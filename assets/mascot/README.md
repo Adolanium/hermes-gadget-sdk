@@ -4,7 +4,7 @@ The device and this project's logo use the Hermes Agent mascot: the girl with th
 
 `nous-girl-white-1024.png` is Hermes Agent's dark-background artwork (`assets/nous-girl-white.svg` in the Hermes Agent repository), rendered to 1024×1024 RGBA. The art is slightly taller than wide, so it sits inside the square with transparent padding.
 
-The artwork comes from the Hermes Agent repository (MIT License, Copyright (c) 2025 Nous Research). The mascot is Nous Research's character. Check with Nous Research before using it outside Hermes-related projects.
+The artwork comes from the Hermes Agent repository (MIT License, Copyright (c) 2025 Nous Research). The mascot is Nous Research's character and part of their brand; this project is unofficial and not affiliated with Nous Research (see [NOTICE](../../NOTICE)). Check with Nous Research before using the mascot outside Hermes-related projects.
 
 ## What is generated from it
 

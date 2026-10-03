@@ -18,6 +18,8 @@
   <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-3dd68c">
 </p>
 
+<p align="center"><sub><b>Unofficial community project.</b> Not affiliated with or endorsed by Nous Research. Hermes, Hermes Agent and the Hermes Agent mascot are trademarks of Nous Research. <a href="#affiliation-and-trademarks">More</a></sub></p>
+
 <p align="center">
   <img src="docs/images/sim-window.png" width="880" alt="The Hermes Gadget simulator window: a round 466x466 screen showing the Hermes mascot and 'Hi, I'm Hermes', TALK and CANCEL buttons, and panels for the device status, text input, sensors, serial console and log">
 </p>
@@ -187,8 +189,14 @@ Long replies turn their own pages, so a board without scroll buttons can still r
 
 Version 0.1. The core, the simulator and the plugin are tested end to end against a real Hermes gateway. The ESP32 firmware builds cleanly with ESP-IDF 6.1 for the ESP32-S3 reference board and a classic ESP32, but has not run on real hardware yet. Not yet included: a wake word, Wi-Fi setup without a serial cable, and over-the-air updates.
 
+## Affiliation and trademarks
+
+Hermes Gadget is an **independent, community-made project**. It is not affiliated with, endorsed by, sponsored by or supported by Nous Research.
+
+"Hermes", "Hermes Agent", "Nous Research" and the Hermes Agent mascot (the girl with the headphones, sometimes called "Nous Girl") are trademarks or brand assets of Nous Research. They appear here only to describe compatibility with Hermes Agent.
+
 ## License
 
-MIT, see [LICENSE](LICENSE). The mascot artwork comes from [Hermes Agent](https://github.com/NousResearch/hermes-agent) (MIT, © 2025 Nous Research) and is Nous Research's character; see [assets/mascot](assets/mascot).
+The code and documentation are MIT licensed; see [LICENSE](LICENSE). That license covers this project's own work and grants no rights to Nous Research's names or marks.
 
-Hermes Gadget is an independent community project. It is not made, endorsed or supported by Nous Research.
+The mascot artwork, and the logo and device bitmaps drawn from it, come from [Hermes Agent](https://github.com/NousResearch/hermes-agent) (MIT, © 2025 Nous Research); see [assets/mascot](assets/mascot) and [NOTICE](NOTICE).

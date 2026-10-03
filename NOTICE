@@ -1,0 +1,24 @@
+Hermes Gadget SDK
+Copyright (c) 2026 Hermes Gadget SDK contributors
+Licensed under the MIT License (see LICENSE).
+
+Unofficial community project
+----------------------------
+Hermes Gadget is an independent, community-made project. It is not affiliated
+with, endorsed by, sponsored by or supported by Nous Research.
+
+Trademarks
+----------
+"Hermes", "Hermes Agent", "Nous Research", the Hermes Agent mascot (the girl
+with the headphones, sometimes called "Nous Girl") and related names and logos
+are trademarks or brand assets of Nous Research. They are used here only to
+describe compatibility with Hermes Agent. This project's MIT license covers its
+own code and documentation; it grants no rights to those names or marks.
+
+Third-party material
+--------------------
+assets/mascot/nous-girl-white-1024.png, the mascot bitmaps generated from it
+(firmware/core/src/mascot_data.cpp) and the project logo derived from it
+(docs/images/logo.png) are based on artwork from the Hermes Agent repository,
+https://github.com/NousResearch/hermes-agent, released under the MIT License,
+Copyright (c) 2025 Nous Research.
