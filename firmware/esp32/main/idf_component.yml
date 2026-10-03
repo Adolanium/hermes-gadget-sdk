@@ -1,3 +1,5 @@
 dependencies:
-  idf: ">=5.1"
+  idf: ">=5.3"
   espressif/esp_websocket_client: "^1.2.3"
+  # ES8311 / ES7210 codecs on boards that use them
+  espressif/esp_codec_dev: "~1.5"

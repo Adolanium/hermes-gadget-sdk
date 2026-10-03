@@ -37,9 +37,54 @@ Board option `esp32s3-breadboard`, for an ESP32-S3-DevKitC-1 N8R8 and the module
 
 All pins avoid the S3's flash/PSRAM pins (26–37) and native USB (19/20). Use **Custom pins** in menuconfig to change any of them.
 
+## ESP32-S3-Touch-AMOLED-1.75
+
+Board option `esp32s3-touch-amoled-175`, for Waveshare's round all-in-one puck: an ESP32-S3R8 (8 MB octal PSRAM) with 16 MB flash, a 1.75" 466×466 AMOLED, touch, two microphones, a speaker output, a battery charger and an optional case. Nothing needs wiring; plug a small 8 Ω speaker into the **SPK** connector to hear replies.
+
+| Part | Chip | Connection |
+|---|---|---|
+| Display | CO5300, QSPI | CS 12, SCLK 38, D0–D3 4/5/6/7, RST 39; column offset 6 |
+| Touch | CST9217 | I2C 0x5A, RST 40 (INT 11 unused: polled) |
+| Speaker DAC | ES8311 | I2C 0x18; I2S MCLK 42, BCLK 9, WS 45, DOUT 8; amplifier enable 46 |
+| Microphones | ES7210 | I2C 0x40; I2S DIN 10 (shares the bus above), MIC1 + MIC2 |
+| Power | AXP2101 | I2C 0x34; left at its power-on defaults |
+| I/O expander | TCA9554 | I2C 0x20; P4 mirrors the PWR key |
+| I2C bus | | SDA 15, SCL 14, 400 kHz |
+| BOOT key | | GPIO 0 |
+
+**Controls.** The screen is the main input:
+
+| Do this | Does |
+|---|---|
+| Hold the screen | TALK: speak while holding, lift to send |
+| Tap the screen | Answer "yes" to a question |
+| Swipe down | CANCEL: discard a recording, close a card, stop a turn, answer "no" |
+| Press the side PWR key | CANCEL as well; hold it 2 s for a new conversation |
+| Hold BOOT | TALK, like holding the screen |
+
+`set touch_cancel swipe` keeps only the swipe as CANCEL, `set touch_cancel pwr` only the PWR key, and `set touch_cancel both` restores the default. The same gestures work on the `sim-466x466-round` simulator board with the mouse.
+
+**Build and flash it** with PlatformIO:
+
+```bash
+cd firmware/esp32
+pio run -e esp32s3-touch-amoled-175 -t upload -t monitor
+```
+
+### First flash: what to check
+
+This port is written from Waveshare's published pinout and drivers and compiles in CI, but it has not yet run on the board. On the first flash, go through this list and send the serial log (`pio device monitor` or `hermes-gadget console --port COMx`) for anything that looks wrong:
+
+1. **Boot log:** `CO5300 466x466 ready`, `codecs: speaker ready, microphones ready` and `touch ready, key ready`. A `did not answer` or `missing` line names the part to look at.
+2. **Screen:** the mascot is centred, upright and not mirrored, and the colours are right (amber accents, not blue). A thin stripe at one edge means the column offset is off.
+3. **Touch:** hold the screen and the listening waves appear; a swipe *down* (not up) cancels. A reversed swipe means the touch mirroring needs flipping.
+4. **PWR key:** a short press cancels and holding 2 s starts a new conversation without powering the board off.
+5. **Microphone:** say something; the waves move with your voice, and Hermes's transcript is right.
+6. **Speaker:** replies are clear and loud enough (`set volume 80`); no hiss between replies.
+
 ## Build and flash
 
-With ESP-IDF 5.1 or later installed (`. $IDF_PATH/export.sh`):
+With ESP-IDF 5.3 or later installed (`. $IDF_PATH/export.sh`):
 
 ```bash
 cd firmware/esp32
@@ -55,9 +100,10 @@ cd firmware/esp32
 pio run -e esp32s3-breadboard -t upload -t monitor
 ```
 
-The firmware is written for ESP-IDF 5.1 and later. It has been compile-checked with ESP-IDF 6.1 through PlatformIO:
+The firmware is written for ESP-IDF 5.3 and later. It has been compile-checked with ESP-IDF 6.1 through PlatformIO:
 
-- ESP32-S3: app image 1.07 MB of the 1.5 MB partition, 13% of static RAM;
+- ESP32-S3 breadboard: app image 1.16 MB of the 1.5 MB partition, 13% of static RAM;
+- ESP32-S3-Touch-AMOLED-1.75: the same;
 - classic ESP32 with custom pins.
 
 On Windows, keep the project on a short path such as `C:\src\hermes-gadget-sdk`. ESP-IDF's linker-script step can exceed the Windows command-line length limit when the build directory is deeply nested.

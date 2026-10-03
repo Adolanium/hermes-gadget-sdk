@@ -42,6 +42,12 @@ struct DeviceProfile {
   bool has_scroll_buttons = false;
   std::string talk_label = "TALK";
   std::string cancel_label = "CANCEL";
+  // The screen stands in for the buttons (hold to talk, tap to answer yes,
+  // swipe to cancel); on-screen hints are worded for touch.
+  bool touch_screen = false;
+  // Board-specific settings the console accepts besides the core ones. Changes
+  // reach the port through App::on_setting_changed.
+  std::vector<std::string> extra_settings;
 };
 
 // A device-side capability the agent may invoke. `params` is a JSON-schema
@@ -144,6 +150,7 @@ class App {
   void cancel_listening(std::string_view why);
   void stop_playback();
   void cancel_turn();
+  bool known_setting(std::string_view key) const;
   void start_new_session();
   void scroll_body(int delta);
   // Long text pages itself, so boards without scroll buttons can read it all.

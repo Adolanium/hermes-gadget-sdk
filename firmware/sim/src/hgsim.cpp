@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "hg/app.hpp"
+#include "hg/touch.hpp"
 
 namespace {
 
@@ -119,6 +120,14 @@ struct hgsim {
   std::unique_ptr<SimHal> hal_impl;
   hg::Hal hal;
   std::unique_ptr<hg::App> app;
+  std::unique_ptr<hg::TouchGestures> touch;
+
+  // touch_cancel: "both" (default) or "swipe" keep swiping down as CANCEL; "pwr" turns it off.
+  void apply_touch_setting() {
+    if (!touch) return;
+    auto v = hal.storage->get("touch_cancel");
+    touch->set_swipe_cancel(!v || *v != "pwr");
+  }
 };
 
 extern "C" {
@@ -148,7 +157,18 @@ hgsim* hgsim_create(const hgsim_config* cfg, const hgsim_host* host) {
   profile.has_scroll_buttons = cfg->has_scroll_buttons != 0;
   profile.talk_label = cfg->talk_label ? cfg->talk_label : "SPACE";
   profile.cancel_label = cfg->cancel_label ? cfg->cancel_label : "ESC";
+  if (cfg->touch) {
+    profile.touch_screen = true;
+    if (!cfg->cancel_label) profile.cancel_label = "Swipe down";
+    profile.extra_settings = {"touch_cancel"};
+  }
   sim->app = std::make_unique<hg::App>(sim->hal, profile);
+  if (cfg->touch) {
+    sim->touch = std::make_unique<hg::TouchGestures>(*sim->app);
+    sim->app->on_setting_changed = [sim](std::string_view key) {
+      if (key == "touch_cancel") sim->apply_touch_setting();
+    };
+  }
   return sim;
 }
 
@@ -182,8 +202,14 @@ int hgsim_add_action(hgsim* sim, const char* name, const char* description, cons
   return 1;
 }
 
-void hgsim_begin(hgsim* sim) { sim->app->begin(); }
-void hgsim_tick(hgsim* sim) { sim->app->tick(); }
+void hgsim_begin(hgsim* sim) {
+  sim->app->begin();
+  sim->apply_touch_setting();
+}
+void hgsim_tick(hgsim* sim) {
+  if (sim->touch) sim->touch->tick(sim->hal.system->now_ms());
+  sim->app->tick();
+}
 void hgsim_network(hgsim* sim, int up, const char* detail) { sim->app->on_network(up != 0, detail ? detail : ""); }
 void hgsim_transport_open(hgsim* sim) { sim->app->on_transport_open(); }
 void hgsim_transport_text(hgsim* sim, const char* data, size_t len) {
@@ -196,6 +222,9 @@ void hgsim_transport_closed(hgsim* sim, const char* reason) { sim->app->on_trans
 void hgsim_button(hgsim* sim, int button, int pressed) {
   if (button < HGSIM_BUTTON_TALK || button > HGSIM_BUTTON_DOWN) return;
   sim->app->on_button(static_cast<hg::Button>(button), pressed != 0);
+}
+void hgsim_touch(hgsim* sim, int touching, int x, int y) {
+  if (sim->touch) sim->touch->update(touching != 0, x, y, sim->hal.system->now_ms());
 }
 void hgsim_mic_samples(hgsim* sim, const int16_t* samples, size_t count) { sim->app->on_mic_samples(samples, count); }
 void hgsim_submit_text(hgsim* sim, const char* text) { sim->app->submit_text(text ? text : ""); }

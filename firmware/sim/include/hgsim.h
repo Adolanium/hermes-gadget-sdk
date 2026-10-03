@@ -22,7 +22,7 @@ extern "C" {
 #define HGSIM_API __attribute__((visibility("default")))
 #endif
 
-#define HGSIM_ABI_VERSION 3
+#define HGSIM_ABI_VERSION 4
 
 typedef struct hgsim hgsim;
 
@@ -74,6 +74,7 @@ typedef struct hgsim_config {
   const char* talk_label;
   const char* cancel_label;
   int round; /* circular panel (see hg::DisplayInfo::round) */
+  int touch; /* the screen is the main input (see hg::TouchGestures) */
 } hgsim_config;
 
 /* Action handler: fill `result_json` (a JSON object) and return 1, or write an
@@ -96,6 +97,8 @@ HGSIM_API void hgsim_transport_text(hgsim* sim, const char* data, size_t len);
 HGSIM_API void hgsim_transport_binary(hgsim* sim, const uint8_t* data, size_t len);
 HGSIM_API void hgsim_transport_closed(hgsim* sim, const char* reason);
 HGSIM_API void hgsim_button(hgsim* sim, int button, int pressed);
+/* Touchscreen sample in screen pixels; touching = 0 when the finger lifts. */
+HGSIM_API void hgsim_touch(hgsim* sim, int touching, int x, int y);
 HGSIM_API void hgsim_mic_samples(hgsim* sim, const int16_t* samples, size_t count);
 HGSIM_API void hgsim_submit_text(hgsim* sim, const char* text);
 HGSIM_API void hgsim_set_sensor(hgsim* sim, const char* name, double value);

@@ -287,6 +287,7 @@ void App::send_hello() {
   }
   json::Value inputs = json::Value::array();
   inputs.push("talk");
+  if (profile_.touch_screen) inputs.push("touch");
   if (profile_.has_cancel_button) inputs.push("cancel");
   if (profile_.has_scroll_buttons) inputs.push("up").push("down");
   caps.set("inputs", inputs);
@@ -685,7 +686,8 @@ void App::on_button(Button button, bool pressed) {
       } else if (mode_ == Mode::Listening && !hands_free_) {
         if (now() - mode_since_ < kMinUtteranceMs) {
           cancel_listening("too short");
-          set_hint_flash("Hold " + profile_.talk_label + " while speaking");
+          set_hint_flash(profile_.touch_screen ? "Hold the screen while speaking"
+                                               : "Hold " + profile_.talk_label + " while speaking");
         } else {
           finish_listening();
         }
@@ -1126,7 +1128,8 @@ void App::update_model() {
     m.screen = Screen::Listening;
     m.hero = true;
     m.headline = "Listening";
-    m.detail = hands_free_ ? "Speak now - pause to send" : "Release " + talk + " to send";
+    m.detail = hands_free_ ? "Speak now - pause to send"
+               : profile_.touch_screen ? "Lift your finger to send" : "Release " + talk + " to send";
     m.hint = profile_.cancel_label + " to discard";
   } else if (!prompt_id_.empty()) {
     m.screen = Screen::Prompt;
@@ -1134,8 +1137,8 @@ void App::update_model() {
     m.caption_lines = kPromptLines;
     m.headline = prompt_title_.empty() ? "Hermes asks" : prompt_title_;
     m.detail = prompt_text_;
-    m.yes = talk + ": Yes";
-    if (profile_.has_cancel_button) m.no = profile_.cancel_label + ": No";
+    m.yes = profile_.touch_screen ? "Tap: Yes" : talk + ": Yes";
+    if (profile_.has_cancel_button) m.no = profile_.touch_screen ? "Swipe: No" : profile_.cancel_label + ": No";
     m.hint = "Hermes is waiting for you";
   } else if (overlay_ == Overlay::Image) {
     m.screen = Screen::Image;
@@ -1170,14 +1173,15 @@ void App::update_model() {
     m.headline = m.speaking ? "Speaking" : "Hermes";
     m.detail = status_;
     m.body = reply_;
-    m.hint = talk + " to reply";
+    m.hint = profile_.touch_screen ? "Hold to reply" : talk + " to reply";
     // Spoken audio can start before the text arrives: let the mascot talk meanwhile.
     m.hero = reply_.empty();
   } else {
     m.screen = Screen::Ready;
     m.headline = "Ready";
     m.body = reply_;
-    m.hint = (talk_mode_ == TalkMode::Tap ? "tap " : "hold ") + talk + " to talk";
+    m.hint = profile_.touch_screen ? (talk_mode_ == TalkMode::Tap ? "Tap the screen to talk" : "Hold the screen to talk")
+                                   : (talk_mode_ == TalkMode::Tap ? "tap " : "hold ") + talk + " to talk";
     bool showing_reply = !reply_.empty() && static_cast<int32_t>(reply_until_ - now()) > 0;
     m.hero = !showing_reply;
     if (m.hero) {
@@ -1219,6 +1223,16 @@ std::string App::status_json() const {
   return s.dump();
 }
 
+bool App::known_setting(std::string_view key) const {
+  for (const char* k : kSettingKeys) {
+    if (key == k) return true;
+  }
+  for (const auto& k : profile_.extra_settings) {
+    if (key == k) return true;
+  }
+  return false;
+}
+
 std::string App::console(std::string_view raw) {
   std::string line = trim(raw);
   if (line.empty()) return {};
@@ -1227,17 +1241,17 @@ std::string App::console(std::string_view raw) {
   std::string rest = sp == std::string::npos ? std::string() : trim(std::string_view(line).substr(sp + 1));
 
   if (cmd == "help") {
+    std::string keys;
+    for (const char* k : kSettingKeys) keys += std::string(" ") + k;
+    for (const auto& k : profile_.extra_settings) keys += " " + k;
     return "@help commands: status | get <key> | set <key> <value> | say <text> | talk | release | cancel | "
-           "new-session | yes | no | "
-           "reconnect | forget-key | factory-reset   keys: name server token talk_mode volume wifi_ssid wifi_pass";
+           "new-session | yes | no | reconnect | forget-key | factory-reset   keys:" + keys;
   }
   if (cmd == "status") return "@status " + status_json();
   if (cmd == "get" || cmd == "set") {
     size_t ks = rest.find(' ');
     std::string key = rest.substr(0, ks);
-    bool known = false;
-    for (const char* k : kSettingKeys) known = known || key == k;
-    if (!known) return "@error unknown key";
+    if (!known_setting(key)) return "@error unknown key";
     if (cmd == "get") {
       std::string v = setting(key);
       json::Value out = json::Value::object();
@@ -1308,6 +1322,7 @@ std::string App::console(std::string_view raw) {
     hal_.storage->erase("device_key");
     if (cmd == "factory-reset") {
       for (const char* k : kSettingKeys) hal_.storage->erase(k);
+      for (const auto& k : profile_.extra_settings) hal_.storage->erase(k);
     }
     return "@ok " + cmd + " (restart the device to apply)";
   }

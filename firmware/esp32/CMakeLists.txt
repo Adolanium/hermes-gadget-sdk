@@ -1,4 +1,4 @@
-# ESP-IDF application for Hermes Gadget devices (ESP-IDF 5.1+; compile-checked with 6.1).
+# ESP-IDF application for Hermes Gadget devices (ESP-IDF 5.3+; compile-checked with 6.1).
 #   idf.py set-target esp32s3
 #   idf.py menuconfig      # "Hermes Gadget" menu: board, pins, Wi-Fi, server
 #   idf.py build flash monitor

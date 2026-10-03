@@ -233,3 +233,18 @@ def test_holding_cancel_starts_a_new_session(devserver, make_sim):
     assert any(m.get("type") == "session.new" for m in sim.sent)
     assert sim.wait_for(lambda: (sim.last_received("reply") or {}).get("text") == "Started a new conversation.",
                         timeout=5)
+
+
+def test_round_touch_board_talks_with_the_screen(devserver, make_sim):
+    hub, _brain, url = devserver()
+    sim = make_sim(url, board="sim-466x466-round")
+    assert sim.wait_screen("ready", timeout=10)
+    hello = next(m for m in sim.sent if m["type"] == "hello")
+    assert hello["caps"]["display"]["shape"] == "round" and "touch" in hello["caps"]["inputs"]
+    sim.touch(True, 233, 233)
+    assert sim.wait_screen("listening", timeout=2)
+    sim.run_for(0.6)
+    sim.touch(False)
+    assert sim.wait_for(lambda: any(m["type"] == "audio.end" for m in sim.sent), timeout=5)
+    # Board settings ride on the same console as the core ones.
+    assert sim.console("set touch_cancel pwr") == "@ok touch_cancel"

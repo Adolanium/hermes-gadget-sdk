@@ -39,6 +39,8 @@ Before flashing, use **Custom pins** in menuconfig to try a wiring without writi
 
 ## A different display
 
+Two drivers ship: `SpiDisplay` (ST7789 over SPI) and `AmoledDisplay` (CO5300 over QSPI, for round AMOLED modules). For a round panel set `round` in the board config: the UI then keeps to the square inside the circle.
+
 Implement `hg::Display` (`firmware/core/include/hg/hal.hpp`):
 
 | Method | What it must do |
@@ -57,7 +59,7 @@ Implement `hg::Display` (`firmware/core/include/hg/hal.hpp`):
 
 ## Audio through a codec chip
 
-Boards like the ESP32-S3-BOX family route audio through codecs (ES7210 ADC, ES8311 DAC) configured over I2C. Implement `hg::AudioIn` and `hg::AudioOut` on top of `esp_codec_dev`, keeping the contracts:
+Boards like the ESP32-S3-BOX family and the ESP32-S3-Touch-AMOLED-1.75 route audio through codecs (ES7210 ADC, ES8311 DAC) configured over I2C. `CodecAudio`, `CodecMic` and `CodecSpeaker` in `port_codec.cpp` implement `hg::AudioIn` and `hg::AudioOut` on top of `esp_codec_dev` for that pair: fill in `BoardConfig::codec` and `BoardConfig::i2c`. Other codecs follow the same contracts:
 
 - **`AudioIn`:**
   - `start(rate)` begins capture.
@@ -76,7 +78,7 @@ Boards like the ESP32-S3-BOX family route audio through codecs (ES7210 ADC, ES83
 
 `App::on_button(Button, pressed)` takes four logical buttons: `Talk`, `Cancel`, `Up`, `Down`. Map any physical input onto them:
 
-- **Touch screen:** a tap in the bottom bar → `Talk` press and release (set `talk_mode` to `tap`); swipe up and down → `Up` / `Down`.
+- **Touch screen:** `hg::TouchGestures` (`firmware/core/include/hg/touch.hpp`) turns raw touch samples into the buttons: hold anywhere is `Talk`, a quick tap answers "yes", a swipe down is `Cancel`. Feed it from the touch driver and set `DeviceProfile::touch_screen` so the hints say "Hold the screen to talk". `port_touch.cpp` does this for a CST9217.
 - **Rotary encoder:** detents → `Up` / `Down`; push → `Talk`.
 - **A single button:** `Talk` only. Long-press handling for `Cancel` belongs in the port.
 

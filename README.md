@@ -136,7 +136,7 @@ Each simulated device keeps its own identity in `~/.hermes-gadget/sim/<name>/`, 
 | Speaker (optional) | MAX98357A I2S amp + 4–8 Ω speaker | Without one, replies are text only |
 | Buttons | The DevKit's BOOT button, plus one more | TALK and CANCEL |
 
-**Prefer an all-in-one puck?** A round ESP32-S3 board with a 1.75" 466×466 AMOLED, microphones and a speaker output (for example the ESP32-S3-Touch-AMOLED-1.75) makes a lovely gadget. The UI already supports it (try `--board sim-466x466-round`); its display, touch and audio-codec drivers are the next port to land.
+**Prefer an all-in-one puck?** The Waveshare ESP32-S3-Touch-AMOLED-1.75 has a round 466×466 AMOLED, touch, two microphones and a speaker output, and needs no wiring: `pio run -e esp32s3-touch-amoled-175 -t upload`. Hold the screen to talk, swipe down to cancel. Its drivers are written and build in CI, but have not run on the board yet; see [docs/hardware.md](docs/hardware.md#esp32-s3-touch-amoled-175).
 
 Pinout, flashing and the serial console are in [docs/hardware.md](docs/hardware.md). Other boards are a configuration change: [docs/porting.md](docs/porting.md).
 
@@ -187,7 +187,7 @@ Long replies turn their own pages, so a board without scroll buttons can still r
 
 ## Status
 
-Version 0.1. The core, the simulator and the plugin are tested end to end against a real Hermes gateway. The ESP32 firmware builds cleanly with ESP-IDF 6.1 for the ESP32-S3 reference board and a classic ESP32, but has not run on real hardware yet. Not yet included: a wake word, Wi-Fi setup without a serial cable, and over-the-air updates.
+Version 0.1. The core, the simulator and the plugin are tested end to end against a real Hermes gateway. The ESP32 firmware builds cleanly in CI for the ESP32-S3 breadboard and the ESP32-S3-Touch-AMOLED-1.75, but has not run on real hardware yet. Not yet included: a wake word, Wi-Fi setup without a serial cable, and over-the-air updates.
 
 ## Affiliation and trademarks
 

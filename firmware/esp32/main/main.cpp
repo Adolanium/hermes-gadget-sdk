@@ -6,6 +6,7 @@
 
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "hg/touch.hpp"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
 
@@ -17,10 +18,30 @@ hgp::EspSystem g_system;
 hgp::NvsStorage g_storage;
 hgp::WsTransport g_transport;
 hgp::SpiDisplay g_display;
+hgp::AmoledDisplay g_amoled;
 hgp::I2sMic g_mic;
 hgp::I2sSpeaker g_speaker;
+hgp::CodecAudio g_codec;
+hgp::CodecMic g_codec_mic;
+hgp::CodecSpeaker g_codec_speaker;
 hgp::Buttons g_buttons;
+hgp::TouchInput g_touch;
 hgp::Wifi g_wifi;
+hg::TouchGestures* g_gestures = nullptr;
+
+// touch_cancel: which inputs act as CANCEL on touch boards.
+//   both (default)  swipe down on the screen, and the PWR key
+//   swipe           only the swipe;  pwr  only the PWR key
+bool g_swipe_cancel = true;
+bool g_key_cancel = true;
+
+void apply_touch_cancel() {
+  auto v = g_storage.get("touch_cancel");
+  std::string mode = v ? *v : "both";
+  g_swipe_cancel = mode != "pwr";
+  g_key_cancel = mode != "swipe";
+  if (g_gestures) g_gestures->set_swipe_cancel(g_swipe_cancel);
+}
 
 void init_nvs() {
   esp_err_t err = nvs_flash_init();
@@ -82,6 +103,17 @@ void dispatch(hg::App& app, hgp::Event& ev) {
       ev.console->reply = app.console(std::string_view(text ? text : "", ev.len));
       xSemaphoreGive(ev.console->done);
       break;
+    case EventType::Touch:
+      if (g_gestures && ev.len == sizeof(hgp::TouchSample)) {
+        const auto* t = reinterpret_cast<const hgp::TouchSample*>(ev.data);
+        g_gestures->update(t->touching, t->x, t->y, g_system.now_ms());
+      }
+      break;
+    case EventType::Key:
+      if (g_key_cancel && ev.len == sizeof(hgp::KeySample)) {
+        app.on_button(hg::Button::Cancel, reinterpret_cast<const hgp::KeySample*>(ev.data)->pressed);
+      }
+      break;
   }
 }
 
@@ -102,9 +134,17 @@ extern "C" void app_main(void) {
   hal.transport = &g_transport;
   hal.storage = &g_storage;
   if (board.lcd.enabled && g_display.begin(board.lcd)) hal.display = &g_display;
+  else if (board.amoled.enabled && g_amoled.begin(board.amoled)) hal.display = &g_amoled;
   if (board.mic.enabled && g_mic.begin(board.mic)) hal.mic = &g_mic;
   if (board.speaker.enabled && g_speaker.begin(board.speaker)) hal.speaker = &g_speaker;
+  i2c_master_bus_handle_t i2c_bus = hgp::i2c::bus(board.i2c);
+  if (board.codec.enabled && g_codec.begin(board.codec, i2c_bus)) {
+    if (g_codec_mic.begin(g_codec.in())) hal.mic = &g_codec_mic;
+    if (g_codec_speaker.begin(g_codec.out())) hal.speaker = &g_codec_speaker;
+  }
   g_buttons.begin(board.buttons);
+  const bool touch = (board.touch.enabled || board.pwr_key.enabled) &&
+                     g_touch.begin(board.touch, board.pwr_key, i2c_bus);
 
   hg::DeviceProfile profile;
   profile.board = board.name;
@@ -112,15 +152,25 @@ extern "C" void app_main(void) {
   profile.default_name = CONFIG_HG_DEFAULT_NAME;
   profile.default_server_url = CONFIG_HG_DEFAULT_SERVER_URL;
   profile.default_access_token = CONFIG_HG_DEFAULT_ACCESS_TOKEN;
-  profile.has_cancel_button = board.buttons.cancel >= 0;
+  profile.has_cancel_button = board.buttons.cancel >= 0 || touch;
   profile.has_scroll_buttons = board.buttons.up >= 0 && board.buttons.down >= 0;
   profile.talk_label = board.talk_label;
   profile.cancel_label = board.cancel_label;
+  if (touch && board.touch.enabled) {
+    profile.touch_screen = true;
+    profile.extra_settings = {"touch_cancel"};
+  }
+  if (hal.mic == &g_codec_mic) profile.mic_rate = hgp::CodecAudio::kRate;
+  if (hal.speaker == &g_codec_speaker) profile.speaker_rate = hgp::CodecAudio::kRate;
 
   static hg::App app(hal, profile);
+  static hg::TouchGestures gestures(app);
+  if (profile.touch_screen) g_gestures = &gestures;
+  apply_touch_cancel();
   add_status_led(app, board.status_led);
   app.on_setting_changed = [](std::string_view key) {
     if (key == "wifi_ssid" || key == "wifi_pass") g_wifi.reconfigure();
+    if (key == "touch_cancel") apply_touch_cancel();
   };
   app.begin();
   hgp::console::begin();
@@ -135,6 +185,7 @@ extern "C" void app_main(void) {
       } while (hgp::events::receive(ev, 0));
     }
     g_buttons.poll(app);
+    if (g_gestures) g_gestures->tick(g_system.now_ms());
     app.tick();
   }
 }

@@ -8,6 +8,7 @@
 #include "hg/app.hpp"
 #include "hg/crypto.hpp"
 #include "hg/protocol.hpp"
+#include "hg/touch.hpp"
 
 using hg::json::Value;
 
@@ -114,6 +115,15 @@ struct Rig {
   hg::App app;
 
   explicit Rig(const std::string& server = "ws://hermes.local:8765/gadget") : app(hal, profile(server)) {}
+  explicit Rig(hg::DeviceProfile p) : app(hal, std::move(p)) {}
+
+  static hg::DeviceProfile touch_profile() {
+    hg::DeviceProfile p = profile("ws://hermes.local:8765/gadget");
+    p.touch_screen = true;
+    p.cancel_label = "Swipe down";
+    p.extra_settings = {"touch_cancel"};
+    return p;
+  }
 
   static hg::DeviceProfile profile(const std::string& server) {
     hg::DeviceProfile p;
@@ -629,4 +639,89 @@ TEST("app: on a round panel everything stays inside the circle") {
   }
   CHECK_EQ(stray, 0);
   CHECK(drawn > 1000);  // and the reply really was drawn inside
+}
+
+TEST("touch: hold to talk, lift to send") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  CHECK_EQ(r.app.model().hint, std::string("Hold the screen to talk"));
+  hg::TouchGestures touch(r.app);
+  touch.update(true, 200, 200, r.fake.clock);
+  CHECK(!r.fake.mic_on);  // not yet: it could still become a swipe
+  r.advance(150);
+  touch.tick(r.fake.clock);
+  CHECK(r.fake.mic_on);
+  CHECK_EQ(r.app.model().detail, std::string("Lift your finger to send"));
+  r.advance(600);
+  touch.update(true, 204, 203, r.fake.clock);  // a wobbly finger is still a hold
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.fake.last("audio.end") != nullptr);
+}
+
+TEST("touch: swipe down while holding discards the recording") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  hg::TouchGestures touch(r.app);
+  touch.update(true, 200, 150, r.fake.clock);
+  r.advance(500);
+  touch.tick(r.fake.clock);
+  CHECK(r.fake.mic_on);
+  touch.update(true, 205, 260, r.fake.clock);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.fake.last("audio.cancel") != nullptr);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(r.fake.last("audio.end") == nullptr);
+}
+
+TEST("touch: tap answers yes, swipe answers no, sideways drags do nothing") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  hg::TouchGestures touch(r.app);
+  r.server(R"({"type":"prompt","id":"q1","title":"Allow?","text":"rm -rf build"})");
+  CHECK_EQ(r.app.model().yes, std::string("Tap: Yes"));
+  CHECK_EQ(r.app.model().no, std::string("Swipe: No"));
+  r.advance(700);
+  touch.update(true, 100, 100, r.fake.clock);  // sideways: ignored
+  touch.update(true, 200, 104, r.fake.clock);
+  r.advance(300);
+  touch.tick(r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(r.fake.last("prompt.reply") == nullptr);
+  CHECK(!r.fake.mic_on);
+
+  touch.update(true, 200, 200, r.fake.clock);  // quick tap
+  r.advance(40);
+  touch.update(false, 0, 0, r.fake.clock);
+  const Value* yes = r.fake.last("prompt.reply");
+  CHECK(yes && (*yes)["answer"].as_string() == "yes");
+
+  r.server(R"({"type":"prompt","id":"q2","title":"Allow?","text":"git push --force"})");
+  r.advance(700);
+  touch.update(true, 200, 120, r.fake.clock);
+  r.advance(30);
+  touch.update(true, 202, 220, r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock);
+  const Value* no = r.fake.last("prompt.reply");
+  CHECK(no && (*no)["id"].as_string() == "q2" && (*no)["answer"].as_string() == "no");
+}
+
+TEST("touch: swipes can be turned off; board settings go through the console") {
+  Rig r(Rig::touch_profile());
+  std::string changed;
+  r.app.on_setting_changed = [&](std::string_view key) { changed = std::string(key); };
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set touch_cancel pwr"), std::string("@ok touch_cancel"));
+  CHECK_EQ(changed, std::string("touch_cancel"));
+  CHECK(r.app.console("get touch_cancel").find("\"pwr\"") != std::string::npos);
+  CHECK(r.app.console("help").find("touch_cancel") != std::string::npos);
+  CHECK_EQ(r.app.console("set nonsense 1"), std::string("@error unknown key"));
+
+  hg::TouchGestures touch(r.app);
+  touch.set_swipe_cancel(false);
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  touch.update(true, 200, 100, r.fake.clock);
+  touch.update(true, 200, 260, r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(r.fake.last("cancel") == nullptr);
 }

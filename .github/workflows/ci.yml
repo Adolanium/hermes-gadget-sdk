@@ -52,8 +52,12 @@ jobs:
         run: pytest -q
 
   esp32:
-    name: ESP32 firmware (esp32s3-breadboard)
+    name: ESP32 firmware (${{ matrix.board }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        board: [esp32s3-breadboard, esp32s3-touch-amoled-175]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -67,4 +71,4 @@ jobs:
         run: pip install platformio
       - name: Build
         working-directory: firmware/esp32
-        run: pio run -e esp32s3-breadboard
+        run: pio run -e ${{ matrix.board }}

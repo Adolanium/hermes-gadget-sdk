@@ -37,6 +37,7 @@ class Board:
     backlight: bool = True
     scroll_buttons: bool = True
     round: bool = False  # circular panel: pixels outside the circle are not shown
+    touch: bool = False  # touchscreen: hold to talk, tap to answer yes, swipe down to cancel
 
 
 BOARDS = {
@@ -45,7 +46,7 @@ BOARDS = {
     "sim-480x320": Board("sim-480x320", 480, 320),
     "sim-240x240-nospeaker": Board("sim-240x240-nospeaker", 240, 240, speaker=False),
     # A 1.75" round AMOLED puck (466x466, e.g. ESP32-S3-Touch-AMOLED-1.75): no scroll buttons.
-    "sim-466x466-round": Board("sim-466x466-round", 466, 466, scroll_buttons=False, round=True),
+    "sim-466x466-round": Board("sim-466x466-round", 466, 466, scroll_buttons=False, round=True, touch=True),
 }
 
 
@@ -146,7 +147,7 @@ class Simulator:
             self, width=b.width, height=b.height, board=b.name, firmware=FIRMWARE_VERSION, name=name,
             server_url=url, access_token=token, mic=b.mic, speaker=b.speaker, backlight=b.backlight,
             scroll_buttons=b.scroll_buttons, library=library, button_labels=button_labels,
-            round_panel=b.round)
+            round_panel=b.round, touch_screen=b.touch)
         self._round_spans = _circle_spans(b.width, b.height) if b.round else None
         self._register_actions()
 
@@ -323,6 +324,10 @@ class Simulator:
 
     def release(self, button: str) -> None:
         self.device.button(BUTTONS[button], False)
+
+    def touch(self, touching: bool, x: int = 0, y: int = 0) -> None:
+        """A touchscreen sample in screen pixels (touch boards only)."""
+        self.device.touch(touching, x, y)
 
     def tap(self, button: str) -> None:
         self.press(button)

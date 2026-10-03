@@ -26,6 +26,47 @@ BoardConfig make() {
   b.cancel_label = "B2";
   return b;
 }
+#elif CONFIG_HG_BOARD_AMOLED_175
+// Waveshare ESP32-S3-Touch-AMOLED-1.75: round 466x466 AMOLED (CO5300, QSPI),
+// CST9217 touch, ES8311 + ES7210 codecs, AXP2101 PMIC, TCA9554 expander.
+// Pins: docs/hardware.md#esp32-s3-touch-amoled-175
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = "esp32s3-touch-amoled-1.75";
+  b.amoled.enabled = true;
+  b.amoled.width = 466;
+  b.amoled.height = 466;
+  b.amoled.cs = 12;
+  b.amoled.sclk = 38;
+  b.amoled.d0 = 4;
+  b.amoled.d1 = 5;
+  b.amoled.d2 = 6;
+  b.amoled.d3 = 7;
+  b.amoled.rst = 39;
+  b.amoled.gap_x = 6;
+  b.amoled.round = true;
+  b.i2c = {15, 14, 400000};
+  b.codec.enabled = true;
+  b.codec.mclk = 42;
+  b.codec.bclk = 9;
+  b.codec.ws = 45;
+  b.codec.dout = 8;
+  b.codec.din = 10;
+  b.codec.pa = 46;
+  b.touch.enabled = true;
+  b.touch.addr = 0x5A;
+  b.touch.rst = 40;
+  b.touch.width = 466;
+  b.touch.height = 466;
+  b.touch.mirror_x = true;
+  b.touch.mirror_y = true;
+  // The side PWR key goes to the AXP2101; its level (SYS_OUT) is mirrored on expander pin P4.
+  b.pwr_key = {true, 0x20, 4, true};
+  b.buttons = {0, -1, -1, -1};  // BOOT also works as TALK
+  b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
+  return b;
+}
 #elif CONFIG_HG_BOARD_CUSTOM
 // Kconfig leaves a disabled bool undefined, so map each one explicitly.
 #ifdef CONFIG_HG_LCD_SWAP_XY

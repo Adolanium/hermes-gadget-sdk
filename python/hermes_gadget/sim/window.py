@@ -116,6 +116,15 @@ class SimulatorWindow:
         self.log = tk.Text(logs, height=14, width=70, bg="#0b0f14", fg="#c8d2dc", font=("Consolas", 9))
         self.log.pack(fill="both", expand=True)
 
+        if self.sim.board.touch:
+            # The screen is a touchscreen: hold to talk, click to answer yes, drag down to cancel.
+            z = self.zoom
+            self.screen.bind("<ButtonPress-1>", lambda e: self.sim.touch(True, e.x // z, e.y // z))
+            self.screen.bind("<B1-Motion>", lambda e: self.sim.touch(True, e.x // z, e.y // z))
+            self.screen.bind("<ButtonRelease-1>", lambda e: self.sim.touch(False))
+            tk.Label(left, text="Touchscreen: hold the mouse on the screen to talk, click to answer yes, "
+                     "drag down to cancel", fg="#8a97a3", bg="#1c232c", font=("Segoe UI", 8)).pack()
+
         self.root.bind("<KeyPress-space>", lambda e: self._key("talk", True))
         self.root.bind("<KeyRelease-space>", lambda e: self._key("talk", False))
         self.root.bind("<KeyPress-Escape>", lambda e: self._key("cancel", True, always=True))
