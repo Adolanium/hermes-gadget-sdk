@@ -337,13 +337,17 @@ class DeviceSession:
         except Exception:
             pass
 
-    def spawn(self, coro) -> None:
+    def spawn(self, coro) -> asyncio.Task:
+        """Run work for this device; :meth:`DeviceHub.stop` cancels whatever is still running."""
         task = asyncio.create_task(coro)
         self._tasks.add(task)
+        self.hub._tasks.add(task)
         task.add_done_callback(self._task_done)
+        return task
 
     def _task_done(self, task: asyncio.Task) -> None:
         self._tasks.discard(task)
+        self.hub._tasks.discard(task)
         if not task.cancelled() and task.exception() is not None:
             log.warning("[%s] handler failed: %s", self.device_id, task.exception())
 
@@ -418,6 +422,7 @@ class DeviceHub:
         self.sessions: dict[str, DeviceSession] = {}
         self.loop: asyncio.AbstractEventLoop | None = None
         self._server = None
+        self._tasks: set[asyncio.Task] = set()  # DeviceSession.spawn, including devices already gone
 
     # -- lifecycle -------------------------------------------------------------------
 
@@ -454,6 +459,11 @@ class DeviceHub:
             self._server.close()
             await self._server.wait_closed()
             self._server = None
+        # A reply still streaming or a reminder still waiting ends with the server.
+        tasks = [task for task in self._tasks if task is not asyncio.current_task()]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     def get(self, device_id: str) -> DeviceSession | None:
         return self.sessions.get(device_id)

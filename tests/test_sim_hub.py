@@ -120,6 +120,21 @@ def test_cancel_interrupts_the_turn(devserver, make_sim):
     assert sim.wait_screen("ready", timeout=5)
 
 
+def test_stopping_the_hub_cancels_work_devices_started(loop_thread, devserver, make_sim):
+    """A reply still streaming (or a reminder still waiting) must not outlive the server."""
+    hub, brain, url = devserver()
+    brain.word_delay = 5.0
+    sim = make_sim(url)
+    assert sim.wait_screen("ready", timeout=10)
+    sim.type_text("one two three")
+    assert sim.wait_screen("responding", timeout=5)
+    turn = brain._turns[sim.status()["device_id"]]
+
+    loop_thread.run(hub.stop())
+
+    assert turn.cancelled()
+
+
 def test_agent_invokes_device_actions(loop_thread, devserver, make_sim):
     hub, _brain, url = devserver()
     sim = make_sim(url)

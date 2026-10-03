@@ -92,8 +92,9 @@ class EchoBrain(HubDelegate):
             await session.send_reply(reply, turn=turn)
             await session.turn_end(turn, "success")
         except asyncio.CancelledError:
-            await session.stop_audio()
-            await session.turn_end(turn, "cancelled")
+            if not session.closed:  # a stopping server has nobody left to tell
+                await session.stop_audio()
+                await session.turn_end(turn, "cancelled")
             raise
 
     def _start_turn(self, session: DeviceSession, msg_id: str, reply: str, audio: bytes | None) -> None:
@@ -101,7 +102,7 @@ class EchoBrain(HubDelegate):
         if previous and not previous.done():
             previous.cancel()
         turn = f"{session.session_id}:{msg_id}"
-        self._turns[session.device_id] = asyncio.create_task(self._turn(session, turn, reply, audio))
+        self._turns[session.device_id] = session.spawn(self._turn(session, turn, reply, audio))
 
     async def on_text(self, session: DeviceSession, msg_id: str, text: str) -> None:
         reply = textfmt.for_device(f"You said: {text}", session.charset)
