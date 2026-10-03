@@ -29,7 +29,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
 import ssl
 import time
@@ -38,7 +37,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from gateway.config import Platform, PlatformConfig
-from gateway.platforms._shared import extra_or_secret
+from gateway.platforms._shared import extra_or_secret, get_scoped_secret as _get_scoped_secret
 from gateway.platforms.base import (
     AudioFormat,
     BasePlatformAdapter,
@@ -268,7 +267,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         """
         if not self._auto_home or self.config.home_channel is not None:
             return
-        if os.getenv("GADGET_HOME_CHANNEL", "").strip():
+        if str(_get_scoped_secret("GADGET_HOME_CHANNEL", "") or "").strip():
             return
         from gateway import config as gateway_config
 

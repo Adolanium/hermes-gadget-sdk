@@ -392,3 +392,24 @@ def test_first_approved_device_becomes_the_home_channel(gadget, make_sim):
     second.run_for(0.5)
     assert gadget.adapter.config.home_channel.chat_id == first.status()["device_id"]
     assert len(gadget.saved_homes) == 1
+
+
+def test_a_home_channel_set_in_the_profile_is_left_alone(gadget, make_sim):
+    """GADGET_HOME_CHANNEL may live in a profile's own .env, which a multiplexed gateway keeps out of
+    os.environ: the adapter reads it through the profile's secret scope."""
+    from agent.secret_scope import reset_secret_scope, set_secret_scope
+
+    sim = make_sim(gadget.url, name="Desk")
+    assert sim.wait_screen("pairing", timeout=10)
+    session = gadget.adapter.hub.get(sim.status()["device_id"])
+
+    async def claim_in_profile_scope():
+        token = set_secret_scope({"GADGET_HOME_CHANNEL": "the-kitchen-device"})
+        try:
+            await gadget.adapter._claim_home(session)
+        finally:
+            reset_secret_scope(token)
+
+    gadget.run(claim_in_profile_scope())
+    assert gadget.adapter.config.home_channel is None
+    assert gadget.saved_homes == []
