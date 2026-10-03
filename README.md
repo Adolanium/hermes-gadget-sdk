@@ -10,6 +10,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/Adolanium/hermes-gadget-sdk/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Adolanium/hermes-gadget-sdk/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="ESP32-S3" src="https://img.shields.io/badge/hardware-ESP32--S3-e7a33e">
   <img alt="Hermes platform plugin" src="https://img.shields.io/badge/Hermes-platform%20plugin-5a9bd5">
   <img alt="C++17 core" src="https://img.shields.io/badge/core-C%2B%2B17-6e7f96">
