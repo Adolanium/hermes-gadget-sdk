@@ -1,0 +1,67 @@
+name: Hermes
+
+# The tests that need a real Hermes Agent: the adapter on Hermes's own classes and a full
+# `hermes gateway run` end to end. Every push and pull request runs them against the pinned
+# commit below; a daily run against Hermes main catches upstream changes that break the plugin.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "37 5 * * *"
+  workflow_dispatch:
+    inputs:
+      hermes_ref:
+        description: Hermes Agent branch, tag or commit to test against (empty = the pinned commit)
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hermes-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The Hermes Agent commit this SDK is verified against. To move it, run this workflow by hand
+  # with hermes_ref: main; when it passes, put the commit it printed here and in the README.
+  HERMES_REF: 2eceb0275501b09febdec88d08b80d1fff730cf8
+
+jobs:
+  integration:
+    name: Plugin on Hermes (${{ github.event_name == 'schedule' && 'main' || inputs.hermes_ref || 'pinned' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: hermes-gadget-sdk
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: ${{ github.event_name == 'schedule' && 'main' || inputs.hermes_ref || env.HERMES_REF }}
+          path: hermes-agent
+      - name: Show the Hermes commit under test
+        working-directory: hermes-agent
+        run: git log -1 --format='Hermes Agent %H (%cs) %s'
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: hermes-agent/uv.lock
+      - name: Install Hermes Agent
+        working-directory: hermes-agent
+        run: uv sync --locked --python 3.14 --group dev
+      - name: Add the SDK to the Hermes environment
+        run: uv pip install --python hermes-agent/.venv/bin/python -e "./hermes-gadget-sdk[dev]"
+      - name: Build the simulator library
+        working-directory: hermes-gadget-sdk
+        run: ../hermes-agent/.venv/bin/hermes-gadget build-sim
+      - name: Test
+        # The tests find the Hermes checkout beside this one (HERMES_AGENT_DIR defaults to
+        # ../hermes-agent) and the end-to-end test runs the gateway from its .venv.
+        working-directory: hermes-gadget-sdk
+        env:
+          HERMES_GADGET_E2E: "1"
+        run: ../hermes-agent/.venv/bin/python -m pytest -q -rs

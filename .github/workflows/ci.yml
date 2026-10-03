@@ -48,7 +48,7 @@ jobs:
       - name: Build the simulator library
         run: hermes-gadget build-sim
       - name: Test
-        # Tests that need a Hermes Agent checkout skip themselves here.
+        # Tests that need a Hermes Agent checkout skip themselves here; hermes.yml runs them.
         run: pytest -q
 
   esp32:
