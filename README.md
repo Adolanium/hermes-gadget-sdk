@@ -21,10 +21,10 @@
 <p align="center"><sub><b>Unofficial community project.</b> Not affiliated with or endorsed by Nous Research. Hermes, Hermes Agent and the Hermes Agent mascot are trademarks of Nous Research. <a href="#affiliation-and-trademarks">More</a></sub></p>
 
 <p align="center">
-  <img src="docs/images/sim-window.png" width="880" alt="The Hermes Gadget simulator window: a round 466x466 screen showing the Hermes mascot and 'Hi, I'm Hermes', TALK and CANCEL buttons, and panels for the device status, text input, sensors, serial console and log">
+  <img src="docs/images/sim-window.png" width="880" alt="The Hermes Gadget simulator window: the device screen showing the Hermes mascot and 'Hi, I'm Hermes', TALK and CANCEL buttons, and panels for the device status, text input, sensors, serial console and log">
 </p>
 
-<p align="center"><i>The desktop simulator running the device firmware on a round 466×466 screen. Screenshot.</i></p>
+<p align="center"><i>The desktop simulator running the device firmware. Screenshot.</i></p>
 
 An ESP32 with a small screen and a microphone becomes a push-to-talk terminal for your Hermes. It pairs with your agent like a new phone would, sends your voice, shows the answer and speaks it, and lends its LEDs, relays and sensors to the agent as tools. Your memory, skills and models stay on your Hermes; the gadget is just a very good pair of ears and a face.
 
@@ -46,7 +46,7 @@ An ESP32 with a small screen and a microphone becomes a push-to-talk terminal fo
 
 <img align="right" src="docs/images/sim-window-rect.png" width="420" alt="The simulator window with a rectangular 320x240 screen showing the same mascot screen">
 
-**Round or rectangular.** The same firmware drives round panels (it keeps to the square inside the circle) and ordinary rectangular ones, like the 320×240 screen of the breadboard build on the right. A board without scroll buttons still works: long replies turn their own pages.
+**Any screen.** The same firmware runs on the AMOLED board above and on a 320×240 breadboard build, on the right. A board without scroll buttons still works: long replies turn their own pages.
 
 Every image on this page is a screenshot of the simulator window, captured with [`tools/capture_window.py`](tools/capture_window.py).
 
@@ -120,7 +120,7 @@ hermes-gadget sim --url ws://127.0.0.1:8765/gadget --board sim-466x466-round
 | Board | Screen |
 |---|---|
 | `sim-320x240` (default) | 320×240, like the breadboard build |
-| `sim-466x466-round` | 1.75" round AMOLED puck |
+| `sim-466x466-round` | The 1.75" AMOLED touch board |
 | `sim-480x320`, `sim-240x135` | Larger and smaller rectangular panels |
 | `sim-240x240-nospeaker` | No speaker: replies are text only |
 
@@ -136,7 +136,7 @@ Each simulated device keeps its own identity in `~/.hermes-gadget/sim/<name>/`, 
 | Speaker (optional) | MAX98357A I2S amp + 4–8 Ω speaker | Without one, replies are text only |
 | Buttons | The DevKit's BOOT button, plus one more | TALK and CANCEL |
 
-**Prefer an all-in-one puck?** The Waveshare ESP32-S3-Touch-AMOLED-1.75 has a round 466×466 AMOLED, touch, two microphones and a speaker output, and needs no wiring: `pio run -e esp32s3-touch-amoled-175 -t upload`. Hold the screen to talk, swipe down to cancel. Its drivers are written and build in CI, but have not run on the board yet; see [docs/hardware.md](docs/hardware.md#esp32-s3-touch-amoled-175).
+**Prefer a ready-made board?** The Waveshare ESP32-S3-Touch-AMOLED-1.75 has a 1.75" AMOLED touchscreen, two microphones and a speaker output, and needs no wiring: `pio run -e esp32s3-touch-amoled-175 -t upload`. Hold the screen to talk, swipe down to cancel. Its drivers are written and build in CI, but have not run on the board yet; see [docs/hardware.md](docs/hardware.md#esp32-s3-touch-amoled-175).
 
 Pinout, flashing and the serial console are in [docs/hardware.md](docs/hardware.md). Other boards are a configuration change: [docs/porting.md](docs/porting.md).
 
