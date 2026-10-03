@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/Adolanium/hermes-gadget-sdk/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Adolanium/hermes-gadget-sdk/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/Adolanium/hermes-gadget-sdk/actions/workflows/hermes.yml"><img alt="Hermes integration" src="https://github.com/Adolanium/hermes-gadget-sdk/actions/workflows/hermes.yml/badge.svg"></a>
   <img alt="ESP32-S3" src="https://img.shields.io/badge/hardware-ESP32--S3-e7a33e">
   <img alt="Hermes platform plugin" src="https://img.shields.io/badge/Hermes-platform%20plugin-5a9bd5">
   <img alt="C++17 core" src="https://img.shields.io/badge/core-C%2B%2B17-6e7f96">
@@ -189,7 +190,7 @@ Long replies turn their own pages, so a board without scroll buttons can still r
 
 ## Status
 
-Version 0.1. The core, the simulator and the plugin are tested end to end against a real Hermes gateway. The ESP32 firmware builds cleanly in CI for the ESP32-S3 breadboard and the ESP32-S3-Touch-AMOLED-1.75, but has not run on real hardware yet. Not yet included: a wake word, Wi-Fi setup without a serial cable, and over-the-air updates.
+Version 0.1. The core, the simulator and the plugin are tested end to end against a real Hermes gateway: CI runs those tests against Hermes Agent [`2eceb02`](https://github.com/NousResearch/hermes-agent/commit/2eceb0275501b09febdec88d08b80d1fff730cf8) (October 3, 2026) on every change, and against Hermes `main` once a day. The ESP32 firmware builds cleanly in CI for the ESP32-S3 breadboard and the ESP32-S3-Touch-AMOLED-1.75, but has not run on real hardware yet. Not yet included: a wake word, Wi-Fi setup without a serial cable, and over-the-air updates.
 
 ## Affiliation and trademarks
 
