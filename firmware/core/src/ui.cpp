@@ -267,12 +267,9 @@ void Ui::draw_top(Canvas& c, const UiModel& m) {
   }
   int ty = s;
   if (panel_.round) {
-    // A round face has no corners: the link dot and the name, centred.
+    // A round face stays quiet: just the link dot, centred, like a watch's status mark.
     int r = std::max(2, 3 * s / 2 + 1);
-    std::string title = fit(m.title, cols_for(w - 6 * s - 2 * r, s));
-    int x = (w - (2 * r + 3 * s + Canvas::text_width(title, s))) / 2;
-    c.fill_circle(x + r, layout_.top_h / 2, r, dot);
-    c.text(x + 2 * r + 3 * s, ty, title, s, kText);
+    c.fill_circle(w / 2, layout_.top_h / 2, r, dot);
     return;
   }
   int label_w = Canvas::text_width(label, s);

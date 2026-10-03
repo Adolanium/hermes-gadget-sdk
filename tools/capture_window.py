@@ -209,7 +209,7 @@ def main() -> None:
         return None
 
     hub.delegate.on_utterance = quiet
-    sim = Simulator(url=f"ws://127.0.0.1:{hub.bound_port}/gadget", state_dir=state / "dev", name="Kitchen Gadget",
+    sim = Simulator(url=f"ws://127.0.0.1:{hub.bound_port}/gadget", state_dir=state / "dev", name="Hermes Gadget",
                     board=args.board)
     win = Recorder(sim, hub, loop, args.zoom, Path(args.frames) if args.frames else None)
     win.root.after(500, win.advance)
