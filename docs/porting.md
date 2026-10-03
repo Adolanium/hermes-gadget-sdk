@@ -52,7 +52,7 @@ Implement `hg::Display` (`firmware/core/include/hg/hal.hpp`):
 
 `SpiDisplay` in `port_display.cpp` is the reference. To add ILI9341, GC9A01 or another panel, swap `esp_lcd_new_panel_st7789` for the matching `esp_lcd` driver (most are managed components). For RGB/parallel or QSPI AMOLED panels, the same interface applies with that panel's `esp_lcd` IO.
 
-**Round panels** (for example a 1.75" 466×466 AMOLED puck): set `round = true`. The UI then draws inside the square inscribed in the circle, keeps everything else dark, centres the status row, and tells the host `"shape": "round"`. Try it with the `sim-466x466-round` simulator board.
+**Round panels** (for example a 1.75" 466×466 AMOLED): set `round = true`. The UI then draws inside the square inscribed in the circle, keeps everything else dark, centres the status row, and tells the host `"shape": "round"`. Try it with the `sim-466x466-round` simulator board.
 
 - **Monochrome or e-paper:** convert RGB565 to your format in `flush()`. The UI uses dark backgrounds with light text and accents, so thresholding the luminance works.
 - **Very small screens** (128×64): the layout scales text to 1×. You may want a slimmer layout; `Ui` reads only `DisplayInfo`.

@@ -39,7 +39,7 @@ All pins avoid the S3's flash/PSRAM pins (26–37) and native USB (19/20). Use *
 
 ## ESP32-S3-Touch-AMOLED-1.75
 
-Board option `esp32s3-touch-amoled-175`, for Waveshare's round all-in-one puck: an ESP32-S3R8 (8 MB octal PSRAM) with 16 MB flash, a 1.75" 466×466 AMOLED, touch, two microphones, a speaker output, a battery charger and an optional case. Nothing needs wiring; plug a small 8 Ω speaker into the **SPK** connector to hear replies.
+Board option `esp32s3-touch-amoled-175`, for Waveshare's all-in-one board: an ESP32-S3R8 (8 MB octal PSRAM) with 16 MB flash, a 1.75" 466×466 AMOLED, touch, two microphones, a speaker output, a battery charger and an optional case. Nothing needs wiring; plug a small 8 Ω speaker into the **SPK** connector to hear replies.
 
 | Part | Chip | Connection |
 |---|---|---|

@@ -65,7 +65,7 @@ State lives in `~/.hermes-gadget/sim/<name>/` (override with `--state-dir`):
 | `sim-240x135` | 240×135 | Small TFT; text drops to scale 1 |
 | `sim-480x320` | 480×320 | Larger panel |
 | `sim-240x240-nospeaker` | 240×240 | No speaker, so replies stay text only |
-| `sim-466x466-round` | 466×466 round | A round AMOLED touch puck: hold the mouse on the screen to talk, click to answer yes, drag down to cancel. No scroll buttons, so long replies page by themselves |
+| `sim-466x466-round` | 466×466 round | The 1.75" AMOLED touch board: hold the mouse on the screen to talk, click to answer yes, drag down to cancel. No scroll buttons, so long replies page by themselves |
 
 Add a profile to `BOARDS` in `python/hermes_gadget/sim/runner.py` to mirror new hardware.
 
