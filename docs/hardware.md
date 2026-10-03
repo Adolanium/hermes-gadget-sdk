@@ -2,6 +2,8 @@
 
 The firmware is an ESP-IDF 5.x application (`firmware/esp32`) built on the portable core. The reference board uses common modules you can wire on a breadboard. Other boards are a configuration change; see [porting.md](porting.md).
 
+> **Untested on hardware.** Both board builds compile in CI, but neither has run on a real board yet. On the first boot, watch the serial console (`pio device monitor` or `hermes-gadget console --port <port>`) and [open an issue](https://github.com/Adolanium/hermes-gadget-sdk/issues) with the log if anything looks wrong.
+
 ## Requirements
 
 - **Chip:** an ESP32-S3 with PSRAM is recommended (N8R8 or N16R8). Plain ESP32/S2/C3/C6 work for displays up to about 240×240 without PSRAM, provided the framebuffer (width × height × 2 bytes) fits in internal RAM next to Wi-Fi.

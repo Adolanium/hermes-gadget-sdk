@@ -77,7 +77,7 @@ The device switches to **Ready** within about 2 seconds. Hold Space to talk, or 
 
 ## 4. Real hardware
 
-See [hardware.md](hardware.md) for the reference wiring and for flashing with `idf.py` or PlatformIO. Once the board is flashed, configure it over USB serial:
+The firmware builds in CI but has not run on a real board yet, so the first flash may need debugging. See [hardware.md](hardware.md) for the reference wiring and for flashing with `idf.py` or PlatformIO. Once the board is flashed, configure it over USB serial:
 
 ```bash
 pip install "hermes-gadget[serial]"
