@@ -1,0 +1,181 @@
+// ESP32 implementations of the core HAL, plus the event queue that moves
+// driver events (Wi-Fi, WebSocket, microphone, console) onto the app task.
+//
+// Threading rule: hg::App is only touched by the app task (app_main's loop).
+// Driver tasks and callbacks post Events; the loop dispatches them.
+#pragma once
+
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <string_view>
+
+#include "freertos/FreeRTOS.h"  // must precede every other FreeRTOS header
+
+#include "board.hpp"
+#include "driver/i2s_std.h"
+#include "esp_lcd_panel_io.h"
+#include "esp_lcd_types.h"
+#include "esp_websocket_client.h"
+#include "freertos/semphr.h"
+#include "freertos/stream_buffer.h"
+#include "hg/app.hpp"
+#include "hg/hal.hpp"
+
+namespace hgp {
+
+// ---------------------------------------------------------------------------
+// Events
+
+enum class EventType : uint8_t { NetUp, NetDown, WsOpen, WsText, WsBinary, WsClosed, Mic, Console };
+
+struct ConsoleRequest {
+  SemaphoreHandle_t done;
+  std::string reply;
+};
+
+struct Event {
+  EventType type;
+  uint32_t generation;  // WebSocket connection generation (stale events are dropped)
+  uint8_t* data;        // heap payload owned by the event, freed after dispatch
+  size_t len;
+  ConsoleRequest* console;
+};
+
+namespace events {
+void init();
+// Copies `data`. Returns false (and drops the event) when the queue is full.
+bool post(EventType type, const void* data = nullptr, size_t len = 0, uint32_t generation = 0,
+          ConsoleRequest* console = nullptr);
+bool receive(Event& out, TickType_t wait);
+void release(Event& ev);
+}  // namespace events
+
+// ---------------------------------------------------------------------------
+// HAL implementations
+
+class EspSystem final : public hg::System {
+ public:
+  uint32_t now_ms() override;
+  void random_bytes(uint8_t* out, size_t len) override;
+  void log(hg::LogLevel level, std::string_view message) override;
+};
+
+class NvsStorage final : public hg::Storage {
+ public:
+  bool begin();
+  std::optional<std::string> get(std::string_view key) override;
+  void set(std::string_view key, std::string_view value) override;
+  void erase(std::string_view key) override;
+
+ private:
+  uint32_t handle_ = 0;  // nvs_handle_t
+  SemaphoreHandle_t lock_ = nullptr;  // the Wi-Fi task reads credentials too
+};
+
+class WsTransport final : public hg::Transport {
+ public:
+  void connect(const std::string& url, const std::string& subprotocol) override;
+  bool send_text(std::string_view text) override;
+  bool send_binary(const uint8_t* data, size_t len) override;
+  void close() override;
+  uint32_t generation() const { return generation_.load(); }
+
+ private:
+  static void on_event(void* arg, const char* base, int32_t id, void* data);
+  esp_websocket_client_handle_t client_ = nullptr;
+  std::atomic<uint32_t> generation_{0};
+  std::string url_, subprotocol_;
+  std::string rx_;  // fragment reassembly (WebSocket task only)
+  uint8_t rx_opcode_ = 0;
+};
+
+class SpiDisplay final : public hg::Display {
+ public:
+  bool begin(const LcdConfig& cfg);
+  hg::DisplayInfo info() const override;
+  uint16_t* framebuffer() override { return fb_; }
+  void flush(uint16_t y0, uint16_t y1) override;
+  void set_backlight(uint8_t percent) override;
+
+ private:
+  static bool on_trans_done(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t* edata, void* ctx);
+  LcdConfig cfg_{};
+  esp_lcd_panel_io_handle_t io_ = nullptr;
+  esp_lcd_panel_handle_t panel_ = nullptr;
+  uint16_t* fb_ = nullptr;
+  uint16_t* bounce_ = nullptr;  // DMA-capable staging rows
+  int bounce_rows_ = 0;
+  SemaphoreHandle_t done_ = nullptr;
+};
+
+// I2S MEMS microphone: a reader task posts 20 ms PCM16 chunks while capturing.
+class I2sMic final : public hg::AudioIn {
+ public:
+  bool begin(const I2sMicConfig& cfg);
+  bool start(uint32_t sample_rate) override;
+  void stop() override;
+
+ private:
+  static void task(void* arg);
+  i2s_chan_handle_t rx_ = nullptr;
+  uint32_t rate_ = 16000;
+  std::atomic<bool> capturing_{false};
+};
+
+// I2S amplifier fed from a stream buffer by a writer task.
+class I2sSpeaker final : public hg::AudioOut {
+ public:
+  bool begin(const I2sSpeakerConfig& cfg);
+  bool begin(uint32_t sample_rate) override;
+  void write(const int16_t* samples, size_t count) override;
+  void end() override;
+  void abort() override;
+  bool busy() const override;
+  void set_volume(uint8_t percent) override { volume_ = percent; }
+
+ private:
+  static void task(void* arg);
+  i2s_chan_handle_t tx_ = nullptr;
+  StreamBufferHandle_t buffer_ = nullptr;
+  std::atomic<uint32_t> rate_{16000};
+  std::atomic<bool> open_{false};
+  std::atomic<bool> draining_{false};
+  std::atomic<bool> flush_{false};
+  std::atomic<uint8_t> volume_{70};
+};
+
+class Buttons {
+ public:
+  void begin(const ButtonConfig& cfg);
+  void poll(hg::App& app);  // call every ~10 ms from the app task
+
+ private:
+  struct Button {
+    int gpio = -1;
+    hg::Button id = hg::Button::Talk;
+    bool pressed = false;
+    uint8_t stable = 0;
+  };
+  Button buttons_[4];
+};
+
+class Wifi {
+ public:
+  void begin(NvsStorage& storage);
+  void reconfigure();  // credentials changed through the console
+
+ private:
+  static void on_event(void* arg, const char* base, int32_t id, void* data);
+  NvsStorage* storage_ = nullptr;
+  bool configured_ = false;
+};
+
+namespace console {
+// Starts the serial console REPL; lines are executed by hg::App::console on the app task.
+void begin();
+}
+
+}  // namespace hgp

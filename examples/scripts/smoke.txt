@@ -1,0 +1,10 @@
+# Headless smoke test. Works against `hermes-gadget devserver` (open pairing)
+# or a Hermes gateway where this device is already approved.
+#   hermes-gadget sim --headless --url ws://127.0.0.1:8765/gadget --script examples/scripts/smoke.txt
+wait ready 30
+status
+text hello from the smoke test
+wait thinking|responding 10
+wait ready 120
+screenshot smoke-reply.png
+console get server

@@ -1,0 +1,11 @@
+# ESP32-S3-DevKitC-1 (N8R8: 8 MB flash, 8 MB octal PSRAM) on a breadboard with:
+#   ST7789 240x320 SPI LCD, INMP441 I2S microphone, MAX98357A I2S amplifier.
+# Wiring: docs/hardware.md#esp32-s3-breadboard
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+# Framebuffer and audio buffers go to PSRAM.
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_HG_BOARD_ESP32S3_BREADBOARD=y

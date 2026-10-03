@@ -1,0 +1,143 @@
+menu "Hermes Gadget"
+
+    config HG_FIRMWARE_VERSION
+        string "Firmware version reported to Hermes"
+        default "0.1.0"
+
+    menu "Defaults (overridable from the serial console)"
+        config HG_DEFAULT_NAME
+            string "Device name"
+            default "Hermes Gadget"
+        config HG_DEFAULT_SERVER_URL
+            string "Hermes gadget endpoint"
+            default ""
+            help
+                ws://<hermes-host>:8765/gadget  (run 'hermes gadget info' on the host).
+                Leave empty to configure it over serial: set server <url>
+        config HG_DEFAULT_ACCESS_TOKEN
+            string "Access token (only if GADGET_ACCESS_TOKEN is set on the host)"
+            default ""
+        config HG_DEFAULT_WIFI_SSID
+            string "Wi-Fi SSID"
+            default ""
+        config HG_DEFAULT_WIFI_PASSWORD
+            string "Wi-Fi password"
+            default ""
+    endmenu
+
+    choice HG_BOARD
+        prompt "Board"
+        default HG_BOARD_ESP32S3_BREADBOARD
+        help
+            Pin maps and peripherals. Add a board: docs/porting.md
+
+        config HG_BOARD_ESP32S3_BREADBOARD
+            bool "ESP32-S3 breadboard (ST7789 + INMP441 + MAX98357A)"
+        config HG_BOARD_CUSTOM
+            bool "Custom pins (configure below)"
+    endchoice
+
+    menu "Custom board pins"
+        depends on HG_BOARD_CUSTOM
+
+        config HG_LCD_ENABLED
+            bool "SPI LCD (ST7789)"
+            default y
+        config HG_LCD_WIDTH
+            int "LCD width (after rotation)"
+            default 320
+            depends on HG_LCD_ENABLED
+        config HG_LCD_HEIGHT
+            int "LCD height (after rotation)"
+            default 240
+            depends on HG_LCD_ENABLED
+        config HG_LCD_SWAP_XY
+            bool "Landscape (swap X/Y)"
+            default y
+            depends on HG_LCD_ENABLED
+        config HG_LCD_MIRROR_X
+            bool "Mirror X"
+            default y
+            depends on HG_LCD_ENABLED
+        config HG_LCD_MIRROR_Y
+            bool "Mirror Y"
+            default n
+            depends on HG_LCD_ENABLED
+        config HG_LCD_INVERT
+            bool "Invert colours (most IPS ST7789 panels)"
+            default y
+            depends on HG_LCD_ENABLED
+        config HG_LCD_GAP_X
+            int "Column offset"
+            default 0
+            depends on HG_LCD_ENABLED
+        config HG_LCD_GAP_Y
+            int "Row offset"
+            default 0
+            depends on HG_LCD_ENABLED
+        config HG_LCD_PIN_MOSI
+            int "LCD MOSI"
+            default 11
+        config HG_LCD_PIN_SCLK
+            int "LCD SCLK"
+            default 12
+        config HG_LCD_PIN_CS
+            int "LCD CS"
+            default 10
+        config HG_LCD_PIN_DC
+            int "LCD DC"
+            default 9
+        config HG_LCD_PIN_RST
+            int "LCD RST (-1 if tied)"
+            default 8
+        config HG_LCD_PIN_BL
+            int "LCD backlight (-1 if always on)"
+            default 7
+        config HG_LCD_SPI_MHZ
+            int "LCD SPI clock (MHz)"
+            default 40
+
+        config HG_MIC_ENABLED
+            bool "I2S microphone (INMP441-style, 24-bit left slot)"
+            default y
+        config HG_MIC_PIN_SCK
+            int "Mic SCK/BCLK"
+            default 4
+        config HG_MIC_PIN_WS
+            int "Mic WS/LRCLK"
+            default 5
+        config HG_MIC_PIN_SD
+            int "Mic SD/DOUT"
+            default 6
+
+        config HG_SPK_ENABLED
+            bool "I2S amplifier (MAX98357A-style)"
+            default y
+        config HG_SPK_PIN_BCLK
+            int "Speaker BCLK"
+            default 15
+        config HG_SPK_PIN_WS
+            int "Speaker LRC/WS"
+            default 16
+        config HG_SPK_PIN_DOUT
+            int "Speaker DIN"
+            default 17
+
+        config HG_BTN_TALK
+            int "Talk button GPIO (active low)"
+            default 0
+        config HG_BTN_CANCEL
+            int "Cancel button GPIO (-1 = none)"
+            default 14
+        config HG_BTN_UP
+            int "Scroll-up button GPIO (-1 = none)"
+            default -1
+        config HG_BTN_DOWN
+            int "Scroll-down button GPIO (-1 = none)"
+            default -1
+        config HG_STATUS_LED
+            int "Status LED GPIO, exposed to the agent as led.set (-1 = none)"
+            default -1
+    endmenu
+
+endmenu

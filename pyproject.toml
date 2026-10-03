@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68,<81"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-gadget"
+version = "0.1.0"
+description = "Build small Hermes-powered hardware devices: device protocol, Hermes platform plugin, desktop simulator and tooling."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Hermes Gadget SDK contributors" }]
+dependencies = [
+  "websockets>=13,<16",
+]
+
+[project.optional-dependencies]
+# Live microphone/speaker in the simulator (PortAudio wheels ship for Windows/macOS).
+audio = ["sounddevice>=0.4.6,<0.6"]
+# Serial provisioning and console for real boards.
+serial = ["pyserial>=3.5,<4"]
+# Image delivery in the development server.
+images = ["Pillow>=10,<13"]
+dev = ["pytest>=8,<10"]
+
+[project.scripts]
+hermes-gadget = "hermes_gadget.cli:main"
+
+[tool.setuptools]
+# The Hermes plugin directory doubles as an importable package so the
+# development server and tests run the exact code the gateway loads.
+package-dir = { "hermes_gadget" = "python/hermes_gadget", "hermes_gadget_plugin" = "plugin" }
+packages = ["hermes_gadget", "hermes_gadget.sim", "hermes_gadget_plugin"]
+
+[tool.setuptools.package-data]
+hermes_gadget_plugin = ["plugin.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

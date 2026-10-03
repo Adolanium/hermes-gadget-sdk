@@ -1,0 +1,116 @@
+# Porting: new boards, displays, audio, inputs, sensors and actions
+
+The core (`firmware/core`) never changes for a new board. A port is drivers plus configuration.
+
+## Add a board with existing drivers
+
+The common case is an SPI ST7789 panel, an I2S microphone, an I2S amplifier and GPIO buttons.
+
+1. Add a Kconfig choice in `firmware/esp32/main/Kconfig.projbuild`:
+
+   ```kconfig
+   config HG_BOARD_MY_BOARD
+       bool "My Board (ST7789 240x240, ICS-43434, MAX98357A)"
+   ```
+
+2. Return its description from `firmware/esp32/main/board.cpp`:
+
+   ```cpp
+   #elif CONFIG_HG_BOARD_MY_BOARD
+   BoardConfig make() {
+     BoardConfig b{};
+     b.name = "my-board";
+     b.lcd = {true, 240, 240, /*swap_xy*/ false, false, false, /*invert*/ true, 0, 0,
+              /*mosi*/ 23, /*sclk*/ 18, /*cs*/ 5, /*dc*/ 16, /*rst*/ 17, /*bl*/ 4, 40};
+     b.mic = {true, 26, 25, 33};
+     b.speaker = {true, 27, 14, 12};
+     b.buttons = {0, 35, -1, -1};
+     return b;
+   }
+   ```
+
+3. Add `firmware/esp32/boards/my-board/sdkconfig.defaults` with the target, flash size, PSRAM mode, and `CONFIG_HG_BOARD_MY_BOARD=y`. Add a PlatformIO env if you use it.
+
+4. Add a simulator profile with the same screen size and peripherals to `BOARDS` in `python/hermes_gadget/sim/runner.py`, so UI work happens on the desktop.
+
+5. Document the wiring in [hardware.md](hardware.md).
+
+Before flashing, use **Custom pins** in menuconfig to try a wiring without writing code.
+
+## A different display
+
+Implement `hg::Display` (`firmware/core/include/hg/hal.hpp`):
+
+| Method | What it must do |
+|---|---|
+| `info()` | Width, height, whether to store pixels byte-swapped (most SPI panels want big-endian RGB565, so return `swap_bytes = true`), whether a backlight can be dimmed, and whether the panel is `round` |
+| `framebuffer()` | A width × height RGB565 buffer you own (PSRAM on ESP32) |
+| `flush(y0, y1)` | Push full-width rows `[y0, y1)` to the panel |
+| `set_backlight(percent)` | Optional |
+
+`SpiDisplay` in `port_display.cpp` is the reference. To add ILI9341, GC9A01 or another panel, swap `esp_lcd_new_panel_st7789` for the matching `esp_lcd` driver (most are managed components). For RGB/parallel or QSPI AMOLED panels, the same interface applies with that panel's `esp_lcd` IO.
+
+**Round panels** (for example a 1.75" 466×466 AMOLED puck): set `round = true`. The UI then draws inside the square inscribed in the circle, keeps everything else dark, centres the status row, and tells the host `"shape": "round"`. Try it with the `sim-466x466-round` simulator board.
+
+- **Monochrome or e-paper:** convert RGB565 to your format in `flush()`. The UI uses dark backgrounds with light text and accents, so thresholding the luminance works.
+- **Very small screens** (128×64): the layout scales text to 1×. You may want a slimmer layout; `Ui` reads only `DisplayInfo`.
+
+## Audio through a codec chip
+
+Boards like the ESP32-S3-BOX family route audio through codecs (ES7210 ADC, ES8311 DAC) configured over I2C. Implement `hg::AudioIn` and `hg::AudioOut` on top of `esp_codec_dev`, keeping the contracts:
+
+- **`AudioIn`:**
+  - `start(rate)` begins capture.
+  - Deliver mono PCM16 chunks of about 20 ms with `App::on_mic_samples` through the event queue (`EventType::Mic`). Never call `App` from a driver task.
+  - `stop()` ends capture.
+- **`AudioOut`:**
+  - `begin(rate)` opens a stream.
+  - `write()` must not block: buffer about 1.5 s; the server keeps 0.5 s of lead.
+  - `end()` drains the buffer.
+  - `abort()` drops it immediately.
+  - `busy()` stays true until the buffered audio has played out.
+
+`I2sMic` and `I2sSpeaker` in `port_audio.cpp` are the reference implementations. The device declares its rates in `DeviceProfile`, and the server resamples to the speaker rate, so a 24 kHz or 48 kHz codec works without host changes.
+
+## Inputs
+
+`App::on_button(Button, pressed)` takes four logical buttons: `Talk`, `Cancel`, `Up`, `Down`. Map any physical input onto them:
+
+- **Touch screen:** a tap in the bottom bar → `Talk` press and release (set `talk_mode` to `tap`); swipe up and down → `Up` / `Down`.
+- **Rotary encoder:** detents → `Up` / `Down`; push → `Talk`.
+- **A single button:** `Talk` only. Long-press handling for `Cancel` belongs in the port.
+
+Set `DeviceProfile::has_cancel_button`, `has_scroll_buttons` and the labels so the hint bar and the `hello` capabilities match the hardware.
+
+## Sensors
+
+Call `app.set_sensor("co2_ppm", value)` whenever you have a reading; the core rate-limits reporting. The agent sees the latest values (with their age) through `gadget_devices`. Sensor names are free-form; include the unit (`temperature_c`, `humidity_pct`).
+
+For events worth an agent reaction ("doorbell pressed", "motion"), use `app.emit_event(name, data, /*notify_agent=*/true)`. It arrives in Hermes as a message from the device.
+
+## Device actions (agent → hardware)
+
+An action is a named capability with a JSON-Schema parameter object and a description written for the model. Register it before `app.begin()`:
+
+```cpp
+hg::Action relay;
+relay.name = "relay.set";
+relay.description = "Switch the desk lamp relay on or off.";
+hg::json::parse(R"({"type":"object","properties":{"on":{"type":"boolean"}},"required":["on"]})",
+                relay.params);
+relay.handler = [](const hg::json::Value& args, hg::json::Value& result, std::string& error) {
+  if (!args["on"].is_bool()) { error = "on must be true or false"; return false; }
+  gpio_set_level(GPIO_NUM_21, args["on"].as_bool());
+  result.set("on", args["on"].as_bool());
+  return true;
+};
+app.add_action(std::move(relay));
+```
+
+The device declares its actions in `hello`. Hermes's model discovers them through the per-device context and `gadget_devices`, and calls them with `gadget_action`. No Hermes or plugin change is needed. Handlers run on the app task: keep them short, and post long work to another task and report completion with an event.
+
+The firmware ships `speaker.volume` and `screen.brightness` when the hardware allows. The simulator adds `led.set` and `buzzer.beep` as examples.
+
+## A non-ESP32 device
+
+Anything that can run C++17 can host the core: a Raspberry Pi with a small display, a Zephyr board, a Linux handheld. Implement the six HAL interfaces and an event loop that calls `App::tick()`. The simulator's `firmware/sim/src/hgsim.cpp` is the smallest complete port. Devices that cannot run the core can speak [the protocol](protocol.md) directly.

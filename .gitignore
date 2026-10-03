@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+dist/
+build/
+
+# Host (CMake) builds
+/build/
+
+# ESP-IDF / PlatformIO outputs
+firmware/esp32/build/
+firmware/esp32/.pio/
+firmware/esp32/managed_components/
+firmware/esp32/dependencies.lock
+firmware/esp32/sdkconfig
+firmware/esp32/sdkconfig.old
+firmware/esp32/sdkconfig.*-*
+!firmware/esp32/sdkconfig.defaults
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,32 @@
+name: gadget
+label: Hermes Gadget
+kind: platform
+version: 0.1.0
+manifest_version: 2
+api_version: 1
+description: >
+  Connect small hardware devices (ESP32 boards with a screen, microphone and
+  speaker) to Hermes. Devices hold a WebSocket to the gateway: voice requests
+  are transcribed by Hermes's speech-to-text, replies are shown on the device
+  and spoken with Hermes's text-to-speech, and the agent can drive device
+  actions (LEDs, relays, displays) through the gadget tools.
+author: Hermes Gadget SDK contributors
+license: MIT
+tags: [gateway, hardware, esp32, voice, iot]
+provides_tools:
+  - gadget_devices
+  - gadget_display
+  - gadget_action
+optional_env:
+  - name: GADGET_ACCESS_TOKEN
+    description: "Optional shared token every gadget must present (configure the same value on the device)"
+    prompt: "Gadget access token (or empty)"
+    password: true
+  - name: GADGET_ALLOWED_USERS
+    description: "Comma-separated device ids allowed without pairing (e.g. hg-0123456789abcdef)"
+    prompt: "Allowed gadget device ids (or empty to use pairing codes)"
+    password: false
+  - name: GADGET_ALLOW_ALL_USERS
+    description: "Allow any gadget without pairing (development only)"
+    prompt: "Allow all gadgets? (true/false)"
+    password: false
