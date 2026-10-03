@@ -37,6 +37,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from agent.i18n import t
 from gateway.config import Platform, PlatformConfig
 from gateway.platforms._shared import extra_or_secret
 from gateway.platforms.base import (
@@ -66,8 +67,11 @@ PAIRING_GRACE_S = 6.0
 # device is unpaired; if approval races it, it is a cheap read-only command.
 PAIRING_TRIGGER = "/status"
 _PAIRING_CMD = re.compile(r"(hermes\s+(?:-p\s+\S+\s+)?pairing\s+approve\s+\S+\s+([A-Z2-9]{8}))\b")
-# The gateway echoes speech-to-text results as a microphone emoji plus the quoted transcript.
-_TRANSCRIPT_ECHO = re.compile(r'^\s*\U0001F399️?\s*"(.*)"\s*$', re.DOTALL)
+# The gateway echoes speech-to-text results with this translated line: a microphone emoji and the
+# quoted transcript, quoted per language (Ukrainian uses «»). Patterns are built from the line itself.
+_ECHO_KEY = "gateway.voice.transcript_echo_short"
+_ECHO_SLOT = "\x00"
+_echo_patterns: Dict[str, Optional[re.Pattern]] = {}
 # Holding CANCEL already is a deliberate "start over", so the /new it sends confirms itself.
 AUTO_CONFIRM_NEW_S = 15.0
 PROMPT_PREFIX = "prompt:"  # message ids of device questions, so edits can withdraw them
@@ -105,6 +109,18 @@ class _Prompt:
 
     def expired(self) -> bool:
         return self.kind == "slash" and time.monotonic() - self.created > SLASH_CONFIRM_TTL_S
+
+
+def transcript_echo(content: str) -> Optional[str]:
+    """The transcript, if ``content`` is the gateway's echo line in Hermes's active language."""
+    line = t(_ECHO_KEY, text=_ECHO_SLOT)
+    if line not in _echo_patterns:
+        head, slot, tail = line.partition(_ECHO_SLOT)
+        head, tail = head.strip(), tail.strip()
+        _echo_patterns[line] = (re.compile(rf"^\s*{re.escape(head)}\s*(.*?)\s*{re.escape(tail)}\s*$", re.DOTALL)
+                                if slot and (head or tail) else None)
+    match = _echo_patterns[line].match(content) if _echo_patterns[line] else None
+    return match.group(1) if match else None
 
 
 def confirm_text(title: str, message: str, charset: str = "ascii") -> Tuple[str, str]:
@@ -378,10 +394,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if not session.paired:
             await self._forward_unpaired(session, content)
             return SendResult(success=True, message_id=uuid.uuid4().hex[:12])
-        echo = _TRANSCRIPT_ECHO.match(content or "")
-        if echo:
+        heard = transcript_echo(content or "")
+        if heard is not None:
             # Show what speech-to-text heard as the user's line, not as a reply.
-            await session.send_transcript(textfmt.for_device(echo.group(1), session.charset))
+            await session.send_transcript(textfmt.for_device(heard, session.charset))
             return SendResult(success=True, message_id=uuid.uuid4().hex[:12])
         text = textfmt.for_device(content, session.charset)
         if text:
