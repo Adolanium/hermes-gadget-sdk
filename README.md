@@ -97,7 +97,7 @@ hermes-gadget sim --url ws://127.0.0.1:8765/gadget --live-audio
 hermes pairing approve gadget <CODE>                   # the code on the device's screen
 ```
 
-**3. Build the real thing:** pick the parts below, then flash it with `pio run -e esp32s3-breadboard -t upload` from `firmware/esp32`. The full walkthrough is in [docs/getting-started.md](docs/getting-started.md).
+**3. Build the real thing:** pick the parts below, then flash it with `pio run -e esp32s3-breadboard -t upload` from `firmware/esp32`. The full walkthrough is in [docs/getting-started.md](docs/getting-started.md). The firmware builds in CI but has not run on a board yet, so the first flash may need debugging.
 
 ## The simulator
 
@@ -127,6 +127,8 @@ hermes-gadget sim --url ws://127.0.0.1:8765/gadget --board sim-466x466-round
 Each simulated device keeps its own identity in `~/.hermes-gadget/sim/<name>/`, so several can be paired at once. It also runs headless from a script, for tests and screenshots. Everything is in [docs/simulator.md](docs/simulator.md).
 
 ## Build one
+
+> **Untested on hardware.** Both board builds compile in CI, but neither has run on a real board yet. If you build one, watch the serial console on the first boot and [open an issue](https://github.com/Adolanium/hermes-gadget-sdk/issues) with its log if something looks wrong.
 
 | Part | Example | Notes |
 |---|---|---|
