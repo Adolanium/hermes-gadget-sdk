@@ -106,7 +106,7 @@ The simulator runs the **same C++ core as the firmware** inside a desktop window
 ```bash
 hermes-gadget build-sim                                   # once, and after changing firmware/core
 hermes-gadget sim --url ws://127.0.0.1:8765/gadget --live-audio
-hermes-gadget sim --url ws://127.0.0.1:8765/gadget --board sim-466x466-round --name "Desk Puck"
+hermes-gadget sim --url ws://127.0.0.1:8765/gadget --board sim-466x466-round
 ```
 
 | Key | Does |
