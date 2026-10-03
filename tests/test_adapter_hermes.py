@@ -168,6 +168,21 @@ def test_transcript_echo_and_interim_messages_are_classified(gadget, make_sim):
     assert sim.wait_for(lambda: (sim.last_received("reply") or {}).get("interim") is True, timeout=5)
 
 
+def test_transcript_echo_is_recognized_in_every_hermes_language(gadget, make_sim, monkeypatch):
+    """Hermes translates the echo line (Ukrainian quotes with «»), so the adapter matches the line the
+    active language renders rather than one hardcoded form."""
+    from agent.i18n import SUPPORTED_LANGUAGES, t
+
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+    for i, lang in enumerate(SUPPORTED_LANGUAGES):
+        monkeypatch.setenv("HERMES_LANGUAGE", lang)
+        text = f"lights {i}"
+        gadget.run(gadget.adapter.send(device_id, t("gateway.voice.transcript_echo_short", text=text)))
+        assert sim.wait_for(lambda: (sim.last_received("transcript") or {}).get("text") == text, timeout=5), lang
+    assert sim.last_received("reply") is None
+
+
 def test_speaking_devices_default_to_spoken_replies(gadget, make_sim):
     talker = _paired_sim(gadget, make_sim, state="talker")
     mute = _paired_sim(gadget, make_sim, state="mute", board="sim-240x240-nospeaker")
