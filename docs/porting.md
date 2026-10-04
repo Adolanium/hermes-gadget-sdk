@@ -124,6 +124,8 @@ The device declares its actions in `hello`. Hermes's model discovers them throug
 
 The firmware ships `speaker.volume` and `screen.brightness` when the hardware allows. The simulator adds `led.set` and `buzzer.beep` as examples.
 
+For runnable Linux examples, see [Home Assistant and MQTT](home-automation.md). They expose fixed lamp targets, report temperature availability and return a job ID for work that completes asynchronously.
+
 ## A non-ESP32 device
 
 Anything that can run C++17 can host the core: a Raspberry Pi with a small display, a Zephyr board, a Linux handheld. Implement the six HAL interfaces and an event loop that calls `App::tick()`. The simulator's `firmware/sim/src/hgsim.cpp` is the smallest complete port. Devices that cannot run the core can speak [the protocol](protocol.md) directly.

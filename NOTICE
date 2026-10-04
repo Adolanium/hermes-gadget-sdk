@@ -31,6 +31,11 @@ installed separately; their packages carry their respective license texts.
 The optional Linux display uses pygame (LGPL 2.1) and SDL2 (zlib), also
 installed separately. No pygame or SDL source is copied into this repository.
 
+The optional MQTT example uses Eclipse Paho MQTT Python, dual licensed under
+Eclipse Public License 2.0 and Eclipse Distribution License 1.0. It is installed
+separately; its package includes both license texts. No Paho source is copied
+into this repository.
+
 assets/mascot/nous-girl-white-1024.png, the mascot bitmaps generated from it
 (firmware/core/src/mascot_data.cpp) and the project logo derived from it
 (docs/images/logo.png) are based on artwork from the Hermes Agent repository,
