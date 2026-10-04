@@ -109,7 +109,7 @@ To publish a release:
 
 To package local builds: `pio run && python tools/package_release.py --all --out dist`.
 
-Each package also includes `hermes-gadget-<version>-licenses.zip`. It contains `LICENSE`, `NOTICE`, `LICENSES/`, and license/notice files from the installed managed components and ESP-IDF source. Packaging finds ESP-IDF through `IDF_PATH`, or the PlatformIO framework directory under `PLATFORMIO_CORE_DIR`/`~/.platformio`. Keep the matching dependency sources installed when packaging release binaries. The archive has a checksum in the manifest and `SHA256SUMS`; the site copies it and links it from the installer. When adding a driver, update the README license table and NOTICE in the same PR.
+Each package also includes `hermes-gadget-<version>-licenses.zip`. It contains `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, `LICENSES/`, and license/notice files from the installed managed components and ESP-IDF source. Packaging finds ESP-IDF through `IDF_PATH`, or the PlatformIO framework directory under `PLATFORMIO_CORE_DIR`/`~/.platformio`. Keep the matching dependency sources installed when packaging release binaries. The archive has a checksum in the manifest and `SHA256SUMS`; the site copies it and links it from the installer. When adding a driver, update [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) and [NOTICE](../NOTICE) in the same PR.
 
 Conventions:
 

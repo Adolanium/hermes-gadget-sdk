@@ -167,7 +167,7 @@ def _file(path: Path, data: bytes) -> dict:
 def license_archive(project: Path, path: Path) -> dict:
     """Ship notices with binary artifacts, including the installed driver sources' notices."""
     repo = PROJECT_DIR.parents[1]
-    files = [(repo / name, name) for name in ("LICENSE", "NOTICE")]
+    files = [(repo / name, name) for name in ("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md")]
     files.extend((p, p.relative_to(repo).as_posix()) for p in (repo / "LICENSES").rglob("*") if p.is_file())
     framework = Path(os.environ.get("IDF_PATH") or
                      Path(os.environ.get("PLATFORMIO_CORE_DIR", Path.home() / ".platformio")) /

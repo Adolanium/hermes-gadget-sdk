@@ -248,6 +248,7 @@ def test_binary_release_keeps_driver_licenses_and_checksums(project, tmp_path, m
         assert archive.read("esp-idf/NOTICE.txt") == b"Framework notice\n"
         assert b"Apache License" in archive.read("LICENSES/Apache-2.0.txt")
         assert b"Espressif" in archive.read("NOTICE")
+        assert b"[Paho MQTT]" in archive.read("THIRD_PARTY_NOTICES.md")
     digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
     assert license_file["sha256"] == digest
     assert f"{digest}  hermes-gadget-0.2.0-licenses.zip" in (dist / "SHA256SUMS").read_text()

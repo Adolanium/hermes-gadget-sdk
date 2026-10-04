@@ -42,6 +42,7 @@ sha256sum /var/lib/hermes-gadget/device.json /etc/hermes-gadget/config.json > /s
 sh install.sh
 sha256sum --check /saved-state.sha256
 test -f /opt/hermes-gadget/current/licenses/NOTICE
+cmp THIRD_PARTY_NOTICES.md /opt/hermes-gadget/current/licenses/THIRD_PARTY_NOTICES.md
 test -f /opt/hermes-gadget/current/licenses/LICENSES/Apache-2.0.txt
 # Install a second release ID to exercise switching while retaining the first.
 python3 -c '

@@ -38,7 +38,7 @@ def package(library: Path, wheel: Path, out: Path, revision: str) -> Path:
         root.mkdir()
         shutil.copy2(library, root / "libhgsim.so")
         shutil.copy2(wheel, root / wheel.name)
-        for file in ("LICENSE", "NOTICE", "README.md"):
+        for file in ("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "README.md"):
             shutil.copy2(ROOT / file, root / file)
         shutil.copytree(ROOT / "LICENSES", root / "LICENSES")
         shutil.copy2(ROOT / "docs/linux.md", root / "linux.md")
