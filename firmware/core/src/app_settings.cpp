@@ -235,6 +235,10 @@ bool App::start_wifi_setup() {
   stop_playback();
   close_settings();
   wake_display();
+  talk_held_ = false;
+  cancel_held_ = false;
+  settings_chord_fired_ = false;
+  wake_buttons_ = 0;
   wifi_setup_text_ = on_wifi_setup();
   if (wifi_setup_text_.empty()) set_hint_flash("Wi-Fi setup unavailable; use USB");
   update_model();

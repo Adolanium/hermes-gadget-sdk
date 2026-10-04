@@ -11,11 +11,10 @@
 #include "lwip/sockets.h"
 #include "lwip/inet.h"
 #include "sdkconfig.h"
+#include "wifi_setup_page.hpp"
 
 namespace hgp {
 namespace {
-
-extern const uint8_t setup_page[] asm("_binary_wifi_setup_html_start");
 
 std::string random_hex(size_t bytes) {
   uint8_t random[16];
@@ -42,6 +41,10 @@ bool local_request(httpd_req_t* req) {
   if (!ap || esp_netif_get_ip_info(ap, &info) != ESP_OK ||
       getsockname(httpd_req_to_sockfd(req), reinterpret_cast<sockaddr*>(&local), &length) != 0 ||
       local.sin_family != AF_INET || local.sin_addr.s_addr != info.ip.addr) return false;
+  esp_netif_ip_info_t station{};
+  auto* sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+  if (sta && esp_netif_get_ip_info(sta, &station) == ESP_OK && station.ip.addr &&
+      (station.ip.addr & station.netmask.addr) == (info.ip.addr & station.netmask.addr)) return false;
   length = sizeof(peer);
   if (getpeername(httpd_req_to_sockfd(req), reinterpret_cast<sockaddr*>(&peer), &length) != 0 ||
       peer.sin_family != AF_INET || (peer.sin_addr.s_addr & info.netmask.addr) != (info.ip.addr & info.netmask.addr)) return false;
@@ -140,7 +143,7 @@ esp_err_t Wifi::setup_http(httpd_req_t* req) {
   if (!local_request(req)) return error_response(req, "403 Forbidden", "Open setup from the device's temporary Wi-Fi network");
   if (req->method == HTTP_GET && std::strcmp(req->uri, "/") == 0) {
     httpd_resp_set_type(req, "text/html; charset=utf-8");
-    return httpd_resp_sendstr(req, reinterpret_cast<const char*>(setup_page));
+    return httpd_resp_sendstr(req, setup_page);
   }
   if (req->method == HTTP_GET) {
     auto result = hg::json::Value::object();

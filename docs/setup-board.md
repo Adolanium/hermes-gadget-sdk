@@ -61,7 +61,7 @@ Phone setup configures a board that already runs the firmware. A board without a
 
 The board saves the new Wi-Fi credentials only after it receives an IP address on that network. A failed attempt restores the previous settings and lets you try again. This check confirms Wi-Fi connectivity; Hermes must also be running at the address you entered. Pairing and device identity stay in place.
 
-The temporary network closes ten seconds after success, after ten minutes, or when you press CANCEL or swipe down on the gadget. Setup uses a local page and needs no phone app. Saved Wi-Fi passwords are never sent back to the page. The temporary password is absent from diagnostics and is discarded when setup closes.
+The temporary network closes ten seconds after success, after ten minutes, or when you press CANCEL or swipe down on the gadget. If the new network overlaps the setup subnet, setup closes immediately after saving and the phone may not show a success message. Setup uses a local page and needs no phone app. Saved Wi-Fi passwords are never sent back to the page. The temporary password is absent from diagnostics and is discarded when setup closes.
 
 USB remains available if phone setup cannot connect. The console accepts `wifi-setup` to start it and show its temporary credentials, or `wifi-setup close` to cancel it. Use USB for networks that overlap the setup subnet `192.168.4.0/24` and for gateway access-token changes. Firmware supports open networks and WPA2-compatible personal networks; enterprise Wi-Fi is not supported. Raspberry Pi networking is configured in Raspberry Pi OS, not through this page.
 

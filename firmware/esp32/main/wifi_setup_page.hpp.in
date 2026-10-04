@@ -1,0 +1,3 @@
+// Generated from the same HTML exercised by the browser tests.
+#pragma once
+constexpr char setup_page[] = R"hgsetup(@HG_WIFI_SETUP_HTML@)hgsetup";

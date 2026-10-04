@@ -1191,3 +1191,20 @@ TEST("Wi-Fi setup: private instructions stay out of diagnostics and prompts clos
   CHECK(r.app.screen() == hg::Screen::Prompt);
   CHECK(!r.app.start_wifi_setup());
 }
+
+TEST("Wi-Fi setup: opening from USB releases an active talk button") {
+  Rig r;
+  r.bring_online(true);
+  r.app.console("set screen_timeout 30");
+  r.app.on_wifi_setup = [] { return "Temporary setup network"; };
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK(r.fake.mic_on);
+  CHECK(r.app.start_wifi_setup());
+  CHECK(!r.fake.mic_on);
+  r.app.on_button(hg::Button::Talk, false);
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Cancel, false);
+  CHECK(!r.app.wifi_setup_open());
+  r.advance(30000);
+  CHECK_EQ(r.fake.brightness, 0);
+}

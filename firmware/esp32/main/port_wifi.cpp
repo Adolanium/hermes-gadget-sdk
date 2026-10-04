@@ -10,6 +10,7 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "sdkconfig.h"
+#include "lwip/inet.h"
 
 namespace hgp {
 namespace {
@@ -80,6 +81,11 @@ void Wifi::connected(hg::App& app) {
   joining_ = false;
   setup_status("connected");
   close_at_ = now_ms() + 10000;
+  esp_netif_ip_info_t station{};
+  auto* sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+  if (sta && esp_netif_get_ip_info(sta, &station) == ESP_OK &&
+      (station.ip.addr & station.netmask.addr) == (inet_addr("192.168.4.1") & station.netmask.addr))
+    app.close_wifi_setup();
 }
 
 void Wifi::provision(const hg::WifiCredentials& credentials) {
