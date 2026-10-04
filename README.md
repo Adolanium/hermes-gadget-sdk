@@ -1,208 +1,108 @@
 <p align="center">
-  <img src="docs/images/logo.png" width="132" alt="Hermes Gadget logo: the Hermes Agent mascot, a girl wearing headphones, on a dark tile">
+  <img src="docs/images/logo.png" width="64" alt="Hermes Gadget logo">
 </p>
 
 <h1 align="center">Hermes Gadget</h1>
 
 <p align="center">
   <b>Hold a button. Ask Hermes. Hear the answer.</b><br>
-  An open SDK for small hardware that talks to <i>your own</i> <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a>.
+  A small device for your own <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a>, with its tools, memory, and skills.
 </p>
 
 <p align="center">
-  <a href="https://github.com/Adolanium/hermes-gadget-sdk/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Adolanium/hermes-gadget-sdk/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/Adolanium/hermes-gadget-sdk/actions/workflows/hermes.yml"><img alt="Hermes integration" src="https://github.com/Adolanium/hermes-gadget-sdk/actions/workflows/hermes.yml/badge.svg"></a>
-  <img alt="ESP32-S3" src="https://img.shields.io/badge/hardware-ESP32--S3-e7a33e">
-  <img alt="Hermes platform plugin" src="https://img.shields.io/badge/Hermes-platform%20plugin-5a9bd5">
-  <img alt="C++17 core" src="https://img.shields.io/badge/core-C%2B%2B17-6e7f96">
-  <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-6e7f96">
-  <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-3dd68c">
+  <a href="https://adolanium.github.io/hermes-gadget-sdk/"><b>Set up a board</b></a> ·
+  <a href="docs/desktop.md"><b>Try the simulator</b></a> ·
+  <a href="docs/getting-started.md">Read the docs</a>
 </p>
-
-<p align="center"><sub><b>Unofficial community project.</b> Not affiliated with or endorsed by Nous Research. Hermes, Hermes Agent and the Hermes Agent mascot are trademarks of Nous Research. <a href="#affiliation-and-trademarks">More</a></sub></p>
 
 <p align="center">
-  <img src="docs/images/sim-window.png" width="880" alt="The Hermes Gadget simulator window: the device screen showing the Hermes mascot and 'Hi, I'm Hermes', TALK and CANCEL buttons, and panels for the device status, text input, sensors, serial console and log">
+  <img src="docs/images/screen-ready.png" width="226" alt="The round simulator display, ready for a question">
+  <br><sub>The desktop simulator runs the same device core. No board needed to try it.</sub>
 </p>
 
-<p align="center"><i>The desktop simulator running the device firmware. Screenshot.</i></p>
+## Choose your starting point
 
-An ESP32 with a small screen and a microphone becomes a push-to-talk terminal for your Hermes. It pairs with your agent like a new phone would, sends your voice, shows the answer and speaks it, and lends its LEDs, relays and sensors to the agent as tools. Your memory, skills and models stay on your Hermes; the gadget is just a very good pair of ears and a face.
+| I have a board | I want to try it first | I want to build with it |
+|---|---|---|
+| [Open the browser installer](https://adolanium.github.io/hermes-gadget-sdk/) | [Start the desktop simulator](docs/desktop.md) | [Explore the SDK](docs/development.md) |
+| Install over USB, connect Wi-Fi, and pair with your Hermes. | Try a scripted demo, then connect your own Hermes. | Add a board, device actions, sensors, or your own face. |
+| Chrome or Edge, a USB data cable, 2.4 GHz Wi-Fi, and Hermes. No firmware toolchain. | Python 3.10+, CMake 3.16+, and a C++17 compiler. | Start with the development guide and tests. |
 
-<table>
-  <tr>
-    <td width="33%" valign="top"><b>🎙️ Voice in, voice out</b><br>Push-to-talk streams 16 kHz audio to Hermes. Its own speech-to-text and text-to-speech do the rest; with a streaming voice, it starts talking before the reply is finished.</td>
-    <td width="33%" valign="top"><b>🔐 Pairs like a phone</b><br>A new device shows a code; you approve it on the Hermes host. Each device proves itself with its own key, so nothing can impersonate it.</td>
-    <td width="33%" valign="top"><b>🛠️ The agent drives the device</b><br>Devices declare actions (an LED, a relay, a buzzer). Hermes can call them, put cards on the screen and read the sensors, from the device or from any other chat.</td>
-  </tr>
-</table>
+## What you can do
 
-## On the screen
+- **Talk and listen.** Hold TALK to speak, release to send, and hear your Hermes reply.
+- **See what is happening.** Read replies, answer confirmation questions, and receive cards from your agent.
+- **Let Hermes act.** Expose the gadget's LEDs, sensors, and other controls as agent tools.
 
-| Idle | Listening | Thinking | Speaking |
-|:---:|:---:|:---:|:---:|
-| ![Idle: the mascot says "Hi, I'm Hermes"](docs/images/screen-ready.png) | ![Listening: sound waves from her headphones](docs/images/screen-listening.png) | ![Thinking: blue thought dots and "Checking the forecast"](docs/images/screen-thinking.png) | ![Speaking: amber waves at her mouth](docs/images/screen-speaking.png) |
-| **Reply** | **Question** | **Pairing** | **Agent card** |
-| ![The answer about tomorrow's weather in Lisbon](docs/images/screen-reply.png) | ![Hermes asks "Allow this command? git push --force", answered with TALK or CANCEL](docs/images/screen-prompt.png) | ![The pairing code and the command that approves it](docs/images/screen-pairing.png) | ![A pasta timer card put up by the agent](docs/images/screen-card.png) |
+Your Hermes does the thinking. Real conversations need Hermes Agent and the Gadget plugin. Voice also needs speech recognition and text-to-speech configured. The demo server gives scripted replies. Follow [Connect Hermes](docs/connect-hermes.md) when you are ready.
 
-<img align="right" src="docs/images/sim-window-rect.png" width="420" alt="The simulator window with a rectangular 320x240 screen showing the same mascot screen">
+## Supported hardware
 
-**Any screen.** The same firmware runs on the AMOLED board above and on a 320×240 breadboard build, on the right. A board without scroll buttons still works: long replies turn their own pages.
+| Board | How you talk | Audio |
+|---|---|---|
+| [Waveshare ESP32-S3-LCD-1.54](docs/hardware.md#waveshare-esp32-s3-lcd-154) | Hold BOOT | Onboard microphones and speaker |
+| [Waveshare ESP32-S3-Touch-AMOLED-1.75](docs/hardware.md#esp32-s3-touch-amoled-175) | Hold the screen | Onboard microphones; speaker output |
+| [ESP32-S3 breadboard build](docs/hardware.md) | Hold TALK | Wire the microphone and optional speaker |
 
-Every image on this page is a screenshot of the simulator window, captured with [`tools/capture_window.py`](tools/capture_window.py).
+Check the exact model and connections in the [hardware guide](docs/hardware.md). Other boards need a [port](docs/porting.md).
 
-<br clear="right">
+## Try the demo from a checkout
 
-## How it works
+<details>
+<summary>Already have Python, CMake, and a compiler? Start here.</summary>
 
-```mermaid
-flowchart LR
-  subgraph Device["Gadget (ESP32 or simulator)"]
-    B[TALK / CANCEL] --> Core["Device core<br/>C++17"]
-    M[Microphone] --> Core
-    Core --> S[Screen]
-    Core --> SP[Speaker]
-  end
-  Core <-->|"WebSocket<br/>JSON + PCM"| Hub
-  subgraph Hermes["Your Hermes gateway"]
-    Hub["Gadget plugin"] <--> GW["Gateway: STT, agent turn, TTS"]
-    GW --> Tools["gadget_display · gadget_action · gadget_devices"]
-  end
-  Tools -.-> Hub
-```
-
-1. **Hold TALK and speak.** The device streams audio to the gadget plugin inside your Hermes gateway.
-2. **Hermes does the thinking.** The plugin hands Hermes a voice message, exactly like a voice note from a messaging app. Hermes transcribes it, runs the agent turn with your tools and memory, and speaks the reply.
-3. **The reply comes back** as text on the screen and audio from the speaker, with live status phrases ("Checking the forecast") in between.
-4. **Hermes can reach back.** Cron results, messages from other chats and agent tools arrive over the same connection.
-
-**Hermes itself is unchanged.** The SDK plugs in through the gateway's platform-plugin interface, the same one messaging platforms use. See [docs/hermes-integration.md](docs/hermes-integration.md).
-
-## Quick start
-
-**1. Try it with no hardware and no Hermes** (needs CMake and a C++17 compiler):
+In your activated environment at the repository root:
 
 ```bash
-pip install -e ".[dev]"
-hermes-gadget build-sim
-hermes-gadget devserver --pairing                      # terminal 1: a stand-in for Hermes
-hermes-gadget sim --url ws://127.0.0.1:8765/gadget     # terminal 2: the simulated device
+python -m pip install -e ".[dev]"
+hermes-gadget build-sim --test
+hermes-gadget devserver --pairing
 ```
 
-**2. Connect it to your Hermes:**
+In a second terminal with the same environment activated:
 
 ```bash
-hermes plugins install https://github.com/Adolanium/hermes-gadget-sdk/tree/main/plugin --enable
-hermes gateway setup                                   # pick Hermes Gadget, then restart the gateway
-hermes-gadget sim --url ws://127.0.0.1:8765/gadget --live-audio
-hermes gadget pair                                     # approves the code on the device's screen
-```
-
-**3. Set up a real board:** plug it in and open the **[browser installer](https://adolanium.github.io/hermes-gadget-sdk/)** in Chrome or Edge. It installs the firmware, connects the board to Wi-Fi and your Hermes, and walks you through pairing; no toolchain needed. To build the firmware yourself instead, see [docs/getting-started.md](docs/getting-started.md).
-
-## The simulator
-
-The simulator runs the **same C++ core as the firmware** inside a desktop window. Your keyboard is the buttons, your PC's microphone and speakers are the device's, and it talks to Hermes (or the stand-in dev server) over the same WebSocket protocol. Anything that works here works on the board.
-
-```bash
-hermes-gadget build-sim                                   # once, and after changing firmware/core
-hermes-gadget sim --url ws://127.0.0.1:8765/gadget --live-audio
 hermes-gadget sim --url ws://127.0.0.1:8765/gadget --board sim-466x466-round
 ```
 
-| Key | Does |
+Type `approve <CODE>` in the first terminal, using the code on the device. Type a message in the simulator to receive a streamed echo. The [desktop guide](docs/desktop.md) covers platform-specific prerequisites and live audio.
+
+</details>
+
+## On the screen
+
+| Ready | Listening | Thinking | Speaking |
+|:---:|:---:|:---:|:---:|
+| ![Ready](docs/images/screen-ready.png) | ![Listening](docs/images/screen-listening.png) | ![Thinking](docs/images/screen-thinking.png) | ![Speaking](docs/images/screen-speaking.png) |
+
+These images show the simulator's device display. The [simulator guide](docs/simulator.md) covers its desktop controls, board profiles, and scripted runs.
+
+## Find the right guide
+
+| Use a gadget | Build with the SDK |
 |---|---|
-| Hold **Space** | TALK: hold to speak, release to send. Also "yes" to a question |
-| **Esc** | CANCEL: discard, close, stop, or "no" to a question. Hold 2 s for a new conversation |
-| **Up / Down** | Scroll a long reply |
-| **Ctrl+S** | Save a screenshot |
-| Text box | Type a message instead of speaking |
+| [Choose a starting point](docs/getting-started.md) | [Development and tests](docs/development.md) |
+| [Set up a board](docs/setup-board.md) | [Add a board, actions, or sensors](docs/porting.md) |
+| [Try the simulator](docs/desktop.md) | [Customize the face](docs/faces.md) |
+| [Connect Hermes](docs/connect-hermes.md) | [Architecture](docs/architecture.md) |
+| [Talk, type, and interrupt](docs/using-gadget.md) | [Protocol](docs/protocol.md) |
+| [Change Wi-Fi or update firmware](docs/setup-board.md#manage-an-existing-gadget) | [Hermes integration reference](docs/hermes-integration.md) |
+| [Troubleshooting](docs/troubleshooting.md) | [Hardware and wiring](docs/hardware.md) |
 
-| Board | Screen |
-|---|---|
-| `sim-320x240` (default) | 320×240, like the breadboard build |
-| `sim-466x466-round` | The 1.75" AMOLED touch board |
-| `sim-480x320`, `sim-240x135` | Larger and smaller rectangular panels |
-| `sim-240x240` | The 1.54" LCD board |
-| `sim-240x240-nospeaker` | No speaker: replies are text only |
+## Project status
 
-Each simulated device keeps its own identity in `~/.hermes-gadget/sim/<name>/`, so several can be paired at once. It also runs headless from a script, for tests and screenshots. Everything is in [docs/simulator.md](docs/simulator.md).
+[Releases](https://github.com/Adolanium/hermes-gadget-sdk/releases/latest) include prebuilt firmware for the three boards above. After the first USB flash, `hermes gadget update` installs new firmware over the air. A build that cannot reach Hermes rolls itself back.
 
-## Build one
+The simulator and firmware share a portable C++17 core. CI tests the core, Python tools, installer, and plugin against a real Hermes gateway, and builds every supported board. The [development guide](docs/development.md) describes the test suites and pinned Hermes version.
 
-| Part | Example | Notes |
-|---|---|---|
-| Board | ESP32-S3 DevKitC-1 N8R8 | PSRAM holds the framebuffer |
-| Screen | 2" ST7789 SPI LCD, 320×240 | 240×240 and 240×135 panels work too |
-| Microphone | INMP441 I2S MEMS mic | |
-| Speaker (optional) | MAX98357A I2S amp + 4–8 Ω speaker | Without one, replies are text only |
-| Buttons | The DevKit's BOOT button, plus one more | TALK and CANCEL |
+Wake-word activation and Wi-Fi setup without USB are not included.
 
-**Prefer a ready-made board?** Two need no wiring, and the [browser installer](https://adolanium.github.io/hermes-gadget-sdk/) sets up either:
-
-- **Waveshare ESP32-S3-LCD-1.54:** a 240×240 screen, two microphones and an onboard speaker. BOOT talks, PLUS cancels. See [docs/hardware.md](docs/hardware.md#waveshare-esp32-s3-lcd-154).
-- **Waveshare ESP32-S3-Touch-AMOLED-1.75:** a round 1.75" AMOLED touchscreen, two microphones and a speaker output. Hold the screen to talk, swipe down to cancel. See [docs/hardware.md](docs/hardware.md#esp32-s3-touch-amoled-175).
-
-Pinout, flashing and the serial console are in [docs/hardware.md](docs/hardware.md). Other boards are a configuration change: [docs/porting.md](docs/porting.md).
-
-## Using it
-
-| Do this | And this happens |
-|---|---|
-| Hold **TALK**, speak, let go | Hermes hears you and answers |
-| Press **TALK** while it is talking | It stops and listens (barge-in) |
-| Tap **CANCEL** | Discard the recording, close a card, or stop the turn |
-| Hold **CANCEL** for 2 s | Start a fresh conversation |
-| A question appears | **TALK** = yes, **CANCEL** = no. Covers `/new`, model switches and dangerous commands the agent wants to run |
-
-Long replies turn their own pages, so a board without scroll buttons can still read everything.
-
-## Under the hood
-
-- **One core, two homes.** The protocol, pairing, push-to-talk, UI and playback live in a portable C++17 core. The ESP32 firmware and the desktop simulator compile the same files, so a bug you can reproduce in the simulator is a bug in the firmware.
-- **The mascot costs about 26 KB.** She is stored as 1-bit frames (idle, blink, talk) at four sizes. The listening waves, thinking dots and speaking waves are drawn live on top of her.
-- **A blink redraws about 25 rows.** The renderer hashes what each part of the screen depends on and only sends the rows that changed over SPI. Idle animation stays cheap even on a slow bus.
-- **Your key crosses the network once.** On first contact the device enrolls a random 32-byte key. After that it answers a fresh challenge with an HMAC, so a recorded session can't be replayed.
-- **The device stays dumb on purpose.** Markdown, Unicode, image decoding, speech recognition and synthesis all happen on the Hermes host. The firmware never needs an update to get a better voice or model.
-- **The tests run without hardware or API keys.** C++ unit tests drive the core through a fake board. The Python suite pairs simulated devices with a real `hermes gateway run`, with a fake model, speech-to-text and text-to-speech behind it.
-
-## Documentation
-
-| Guide | What's in it |
-|---|---|
-| [Getting started](docs/getting-started.md) | From zero to a paired device, simulator or hardware |
-| [Architecture](docs/architecture.md) | The core, rendering, the mascot, interaction, security |
-| [Faces](docs/faces.md) | Making the face on the screen your own artwork |
-| [Protocol](docs/protocol.md) | Every message between device and host |
-| [Hermes integration](docs/hermes-integration.md) | How the plugin uses Hermes, configuration, making replies fast |
-| [Simulator](docs/simulator.md) | Keys, boards, scripted and headless runs |
-| [Hardware](docs/hardware.md) | Wiring, flashing, the serial console |
-| [Porting](docs/porting.md) | New boards, displays, audio, sensors and actions |
-| [Development](docs/development.md) | Repository layout and test suites |
-
-## Repository
-
-| Path | What it is |
-|---|---|
-| [`plugin/`](plugin) | The Hermes platform plugin: device hub, gateway adapter, agent tools, `hermes gadget` CLI |
-| [`firmware/core/`](firmware/core) | The portable device core |
-| [`firmware/esp32/`](firmware/esp32) | ESP-IDF firmware and board configurations |
-| [`firmware/sim/`](firmware/sim) | The core as a library for the desktop simulator |
-| [`python/hermes_gadget/`](python/hermes_gadget) | The `hermes-gadget` CLI: simulator, development server, plugin installer, provisioning |
-| [`tests/`](tests), [`firmware/tests/`](firmware/tests) | Python and C++ test suites |
-
-## Status
-
-Version 0.1, [released](https://github.com/Adolanium/hermes-gadget-sdk/releases/latest) with prebuilt firmware for three boards: the Waveshare ESP32-S3-LCD-1.54, the Waveshare ESP32-S3-Touch-AMOLED-1.75 and the ESP32-S3 breadboard build.
-
-- **Setup:** the [browser installer](https://adolanium.github.io/hermes-gadget-sdk/) flashes a board and connects it to Wi-Fi and Hermes.
-- **Updates:** after the first USB flash, new firmware installs over the air (`hermes gadget update`), and a build that can't reach Hermes rolls itself back.
-- **Testing:** the core, the simulator and the plugin are tested end to end against a real Hermes gateway. CI runs those tests against Hermes Agent [`2eceb02`](https://github.com/NousResearch/hermes-agent/commit/2eceb0275501b09febdec88d08b80d1fff730cf8) (October 3, 2026) on every change, and against Hermes `main` once a day. It also builds the firmware for every board.
-- **Not yet included:** a wake word, and Wi-Fi setup without a USB cable.
+[![CI](https://github.com/Adolanium/hermes-gadget-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/Adolanium/hermes-gadget-sdk/actions/workflows/ci.yml)
+[![Hermes integration](https://github.com/Adolanium/hermes-gadget-sdk/actions/workflows/hermes.yml/badge.svg)](https://github.com/Adolanium/hermes-gadget-sdk/actions/workflows/hermes.yml)
 
 ## Contributing
 
-Bug reports from real boards, new boards, fixes and docs are all welcome; [CONTRIBUTING.md](CONTRIBUTING.md) explains how. Please report security problems privately, as described in [SECURITY.md](SECURITY.md).
+Bug reports from real boards, new boards, fixes, and docs are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md). Report security problems privately through [SECURITY.md](SECURITY.md).
 
 ## Affiliation and trademarks
 

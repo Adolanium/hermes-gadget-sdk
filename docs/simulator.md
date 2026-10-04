@@ -1,5 +1,7 @@
 # The simulator
 
+New here? Follow [Try the simulator](desktop.md) for installation and your first conversation. This page covers controls, board profiles, and scripting.
+
 `hermes-gadget sim` runs the **production device core** (`firmware/core`) as a shared library inside a Python host.
 
 **Real code, same as on the ESP32:**
