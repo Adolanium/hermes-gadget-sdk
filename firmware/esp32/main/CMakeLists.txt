@@ -12,6 +12,7 @@ idf_component_register(
         "port_events.cpp"
         "port_ota.cpp"
         "port_power.cpp"
+        "port_latch_power.cpp"
         "../../drivers/axp2101.cpp"
         "port_storage.cpp"
         "port_system.cpp"
@@ -29,6 +30,7 @@ idf_component_register(
         esp_driver_i2s
         esp_driver_ledc
         esp_app_format
+        esp_adc
         esp_event
         esp_lcd
         esp_netif

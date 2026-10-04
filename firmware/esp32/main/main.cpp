@@ -31,6 +31,7 @@ hgp::TouchInput g_touch;
 hgp::Wifi g_wifi;
 hgp::EspUpdater g_updater;
 hgp::AxpPower g_power;
+hgp::LatchPower g_latch_power;
 hg::TouchGestures* g_gestures = nullptr;
 
 // touch_cancel: which inputs act as CANCEL on touch boards.
@@ -129,6 +130,7 @@ extern "C" void app_main(void) {
   hgp::events::init();
   ESP_ERROR_CHECK(g_storage.begin() ? ESP_OK : ESP_FAIL);
   const hgp::BoardConfig& board = hgp::board_config();
+  const bool latch_power = board.latch_power.enabled && g_latch_power.begin(board.latch_power);
   const char* version = esp_app_get_description()->version;
   ESP_LOGI(TAG, "Hermes Gadget %s on %s", version, board.name);
 #if CONFIG_SPIRAM
@@ -152,6 +154,7 @@ extern "C" void app_main(void) {
   hal.system = &g_system;
   hal.transport = &g_transport;
   hal.storage = &g_storage;
+  if (latch_power) hal.power = &g_latch_power;
   if (g_updater.capacity()) hal.updater = &g_updater;
   if (board.lcd.enabled && g_display.begin(board.lcd)) hal.display = &g_display;
   else if (board.amoled.enabled && g_amoled.begin(board.amoled)) hal.display = &g_amoled;

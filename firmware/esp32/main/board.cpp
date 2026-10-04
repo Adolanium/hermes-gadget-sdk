@@ -115,8 +115,9 @@ BoardConfig make() {
   b.codec.dout = 12;
   b.codec.din = 11;
   b.codec.pa = 7;
-  // BOOT is TALK; PLUS is CANCEL. The PWR key is left alone: Waveshare's demo
-  // uses a long press for a software power-off, so it is not free for CANCEL.
+  // R27/R32 divide VBAT by three. BAT_EN is high to keep battery power on;
+  // CHG_STAT is low while charging. PWR remains part of the power circuit.
+  b.latch_power = {true, 1, 2, 3};
   b.buttons = {0, 4, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "PLUS";

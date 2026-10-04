@@ -56,7 +56,13 @@ Board option `esp32s3-lcd-154`, for Waveshare's all-in-one 1.54" board (SKUs 338
 | Buttons (to GND) | | TALK = BOOT (0), CANCEL = PLUS (4) |
 | Battery | ETA6098 | GPIO 1 (BAT_ADC), GPIO 2 (power latch), GPIO 3 (CHG_STAT) — unused |
 
-The PWR key is deliberately not mapped: Waveshare's factory firmware uses a long press for a software power-off through the GPIO 2 power latch. The TF card, QMI8658, battery gauge and touchscreen are unused for now.
+The PWR key remains part of the power circuit. Firmware asserts GPIO 2 at startup to keep the battery path enabled. The TF card, QMI8658 and touchscreen are unused.
+
+The [device settings menu](using-gadget.md#device-settings-and-hardware-checks) shows calibrated battery-node voltage and the charging signal. GPIO 1 samples the R27/R32 divider, whose ratio is three. GPIO 3 reads the active-low charging signal. This board has no fuel gauge, battery presence detector or USB-status input, so those readings are omitted. Voltage is unavailable if the ESP32's ADC calibration cannot start. An unplugged battery can leave voltage on this node while USB powers the charger; voltage alone does not prove a battery is attached.
+
+Select **Power off** twice to lower GPIO 2 and disconnect battery power. **USB continues to power the board.** Disconnect USB to turn it off, and hold PWR to turn it back on from battery. BOOT and PLUS retain their TALK and CANCEL roles. The optional screen timeout dims and darkens the display while keeping Wi-Fi connected.
+
+Wiring follows the [Waveshare schematic](https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-1.54/ESP32-S3-LCD-1.54-Schematic.pdf). For physical verification, compare the displayed voltage with a meter, test with and without a battery, check the charging signal, and test shutdown separately with USB and battery power. Record the board revision in the [hardware checklist](hardware-validation.md).
 
 **Build and flash it** with PlatformIO (`pio run -e esp32s3-lcd-154 -t upload -t monitor`) or with `idf.py`:
 

@@ -19,6 +19,8 @@
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
 #include "esp_codec_dev.h"
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_types.h"
 #include "esp_websocket_client.h"
@@ -257,6 +259,19 @@ class AxpPower final : public hg::Power {
  private:
   i2c_master_dev_handle_t dev_ = nullptr;
   std::unique_ptr<hg::Axp2101> chip_;
+};
+
+class LatchPower final : public hg::Power {
+ public:
+  bool begin(const LatchPowerConfig& cfg);
+  std::optional<hg::PowerStatus> read() override;
+  bool power_off() override;
+
+ private:
+  LatchPowerConfig cfg_{};
+  adc_oneshot_unit_handle_t adc_ = nullptr;
+  adc_cali_handle_t calibration_ = nullptr;
+  adc_channel_t channel_ = ADC_CHANNEL_0;
 };
 
 class Buttons {

@@ -77,6 +77,11 @@ struct ButtonConfig {
   int talk = -1, cancel = -1, up = -1, down = -1;  // active-low GPIOs, -1 = absent
 };
 
+struct LatchPowerConfig {
+  bool enabled = false;
+  int adc = -1, enable = -1, charging = -1;
+};
+
 struct BoardConfig {
   const char* name;
   LcdConfig lcd;
@@ -89,6 +94,7 @@ struct BoardConfig {
   TouchConfig touch;
   ExpanderKeyConfig pwr_key;
   bool axp2101 = false;
+  LatchPowerConfig latch_power;
   int status_led = -1;
   const char* talk_label = "TALK";
   const char* cancel_label = "CANCEL";
