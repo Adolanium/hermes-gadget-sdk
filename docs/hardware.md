@@ -14,6 +14,9 @@ The firmware is an ESP-IDF 5.x application (`firmware/esp32`) built on the porta
 
 Board option `esp32s3-breadboard`, for an ESP32-S3-DevKitC-1 N8R8 and the modules above.
 
+- **Flash:** 4 MB or more. The same image runs on 4, 8 and 16 MB modules.
+- **PSRAM:** octal, as on the N8R8 and N16R8. On an N8R2 (quad PSRAM) or a module without PSRAM, the firmware still starts and says so in its log, but the display may not: the framebuffer needs PSRAM. For an N8R2, build with `CONFIG_SPIRAM_MODE_QUAD=y` instead.
+
 | Module | Signal | ESP32-S3 GPIO |
 |---|---|---|
 | ST7789 LCD | MOSI / SDA | 11 |

@@ -2,11 +2,14 @@
 #   ST7789 240x320 SPI LCD, INMP441 I2S microphone, MAX98357A I2S amplifier.
 # Wiring: docs/hardware.md#esp32-s3-breadboard
 CONFIG_IDF_TARGET="esp32s3"
-# CONFIG_ESPTOOLPY_FLASHSIZE_4MB is not set
-CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+# Flash size stays at the base 4 MB: partitions.csv fits it, so one image runs on
+# 4, 8 and 16 MB modules alike.
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
 # Framebuffer and audio buffers go to PSRAM.
 CONFIG_SPIRAM_USE_MALLOC=y
+# Without the expected PSRAM (an N8R2 or N8 module), start anyway and say so in the
+# log and in `diag`, rather than restart in a loop.
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 CONFIG_HG_BOARD_ESP32S3_BREADBOARD=y

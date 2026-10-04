@@ -7,6 +7,7 @@
 #include "driver/gpio.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_psram.h"
 #include "hg/touch.hpp"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
@@ -129,6 +130,18 @@ extern "C" void app_main(void) {
   const hgp::BoardConfig& board = hgp::board_config();
   const char* version = esp_app_get_description()->version;
   ESP_LOGI(TAG, "Hermes Gadget %s on %s", version, board.name);
+#if CONFIG_SPIRAM
+#if CONFIG_SPIRAM_MODE_OCT
+  constexpr const char* kPsramMode = "octal";
+#else
+  constexpr const char* kPsramMode = "quad";
+#endif
+  if (!esp_psram_is_initialized()) {
+    ESP_LOGE(TAG, "no PSRAM found: this firmware is built for a module with %s PSRAM, and the display may "
+                  "not start without it (see the board's requirements in docs/hardware.md)",
+             kPsramMode);
+  }
+#endif
   g_updater.start();  // a new firmware on probation starts its clock now
 
   // Wi-Fi first: the radio is the entropy source for the device key.
