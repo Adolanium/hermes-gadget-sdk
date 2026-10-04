@@ -43,7 +43,8 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
   }
 
   const int dx = x - x0_, dy = y - y0_;
-  const bool swiped_down = (cfg_.swipe_cancel || app_.settings_open()) && dy >= cfg_.swipe_px && std::abs(dx) < dy;
+  const bool swiped_down = (cfg_.swipe_cancel || app_.settings_open() || app_.wifi_setup_open()) &&
+                          dy >= cfg_.swipe_px && std::abs(dx) < dy;
   switch (state_) {
     case State::Settings:
       if (swiped_down) {

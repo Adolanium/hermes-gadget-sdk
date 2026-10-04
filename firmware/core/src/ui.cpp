@@ -135,6 +135,7 @@ const char* screen_name(Screen s) {
     case Screen::Prompt: return "prompt";
     case Screen::Updating: return "updating";
     case Screen::Settings: return "settings";
+    case Screen::Setup: return "setup";
   }
   return "unknown";
 }
@@ -359,6 +360,7 @@ void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
     }
     case Screen::Image:
     case Screen::Settings:
+    case Screen::Setup:
       break;
   }
 }

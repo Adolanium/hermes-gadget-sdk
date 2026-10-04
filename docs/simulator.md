@@ -107,7 +107,7 @@ Script commands, one per line:
 | `screenshot <file.png>` | Save the screen |
 | `expect <text>` | Fail unless the last reply contains `<text>` |
 
-Screens are `boot`, `offline`, `connecting`, `pairing`, `ready`, `listening`, `thinking`, `responding`, `card`, `image`, `prompt`, `updating`, `settings` and `error`.
+Screens are `boot`, `offline`, `connecting`, `pairing`, `ready`, `listening`, `thinking`, `responding`, `card`, `image`, `prompt`, `updating`, `settings`, `setup` and `error`. The `setup` screen belongs to the ESP32 phone-setup flow; the simulator does not start a Wi-Fi access point.
 
 ## Using it from Python
 

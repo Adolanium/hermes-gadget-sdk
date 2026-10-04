@@ -9,6 +9,7 @@ set(HG_CORE_SOURCES
     src/json.cpp
     src/mascot_data.cpp
     src/protocol.cpp
+    src/setup.cpp
     src/touch.cpp
     src/ui.cpp
     src/vad.cpp

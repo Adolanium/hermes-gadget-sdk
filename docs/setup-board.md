@@ -38,7 +38,7 @@ Open the [browser installer](https://adolanium.github.io/hermes-gadget-sdk/insta
 
 ## Manage an existing gadget
 
-To change Wi-Fi or the Hermes address, connect USB and use the installer's **skip to Wi-Fi** option. Its firmware reinstall option can keep the existing settings.
+To change Wi-Fi or the Hermes address, use [phone setup](#set-up-wi-fi-with-your-phone) or connect USB and use the installer's **skip to Wi-Fi** option. Its firmware reinstall option can keep the existing settings.
 
 To update firmware over the air, run this on the Hermes computer, replacing the name with your device's name or ID:
 
@@ -48,6 +48,22 @@ hermes gadget update "Kitchen" --latest
 ```
 
 For a custom build, follow [Build and flash](hardware.md#build-and-flash). For USB configuration from the SDK checkout, install the serial extra with `python -m pip install -e ".[serial]"` and use `hermes-gadget provision --help`.
+
+## Set up Wi-Fi with your phone
+
+Phone setup configures a board that already runs the firmware. A board without a saved Wi-Fi network opens setup automatically at startup. To change an existing connection, open [device settings](using-gadget.md#device-settings-and-hardware-checks) and select **Wi-Fi setup**.
+
+1. Join the `Hermes-XXXX` network shown on the gadget. Enter its temporary password, also shown on the screen. Each setup session gets a new password.
+2. Keep this network selected if your phone warns that it has no internet. Open `http://192.168.4.1` in the phone's browser.
+3. Enter your 2.4 GHz network name, its password, and the device URL from `hermes gadget info`. Leave the password empty only for an open network.
+4. Choose **Check connection and save**. The board allows up to 30 seconds to connect. If your phone disconnects during the check, rejoin the gadget's network and reload the page.
+5. After the page reports success, reconnect your phone to its usual network. The gadget connects to Hermes; approve its pairing code if this is its first setup.
+
+The board saves the new Wi-Fi credentials only after it receives an IP address on that network. A failed attempt restores the previous settings and lets you try again. This check confirms Wi-Fi connectivity; Hermes must also be running at the address you entered. Pairing and device identity stay in place.
+
+The temporary network closes ten seconds after success, after ten minutes, or when you press CANCEL or swipe down on the gadget. Setup uses a local page and needs no phone app. Saved Wi-Fi passwords are never sent back to the page. The temporary password is absent from diagnostics and is discarded when setup closes.
+
+USB remains available if phone setup cannot connect. The console accepts `wifi-setup` to start it and show its temporary credentials, or `wifi-setup close` to cancel it. Use USB for networks that overlap the setup subnet `192.168.4.0/24` and for gateway access-token changes. Firmware supports open networks and WPA2-compatible personal networks; enterprise Wi-Fi is not supported. Raspberry Pi networking is configured in Raspberry Pi OS, not through this page.
 
 ## Get help
 

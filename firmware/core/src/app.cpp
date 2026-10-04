@@ -505,6 +505,7 @@ void App::h_reply(const json::Value& m) {
 }
 
 void App::h_audio_start(const json::Value& m) {
+  close_wifi_setup();
   wake_display();
   if (settings_open()) close_settings();
   if (!hal_.speaker || mode_ == Mode::Listening) return;
@@ -601,6 +602,7 @@ void App::h_display(const json::Value& m) {
 }
 
 void App::h_image_start(const json::Value& m) {
+  close_wifi_setup();
   wake_display();
   if (settings_open()) close_settings();
   if (!hal_.display || !ui_) return;
@@ -633,6 +635,7 @@ void App::h_image_end(const json::Value& m) {
 }
 
 void App::h_prompt(const json::Value& m) {
+  close_wifi_setup();
   wake_display();
   if (settings_open()) close_settings();
   const std::string& id = m["id"].as_string();
@@ -725,6 +728,10 @@ void App::h_error(const json::Value& m) {
 // Input
 
 void App::on_button(Button button, bool pressed) {
+  if (!wifi_setup_text_.empty()) {
+    if (button == Button::Cancel && !pressed) close_wifi_setup();
+    return;
+  }
   const auto bit = static_cast<uint8_t>(1u << static_cast<unsigned>(button));
   if (pressed && wake_display()) { wake_buttons_ |= bit; return; }
   if (wake_buttons_ & bit) {
@@ -924,6 +931,7 @@ void App::on_mic_samples(const int16_t* samples, size_t count) {
 }
 
 void App::submit_text(std::string_view text) {
+  close_wifi_setup();
   wake_display();
   if (settings_open()) close_settings();
   std::string t = trim(text);
@@ -1138,6 +1146,7 @@ void App::h_ota_begin(const json::Value& m) {
     return;
   }
   ota_ = Ota::Receiving;
+  close_wifi_setup();
   close_settings();
   ota_received_ = ota_acked_ = 0;
   ota_seq_ = 0;
@@ -1347,6 +1356,16 @@ void App::update_model() {
     case Phase::Online: m.link = Link::Online; break;
   }
   if (m.link == Link::Offline && network_up_) m.link = Link::Network;
+  if (!wifi_setup_text_.empty()) {
+    m.screen = Screen::Setup;
+    m.headline = "Wi-Fi setup";
+    m.detail = "Connect your phone";
+    m.body = wifi_setup_text_;
+    m.scroll = 0;
+    m.hint = profile_.touch_screen ? "Swipe down to close" : profile_.cancel_label + " to close";
+    if (ui_) ui_->render(m);
+    return;
+  }
   if (settings_open()) {
     settings_model();
     if (ui_ && !display_sleeping_) ui_->render(m);
@@ -1566,9 +1585,13 @@ std::string App::console(std::string_view raw) {
     for (const char* k : kSettingKeys) keys += std::string(" ") + k;
     for (const auto& k : profile_.extra_settings) keys += " " + k;
     return "@help commands: status | diag [log] | get <key> | set <key> <value> | say <text> | talk | release | "
-           "cancel | new-session | settings [close] | yes | no | reconnect | forget-key | factory-reset   keys:" + keys;
+           "cancel | new-session | settings [close] | wifi-setup [close] | yes | no | reconnect | forget-key | factory-reset   keys:" + keys;
   }
   if (cmd == "status") return "@status " + status_json();
+  if (cmd == "wifi-setup") {
+    if (rest == "close") { close_wifi_setup(); return "@ok Wi-Fi setup closed"; }
+    return start_wifi_setup() ? "@ok " + wifi_setup_text_ : "@error Wi-Fi setup unavailable";
+  }
   if (cmd == "settings") {
     if (rest == "close") { close_settings(); return "@ok settings closed"; }
     return open_settings() ? "@ok settings" : "@error settings unavailable during a prompt or update";

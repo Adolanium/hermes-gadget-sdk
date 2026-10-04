@@ -37,6 +37,7 @@ Tap CANCEL to move to the next item, then tap TALK to change it. On a touchscree
 | Battery and power | Show available power readings on boards with a power driver |
 | Screen timeout | Choose always on, 30, 60, 120, or 300 seconds |
 | Power off | Select twice to shut down a board with a power driver |
+| Wi-Fi setup | Start [phone-based setup](setup-board.md#set-up-wi-fi-with-your-phone) on ESP32 boards |
 
 Volume, brightness, talk mode, and screen timeout survive restarts. Unavailable drivers show as unavailable. These checks help you test the hardware; a completed tone does not prove that a physical speaker produced sound.
 

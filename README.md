@@ -102,7 +102,7 @@ These images show the simulator's device display. The [simulator guide](docs/sim
 
 The simulator and firmware share a portable C++17 core. CI tests the core, Python tools, installer, and plugin against a real Hermes gateway, and builds every supported board. The [development guide](docs/development.md) describes the test suites and pinned Hermes version.
 
-Wake-word activation and Wi-Fi setup without USB are not included.
+After installing firmware, you can [configure Wi-Fi from your phone](docs/setup-board.md#set-up-wi-fi-with-your-phone) through the gadget's temporary network. USB setup remains available. Wake-word activation is not included.
 
 [![CI](https://github.com/Adolanium/hermes-gadget-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/Adolanium/hermes-gadget-sdk/actions/workflows/ci.yml)
 [![Hermes integration](https://github.com/Adolanium/hermes-gadget-sdk/actions/workflows/hermes.yml/badge.svg)](https://github.com/Adolanium/hermes-gadget-sdk/actions/workflows/hermes.yml)

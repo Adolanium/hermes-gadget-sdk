@@ -6,11 +6,11 @@
 namespace hg {
 
 bool App::settings_title_hit(int x, int y) const {
-  return ui_ && !prompt_showing() && !ota_busy() && ui_->title_hit(x, y);
+  return ui_ && !prompt_showing() && !ota_busy() && !wifi_setup_open() && ui_->title_hit(x, y);
 }
 
 bool App::open_settings() {
-  if (prompt_showing() || ota_busy() || ota_ == Ota::Restarting) return false;
+  if (prompt_showing() || ota_busy() || ota_ == Ota::Restarting || !wifi_setup_text_.empty()) return false;
   wake_display();
   if (settings_open()) { close_settings(); return true; }
   if (mode_ == Mode::Listening) cancel_listening("local settings");
@@ -59,8 +59,10 @@ void App::settings_input(Button button, bool pressed) {
     menu_ = static_cast<Menu>(item);
     if (!hal_.power && (menu_ == Menu::Power || menu_ == Menu::PowerOff)) {
       menu_ = menu_ == Menu::Power ? (button == Button::Up ? Menu::Info : Menu::IdleTimer)
-                                   : (button == Button::Up ? Menu::IdleTimer : Menu::Back);
+                                   : (button == Button::Up ? Menu::IdleTimer : Menu::WifiSetup);
     }
+    if (!on_wifi_setup && menu_ == Menu::WifiSetup)
+      menu_ = button == Button::Up ? (hal_.power ? Menu::PowerOff : Menu::IdleTimer) : Menu::Back;
     return;
   }
   if (button != Button::Talk || pressed) return;
@@ -123,6 +125,7 @@ void App::settings_input(Button button, bool pressed) {
       }
       break;
     case Menu::Back: close_settings(); break;
+    case Menu::WifiSetup: start_wifi_setup(); break;
     case Menu::Power:
     case Menu::Info:
     case Menu::Closed: break;
@@ -212,6 +215,10 @@ void App::settings_model() {
       m.detail = "Power off";
       m.body = "Shut down the board. Use its PWR key to turn it on again.";
       break;
+    case Menu::WifiSetup:
+      m.detail = "Wi-Fi setup";
+      m.body = "Start a temporary network to configure this device with your phone.";
+      break;
     case Menu::Back:
       m.detail = "Back to Hermes";
       m.body = "Select to close settings.";
@@ -219,6 +226,26 @@ void App::settings_model() {
     case Menu::Closed: break;
   }
   if (!check_result_.empty()) m.body += "\n" + check_result_;
+}
+
+bool App::start_wifi_setup() {
+  if (!on_wifi_setup || prompt_showing() || ota_busy() || ota_ == Ota::Restarting) return false;
+  if (mode_ == Mode::Listening) cancel_listening("Wi-Fi setup");
+  else if (mode_ != Mode::Idle) cancel_turn();
+  stop_playback();
+  close_settings();
+  wake_display();
+  wifi_setup_text_ = on_wifi_setup();
+  if (wifi_setup_text_.empty()) set_hint_flash("Wi-Fi setup unavailable; use USB");
+  update_model();
+  return !wifi_setup_text_.empty();
+}
+
+void App::close_wifi_setup() {
+  if (wifi_setup_text_.empty()) return;
+  wifi_setup_text_.clear();
+  if (on_wifi_setup_close) on_wifi_setup_close();
+  update_model();
 }
 
 }  // namespace hg

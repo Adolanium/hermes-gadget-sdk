@@ -25,7 +25,7 @@ void App::power_tick() {
   }
   if (!hal_.display || !hal_.display->info().has_backlight || !screen_timeout_ms_) return;
   const bool idle = mode_ == Mode::Idle && !speaking() && !settings_open() && !talk_held_ && !cancel_held_ &&
-                    !prompt_showing() && !ota_busy() && ota_ != Ota::Restarting && overlay_ == Overlay::None &&
+                    !prompt_showing() && wifi_setup_text_.empty() && !ota_busy() && ota_ != Ota::Restarting && overlay_ == Overlay::None &&
                     (phase_ == Phase::NoNetwork || (phase_ == Phase::Online && paired_));
   if (!idle) { wake_display(); return; }
   const uint32_t elapsed = now() - activity_at_;

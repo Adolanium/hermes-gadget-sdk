@@ -18,8 +18,10 @@ idf_component_register(
         "port_system.cpp"
         "port_touch.cpp"
         "port_wifi.cpp"
+        "port_wifi_setup.cpp"
         "port_ws.cpp"
     INCLUDE_DIRS "." "../../drivers"
+    EMBED_TXTFILES "wifi_setup.html"
     REQUIRES core
     # "driver" pulls in GPIO, I2S, LEDC and SPI on every ESP-IDF 5.x release.
     # ESP-IDF 6.x dropped I2S and LEDC from that catch-all, so name them too;
@@ -34,6 +36,7 @@ idf_component_register(
         esp_event
         esp_lcd
         esp_netif
+        esp_http_server
         esp_psram
         esp_timer
         esp_wifi

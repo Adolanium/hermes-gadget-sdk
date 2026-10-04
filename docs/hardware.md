@@ -211,6 +211,7 @@ gadget> status
 | `cancel` | Press CANCEL |
 | `new-session` | Start a fresh conversation (same as holding CANCEL for 2 s) |
 | `settings` / `settings close` | Open or close the local settings and hardware checks |
+| `wifi-setup` / `wifi-setup close` | Start or cancel phone setup; the start response includes temporary network credentials |
 | `yes` / `no` | Answer the question on screen |
 | `reconnect` | Drop and re-open the Hermes connection |
 | `forget-key` | New device identity on next boot (re-enrollment and re-pairing) |
@@ -223,7 +224,7 @@ Machine-readable lines start with `@`, so tools can drive a bench device. `herme
 ## Power-on sequence
 
 1. **Boot:** about 1 s.
-2. **Wi-Fi:** credentials from NVS, else from menuconfig. Without credentials the screen says "No network".
+2. **Wi-Fi:** credentials from NVS, else from menuconfig. Without credentials the device opens a temporary network for [phone setup](setup-board.md#set-up-wi-fi-with-your-phone).
 3. **Connect:** the device opens the WebSocket to `server`, retrying 1 → 30 s with backoff.
 4. **Authenticate:** it enrolls its key on first contact and proves it with an HMAC afterwards.
 5. **Pair or ready:** an unpaired device shows a pairing code (approve with `hermes gadget pair`); a paired one goes to **Ready**.
@@ -231,6 +232,6 @@ Machine-readable lines start with `@`, so tools can drive a bench device. `herme
 ## Known limits of the reference firmware
 
 - Push-to-talk or tap with energy VAD. There is no wake word; the protocol leaves room for one (`audio.start.mode`).
-- Wi-Fi provisioning is over serial (or menuconfig). There is no SoftAP or BLE provisioning yet.
+- Wi-Fi setup works over USB or a temporary password-protected network. There is no BLE setup or dedicated phone app.
 - Firmware updates are authorized with the device key, but images aren't signed: the bootloader runs whatever a trusted Hermes installs. Secure Boot isn't enabled.
 - The text font is ASCII only; the host folds other characters.

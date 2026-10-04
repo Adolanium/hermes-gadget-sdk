@@ -8,6 +8,7 @@
 #include "hg/app.hpp"
 #include "hg/crypto.hpp"
 #include "hg/protocol.hpp"
+#include "hg/setup.hpp"
 #include "hg/touch.hpp"
 
 using hg::json::Value;
@@ -1125,4 +1126,68 @@ TEST("power: failed readings replace stale data and shutdown requires a second l
   CHECK_EQ(battery.shutdowns, 0);
   r.app.console("talk"); r.app.console("release");
   CHECK_EQ(battery.shutdowns, 1);
+}
+
+TEST("Wi-Fi setup: bounded credentials require the current session and never replace valid output on failure") {
+  hg::WifiCredentials out;
+  std::string error;
+  const std::string body = R"({"nonce":"current","ssid":"Kitchen","password":"example pass","server":"ws://192.168.1.20:8765/gadget"})";
+  CHECK(hg::parse_wifi_setup(body, "current", out, error));
+  CHECK_EQ(std::string(out.ssid), std::string("Kitchen"));
+  CHECK_EQ(std::string(out.password), std::string("example pass"));
+  CHECK_EQ(std::string(out.server), std::string("ws://192.168.1.20:8765/gadget"));
+  CHECK(!hg::parse_wifi_setup(body, "expired", out, error));
+  CHECK(!hg::parse_wifi_setup(body, "", out, error));
+  for (const std::string& url : {"http://example.com", "ws://", "ws://host:0", "ws://host:65536",
+                                 "ws://user:pass@host", "ws://host/#secret", "ws://host\n/path"}) {
+    Value form;
+    CHECK(hg::json::parse(body, form));
+    form.set("server", url);
+    CHECK(!hg::parse_wifi_setup(form.dump(), "current", out, error));
+  }
+  Value form;
+  CHECK(hg::json::parse(body, form));
+  form.set("ssid", std::string(33, 'x'));
+  CHECK(!hg::parse_wifi_setup(form.dump(), "current", out, error));
+  form.set("ssid", std::string("x\0y", 3));
+  CHECK(!hg::parse_wifi_setup(form.dump(), "current", out, error));
+  CHECK_EQ(std::string(out.ssid), std::string("Kitchen"));
+  form.set("ssid", std::string(32, 'x')).set("password", "").set("server", "wss://[::1]:8765/gadget");
+  CHECK(hg::parse_wifi_setup(form.dump(), "current", out, error));
+  CHECK_EQ(std::string(out.password), std::string());
+  form.set("password", "short");
+  CHECK(!hg::parse_wifi_setup(form.dump(), "current", out, error));
+  form.set("password", std::string(64, 'a'));
+  CHECK(hg::parse_wifi_setup(form.dump(), "current", out, error));
+  form.set("password", std::string(64, 'z'));
+  CHECK(!hg::parse_wifi_setup(form.dump(), "current", out, error));
+  CHECK(!hg::parse_wifi_setup(std::string(1025, ' '), "current", out, error));
+}
+
+TEST("Wi-Fi setup: private instructions stay out of diagnostics and prompts close the temporary network") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  int closed = 0;
+  r.app.on_wifi_setup = [] { return "Network: Hermes-test\nPassword: private-setup-key"; };
+  r.app.on_wifi_setup_close = [&] { ++closed; };
+  CHECK(r.app.start_wifi_setup());
+  CHECK(r.app.screen() == hg::Screen::Setup);
+  CHECK(r.app.model().body.find("private-setup-key") != std::string::npos);
+  CHECK(r.app.console("diag").find("private-setup-key") == std::string::npos);
+  CHECK(r.app.status_json().find("private-setup-key") == std::string::npos);
+  r.app.console("talk"); r.app.console("release");
+  CHECK(!r.fake.mic_on);
+  hg::TouchGestures touch(r.app);
+  touch.set_swipe_cancel(false);
+  touch.update(true, 100, 50, r.fake.clock);
+  touch.update(true, 100, 150, r.fake.clock + 30);
+  touch.update(false, 0, 0, r.fake.clock + 40);
+  CHECK_EQ(closed, 1);
+  CHECK(!r.app.wifi_setup_open());
+  CHECK(r.app.start_wifi_setup());
+  r.server(R"({"type":"prompt","id":"setup-test","text":"Continue?"})");
+  CHECK_EQ(closed, 2);
+  CHECK(!r.app.wifi_setup_open());
+  CHECK(r.app.screen() == hg::Screen::Prompt);
+  CHECK(!r.app.start_wifi_setup());
 }

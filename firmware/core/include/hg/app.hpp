@@ -94,6 +94,12 @@ class App {
   bool settings_title_hit(int x, int y) const;
   // Returns true when this input only wakes a sleeping display.
   bool wake_display();
+  bool start_wifi_setup();
+  void close_wifi_setup();
+  bool wifi_setup_open() const { return !wifi_setup_text_.empty(); }
+  // These run on the app task. Start returns private, on-screen instructions.
+  std::function<std::string()> on_wifi_setup;
+  std::function<void()> on_wifi_setup_close;
 
   // Serial-console command (provisioning, bench automation). Returns the
   // response; machine-readable lines start with '@'.
@@ -218,11 +224,12 @@ class App {
   uint8_t volume_ = 70;
   uint8_t brightness_ = 100;
   enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, Microphone, Speaker, Display, Inputs, Info,
-                              Power, IdleTimer, PowerOff, Back };
+                              Power, IdleTimer, PowerOff, WifiSetup, Back };
   enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };
   Menu menu_ = Menu::Closed;
   HardwareCheck hardware_check_ = HardwareCheck::None;
   std::string check_result_;
+  std::string wifi_setup_text_;
   bool talk_held_ = false;
   bool settings_chord_fired_ = false;
   uint32_t talk_down_at_ = 0;

@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <mutex>
 #include <string>
 #include <string_view>
 
@@ -24,17 +25,20 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_types.h"
 #include "esp_websocket_client.h"
+#include "esp_http_server.h"
 #include "freertos/semphr.h"
 #include "freertos/stream_buffer.h"
 #include "hg/app.hpp"
 #include "hg/hal.hpp"
+#include "hg/setup.hpp"
 
 namespace hgp {
 
 // ---------------------------------------------------------------------------
 // Events
 
-enum class EventType : uint8_t { NetUp, NetDown, WsOpen, WsText, WsBinary, WsClosed, Mic, Console, Touch, Key };
+enum class EventType : uint8_t { NetUp, NetDown, WsOpen, WsText, WsBinary, WsClosed, Mic, Console, Touch, Key,
+                                 WifiStarted, WifiDisconnected, WifiProvision };
 
 // Payloads of Touch and Key events (posted by the input task).
 struct TouchSample {
@@ -323,11 +327,28 @@ class Wifi {
  public:
   void begin(NvsStorage& storage);
   void reconfigure();  // credentials changed through the console
+  void disconnected();
+  void connected(hg::App& app);
+  void tick(hg::App& app, uint32_t now);
+  std::string start_setup();
+  void stop_setup();
+  void provision(const hg::WifiCredentials& credentials);
 
  private:
   static void on_event(void* arg, const char* base, int32_t id, void* data);
+  static esp_err_t setup_http(httpd_req_t* request);
+  void join(const char* ssid, const char* password);
+  void setup_status(std::string status);
   NvsStorage* storage_ = nullptr;
   bool configured_ = false;
+  bool auto_setup_ = false, auto_setup_tried_ = false;
+  bool joining_ = false, wait_disconnect_ = false;
+  uint32_t retry_at_ = 0, trial_at_ = 0, setup_until_ = 0, close_at_ = 0;
+  hg::WifiCredentials candidate_{};
+  httpd_handle_t http_ = nullptr;
+  std::mutex setup_mutex_;
+  std::string ap_name_, ap_password_, nonce_, setup_state_;
+  bool accepting_setup_ = false;
 };
 
 namespace console {
