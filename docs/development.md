@@ -28,6 +28,8 @@ assets/mascot/          The mascot master image and its attribution
 
 CI runs the last two rows in `.github/workflows/hermes.yml`: against the Hermes commit pinned there (`HERMES_REF`) on every push and pull request, and against Hermes `main` once a day. To move the pin, run that workflow by hand with `hermes_ref: main`. When it passes, put the commit it printed into `HERMES_REF` and the README's status line.
 
+The Linux jobs run on `ubuntu-24.04` rather than `ubuntu-latest`, so a new runner image arrives as a deliberate change instead of a surprise. Dependabot proposes the workflows' actions, the installer's npm packages and the Python dependencies weekly, a week after each release.
+
 The end-to-end test runs a real gateway with the plugin installed and a fake OpenAI-compatible server (`tests/fakes/fake_openai.py`) standing in for the model, STT and TTS. It then:
 
 - pairs a simulated device with `hermes pairing approve`;
