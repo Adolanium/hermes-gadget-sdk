@@ -91,12 +91,16 @@ bool TouchInput::read_touch(TouchSample& out) {
 
 bool TouchInput::begin_box_touch(i2c_master_bus_handle_t bus) {
   esp_lcd_panel_io_i2c_config_t io_cfg = {};
+  io_cfg.scl_speed_hz = 100000;
+  io_cfg.control_phase_bytes = 1;
+  io_cfg.lcd_cmd_bits = 16;
+  io_cfg.flags.disable_control_phase = 1;
   bool tt21100 = false;
   if (i2c_master_probe(bus, 0x5d, 50) == ESP_OK || i2c_master_probe(bus, 0x14, 50) == ESP_OK) {
-    io_cfg = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
+    io_cfg.dev_addr = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS;
     if (i2c_master_probe(bus, 0x5d, 50) != ESP_OK) io_cfg.dev_addr = 0x14;
   } else if (i2c_master_probe(bus, 0x24, 50) == ESP_OK) {
-    io_cfg = ESP_LCD_TOUCH_IO_I2C_TT21100_CONFIG();
+    io_cfg.dev_addr = ESP_LCD_TOUCH_IO_I2C_TT21100_ADDRESS;
     tt21100 = true;
   } else {
     return false;
