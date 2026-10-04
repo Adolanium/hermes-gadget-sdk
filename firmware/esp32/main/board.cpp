@@ -16,6 +16,8 @@ namespace {
 #define HG_BOARD_NAME "esp32s3-touch-amoled-1.75c"
 #elif CONFIG_HG_BOARD_BOX3
 #define HG_BOARD_NAME "esp32-s3-box-3"
+#elif CONFIG_HG_BOARD_CORES3
+#define HG_BOARD_NAME "m5stack-cores3"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154
 #define HG_BOARD_NAME "waveshare-esp32s3-lcd-154"
 #else
@@ -161,6 +163,36 @@ BoardConfig make() {
   b.touch.height = 240;
   b.buttons = {0, -1, -1, -1};
   b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
+  return b;
+}
+#elif CONFIG_HG_BOARD_CORES3
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.cores3 = true;
+  b.axp2101 = true;
+  b.i2c = {12, 11, 400000};
+  b.lcd.enabled = true;
+  b.lcd.controller = LcdController::CoreS3;
+  b.lcd.width = 320;
+  b.lcd.height = 240;
+  b.lcd.swap_xy = false;
+  b.lcd.mirror_x = false;
+  b.lcd.mirror_y = false;
+  b.lcd.invert = true;
+  b.lcd.mosi = 37;
+  b.lcd.sclk = 36;
+  b.lcd.cs = 3;
+  b.lcd.dc = 35;
+  b.codec = {true, 0, 34, 33, 13, 14, -1};
+  b.codec.speaker = SpeakerCodec::Aw88298;
+  b.touch.enabled = true;
+  b.touch.controller = TouchController::Ft5x06;
+  b.touch.addr = 0x38;
+  b.touch.width = 320;
+  b.touch.height = 240;
+  b.talk_label = "Hold screen";
   b.cancel_label = "Swipe down";
   return b;
 }

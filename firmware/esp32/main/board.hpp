@@ -11,7 +11,7 @@
 
 namespace hgp {
 
-enum class LcdController { St7789, Box3 };
+enum class LcdController { St7789, Box3, CoreS3 };
 
 struct LcdConfig {
   bool enabled = false;
@@ -51,16 +51,19 @@ struct I2cBusConfig {
 
 // ES8311 (speaker DAC) and ES7210 (microphone ADC) sharing one duplex I2S bus,
 // controlled over the I2C bus.
+enum class SpeakerCodec { Es8311, Aw88298 };
+
 struct CodecAudioConfig {
   bool enabled = false;
   int mclk = -1, bclk = -1, ws = -1, dout = -1, din = -1;
   int pa = -1;               // speaker amplifier enable, active high
   float amp_supply_v = 5.0f;  // amplifier supply; the ES8311 driver sets its output level from it
   float mic_gain_db = 24.0f;
+  SpeakerCodec speaker = SpeakerCodec::Es8311;
 };
 
 // CST9217 capacitive touch on the I2C bus: hold to talk, tap, swipe down to cancel.
-enum class TouchController { Cst9217, Box3 };
+enum class TouchController { Cst9217, Box3, Ft5x06 };
 
 struct TouchConfig {
   bool enabled = false;
@@ -102,6 +105,7 @@ struct BoardConfig {
   ExpanderKeyConfig pwr_key;
   bool axp2101 = false;
   bool axp_audio_supply = false;
+  bool cores3 = false;
   LatchPowerConfig latch_power;
   int status_led = -1;
   const char* talk_label = "TALK";

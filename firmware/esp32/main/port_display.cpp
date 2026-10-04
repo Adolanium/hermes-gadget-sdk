@@ -13,6 +13,8 @@
 #include "esp_lcd_panel_st7789.h"
 #include "esp_log.h"
 #include "panel_box3.hpp"
+#include "panel_cores3.hpp"
+#include "freertos/task.h"
 
 namespace hgp {
 namespace {
@@ -33,6 +35,7 @@ bool SpiDisplay::on_trans_done(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event
 bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   cfg_ = cfg;
   bool ili9341 = false;
+  bool cores3_e = false;
   if (cfg.controller == LcdController::Box3) {
     if (!i2c_bus) return false;
     if (i2c_master_probe(i2c_bus, 0x24, 50) != ESP_OK) {
@@ -44,6 +47,32 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
     }
   }
   controller_name_ = ili9341 ? "ili9342" : "st7789";
+  if (cfg.controller == LcdController::CoreS3) {
+    if (!bus) return false;
+    i2c_device_config_t device = {};
+    device.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+    device.device_address = 0x38;
+    device.scl_speed_hz = 100000;
+    i2c_master_dev_handle_t touch = nullptr;
+    if (i2c_master_bus_add_device(bus, &device, &touch) != ESP_OK) return false;
+    uint8_t version = 0;
+    for (int attempt = 0; attempt < 5; ++attempt) {
+      const uint8_t work_mode[] = {0x00, 0x00};
+      const uint8_t reg = 0xa6;
+      if (i2c_master_transmit(touch, work_mode, sizeof(work_mode), 50) == ESP_OK &&
+          i2c_master_transmit_receive(touch, &reg, 1, &version, 1, 50) == ESP_OK &&
+          (version == 0x10 || version == 0x12)) break;
+      vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    i2c_master_bus_rm_device(touch);
+    if (version != 0x10 && version != 0x12) {
+      ESP_LOGE(TAG, "unknown CoreS3 panel revision (touch firmware 0x%02x)", version);
+      return false;
+    }
+    ili9341 = true;
+    cores3_e = version == 0x12;
+    controller_name_ = cores3_e ? "ili9342e" : "ili9342c";
+  }
   const size_t px = static_cast<size_t>(cfg.width) * cfg.height;
   fb_ = static_cast<uint16_t*>(heap_caps_malloc(px * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (!fb_) fb_ = static_cast<uint16_t*>(heap_caps_malloc(px * 2, MALLOC_CAP_8BIT));
@@ -84,9 +113,15 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   panel_cfg.flags.reset_active_high = cfg.reset_active_high;
   ili9341_vendor_config_t vendor = {};
   if (ili9341) {
-    vendor.init_cmds = kBox3PanelInit;
-    vendor.init_cmds_size = sizeof(kBox3PanelInit) / sizeof(kBox3PanelInit[0]);
-    panel_cfg.vendor_config = &vendor;
+    if (cfg.controller == LcdController::Box3) {
+      vendor.init_cmds = kBox3PanelInit;
+      vendor.init_cmds_size = sizeof(kBox3PanelInit) / sizeof(kBox3PanelInit[0]);
+      panel_cfg.vendor_config = &vendor;
+    } else if (cores3_e) {
+      vendor.init_cmds = kCoreS3EPanelInit;
+      vendor.init_cmds_size = sizeof(kCoreS3EPanelInit) / sizeof(kCoreS3EPanelInit[0]);
+      panel_cfg.vendor_config = &vendor;
+    }
     ESP_ERROR_CHECK(esp_lcd_new_panel_ili9341(io_, &panel_cfg, &panel_));
   } else {
     ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io_, &panel_cfg, &panel_));
@@ -116,6 +151,7 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
     ESP_ERROR_CHECK(ledc_channel_config(&ch));
     set_backlight(100);
   }
+  if (board_backlight) board_backlight(100);
   ESP_LOGI(TAG, "%s %ux%u ready", controller_name_, cfg.width, cfg.height);
   return true;
 }
@@ -125,7 +161,7 @@ hg::DisplayInfo SpiDisplay::info() const {
   di.width = cfg_.width;
   di.height = cfg_.height;
   di.swap_bytes = true;  // the panel wants big-endian RGB565
-  di.has_backlight = cfg_.backlight >= 0;
+  di.has_backlight = cfg_.backlight >= 0 || static_cast<bool>(board_backlight);
   return di;
 }
 
@@ -141,6 +177,7 @@ void SpiDisplay::flush(uint16_t y0, uint16_t y1) {
 }
 
 void SpiDisplay::set_backlight(uint8_t percent) {
+  if (board_backlight) { board_backlight(percent); return; }
   if (cfg_.backlight < 0) return;
   uint32_t duty = (1023u * std::min<uint8_t>(percent, 100)) / 100u;
   ledc_set_duty(LEDC_LOW_SPEED_MODE, kBlChannel, duty);

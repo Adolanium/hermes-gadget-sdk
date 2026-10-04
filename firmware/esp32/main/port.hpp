@@ -17,6 +17,7 @@
 
 #include "board.hpp"
 #include "axp2101.hpp"
+#include "cores3.hpp"
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
 #include "esp_codec_dev.h"
@@ -119,6 +120,7 @@ class SpiDisplay final : public hg::Display {
   uint16_t* framebuffer() override { return fb_; }
   void flush(uint16_t y0, uint16_t y1) override;
   void set_backlight(uint8_t percent) override;
+  std::function<void(uint8_t)> board_backlight;
 
  private:
   static bool on_trans_done(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t* edata, void* ctx);
@@ -269,6 +271,16 @@ class AxpPower final : public hg::Power {
  private:
   i2c_master_dev_handle_t dev_ = nullptr;
   std::unique_ptr<hg::Axp2101> chip_;
+};
+
+class CoreS3Board {
+ public:
+  bool begin(i2c_master_bus_handle_t bus);
+  void set_backlight(uint8_t percent);
+
+ private:
+  i2c_master_dev_handle_t pmic_ = nullptr, expander_ = nullptr;
+  std::unique_ptr<hg::CoreS3Control> control_;
 };
 
 class LatchPower final : public hg::Power {

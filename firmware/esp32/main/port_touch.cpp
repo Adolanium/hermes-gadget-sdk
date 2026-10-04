@@ -9,6 +9,7 @@
 #include "esp_log.h"
 #include "esp_lcd_touch_gt911.h"
 #include "esp_lcd_touch_tt21100.h"
+#include "esp_lcd_touch_ft5x06.h"
 #include "freertos/task.h"
 
 namespace hgp {
@@ -25,7 +26,17 @@ bool TouchInput::begin(const TouchConfig& touch, const ExpanderKeyConfig& key, i
   if (!bus) return false;
   touch_ = touch;
   key_ = key;
-  if (touch.enabled && touch.controller == TouchController::Box3) {
+  if (touch.enabled && touch.controller == TouchController::Ft5x06) {
+    esp_lcd_panel_io_i2c_config_t io_cfg = ESP_LCD_TOUCH_IO_I2C_FT5x06_CONFIG();
+    esp_lcd_panel_io_handle_t io = nullptr;
+    esp_lcd_touch_config_t cfg = {};
+    cfg.x_max = touch.width;
+    cfg.y_max = touch.height;
+    cfg.rst_gpio_num = GPIO_NUM_NC;  // The board's expander already released reset.
+    cfg.int_gpio_num = GPIO_NUM_NC;
+    if (esp_lcd_new_panel_io_i2c(bus, &io_cfg, &io) == ESP_OK &&
+        esp_lcd_touch_new_i2c_ft5x06(io, &cfg, &managed_touch_) != ESP_OK) esp_lcd_panel_io_del(io);
+  } else if (touch.enabled && touch.controller == TouchController::Box3) {
     begin_box_touch(bus);
   } else if (touch.enabled) {
     if (touch.rst >= 0) {

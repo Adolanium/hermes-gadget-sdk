@@ -75,7 +75,7 @@ bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus)
 
   audio_codec_i2c_cfg_t dac_i2c = {};
   dac_i2c.port = I2C_NUM_0;
-  dac_i2c.addr = ES8311_CODEC_DEFAULT_ADDR;
+  dac_i2c.addr = cfg.speaker == SpeakerCodec::Aw88298 ? AW88298_CODEC_DEFAULT_ADDR : ES8311_CODEC_DEFAULT_ADDR;
   dac_i2c.bus_handle = bus;
   es8311_codec_cfg_t dac = {};
   dac.ctrl_if = audio_codec_new_i2c_ctrl(&dac_i2c);
@@ -89,7 +89,15 @@ bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus)
   dac.hw_gain.codec_dac_voltage = 3.3;
   esp_codec_dev_cfg_t out_cfg = {};
   out_cfg.dev_type = ESP_CODEC_DEV_TYPE_OUT;
-  out_cfg.codec_if = es8311_codec_new(&dac);
+  if (cfg.speaker == SpeakerCodec::Aw88298) {
+    aw88298_codec_cfg_t amp = {};
+    amp.ctrl_if = dac.ctrl_if;
+    amp.gpio_if = gpio_if;
+    amp.hw_gain.pa_gain = 15;
+    out_cfg.codec_if = aw88298_codec_new(&amp);
+  } else {
+    out_cfg.codec_if = es8311_codec_new(&dac);
+  }
   out_cfg.data_if = data_if;
   out_ = out_cfg.codec_if ? esp_codec_dev_new(&out_cfg) : nullptr;
 
