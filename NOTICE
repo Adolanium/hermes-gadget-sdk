@@ -43,3 +43,15 @@ the ESP32-S3-Touch-AMOLED-1.75,
 https://components.espressif.com/components/waveshare/esp32_s3_touch_amoled_1_75,
 released by Waveshare under the Apache License 2.0. A copy of that license is in
 LICENSES/Apache-2.0.txt.
+
+The BOX-3 panel initialization register values in
+firmware/esp32/main/panel_box3.hpp follow Espressif's ESP32-S3-BOX-3 BSP,
+https://github.com/espressif/esp-bsp/tree/master/bsp/esp-box-3,
+Copyright 2022-2026 Espressif Systems (Shanghai) CO LTD, Apache License 2.0.
+The adapter changes sleep-out and display-on to zero data bytes and explicit
+delays, and omits the legacy table terminator.
+
+The managed esp_lcd_ili9341, esp_lcd_touch, esp_lcd_touch_gt911 and
+esp_lcd_touch_tt21100 drivers are Espressif components under Apache License 2.0.
+They are fetched at build time. Binary release packages include the installed
+component and ESP-IDF license files alongside this notice.

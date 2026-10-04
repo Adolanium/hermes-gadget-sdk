@@ -40,7 +40,7 @@ Before flashing, use **Custom pins** in menuconfig to try a wiring without writi
 
 ## A different display
 
-Two drivers ship: `SpiDisplay` (ST7789 over SPI) and `AmoledDisplay` (CO5300 over QSPI, for round AMOLED modules). For a round panel set `round` in the board config: the UI then keeps to the square inside the circle.
+Two display adapters ship: `SpiDisplay` (ST7789 and the BOX-3 ILI9342 variant over SPI) and `AmoledDisplay` (CO5300 over QSPI, for round AMOLED modules). For a round panel set `round` in the board config: the UI then keeps to the square inside the circle. BOX-3 uses the managed TT21100/GT911 touch drivers. Its LCD and touch share one reset line, so initialize the display before touch.
 
 Implement `hg::Display` (`firmware/core/include/hg/hal.hpp`):
 

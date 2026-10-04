@@ -22,9 +22,11 @@ import argparse
 import configparser
 import hashlib
 import json
+import os
 import re
 import struct
 import sys
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -162,13 +164,37 @@ def _file(path: Path, data: bytes) -> dict:
     return {"path": path.name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
 
 
-def write_release(builds: list[Build], out: Path) -> dict:
+def license_archive(project: Path, path: Path) -> dict:
+    """Ship notices with binary artifacts, including the installed driver sources' notices."""
+    repo = PROJECT_DIR.parents[1]
+    files = [(repo / name, name) for name in ("LICENSE", "NOTICE")]
+    files.extend((p, p.relative_to(repo).as_posix()) for p in (repo / "LICENSES").rglob("*") if p.is_file())
+    framework = Path(os.environ.get("IDF_PATH") or
+                     Path(os.environ.get("PLATFORMIO_CORE_DIR", Path.home() / ".platformio")) /
+                     "packages" / "framework-espidf")
+    for root, prefix in ((project / "managed_components", "components"), (framework, "esp-idf")):
+        if not root.is_dir():
+            continue
+        for entry in root.rglob("*"):
+            if entry.is_file() and entry.name.upper().startswith(("LICENSE", "LICENCE", "NOTICE", "COPYING", "COPYRIGHT")):
+                files.append((entry, f"{prefix}/{entry.relative_to(root).as_posix()}"))
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for source, name in sorted(files, key=lambda item: item[1]):
+            info = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            archive.writestr(info, source.read_bytes())
+    data = path.read_bytes()
+    return {"path": path.name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+
+
+def write_release(builds: list[Build], out: Path, project: Path = PROJECT_DIR) -> dict:
     versions = sorted({b.version for b in builds})
     if len(versions) != 1:
         raise PackageError(f"the boards report different versions: {', '.join(versions)}")
     version = versions[0]
     out.mkdir(parents=True, exist_ok=True)
     manifest = {"name": "Hermes Gadget", "version": version, "builds": []}
+    manifest["licenses"] = license_archive(project, out / f"hermes-gadget-{version}-licenses.zip")
     for b in builds:
         stem = f"hermes-gadget-{b.board}-{version}"
         manifest["builds"].append({
@@ -187,6 +213,8 @@ def write_release(builds: list[Build], out: Path) -> dict:
         })
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     sums = [f"{f['sha256']}  {f['path']}" for build in manifest["builds"] for f in (build["image"], build["app"])]
+    licenses = manifest["licenses"]
+    sums.append(f"{licenses['sha256']}  {licenses['path']}")
     (out / "SHA256SUMS").write_text("\n".join(sums) + "\n", encoding="utf-8")
     return manifest
 
@@ -216,7 +244,7 @@ hermes-gadget-<board>-{version}.bin`. This also erases the device's settings, so
 
 **Update a running device:** `hermes gadget update <device> hermes-gadget-<board>-{version}-app.bin`.
 {plugin}
-Checksums are in `SHA256SUMS`.
+Checksums are in `SHA256SUMS`. License texts and notices are in `hermes-gadget-{version}-licenses.zip`.
 """
 
 
@@ -242,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.expect_version and builds[0].version != args.expect_version:
             raise PackageError(f"the firmware reports {builds[0].version}, not {args.expect_version}; "
                                "update PROJECT_VER in firmware/esp32/CMakeLists.txt")
-        manifest = write_release(builds, args.out)
+        manifest = write_release(builds, args.out, args.project)
     except PackageError as exc:
         print(f"package_release: {exc}", file=sys.stderr)
         return 1

@@ -43,6 +43,16 @@ async function board(page) {
   `}));
 }
 
+test("installer exposes the release's firmware license archive", async ({page}) => {
+  await page.route("**/firmware/manifest.json", route => route.fulfill({
+    json: {...manifest, licenses: {path: "hermes-gadget-test-licenses.zip"}},
+  }));
+  await page.goto("/installer.html");
+  const licenses = page.getByRole("link", {name: "Firmware licenses"});
+  await expect(licenses).toBeVisible();
+  await expect(licenses).toHaveAttribute("href", "firmware/hermes-gadget-test-licenses.zip");
+});
+
 test("board setup prepares Hermes, installs with settings preserved, and pairs", async ({page, context}) => {
   await board(page);
   await context.grantPermissions(["clipboard-read","clipboard-write"]);
