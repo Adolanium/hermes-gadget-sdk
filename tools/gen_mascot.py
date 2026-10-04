@@ -22,6 +22,7 @@ OUT = REPO / "firmware" / "core" / "src" / "mascot_data.cpp"
 SIZES = (64, 96, 144, 192)
 FRAMES = ("idle", "blink", "talk")
 THRESHOLD = 110  # alpha above this is ink after downsampling
+MASTER_SIZE = 1024  # the master's side, in pixels: everything above is in this space
 
 # Feature geometry in 1024-px master coordinates.
 RIGHT_EYE = [(318, 418), (452, 410), (462, 470), (444, 498), (326, 496), (314, 458)]
@@ -29,12 +30,23 @@ RIGHT_LID = [(326, 452), (350, 466), (388, 474), (424, 468), (452, 452)]
 LEFT_EYE = [(213, 446), (254, 444), (257, 516), (215, 518)]
 LEFT_LID = [(215, 484), (233, 490), (254, 484)]
 MOUTH_OPEN = (246, 622, 292, 648)  # ellipse box between the lips
-# Effect anchors (fractions of the bitmap size, x1000).
+# Effect anchors, also in master pixels: they are scaled to thousandths of the
+# bitmap size on output, because that is how the firmware reads them.
 EAR_CUP = (622, 300)    # the headphone cup: "listening" waves radiate from here
 MOUTH = (268, 635)      # "speaking" waves
 HEAD_TOP_RIGHT = (820, 110)  # "thinking" dots
 EYES_ROWS = (405, 520)  # rows touched by blinking
 MOUTH_ROWS = (600, 665)  # rows touched by talking
+
+
+def thousandths(master_px: int) -> int:
+    """Master pixels to the thousandths of the bitmap size the firmware expects.
+
+    The renderer multiplies these by the drawn size and divides by 1000, so a
+    master coordinate has to be scaled: at 192 px, skipping this puts every
+    effect about 3 px out.
+    """
+    return round(master_px * 1000 / MASTER_SIZE)
 
 
 def make_frames(master: Image.Image) -> dict[str, Image.Image]:
@@ -99,9 +111,11 @@ def emit(frames: dict[str, Image.Image]) -> str:
     lines += [
         "};",
         "",
-        f"const Anchors kAnchors = {{{{{EAR_CUP[0]}, {EAR_CUP[1]}}}, {{{MOUTH[0]}, {MOUTH[1]}}}, "
-        f"{{{HEAD_TOP_RIGHT[0]}, {HEAD_TOP_RIGHT[1]}}}, {EYES_ROWS[0]}, {EYES_ROWS[1]}, "
-        f"{MOUTH_ROWS[0]}, {MOUTH_ROWS[1]}}};",
+        f"const Anchors kAnchors = {{{{{thousandths(EAR_CUP[0])}, {thousandths(EAR_CUP[1])}}}, "
+        f"{{{thousandths(MOUTH[0])}, {thousandths(MOUTH[1])}}}, "
+        f"{{{thousandths(HEAD_TOP_RIGHT[0])}, {thousandths(HEAD_TOP_RIGHT[1])}}}, "
+        f"{thousandths(EYES_ROWS[0])}, {thousandths(EYES_ROWS[1])}, "
+        f"{thousandths(MOUTH_ROWS[0])}, {thousandths(MOUTH_ROWS[1])}}};",
         "",
         "}  // namespace",
         "",
@@ -150,8 +164,8 @@ def main() -> None:
     ap.add_argument("--preview", action="store_true")
     args = ap.parse_args()
     master = Image.open(MASTER).convert("RGBA")
-    if master.size != (1024, 1024):
-        raise SystemExit(f"{MASTER} must be 1024x1024, got {master.size}")
+    if master.size != (MASTER_SIZE, MASTER_SIZE):
+        raise SystemExit(f"{MASTER} must be {MASTER_SIZE}x{MASTER_SIZE}, got {master.size}")
     frames = make_frames(master)
     OUT.write_text(emit(frames), encoding="utf-8")
     print(f"wrote {OUT.relative_to(REPO)}")

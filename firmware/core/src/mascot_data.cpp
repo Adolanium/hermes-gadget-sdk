@@ -1155,7 +1155,7 @@ const Bitmap kBitmaps[] = {
     {192, Frame::Talk, kTalk192},
 };
 
-const Anchors kAnchors = {{622, 300}, {268, 635}, {820, 110}, 405, 520, 600, 665};
+const Anchors kAnchors = {{607, 293}, {262, 620}, {801, 107}, 396, 508, 586, 649};
 
 }  // namespace
 
