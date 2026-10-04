@@ -12,6 +12,8 @@ namespace {
 #define HG_BOARD_NAME "esp32s3-breadboard"
 #elif CONFIG_HG_BOARD_AMOLED_175
 #define HG_BOARD_NAME "esp32s3-touch-amoled-1.75"
+#elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154
+#define HG_BOARD_NAME "waveshare-esp32s3-lcd-154"
 #else
 #define HG_BOARD_NAME "custom"
 #endif
@@ -79,6 +81,44 @@ BoardConfig make() {
   b.buttons = {0, -1, -1, -1};  // BOOT also works as TALK
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";
+  return b;
+}
+#elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154
+// Waveshare ESP32-S3-LCD-1.54 (SKUs 33866/33867, the non-touch version): 1.54"
+// 240x240 ST7789 over SPI, ES8311 speaker DAC + ES7210 microphone ADC on one
+// duplex I2S bus, NS4150B amplifier, QMI8658 IMU, BOOT/PLUS/PWR keys.
+// Pins: docs/hardware.md#waveshare-esp32-s3-lcd-154 (Waveshare's factory demo).
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.lcd.enabled = true;
+  b.lcd.width = 240;
+  b.lcd.height = 240;
+  b.lcd.swap_xy = false;
+  b.lcd.mirror_x = false;
+  b.lcd.mirror_y = false;
+  b.lcd.invert = true;
+  b.lcd.gap_x = 0;
+  b.lcd.gap_y = 0;
+  b.lcd.mosi = 39;
+  b.lcd.sclk = 38;
+  b.lcd.cs = 21;
+  b.lcd.dc = 45;
+  b.lcd.rst = 40;
+  b.lcd.backlight = 46;
+  b.i2c = {42, 41, 400000};
+  b.codec.enabled = true;
+  b.codec.mclk = 8;
+  b.codec.bclk = 9;
+  b.codec.ws = 10;
+  b.codec.dout = 12;
+  b.codec.din = 11;
+  b.codec.pa = 7;
+  // BOOT is TALK; PLUS is CANCEL. The PWR key is left alone: Waveshare's demo
+  // uses a long press for a software power-off, so it is not free for CANCEL.
+  b.buttons = {0, 4, -1, -1};
+  b.talk_label = "BOOT";
+  b.cancel_label = "PLUS";
   return b;
 }
 #elif CONFIG_HG_BOARD_CUSTOM
