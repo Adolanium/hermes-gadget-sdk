@@ -118,6 +118,51 @@ test("an unplugged board ends the wait at once", async () => {
   await assert.rejects(device.command("status"), /connection to the board closed/);
 });
 
+const DIAG = { device_id: STATUS.device_id, board: "esp32s3-lcd-154", app: STATUS };
+
+test("reads the diagnostics report and the recent log", async () => {
+  const board = fakeBoard((line) => {
+    if (line === "diag") return `@diag ${JSON.stringify(DIAG)}`;
+    if (line === "diag log") return "I (312) hg.main: start\nW (900) hg.wifi: auth failed\n@log end";
+    return undefined;
+  }, { swallow: 0 });
+  const device = new DeviceConsole(board.port);
+  assert.deepEqual(await device.diagnostics(), {
+    report: DIAG, log: ["I (312) hg.main: start", "W (900) hg.wifi: auth failed"] });
+  await device.close();
+});
+
+test("a board that keeps no log still gives its report, and says why the log is empty", async () => {
+  const board = fakeBoard((line) => (line === "diag" ? `@diag ${JSON.stringify(DIAG)}`
+    : "@error this device keeps no log"), { swallow: 0 });
+  const device = new DeviceConsole(board.port);
+  assert.deepEqual(await device.diagnostics(), { report: DIAG, log: ["@error this device keeps no log"] });
+  await device.close();
+});
+
+test("a board without the diag command is refused clearly", async () => {
+  const board = fakeBoard(() => "@error unknown command (try: help)", { swallow: 0 });
+  const device = new DeviceConsole(board.port);
+  await assert.rejects(device.diagnostics(), /The board refused the report: unknown command/);
+  await device.close();
+});
+
+test("commands from two callers take turns, so neither takes the other's reply", async () => {
+  const board = fakeBoard((line) => {
+    if (line === "status") return `@status ${JSON.stringify(STATUS)}`;
+    if (line === "diag") return `@diag ${JSON.stringify(DIAG)}`;
+    if (line === "diag log") return "I (1) boot\n@log end";
+    return undefined;
+  }, { swallow: 0, chunk: 3 });
+  const device = new DeviceConsole(board.port);
+  const [first, diagnostics, second] = await Promise.all([device.status(), device.diagnostics(), device.status()]);
+  assert.deepEqual([first, second], [STATUS, STATUS]);
+  assert.deepEqual(diagnostics, { report: DIAG, log: ["I (1) boot"] });
+  // One command at a time, in the order they were asked for; "diag log" waits its turn too.
+  assert.deepEqual(board.received, ["status", "diag", "status", "diag log"]);
+  await device.close();
+});
+
 test("a line too long for the console is refused before sending", async () => {
   const board = fakeBoard(() => "@ok x", { swallow: 0 });
   const device = new DeviceConsole(board.port);

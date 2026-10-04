@@ -244,6 +244,35 @@ h1 {
   margin-top: 0.8rem;
 }
 
+.notice .hint {
+  margin-top: 0.6rem;
+}
+
+/* ---- setting up Hermes ---- */
+
+.setup-hermes {
+  margin: 0 0 1.5rem;
+  padding: 0.85rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+}
+
+.setup-hermes summary {
+  cursor: pointer;
+  color: var(--accent-strong);
+  font-weight: 600;
+  width: fit-content;
+}
+
+.setup-hermes > p {
+  margin: 0.8rem 0 0;
+}
+
+.other-board {
+  margin-top: 0.8rem;
+}
+
 .notice-error {
   border-left-color: var(--error);
 }
@@ -748,10 +777,16 @@ li[data-state="done"] .mark::after {
 }
 
 .command code {
+  min-width: 0;
   border: 0;
   background: none;
   padding: 0;
   font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
+.command .button {
+  flex: none;
 }
 
 /* ---- log, help, footer ---- */
@@ -810,6 +845,15 @@ li[data-state="done"] .mark::after {
 .help p {
   margin: 0.5rem 0 0;
   color: var(--muted);
+}
+
+.help .actions {
+  margin-top: 0.8rem;
+}
+
+.help .status {
+  margin-top: 0.6rem;
+  color: var(--text);
 }
 
 .footer {

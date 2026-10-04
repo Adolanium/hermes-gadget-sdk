@@ -60,3 +60,11 @@ def test_installer_settings_reach_the_core_intact(make_sim, tmp_path):
         assert json.loads(sim.console(f"get {key}")[len("@value "):])["value"] == SETTINGS[key]
     assert sim.storage.get("wifi_pass") == SETTINGS["wifi_pass"]  # `get` only says "<set>" for secrets
     assert any(line.startswith("I (312) hg.main") for line in report["lines"])  # boot noise passed through
+
+    # The page's diagnostics report is the core's own `diag` answer; the simulator keeps no log.
+    diagnostics = report["diagnostics"]
+    assert diagnostics["report"] == json.loads(sim.console("diag")[len("@diag "):]) | {
+        "connection": diagnostics["report"]["connection"], "app": diagnostics["report"]["app"]}
+    assert (diagnostics["report"]["device_id"], diagnostics["report"]["app"]["server"]) == (
+        report["before"]["device_id"], SETTINGS["server"])
+    assert diagnostics["log"] == ["@error this device keeps no log"]

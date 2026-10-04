@@ -1,6 +1,6 @@
 {
   "title": "Waveshare ESP32-S3-Touch-AMOLED-1.75",
-  "summary": "Round 1.75\" AMOLED touchscreen, two microphones and a speaker output. Nothing to wire.",
+  "summary": "Round 1.75\" AMOLED touchscreen, two microphones and a speaker output.",
   "docs": "docs/hardware.md#esp32-s3-touch-amoled-175",
   "ready_made": true
 }

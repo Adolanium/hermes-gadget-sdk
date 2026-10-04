@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-gadget"
-version = "0.1.0"
+version = "0.1.1"
 description = "Build small Hermes-powered hardware devices: device protocol, Hermes platform plugin, desktop simulator and tooling."
 readme = "README.md"
 requires-python = ">=3.10"

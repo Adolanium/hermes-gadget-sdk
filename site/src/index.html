@@ -40,13 +40,27 @@
         <ul class="needs" aria-label="You need">
           <li>Chrome or Edge on a computer</li>
           <li>A USB data cable</li>
-          <li>Hermes with the Gadget plugin (<a href="https://github.com/Adolanium/hermes-gadget-sdk/blob/main/docs/getting-started.md#3-connect-to-hermes">set it up</a>)</li>
+          <li>Hermes with the Gadget plugin (<a href="#hermes-setup" data-open="hermes-setup">set it up</a>)</li>
         </ul>
       </div>
       <figure class="hero-device">
         <img src="img/screen-ready.png" alt="A gadget's round screen showing the Hermes mascot and &quot;Hold the screen to talk&quot;" width="466" height="466">
       </figure>
     </section>
+
+    <details class="setup-hermes" id="hermes-setup">
+      <summary>First time? Set up Hermes</summary>
+      <p>On the computer that runs Hermes, install the plugin, then add Hermes Gadget to the gateway:</p>
+      <div class="command">
+        <code>hermes plugins install https://github.com/Adolanium/hermes-gadget-sdk/tree/main/plugin --enable</code>
+        <button class="button small" type="button" data-copy="hermes plugins install https://github.com/Adolanium/hermes-gadget-sdk/tree/main/plugin --enable">Copy</button>
+      </div>
+      <div class="command">
+        <code>hermes gateway setup</code>
+        <button class="button small" type="button" data-copy="hermes gateway setup">Copy</button>
+      </div>
+      <p class="hint">Choose <strong>Hermes Gadget</strong> and restart the gateway when it asks. It then prints a link to this page with your Hermes address filled in. <a href="https://github.com/Adolanium/hermes-gadget-sdk/blob/main/docs/getting-started.md#3-connect-to-hermes">Full guide</a></p>
+    </details>
 
     <div class="notice notice-error" id="unsupported" hidden>
       <p><strong>This browser can't talk to USB devices.</strong> Open this page in Chrome or Edge on a computer. Safari, Firefox, phones and tablets don't support it.</p>
@@ -61,6 +75,7 @@
         </div>
         <div class="step-body">
           <div class="boards" id="boards" role="radiogroup" aria-label="Board"></div>
+          <p class="hint other-board">Board not listed? See <a href="https://github.com/Adolanium/hermes-gadget-sdk/blob/main/docs/porting.md">what a port involves</a>, or <a href="https://github.com/Adolanium/hermes-gadget-sdk/issues/new?template=new_board.yml">ask for it</a>.</p>
           <div class="notice" id="no-firmware" hidden>
             <p>No firmware has been published here yet. You can <a href="https://github.com/Adolanium/hermes-gadget-sdk/blob/main/docs/hardware.md#build-and-flash">build and flash it yourself</a>, then come back to connect it to Wi-Fi.</p>
           </div>
@@ -177,6 +192,11 @@
           </div>
           <div class="notice notice-success" id="pair-done" hidden>
             <p><strong>Your gadget is ready.</strong> Hold TALK, or the screen on a touch board, and ask it something.</p>
+            <p class="hint">New firmware reaches it over Wi-Fi, with no cable or page needed. On your Hermes computer:</p>
+            <div class="command">
+              <code id="update-command">hermes gadget update &lt;name&gt; --latest</code>
+              <button class="button small" type="button" id="update-copy" data-copy="hermes gadget update &lt;name&gt; --latest">Copy</button>
+            </div>
           </div>
           <div class="notice notice-warning" id="pair-hint" role="alert" hidden></div>
           <div class="actions">
@@ -210,9 +230,15 @@
         <summary>It's on Wi-Fi but doesn't reach Hermes</summary>
         <p>Check the address with <code>hermes gadget info</code> on the Hermes computer, that the gateway is running, and that its firewall lets the board in on port 8765. The board has to be able to reach that address from its network.</p>
       </details>
-      <details>
+      <details id="diag-help">
         <summary>Something else</summary>
-        <p>Save a diagnostics report with <code>hermes-gadget diag --port &lt;port&gt;</code> and <a href="https://github.com/Adolanium/hermes-gadget-sdk/issues">open an issue</a> with it attached.</p>
+        <p>With the board plugged in, save its diagnostics report, then <a href="https://github.com/Adolanium/hermes-gadget-sdk/issues/new?template=bug_report.yml">open an issue</a> with the file attached.</p>
+        <div class="actions">
+          <button class="button" id="diag-save" type="button">Save a diagnostics report</button>
+        </div>
+        <p class="status" id="diag-status" role="status" aria-live="polite" hidden></p>
+        <div class="notice notice-error" id="diag-error" role="alert" hidden></div>
+        <p class="hint">From a terminal, <code>hermes-gadget diag --port &lt;port&gt;</code> saves the same report.</p>
       </details>
     </section>
   </main>

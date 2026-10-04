@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import re
 import struct
 import sys
 from pathlib import Path
@@ -224,6 +225,23 @@ def test_every_board_comes_from_platformio_ini(project, tmp_path):
     assert package_release.INSTALLER_URL in text
     assert "| LCD 1.54 | `hermes-gadget-lcd-154-0.2.0.bin` | `hermes-gadget-lcd-154-0.2.0-app.bin` |" in text
     assert "hermes plugins install" not in text  # no commit given, so no pinned plugin
+
+
+def test_every_real_board_has_what_the_installer_shows():
+    """Each board in platformio.ini: a title, a one-line summary and a "Pins and details" link that
+    lands on a heading. A ready-made board gets the installer's "Nothing to wire" badge, so its
+    summary doesn't repeat it."""
+    repo = TOOLS.parents[2]
+    anchors = {re.sub(r"[^\w\- ]", "", line.lstrip("#").strip().lower()).replace(" ", "-")
+               for line in (repo / "docs" / "hardware.md").read_text(encoding="utf-8").splitlines()
+               if line.startswith("#")}
+    for board, board_dir in package_release.environments(package_release.PROJECT_DIR).items():
+        meta = json.loads((package_release.PROJECT_DIR / "boards" / board_dir / "board.json").read_text(encoding="utf-8"))
+        assert meta.get("title") and meta.get("summary"), board
+        page, _, anchor = meta["docs"].partition("#")
+        assert page == "docs/hardware.md" and anchor in anchors, f"{board}: {meta['docs']} isn't a heading"
+        if meta.get("ready_made"):
+            assert "nothing to wire" not in meta["summary"].lower(), f"{board}: the badge already says it"
 
 
 def test_release_notes_pin_the_plugin_to_the_release_commit(project, tmp_path):
