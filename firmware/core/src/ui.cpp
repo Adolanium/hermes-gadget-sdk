@@ -134,6 +134,7 @@ const char* screen_name(Screen s) {
     case Screen::Error: return "error";
     case Screen::Prompt: return "prompt";
     case Screen::Updating: return "updating";
+    case Screen::Settings: return "settings";
   }
   return "unknown";
 }
@@ -196,7 +197,7 @@ void Ui::render(const UiModel& m) {
                   .val(m.screen == Screen::Listening ? m.level : uint8_t(0))
                   .val(m.speaking)
                   .get();
-  hashes[2] = Hash().val(m.screen).add(m.detail).add(m.body).add(m.code).val(m.scroll).get();
+  hashes[2] = Hash().val(m.screen).add(m.detail).add(m.body).add(m.code).val(m.scroll).val(m.color_test).get();
   hashes[3] = Hash().add(m.hint).get();
 
   if (m.hero) {
@@ -394,6 +395,16 @@ void Ui::draw_content(Canvas& c, const UiModel& m) {
   const int lh = Canvas::line_height(s);
   c.fill_rect(0, y0, w, y1 - y0, kBg);
   int y = y0 + margin;
+
+  if (m.color_test) {
+    const uint16_t colors[] = {rgb565(255, 0, 0), rgb565(0, 255, 0), rgb565(0, 0, 255),
+                               rgb565(255, 255, 255), rgb565(0, 0, 0)};
+    for (int i = 0; i < 5; ++i) {
+      const int left = w * i / 5, right = w * (i + 1) / 5;
+      c.fill_rect(left, y0, right - left, y1 - y0, colors[i]);
+    }
+    return;
+  }
 
   if (m.screen == Screen::Boot) {
     int big = s + 2;

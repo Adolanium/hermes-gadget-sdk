@@ -36,7 +36,7 @@ constexpr uint32_t kOtaRestartMs = 1000;    // time for ota.done to leave before
 constexpr uint32_t kBackoffMs[] = {1000, 2000, 4000, 8000, 15000, 30000};
 constexpr size_t kBackoffSteps = sizeof(kBackoffMs) / sizeof(kBackoffMs[0]);
 
-const char* const kSettingKeys[] = {"name", "server", "token", "talk_mode", "volume", "wifi_ssid", "wifi_pass"};
+const char* const kSettingKeys[] = {"name", "server", "token", "talk_mode", "volume", "brightness", "wifi_ssid", "wifi_pass"};
 
 bool is_secret(std::string_view key) { return key == "token" || key == "wifi_pass"; }
 
@@ -102,6 +102,8 @@ void App::load_settings() {
   int vol = std::atoi(setting("volume", "70").c_str());
   volume_ = static_cast<uint8_t>(std::max(0, std::min(100, vol)));
   if (hal_.speaker) hal_.speaker->set_volume(volume_);
+  brightness_ = static_cast<uint8_t>(std::max(5, std::min(100, std::atoi(setting("brightness", "100").c_str()))));
+  if (hal_.display && hal_.display->info().has_backlight) hal_.display->set_backlight(brightness_);
 }
 
 void App::add_action(Action action) {
@@ -170,6 +172,8 @@ void App::begin() {
       }
       int p = static_cast<int>(std::max<int64_t>(5, std::min<int64_t>(100, args["percent"].as_int())));
       hal_.display->set_backlight(static_cast<uint8_t>(p));
+      brightness_ = static_cast<uint8_t>(p);
+      if (hal_.storage) hal_.storage->set("brightness", std::to_string(p));
       result.set("percent", p);
       return true;
     };
@@ -495,6 +499,7 @@ void App::h_reply(const json::Value& m) {
 }
 
 void App::h_audio_start(const json::Value& m) {
+  if (settings_open()) close_settings();
   if (!hal_.speaker || mode_ == Mode::Listening) return;
   uint32_t rate = static_cast<uint32_t>(m["rate"].as_int(profile_.speaker_rate));
   if (m["format"].str_or("pcm16") != "pcm16") {
@@ -588,6 +593,7 @@ void App::h_display(const json::Value& m) {
 }
 
 void App::h_image_start(const json::Value& m) {
+  if (settings_open()) close_settings();
   if (!hal_.display || !ui_) return;
   const UiLayout& l = ui_->layout();
   const DisplayInfo& di = ui_->area();
@@ -618,6 +624,7 @@ void App::h_image_end(const json::Value& m) {
 }
 
 void App::h_prompt(const json::Value& m) {
+  if (settings_open()) close_settings();
   const std::string& id = m["id"].as_string();
   if (id.empty()) return;
   prompt_id_ = id;
@@ -708,9 +715,28 @@ void App::h_error(const json::Value& m) {
 // Input
 
 void App::on_button(Button button, bool pressed) {
+  if (button == Button::Talk) {
+    talk_held_ = pressed;
+    if (pressed) talk_down_at_ = now();
+  }
+  if (settings_chord_fired_) {
+    if (button == Button::Cancel) cancel_held_ = pressed;
+    if (!talk_held_ && !cancel_held_) settings_chord_fired_ = false;
+    return;
+  }
+  if (settings_open()) {
+    if (button == Button::Cancel) {
+      cancel_held_ = pressed;
+      if (pressed) cancel_down_at_ = now();
+    }
+    if (!(talk_held_ && cancel_held_)) settings_input(button, pressed);
+    update_model();
+    return;
+  }
   switch (button) {
     case Button::Talk:
       if (pressed) {
+        if (cancel_held_) return;  // wait for the local settings chord
         if (!can_talk()) {
           set_hint_flash(phase_ == Phase::Online ? "Approve pairing first" : "Not connected to Hermes");
           return;
@@ -741,6 +767,7 @@ void App::on_button(Button button, bool pressed) {
         cancel_held_ = true;
         cancel_down_at_ = now();
         cancel_long_fired_ = false;
+        if (talk_held_ && mode_ == Mode::Listening) cancel_listening("cancelled");
         return;
       }
       if (!cancel_held_) return;
@@ -851,6 +878,11 @@ void App::cancel_turn() {
 }
 
 void App::on_mic_samples(const int16_t* samples, size_t count) {
+  if (hardware_check_ == HardwareCheck::Microphone) {
+    level_ = level_percent(rms(samples, count));
+    update_model();
+    return;
+  }
   if (mode_ != Mode::Listening || count == 0) return;
   level_ = level_percent(rms(samples, count));
   size_t off = 0;
@@ -876,6 +908,7 @@ void App::on_mic_samples(const int16_t* samples, size_t count) {
 }
 
 void App::submit_text(std::string_view text) {
+  if (settings_open()) close_settings();
   std::string t = trim(text);
   if (t.empty()) return;
   if (!can_talk()) {
@@ -1075,6 +1108,7 @@ void App::h_ota_begin(const json::Value& m) {
     return;
   }
   ota_ = Ota::Receiving;
+  close_settings();
   ota_received_ = ota_acked_ = 0;
   ota_seq_ = 0;
   ota_hash_ = crypto::Sha256();
@@ -1153,6 +1187,7 @@ void App::h_ota_abort(const json::Value&) {
 
 void App::tick() {
   const uint32_t t = now();
+  settings_tick();
 
   if (phase_ == Phase::Boot && static_cast<int32_t>(t - boot_until_) >= 0) {
     phase_ = network_up_ ? Phase::Connecting : Phase::NoNetwork;
@@ -1223,7 +1258,7 @@ void App::tick() {
     notice_until_ = 0;
     update_model();
   }
-  if (cancel_held_ && !cancel_long_fired_ && !prompt_showing()) {
+  if (cancel_held_ && !talk_held_ && !settings_open() && !cancel_long_fired_ && !prompt_showing()) {
     uint32_t held = t - cancel_down_at_;
     if (held >= kNewSessionHoldMs) {
       cancel_long_fired_ = true;
@@ -1271,6 +1306,7 @@ void App::update_model() {
   m.scroll = scroll_;
   m.level = level_;
   m.speaking = speaking();
+  m.color_test = false;
 
   switch (phase_) {
     case Phase::NoNetwork:
@@ -1280,6 +1316,11 @@ void App::update_model() {
     case Phase::Online: m.link = Link::Online; break;
   }
   if (m.link == Link::Offline && network_up_) m.link = Link::Network;
+  if (settings_open()) {
+    settings_model();
+    if (ui_) ui_->render(m);
+    return;
+  }
 
   const std::string talk = profile_.talk_label;
   if (phase_ == Phase::Boot) {
@@ -1489,9 +1530,13 @@ std::string App::console(std::string_view raw) {
     for (const char* k : kSettingKeys) keys += std::string(" ") + k;
     for (const auto& k : profile_.extra_settings) keys += " " + k;
     return "@help commands: status | diag [log] | get <key> | set <key> <value> | say <text> | talk | release | "
-           "cancel | new-session | yes | no | reconnect | forget-key | factory-reset   keys:" + keys;
+           "cancel | new-session | settings [close] | yes | no | reconnect | forget-key | factory-reset   keys:" + keys;
   }
   if (cmd == "status") return "@status " + status_json();
+  if (cmd == "settings") {
+    if (rest == "close") { close_settings(); return "@ok settings closed"; }
+    return open_settings() ? "@ok settings" : "@error settings unavailable during a prompt or update";
+  }
   if (cmd == "diag" && rest.empty()) return diag_report();
   if (cmd == "diag" && rest == "log") {
     if (!recent_log) return "@error this device keeps no log";

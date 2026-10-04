@@ -17,3 +17,24 @@ Long replies turn their own pages. Simulated boards with scroll buttons also acc
 Try asking Hermes to show a reminder on the screen. The agent can use `gadget_display` to display a card. Devices with actions can also respond to requests such as "Turn the LED purple."
 
 If speech is missing, check [audio setup](connect-hermes.md#4-enable-speech). For connection problems, use [troubleshooting](troubleshooting.md). To change Wi-Fi or install firmware updates, see [Manage an existing gadget](setup-board.md#manage-an-existing-gadget).
+
+## Device settings and hardware checks
+
+Hold TALK and CANCEL together for one second to open or close device settings. On a touchscreen, hold the title bar for one second. Settings also work while the device is offline. Opening settings stops the current recording or reply.
+
+Tap CANCEL to move to the next item, then tap TALK to change it. On a touchscreen, swipe down for the next item and tap to select. Boards with Up and Down buttons can move in either direction. Select **Back to Hermes** to leave.
+
+| Item | What it does |
+|---|---|
+| Speaker volume | Change volume in steps of 10 percent |
+| Screen brightness | Choose 10, 25, 50, 75, or 100 percent when the display supports it |
+| Talk mode | Choose hold-to-talk or tap-to-talk with silence detection |
+| Microphone check | Show the live input level; nothing is saved or sent to Hermes |
+| Speaker check | Play a short, quiet tone at the current volume |
+| Display check | Show red, green, blue, white, and black bands |
+| Input check | Show the last button pressed; release CANCEL to leave the check |
+| Device information | Show the board, firmware, device ID, and available audio drivers |
+
+Volume, brightness, and talk mode survive restarts. Unavailable drivers show as unavailable. These checks help you test the hardware; a completed tone does not prove that a physical speaker produced sound.
+
+Incoming confirmation prompts and firmware updates close settings. You cannot open settings during a prompt or update. The USB console also accepts `settings`, `settings close`, and `set brightness 50`.

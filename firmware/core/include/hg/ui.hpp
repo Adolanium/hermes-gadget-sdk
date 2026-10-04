@@ -30,6 +30,7 @@ enum class Screen : uint8_t {
   Error,
   Prompt,  // a yes/no question from Hermes, answered with the buttons
   Updating,  // installing a firmware update
+  Settings,
 };
 
 enum class Link : uint8_t { Offline, Network, Connecting, Online };
@@ -47,6 +48,7 @@ struct UiModel {
   int scroll = -1;       // first visible body line; -1 pins to the end
   uint8_t level = 0;     // microphone level 0..100
   bool speaking = false;
+  bool color_test = false;
   uint32_t frame = 0;    // animation frame, advanced by the app
   std::string hint;      // bottom bar
   std::string yes, no;   // answer buttons under the hero caption (Prompt screen)
@@ -81,6 +83,9 @@ class Ui {
   void flush(int y0, int y1);
   // Body text rows visible on a text screen for this model (after detail lines).
   int body_rows(const UiModel& m) const;
+  bool title_hit(int x, int y) const {
+    return x >= ox_ && x < ox_ + info_.width && y >= oy_ && y < oy_ + layout_.top_h;
+  }
 
  private:
   void draw_top(Canvas& c, const UiModel& m);

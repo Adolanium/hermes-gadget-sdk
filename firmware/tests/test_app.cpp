@@ -56,6 +56,8 @@ struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Stor
   // Display
   int width = 320, height = 240;
   bool round = false;
+  bool backlight = false;
+  int brightness = 0, volume = 0;
   std::vector<uint16_t> fb = std::vector<uint16_t>(320 * 240, 0);
   int flushes = 0;
   int flushed_rows = 0;
@@ -64,6 +66,7 @@ struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Stor
     d.width = static_cast<uint16_t>(width);
     d.height = static_cast<uint16_t>(height);
     d.round = round;
+    d.has_backlight = backlight;
     return d;
   }
   void make_round(int diameter) {
@@ -72,6 +75,7 @@ struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Stor
     fb.assign(static_cast<size_t>(diameter * diameter), 0);
   }
   uint16_t* framebuffer() override { return fb.data(); }
+  void set_backlight(uint8_t percent) override { brightness = percent; }
   void flush(uint16_t y0, uint16_t y1) override {
     ++flushes;
     flushed_rows += y1 - y0;
@@ -90,6 +94,7 @@ struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Stor
   void end() override { spk_open = false; }
   void abort() override { spk_open = false; }
   bool busy() const override { return spk_open; }
+  void set_volume(uint8_t percent) override { volume = percent; }
 
   hg::Hal hal() {
     hg::Hal h;
@@ -952,4 +957,109 @@ TEST("touch: swipes can be turned off; board settings go through the console") {
   touch.update(true, 200, 260, r.fake.clock);
   touch.update(false, 0, 0, r.fake.clock);
   CHECK(r.fake.last("cancel") == nullptr);
+}
+
+TEST("settings: physical chord opens locally and saves volume, brightness and talk mode") {
+  Rig r;
+  r.fake.backlight = true;
+  r.app.begin();
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Talk, true);
+  r.advance(1000);
+  CHECK(r.app.screen() == hg::Screen::Settings);
+  r.app.on_button(hg::Button::Talk, false);
+  r.app.on_button(hg::Button::Cancel, false);
+  CHECK_EQ(r.app.model().detail, std::string("Speaker volume"));
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK_EQ(r.fake.volume, 80);
+  CHECK_EQ(r.fake.kv["volume"], std::string("80"));
+  r.app.console("cancel");
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK_EQ(r.fake.brightness, 10);
+  CHECK_EQ(r.fake.kv["brightness"], std::string("10"));
+  r.app.console("cancel");
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK_EQ(r.fake.kv["talk_mode"], std::string("tap"));
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Cancel, true);
+  r.advance(1000);
+  r.app.on_button(hg::Button::Cancel, false);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(!r.app.settings_open());
+  CHECK_EQ(r.fake.kv["talk_mode"], std::string("tap"));
+  Rig reboot;
+  reboot.fake.backlight = true;
+  reboot.fake.kv = r.fake.kv;
+  reboot.app.begin();
+  CHECK_EQ(reboot.fake.volume, 80);
+  CHECK_EQ(reboot.fake.brightness, 10);
+  CHECK_EQ(reboot.app.device_id(), r.app.device_id());
+}
+
+TEST("settings: hardware checks are local and prompts release the microphone") {
+  Rig r;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 3; ++i) r.app.console("cancel");
+  CHECK_EQ(r.app.model().detail, std::string("Microphone check"));
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK(r.fake.mic_on);
+  const int16_t samples[] = {32767, -32767, 32767, -32767};
+  r.app.on_mic_samples(samples, 4);
+  CHECK_EQ(r.app.model().level, uint8_t(99));
+  CHECK(r.app.model().body.find("Local only") != std::string::npos);
+  CHECK(r.fake.sent_binary.empty());
+  CHECK(r.fake.last("audio.start") == nullptr);
+  r.app.console("cancel");
+  CHECK(!r.fake.mic_on);
+  CHECK_EQ(r.app.model().detail, std::string("Speaker check"));
+  r.app.console("talk");
+  r.app.console("release");
+  r.advance(20);
+  CHECK_EQ(r.fake.spk_samples, size_t(4000));
+  CHECK(r.app.model().body.find("Tone finished") != std::string::npos);
+  r.app.console("cancel");
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK(r.app.model().color_test);
+  CHECK_EQ(r.fake.fb[100 * 320 + 10], uint16_t(0xf800));
+  CHECK_EQ(r.fake.fb[100 * 320 + 150], uint16_t(0x001f));
+  r.app.close_settings();
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 3; ++i) r.app.console("cancel");
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK(r.fake.mic_on);
+  r.server(R"({"type":"prompt","id":"local-check","text":"Continue?"})");
+  CHECK(!r.fake.mic_on);
+  CHECK(r.app.screen() == hg::Screen::Prompt);
+  CHECK(!r.app.open_settings());
+}
+
+TEST("settings: title hold and menu swipe work without starting a recording") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  hg::TouchGestures touch(r.app);
+  touch.set_swipe_cancel(false);
+  touch.update(true, 100, 4, r.fake.clock);
+  r.advance(1100);
+  touch.tick(r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(r.app.screen() == hg::Screen::Settings);
+  CHECK(!r.fake.mic_on);
+  CHECK_EQ(r.app.model().detail, std::string("Speaker volume"));
+  touch.update(true, 100, 80, r.fake.clock);
+  touch.update(true, 100, 150, r.fake.clock + 30);
+  touch.update(false, 0, 0, r.fake.clock + 40);
+  CHECK_EQ(r.app.model().detail, std::string("Screen brightness"));
+  touch.update(true, 100, 4, r.fake.clock);
+  r.advance(1100);
+  touch.tick(r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(!r.app.settings_open());
+  CHECK(r.app.screen() == hg::Screen::Ready);
 }

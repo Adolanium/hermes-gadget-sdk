@@ -87,6 +87,11 @@ class App {
   void emit_event(std::string_view name, json::Value data, bool notify_agent);
   // Registers an action. Call before begin() so it is part of the hello.
   void add_action(Action action);
+  // Local settings and hardware checks. No microphone samples leave the device.
+  bool open_settings();
+  void close_settings();
+  bool settings_open() const { return menu_ != Menu::Closed; }
+  bool settings_title_hit(int x, int y) const;
 
   // Serial-console command (provisioning, bench automation). Returns the
   // response; machine-readable lines start with '@'.
@@ -155,6 +160,10 @@ class App {
   bool ota_busy() const;
 
   void load_settings();
+  void settings_input(Button button, bool pressed);
+  void settings_tick();
+  void settings_model();
+  void stop_hardware_check();
   json::Value status_value() const;
   std::string diag_report();
   std::string setting(std::string_view key, std::string_view fallback = {}) const;
@@ -203,6 +212,15 @@ class App {
   std::string access_token_;
   TalkMode talk_mode_ = TalkMode::Hold;
   uint8_t volume_ = 70;
+  uint8_t brightness_ = 100;
+  enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, Microphone, Speaker, Display, Inputs, Info, Back };
+  enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };
+  Menu menu_ = Menu::Closed;
+  HardwareCheck hardware_check_ = HardwareCheck::None;
+  std::string check_result_;
+  bool talk_held_ = false;
+  bool settings_chord_fired_ = false;
+  uint32_t talk_down_at_ = 0;
 
   // connection
   Phase phase_ = Phase::Boot;

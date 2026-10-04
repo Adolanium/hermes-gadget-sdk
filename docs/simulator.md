@@ -50,6 +50,7 @@ A first session, start to finish:
 | Hold **Space** / TALK button | Push-to-talk |
 | **Esc** / CANCEL | Discard a recording, close a card, stop a turn |
 | Hold **Esc** / CANCEL for 2 s | Start a new Hermes session (`/new`); a countdown shows in the hint bar |
+| Hold **Space + Esc** for 1 s | Open or close the device's settings and local hardware checks |
 | **Space** / **Esc** on a question | Answer yes / no |
 | **Up / Down** | Scroll a long reply (long replies also page by themselves) |
 | **Ctrl+S** | Save a PNG screenshot into the state directory |
@@ -61,6 +62,8 @@ A first session, start to finish:
 | **Developer tools**, serial console | The same commands as the board's UART console (`help`, `status`, `set server ...`) |
 
 The simulated device registers two demo actions the agent can use: `led.set` (a virtual LED in the window) and `buzzer.beep`.
+
+The [device settings menu](using-gadget.md#device-settings-and-hardware-checks) runs in the native firmware core. On touch profiles, hold the device title bar to open it. You can also enter `settings` in the serial console. The desktop **Settings** dialog configures the simulator host; the device menu changes saved volume, brightness, and talk mode.
 
 State lives in `~/.hermes-gadget/sim/<name>/` (override with `--state-dir`):
 
@@ -104,7 +107,7 @@ Script commands, one per line:
 | `screenshot <file.png>` | Save the screen |
 | `expect <text>` | Fail unless the last reply contains `<text>` |
 
-Screens are `boot`, `offline`, `connecting`, `pairing`, `ready`, `listening`, `thinking`, `responding`, `card`, `image`, `prompt` and `error`.
+Screens are `boot`, `offline`, `connecting`, `pairing`, `ready`, `listening`, `thinking`, `responding`, `card`, `image`, `prompt`, `updating`, `settings` and `error`.
 
 ## Using it from Python
 

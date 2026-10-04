@@ -8,6 +8,10 @@ void TouchGestures::press(Button b) { app_.on_button(b, true); }
 void TouchGestures::release(Button b) { app_.on_button(b, false); }
 
 void TouchGestures::tick(uint32_t now_ms) {
+  if (state_ == State::Settings && now_ms - t0_ >= 1000) {
+    state_ = State::Ignored;
+    app_.open_settings();
+  }
   if (state_ == State::Pending && static_cast<int32_t>(now_ms - t0_) >= static_cast<int32_t>(cfg_.hold_ms)) {
     state_ = State::Talk;
     press(Button::Talk);
@@ -30,7 +34,7 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
   }
 
   if (state_ == State::Idle) {
-    state_ = State::Pending;
+    state_ = app_.settings_title_hit(x, y) ? State::Settings : State::Pending;
     x0_ = x;
     y0_ = y;
     t0_ = now_ms;
@@ -38,8 +42,18 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
   }
 
   const int dx = x - x0_, dy = y - y0_;
-  const bool swiped_down = cfg_.swipe_cancel && dy >= cfg_.swipe_px && std::abs(dx) < dy;
+  const bool swiped_down = (cfg_.swipe_cancel || app_.settings_open()) && dy >= cfg_.swipe_px && std::abs(dx) < dy;
   switch (state_) {
+    case State::Settings:
+      if (swiped_down) {
+        state_ = State::Swipe;
+        press(Button::Cancel);
+      } else if (std::abs(dx) > cfg_.slop_px || std::abs(dy) > cfg_.slop_px) {
+        state_ = State::Ignored;
+      } else {
+        tick(now_ms);
+      }
+      break;
     case State::Pending:
       if (swiped_down) {
         state_ = State::Swipe;
@@ -58,6 +72,7 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
         state_ = State::Ignored;
         press(Button::Cancel);
         release(Button::Cancel);
+        release(Button::Talk);
       }
       break;
     default: break;
