@@ -40,7 +40,7 @@ if [ ! -f "$destination/.installed" ]; then
     cp LICENSE NOTICE "$destination/licenses/"
     cp -R LICENSES "$destination/licenses/"
     python3 -m venv --system-site-packages "$destination/venv"
-    "$destination/venv/bin/python" -m pip install "$source_dir/$wheel[audio,gpio]"
+    "$destination/venv/bin/python" -m pip install "$source_dir/${wheel}[audio,gpio]"
     HGSIM_LIBRARY="$destination/libhgsim.so" "$destination/venv/bin/python" -c \
         'from hermes_gadget.sim.native import load_library; load_library()'
     touch "$destination/.installed"

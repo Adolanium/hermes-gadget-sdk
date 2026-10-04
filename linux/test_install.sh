@@ -19,7 +19,7 @@ echo "$*" >> /systemctl.log
 if [ "$1" = is-active ]; then exit 1; fi
 SCRIPT
 chmod +x /test-bin/systemctl
-export PATH=/test-bin:$PATH
+export PATH="/test-bin:$PATH"
 sh install.sh
 cli=/opt/hermes-gadget/current/venv/bin/hermes-gadget
 export HGSIM_LIBRARY=/opt/hermes-gadget/current/libhgsim.so
@@ -50,7 +50,8 @@ p=json.load(open("package.json"))
 p["release_id"] = p["version"] + "-ffffffffffff"
 open("package.json", "w").write(json.dumps(p))
 '
-find . -type f ! -name SHA256SUMS -exec sha256sum {} + > SHA256SUMS
+find . -type f ! -name SHA256SUMS -exec sha256sum {} + > /updated-checksums
+mv /updated-checksums SHA256SUMS
 sh install.sh
 sha256sum --check /saved-state.sha256
 test -L /opt/hermes-gadget/previous
