@@ -9,6 +9,8 @@ CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
 # The 115 KB framebuffer and audio buffers go to PSRAM.
 CONFIG_SPIRAM_USE_MALLOC=y
+# If PSRAM ever fails to start, boot anyway so the log and `diag` can say so.
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 # The Type-C port is the S3's own USB Serial/JTAG and the console must live there:
 # a secondary console is output-only, so commands typed over USB would never
