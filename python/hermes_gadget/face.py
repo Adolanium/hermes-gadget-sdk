@@ -441,6 +441,220 @@ def report(frames, threshold: int = THRESHOLD) -> None:
         print(f"  {size:>3} px   " + "   ".join(parts))
 
 
+# -- placing the features by hand -----------------------------------------------------------------------
+
+# The window asks for these in order. The eyes and the mouth are required; the two
+# anchors have sensible defaults from the geometry, so they can be skipped.
+PICK_STEPS = (
+    ("left", "Click the centre of the NEAR eye"),
+    ("right", "Click the centre of the FAR eye"),
+    ("mouth", "Click the centre of the mouth"),
+    ("ear_cup", "Click where the listening waves should start, or press Return to keep the default"),
+    ("think_dot", "Click where the thinking dots go, or press Return to keep the default"),
+)
+REQUIRED_PICKS = ("left", "right", "mouth")
+
+
+class Picker:
+    """Turn clicks on a picture into the flags a run takes.
+
+    A click gives a position; the sizes come from the measurement, so a click only
+    has to land on the feature. The window is a thin shell over this, which keeps
+    the arithmetic testable without a display.
+    """
+
+    def __init__(self, box, geo: dict, mask: str = "alpha"):
+        self.box = tuple(box)
+        self.geo = geo
+        self.mask = mask
+        self.picks: dict[str, tuple[int, int]] = {}
+        self.skipped: set[str] = set()
+
+    def _ink(self):
+        x0, y0, x1, y1 = self.box
+        return x0, y0, x1 - x0, y1 - y0
+
+    def next_step(self):
+        for name, _ in PICK_STEPS:
+            if name not in self.picks and name not in self.skipped:
+                return name
+        return None
+
+    def prompt(self) -> str:
+        name = self.next_step()
+        if name is None:
+            return "All placed. The flags for a run are below."
+        return dict(PICK_STEPS)[name]
+
+    def click(self, x: float, y: float) -> bool:
+        name = self.next_step()
+        if name is None:
+            return False
+        self.picks[name] = (int(round(x)), int(round(y)))
+        return True
+
+    def skip(self) -> bool:
+        name = self.next_step()
+        if name is None or name in REQUIRED_PICKS:
+            return False
+        self.skipped.add(name)
+        return True
+
+    def reset(self) -> None:
+        self.picks.clear()
+        self.skipped.clear()
+
+    def _fraction(self, x: float, y: float) -> tuple[float, float]:
+        x0, y0, w, h = self._ink()
+        return (x - x0) / w, (y - y0) / h
+
+    def _size(self, box) -> tuple[float, float]:
+        _, _, w, h = self._ink()
+        return (box[2] - box[0]) / w, (box[3] - box[1]) / h
+
+    def marks(self) -> dict:
+        """Where to draw the marks, in picture pixels: the picks, or the measurement."""
+        out = {}
+        for name in ("left", "right"):
+            out[name] = (self._box_at(self.picks[name], self.geo[name]) if name in self.picks
+                         else self.geo[name])
+        out["mouth"] = (self._box_at(self.picks["mouth"], self.geo["mouth"]) if "mouth" in self.picks
+                        else self.geo["mouth"])
+        for name in ("ear_cup", "think_dot"):
+            out[name] = self.picks.get(name) or self.geo[name]
+        return out
+
+    @staticmethod
+    def _box_at(centre, like) -> tuple[int, int, int, int]:
+        """The same size as a measured box, moved to a picked centre."""
+        cx, cy = centre
+        w, h = like[2] - like[0], like[3] - like[1]
+        x0, y0 = round(cx - w / 2), round(cy - h / 2)
+        return (x0, y0, x0 + w, y0 + h)
+
+    def flags(self) -> str | None:
+        """The flag line for a run, or None while a required pick is missing."""
+        if any(name not in self.picks for name in REQUIRED_PICKS):
+            return None
+        parts = ["--mask", self.mask]
+        for side in ("left", "right"):
+            fx, fy = self._fraction(*self.picks[side])
+            fw, fh = self._size(self.geo[side])
+            parts += [f"--eye-{side}", f"{fx:.4f} {fy:.4f} {fw:.4f} {fh:.4f}"]
+        mx, my = self._fraction(*self.picks["mouth"])
+        mw, mh = self._size(self.geo["mouth"])
+        parts += ["--mouth-x", f"{mx:.4f}", "--mouth-y", f"{my:.4f}",
+                  "--mouth-w", f"{mw:.4f}", "--mouth-h", f"{mh:.4f}"]
+        for name, flag in (("ear_cup", "--ear-cup"), ("think_dot", "--think-dot")):
+            if name in self.picks:
+                ex, ey = self._fraction(*self.picks[name])
+                parts += [flag, f"{ex:.4f} {ey:.4f}"]
+        return " ".join(parts)
+
+
+def pick_features(path: Path, opts: Options, side: int = 620) -> str:
+    """Open a picture, click the features, print the flags for a real run.
+
+    The picture is shown the way the device sees it, after the mask and the crop,
+    with the marks the current geometry would draw. Tkinter is imported here rather
+    than at module level, so generating a face never needs a display.
+    """
+    try:
+        import tkinter as tk
+
+        from PIL import ImageTk
+    except ImportError as exc:  # a python built without Tk
+        raise SystemExit(
+            f"the picker needs Tk, and this python has no _tkinter ({exc}). On macOS with "
+            f"Homebrew python: brew install python-tk@3.13, or run the picker with a python "
+            f"that has it.") from exc
+
+    master = load_master(path, mask=opts.mask, threshold=opts.threshold, crop=opts.crop)
+    alpha = master.getchannel("A")
+    box = ink_box(alpha, opts.threshold)
+    picker = Picker(box, measure(alpha, opts), opts.mask)
+    scale = side / master.width
+
+    shown = Image.new("RGB", master.size, BG)
+    shown.paste(master, (0, 0), master)
+    shown = shown.resize((side, side), Image.LANCZOS)
+
+    root = tk.Tk()
+    root.title("Place the features")
+    prompt = tk.Label(root, text=picker.prompt(), anchor="w", justify="left", font=("Helvetica", 14))
+    prompt.pack(fill="x", padx=12, pady=(12, 6))
+    canvas = tk.Canvas(root, width=side, height=side, highlightthickness=0,
+                       bg="#%02x%02x%02x" % BG)
+    canvas.pack(padx=12)
+    photo = ImageTk.PhotoImage(shown)
+    canvas.create_image(0, 0, anchor="nw", image=photo)
+    flags_box = tk.Text(root, height=3, width=96, font=("Menlo", 11), wrap="word")
+    flags_box.pack(padx=12, pady=(8, 12))
+    flags_box.insert("1.0", "Click the three marks. Return skips the two optional ones. "
+                            "R starts over, Q quits.")
+
+    def draw() -> None:
+        canvas.delete("mark")
+        marks = picker.marks()
+        for name, box_in in marks.items():
+            colours = {"left": "#ff5050", "right": "#ff5050", "mouth": "#50dcff",
+                       "ear_cup": "#50ff8c", "think_dot": "#ff78ff"}
+            colour = colours[name]
+            if name in ("ear_cup", "think_dot"):
+                px, py = box_in
+                draw_x, draw_y = px * scale, py * scale
+                canvas.create_line(draw_x - 14, draw_y, draw_x + 14, draw_y, fill=colour, width=3,
+                                   tags="mark")
+                canvas.create_line(draw_x, draw_y - 14, draw_x, draw_y + 14, fill=colour, width=3,
+                                   tags="mark")
+            else:
+                x0, y0, x1, y1 = box_in
+                canvas.create_oval(x0 * scale, y0 * scale, x1 * scale, y1 * scale, outline=colour,
+                                   width=3, tags="mark")
+
+    def show_flags() -> None:
+        line = picker.flags()
+        if line is None:
+            return
+        text = f"hermes-gadget face {path.name} {line}"
+        flags_box.delete("1.0", "end")
+        flags_box.insert("1.0", text)
+        print(text)
+        print("(the same line is in the window, to copy)")
+
+    def on_click(event) -> None:
+        picker.click(event.x / scale, event.y / scale)
+        prompt.config(text=picker.prompt())
+        draw()
+        show_flags()
+
+    def on_return(event) -> None:
+        if picker.skip():
+            prompt.config(text=picker.prompt())
+            show_flags()
+
+    def on_r(event) -> None:
+        picker.reset()
+        prompt.config(text=picker.prompt())
+        draw()
+        flags_box.delete("1.0", "end")
+        flags_box.insert("1.0", "Click the three marks. Return skips the two optional ones. "
+                                "R starts over, Q quits.")
+
+    canvas.bind("<Button-1>", on_click)
+    root.bind("<Return>", on_return)
+    root.bind("<r>", on_r)
+    root.bind("<R>", on_r)
+    root.bind("<q>", lambda _event: root.destroy())
+    root.bind("<Q>", lambda _event: root.destroy())
+    root.bind("<Escape>", lambda _event: root.destroy())
+    draw()
+    print("Place the features in the window: near eye, far eye, mouth. "
+          "Return skips the two optional anchors.")
+    root.mainloop()
+    return picker.flags() or ""
+
+
 # -- the two things the CLI calls -----------------------------------------------------------------------
 
 def write_mascot(out: Path = OUT_DEFAULT, preview_path: Path | None = None,

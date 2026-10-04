@@ -335,13 +335,6 @@ def cmd_face(args) -> int:
     check_path = Path(args.check) if args.check else None
     image = Path(args.image).expanduser().resolve() if args.image else None
 
-    # No picture, or the project's own artwork, means the mascot profile: this is
-    # the one generator, and what tools/gen_mascot.py used to be.
-    if args.mascot or image is None or image == face.MASTER:
-        face.write_mascot(out=out, preview_path=preview_path, check_path=check_path,
-                          want_report=args.report)
-        return 0
-
     opts = face.Options(
         mask=args.mask, threshold=args.threshold,
         crop=tuple(args.crop) if args.crop else None,
@@ -353,6 +346,23 @@ def cmd_face(args) -> int:
         eye_grow=args.eye_grow, mouth_grow=args.mouth_grow,
         mouth_x=args.mouth_x, mouth_y=args.mouth_y, mouth_w=args.mouth_w, mouth_h=args.mouth_h,
         ear_cup=tuple(args.ear_cup), think_dot=tuple(args.think_dot))
+
+    # --pick places the features by hand, and writes nothing: it prints the flags
+    # for a real run, so a mis-click cannot touch the shipped artwork.
+    if args.pick:
+        if image is None:
+            print("--pick needs a picture: hermes-gadget face IMAGE --pick", file=sys.stderr)
+            return 1
+        face.pick_features(image, opts)
+        return 0
+
+    # No picture, or the project's own artwork, means the mascot profile: the one
+    # generator, and what tools/gen_mascot.py used to be.
+    if args.mascot or image is None or image == face.MASTER:
+        face.write_mascot(out=out, preview_path=preview_path, check_path=check_path,
+                          want_report=args.report)
+        return 0
+
     face.write_face(image, opts, out=out, preview_path=preview_path, check_path=check_path,
                     want_report=args.report)
     return 0
@@ -439,6 +449,9 @@ def build_parser() -> argparse.ArgumentParser:
                                    "for the mascot, only when given)")
     f.add_argument("--report", action="store_true",
                    help="Print how many bits each frame changes against idle, per size")
+    f.add_argument("--pick", action="store_true",
+                   help="Open the picture in a window and click the eyes and mouth, to get the "
+                        "flags for a run. Writes nothing.")
     f.add_argument("--mask", choices=("alpha", "bright", "dark"), default="alpha",
                    help="Where the ink is: alpha (the picture has transparency), bright (light art "
                         "on a dark background), dark (dark art on a light one). Generated images "
