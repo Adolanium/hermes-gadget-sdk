@@ -27,7 +27,12 @@ bool TouchInput::begin(const TouchConfig& touch, const ExpanderKeyConfig& key, i
   touch_ = touch;
   key_ = key;
   if (touch.enabled && touch.controller == TouchController::Ft5x06) {
-    esp_lcd_panel_io_i2c_config_t io_cfg = ESP_LCD_TOUCH_IO_I2C_FT5x06_CONFIG();
+    esp_lcd_panel_io_i2c_config_t io_cfg = {};
+    io_cfg.dev_addr = ESP_LCD_TOUCH_IO_I2C_FT5x06_ADDRESS;
+    io_cfg.scl_speed_hz = 100000;
+    io_cfg.control_phase_bytes = 1;
+    io_cfg.lcd_cmd_bits = 8;
+    io_cfg.flags.disable_control_phase = 1;
     esp_lcd_panel_io_handle_t io = nullptr;
     esp_lcd_touch_config_t cfg = {};
     cfg.x_max = touch.width;
