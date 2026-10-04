@@ -19,9 +19,13 @@ idf_component_register(
     INCLUDE_DIRS "."
     REQUIRES core
     # "driver" pulls in GPIO, I2S, LEDC and SPI on every ESP-IDF 5.x release.
+    # ESP-IDF 6.x dropped I2S and LEDC from that catch-all, so name them too;
+    # both components exist in 5.x as well, where this is a no-op.
     PRIV_REQUIRES
         app_update
         driver
+        esp_driver_i2s
+        esp_driver_ledc
         esp_app_format
         esp_event
         esp_lcd
