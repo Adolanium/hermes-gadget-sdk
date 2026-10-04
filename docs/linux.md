@@ -151,6 +151,58 @@ to 4 in that case. Verify the header controller with `gpioinfo` before wiring.
 See [GPIO Zero's pin documentation](https://gpiozero.readthedocs.io/en/stable/api_pins.html)
 for the lgpio backend and permissions.
 
+## Add a screen
+
+Add `display` to the configuration to show the firmware's device screen:
+
+```json
+"display": {
+  "width": 320,
+  "height": 240,
+  "fullscreen": true,
+  "rotation": 0,
+  "touch": true
+}
+```
+
+The dimensions describe the device canvas. The client scales that canvas to
+fit the monitor and leaves black borders where needed. Both dimensions must
+be even numbers between 160 and 800. Set `round` to `true` for a circular
+canvas with equal width and height. Rotation accepts 0, 90, 180 or 270 degrees
+counterclockwise. Use the same orientation as your touch input.
+
+On a Linux desktop, install `.[display]`, set `fullscreen` to `false` for a
+window, and start the client from your desktop terminal. Space is TALK, Escape
+is Cancel, and the arrow keys scroll. Touch or hold the screen to interact;
+swipe down to cancel. Closing the window stops the client. Omitting `display`
+keeps the service headless.
+
+On Raspberry Pi OS Lite, the optional screen needs an SDL build with KMS/DRM
+support. Prefer the OS package so it uses the system graphics drivers:
+
+```bash
+sudo apt install python3-pygame
+```
+
+Use a virtual environment created with `--system-site-packages`. From the
+local console, set `SDL_VIDEODRIVER=kmsdrm` before starting the client. If SDL
+reports that the driver is unavailable, use a desktop session or install a
+system SDL/pygame build with KMS/DRM support. A pip wheel's available video
+drivers can differ from the OS package.
+
+Direct display access requires the graphics device and an active local seat.
+Test from the Pi's local console before configuring unattended display startup.
+The supplied system service runs headlessly by default; an SSH session or a
+background service does not automatically get permission to own the display.
+Do not run the client as root to bypass a display error. For a desktop kiosk,
+start the client in the logged-in user's graphical session with its own state
+directory. Never run it alongside the system service with the same identity.
+
+The screen uses the existing firmware renderer for pairing, conversations,
+cards, prompts and images. Audio and GPIO still use the configured real
+devices. Software rendering and touch mapping pass automated tests; monitor,
+touch-controller and direct-console behavior still need physical verification.
+
 ## State and recovery
 
 The default state directory is `$XDG_STATE_HOME/hermes-gadget`, or
@@ -180,7 +232,7 @@ environment at `/opt/hermes-gadget`, plus a configuration file at
 before installing the unit. Run control commands as the service account with
 `--state-dir /var/lib/hermes-gadget`.
 
-The client only advertises configured audio and output actions. It reports no
-display, battery or ESP32 update slot. Software updates require stopping the process, updating the
+The client only advertises configured display, audio and output actions. It
+reports no battery or ESP32 update slot. Software updates require stopping the process, updating the
 checkout, rebuilding the native library, and restarting with the same state
 directory.

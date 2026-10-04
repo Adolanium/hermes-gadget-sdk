@@ -134,7 +134,7 @@ def run(config: dict, directory: Path, stop: threading.Event) -> None:
             client.start()
             server = ControlServer(directory / "control.sock", client)
             try:
-                while not stop.is_set():
+                while not stop.is_set() and client.running:
                     client.step()
                     server.poll()
             finally:

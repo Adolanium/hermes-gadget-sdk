@@ -28,6 +28,8 @@ Optional Linux audio uses python-sounddevice (MIT, Matthias Geier) and the
 system PortAudio library (MIT). Raspberry Pi controls use GPIO Zero
 (BSD-3-Clause) and the system lgpio library (Unlicense). These dependencies are
 installed separately; their packages carry their respective license texts.
+The optional Linux display uses pygame (LGPL 2.1) and SDL2 (zlib), also
+installed separately. No pygame or SDL source is copied into this repository.
 
 assets/mascot/nous-girl-white-1024.png, the mascot bitmaps generated from it
 (firmware/core/src/mascot_data.cpp) and the project logo derived from it

@@ -21,8 +21,8 @@ from ..sim.transport import WsTransport
 
 def load_config(path: Path) -> dict:
     config = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(config, dict) or set(config) - {"server", "name", "token", "audio", "gpio"}:
-        raise ValueError("unknown configuration field; expected server, name, token, audio or gpio")
+    if not isinstance(config, dict) or set(config) - {"server", "name", "token", "audio", "gpio", "display"}:
+        raise ValueError("unknown configuration field; expected server, name, token, audio, gpio or display")
     for key in {"server", "name", "token"} & config.keys():
         value = config[key]
         if not isinstance(value, str) or len(value.encode()) > 500 or "\x00" in value:
@@ -50,6 +50,20 @@ def load_config(path: Path) -> dict:
         raise ValueError("GPIO pins must be distinct BCM numbers from 2 to 27")
     if type(gpio.get("chip", 0)) is not int or not 0 <= gpio.get("chip", 0) <= 15:
         raise ValueError("gpio.chip must be a number from 0 to 15")
+    if "display" in config:
+        display = config["display"]
+        if not isinstance(display, dict) or set(display) - {"width", "height", "fullscreen", "rotation", "touch", "round"}:
+            raise ValueError("display accepts width, height, fullscreen, rotation, touch and round")
+        width, height = display.get("width", 320), display.get("height", 240)
+        if any(type(size) is not int or size % 2 or not 160 <= size <= 800 for size in (width, height)):
+            raise ValueError("display width and height must be even numbers from 160 to 800")
+        if type(display.get("rotation", 0)) is not int or display.get("rotation", 0) not in (0, 90, 180, 270):
+            raise ValueError("display rotation must be 0, 90, 180 or 270")
+        for key in ("fullscreen", "touch", "round"):
+            if key in display and not isinstance(display[key], bool):
+                raise ValueError(f"display.{key} must be boolean")
+        if display.get("round") and width != height:
+            raise ValueError("a round display needs equal width and height")
     return config
 
 
@@ -104,12 +118,25 @@ class Client:
         audio = config.get("audio", {})
         self.audio = Audio(audio) if "input" in audio or "output" in audio else None
         self.gpio = None
-        self.device = NativeDevice(self, width=0, height=0, board="linux", firmware=__version__,
-                                   name=config.get("name", "Linux Gadget"), mic="input" in audio,
-                                   speaker="output" in audio, mic_rate=audio.get("rate", 16000),
-                                   speaker_rate=audio.get("rate", 16000), audio_host=self.audio,
-                                   backlight=False, scroll_buttons=False, library=library,
-                                   button_labels=("TALK", "CANCEL"))
+        self.display = None
+        self.running = True
+        if "display" in config:
+            from .display import Display
+
+            self.display = Display(config["display"])
+        try:
+            self.device = NativeDevice(
+                self, width=self.display.width if self.display else 0,
+                height=self.display.height if self.display else 0, board="linux", firmware=__version__,
+                name=config.get("name", "Linux Gadget"), mic="input" in audio, speaker="output" in audio,
+                mic_rate=audio.get("rate", 16000), speaker_rate=audio.get("rate", 16000), audio_host=self.audio,
+                backlight=False, scroll_buttons=self.display is not None, library=library,
+                button_labels=("TALK", "CANCEL"), touch_screen=self.display.touch if self.display else False,
+                round_panel=self.display.round if self.display else False)
+        except Exception:
+            if self.display:
+                self.display.close()
+            raise
         self.transport = WsTransport()
         try:
             if config.get("gpio"):
@@ -127,6 +154,8 @@ class Client:
 
     def step(self) -> None:
         self._check_storage()
+        if self.display:
+            self.running = self.display.poll(self.device)
         # Bound each iteration so traffic cannot starve controls or the core clock.
         for _ in range(64):
             try:
@@ -166,6 +195,8 @@ class Client:
             elif pcm:
                 self.device.mic_samples(pcm)
         self.device.tick()
+        if self.display:
+            self.display.present(self.device, self.now_ms())
         self._check_storage()
 
     def close(self) -> None:
@@ -179,6 +210,8 @@ class Client:
             finally:
                 self.transport.shutdown()
                 self.device.close()
+                if self.display:
+                    self.display.close()
 
     def command(self, request: dict) -> dict:
         if not isinstance(request, dict):
@@ -243,6 +276,9 @@ class Client:
 
     def transport_connect(self, url: str, subprotocol: str) -> None:
         self.transport.connect(url, subprotocol)
+
+    def display_flush(self, y0: int, y1: int) -> None:
+        self.display.dirty = True
 
     def transport_send_text(self, text: str) -> bool:
         return self.transport.send(text)
