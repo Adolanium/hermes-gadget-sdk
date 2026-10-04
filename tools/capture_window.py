@@ -54,9 +54,9 @@ def tone(seconds: float, freq: float, volume: int, wobble: bool = False) -> byte
 class Recorder(SimulatorWindow):
     """The real simulator window, plus a scripted director and screen grabs."""
 
-    def __init__(self, sim, hub, loop, zoom, frames_dir: Path | None):
+    def __init__(self, sim, hub, loop, zoom):
         super().__init__(sim, zoom=zoom)
-        self.hub, self.loop, self.frames_dir = hub, loop, frames_dir
+        self.hub, self.loop = hub, loop
         self.root.attributes("-topmost", True)
         self.scene: str | None = None
         self.scenes: dict[str, list[Image.Image]] = {}
@@ -211,7 +211,7 @@ def main() -> None:
     hub.delegate.on_utterance = quiet
     sim = Simulator(url=f"ws://127.0.0.1:{hub.bound_port}/gadget", state_dir=state / "dev", name="Hermes Gadget",
                     board=args.board)
-    win = Recorder(sim, hub, loop, args.zoom, Path(args.frames) if args.frames else None)
+    win = Recorder(sim, hub, loop, args.zoom)
     win.root.after(500, win.advance)
     win.run()
 

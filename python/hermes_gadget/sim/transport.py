@@ -34,7 +34,6 @@ class WsTransport:
         self._generation = 0
         self._outbox: asyncio.Queue | None = None
         self._ws = None
-        self._task: asyncio.Future | None = None
         self._lock = threading.Lock()
 
     @property
@@ -45,7 +44,7 @@ class WsTransport:
         with self._lock:
             self._generation += 1
             gen = self._generation
-        self._task = asyncio.run_coroutine_threadsafe(self._run(url, subprotocol, gen), self._loop)
+        asyncio.run_coroutine_threadsafe(self._run(url, subprotocol, gen), self._loop)
 
     def close(self) -> None:
         with self._lock:

@@ -104,10 +104,6 @@ def resample(pcm: bytes, src_rate: int, dst_rate: int, channels: int = 1) -> byt
     return Resampler(src_rate, dst_rate, channels).process(pcm)
 
 
-def find_ffmpeg() -> str | None:
-    return shutil.which("ffmpeg")
-
-
 def decode_file(path: str, rate: int) -> bytes:
     """Decode an audio file to mono PCM16 at ``rate``."""
     try:
@@ -117,7 +113,7 @@ def decode_file(path: str, rate: int) -> bytes:
                 return resample(raw, w.getframerate(), rate, w.getnchannels())
     except (wave.Error, EOFError):
         pass  # not a plain PCM WAV; fall through to ffmpeg
-    ffmpeg = find_ffmpeg()
+    ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise AudioDecodeError(f"cannot decode {path}: not PCM WAV and ffmpeg is not installed")
     proc = subprocess.run(
