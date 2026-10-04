@@ -178,16 +178,31 @@ def _serial(port: str, baud: int):
     return serial.Serial(port, baud, timeout=0.2)
 
 
-def _serial_command(ser, line: str, timeout: float = 3.0) -> str:
+def _serial_lines(ser, line: str, done, timeout: float) -> list[str]:
+    """Send a console line and collect complete output lines until ``done(line)``.
+
+    Long replies (``diag``) arrive over several reads, so a line counts only
+    once its newline has arrived. Returns every line read, the last one being
+    the line that satisfied ``done`` (or whatever arrived before the timeout).
+    """
     ser.write((line + "\n").encode())
     end = time.monotonic() + timeout
-    buf = b""
+    buf, lines = b"", []
     while time.monotonic() < end:
-        buf += ser.read(256)
-        for raw in buf.decode(errors="replace").splitlines():
-            if raw.startswith("@"):
-                return raw
-    return ""
+        buf += ser.read(512)
+        *complete, buf = buf.split(b"\n")
+        for raw in complete:
+            text = raw.decode(errors="replace").rstrip("\r")
+            lines.append(text)
+            if done(text):
+                return lines
+    return lines
+
+
+def _serial_command(ser, line: str, timeout: float = 3.0) -> str:
+    """The first machine-readable ('@') reply to a console line, or ''."""
+    lines = _serial_lines(ser, line, lambda text: text.startswith("@"), timeout)
+    return lines[-1] if lines and lines[-1].startswith("@") else ""
 
 
 def cmd_provision(args) -> int:
@@ -206,6 +221,60 @@ def cmd_provision(args) -> int:
             if not reply.startswith("@ok"):
                 return 1
         print(_serial_command(ser, "status") or "no status reply")
+    return 0
+
+
+def _diag_summary(report: dict) -> list[str]:
+    """A few lines from a ``diag`` report, for the terminal."""
+    out = [f"firmware {report.get('firmware')} on {report.get('board')} ({report.get('device_id')})"]
+    if "reset_reason" in report:
+        out.append(f"reset reason: {report['reset_reason']}, up {report.get('uptime_s', '?')} s")
+    parts = report.get("parts")
+    if isinstance(parts, dict):
+        out.append("parts: " + ", ".join(
+            f"{k} {'yes' if v is True else 'no' if v is False else v}" for k, v in parts.items()))
+    if isinstance(report.get("i2c"), list):
+        out.append("I2C: " + (" ".join(report["i2c"]) or "nothing answered"))
+    wifi = report.get("wifi")
+    if isinstance(wifi, dict):
+        out.append(f"Wi-Fi: joined {wifi.get('ssid')} ({wifi.get('rssi')} dBm), {wifi.get('ip', 'no address')}"
+                   if wifi.get("joined") else "Wi-Fi: not joined")
+    app, conn = report.get("app") or {}, report.get("connection") or {}
+    line = f"Hermes: {app.get('phase')}, {'paired' if app.get('paired') else 'not paired'}"
+    if conn.get("last_close"):
+        line += f", last connection ended: {conn['last_close']}"
+    if app.get("error"):
+        line += f", error: {app['error']}"
+    out.append(line)
+    return out
+
+
+def cmd_diag(args) -> int:
+    import json
+    import re
+
+    ser = _serial(args.port, args.baud)
+    with ser:
+        time.sleep(0.5)
+        ser.reset_input_buffer()
+        reply = _serial_command(ser, "diag", timeout=8.0)
+        if not reply.startswith("@diag "):
+            print(f"No diag report from {args.port} ({reply or 'no answer'}). Is the firmware running, "
+                  "and is this its console port?", file=sys.stderr)
+            return 1
+        report = json.loads(reply[len("@diag "):])
+        log = _serial_lines(ser, "diag log", lambda text: text == "@log end" or text.startswith("@error"), 8.0)
+    log = [line for line in log if line != "@log end" and not line.startswith("gadget>")]
+
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    device = re.sub(r"[^A-Za-z0-9_.-]", "_", str(report.get("device_id") or "device"))
+    path = Path(args.out) if args.out else Path(f"hermes-gadget-diag-{device}-{stamp}.txt")
+    path.write_text(
+        f"Hermes Gadget diagnostics from {args.port}, {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"== report ==\n{json.dumps(report, indent=2)}\n\n== recent log ==\n" + "\n".join(log) + "\n",
+        encoding="utf-8")
+    print("\n".join(_diag_summary(report)))
+    print(f"\nSaved the full report to {path}. Attach it when you open an issue.")
     return 0
 
 
@@ -295,6 +364,12 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--port", required=True)
     c.add_argument("--baud", type=int, default=115200)
     c.set_defaults(func=cmd_console)
+
+    dg = sub.add_parser("diag", help="Save a board's diagnostics report (for bug reports)")
+    dg.add_argument("--port", required=True, help="Serial port, e.g. COM5 or /dev/ttyUSB0")
+    dg.add_argument("--baud", type=int, default=115200)
+    dg.add_argument("--out", help="Report file (default: hermes-gadget-diag-<device>-<time>.txt)")
+    dg.set_defaults(func=cmd_diag)
     return p
 
 

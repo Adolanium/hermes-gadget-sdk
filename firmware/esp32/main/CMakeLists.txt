@@ -7,6 +7,7 @@ idf_component_register(
         "port_buttons.cpp"
         "port_codec.cpp"
         "port_console.cpp"
+        "port_diag.cpp"
         "port_display.cpp"
         "port_events.cpp"
         "port_storage.cpp"
@@ -19,6 +20,7 @@ idf_component_register(
     # "driver" pulls in GPIO, I2S, LEDC and SPI on every ESP-IDF 5.x release.
     PRIV_REQUIRES
         driver
+        esp_app_format
         esp_event
         esp_lcd
         esp_netif

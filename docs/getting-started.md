@@ -87,6 +87,14 @@ hermes-gadget provision --port COM5 --wifi-ssid MyWifi --wifi-pass secret \
 
 It pairs exactly like the simulator.
 
+If something on the board doesn't work, save a diagnostics report and attach it to an [issue](https://github.com/Adolanium/hermes-gadget-sdk/issues):
+
+```bash
+hermes-gadget diag --port COM5
+```
+
+It prints a short summary (reset reason, which parts came up, I2C chips that answer, Wi-Fi, the Hermes connection) and saves the full report with the recent log to a file.
+
 ## Troubleshooting
 
 | Symptom | Fix |
