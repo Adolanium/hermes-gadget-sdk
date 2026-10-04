@@ -3,7 +3,9 @@
 The device draws a face on its screen: three 1-bit frames, idle, blink and talk, at 64, 96,
 144 and 192 px. **A face is built into the firmware**, so the shipped one is the Hermes Agent
 mascot, and changing it means building your own firmware image. Once built, `hermes gadget
-update` can install it over the air like any other release.
+update` can install that image over the air. Release firmware, whether from
+`hermes gadget update --latest` or the browser installer, carries the default face, so a
+custom face comes back by rebuilding it.
 
 The generator is `hermes-gadget face`. It replaces the old `tools/gen_mascot.py`, and with no
 arguments it regenerates the mascot, byte for byte, from the project's own artwork.
@@ -68,9 +70,19 @@ features before spending a flash.
 Generated images and screenshots need `bright` or `dark`. With none of them you get one solid
 block, and the command says so rather than writing it.
 
-Then build and flash as in [hardware.md](hardware.md), or let `hermes gadget update` install a
-release image over the air. Flashing keeps the device's settings, so it stays paired and keeps
-its Wi-Fi, its volume and its device key.
+Then build and flash as in [hardware.md](hardware.md), or install your build over the air from
+the Hermes computer:
+
+```
+hermes gadget update "Kitchen" firmware/esp32/.pio/build/<board>/firmware.bin
+```
+
+Either way the device keeps its settings, so it stays paired and keeps its Wi-Fi, its volume
+and its device key.
+
+**Updates bring back the default face.** `hermes gadget update --latest` and the browser
+installer install release firmware, which carries the shipped mascot. To keep your face on a
+newer release, build that release with your `mascot_data.cpp` and install the build as above.
 
 ## Placing the eye and the mouth
 

@@ -58,12 +58,13 @@ def test_the_mascot_blinks_and_talks(tmp_path):
 
 
 def test_the_blink_is_big_enough_to_see():
-    """The number the docs quote: 226 bits at 192 px, the size the screen draws."""
+    """The numbers the docs quote: 226 bits on a blink and 16 on talk at 192 px, the size the screen draws."""
     master = face.load_master(MASTER)
     frames = face.mascot_frames(master)
     idle = face.to_bits(frames["idle"], 192)
-    blink = face.to_bits(frames["blink"], 192)
-    assert sum(bin(a ^ b).count("1") for a, b in zip(idle, blink)) == 226
+    changed = {frame: sum(bin(a ^ b).count("1") for a, b in zip(idle, face.to_bits(frames[frame], 192)))
+               for frame in ("blink", "talk")}
+    assert changed == {"blink": 226, "talk": 16}
 
 
 def test_measured_geometry_lands_on_the_mascots_features():
@@ -120,6 +121,23 @@ def test_the_command_generates_the_mascot(tmp_path):
     out = tmp_path / "mascot_data.cpp"
     assert cli.main(["face", "--out", str(out), "--preview", str(tmp_path / "p.png")]) == 0
     assert out.read_text() == SHIPPED.read_text()
+    # The same bytes on every OS: forward slashes in the header and LF line endings, even on Windows.
+    raw = out.read_bytes()
+    assert b"\r" not in raw and b"from assets/mascot/nous-girl-white-1024.png" in raw
+
+
+def test_the_mascot_has_a_geometry_check_too(tmp_path):
+    check = tmp_path / "check.png"
+    assert cli.main(["face", "--out", str(tmp_path / "m.cpp"), "--preview", str(tmp_path / "p.png"),
+                     "--check", str(check)]) == 0
+    assert check.exists()
+
+
+def test_outside_a_checkout_the_command_says_where_to_run_it(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(face, "MASTER", tmp_path / "missing.png")
+    assert cli.main(["face", "--out", str(tmp_path / "x.cpp")]) == 1
+    assert "runs from a checkout of the SDK" in capsys.readouterr().err
+    assert not (tmp_path / "x.cpp").exists()
 
 
 def test_the_command_takes_a_picture_and_writes_a_face(tmp_path):

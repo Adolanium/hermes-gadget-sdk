@@ -409,13 +409,14 @@ def overlay(master, geo: dict, path: Path, box) -> None:
               ((80, 220, 255), "cyan = the mouth, which opens when speaking"),
               ((80, 255, 140), "green cross = where the listening waves start"),
               ((255, 120, 255), "magenta cross = where the thinking dots go")]
-    sheet = Image.new("RGB", (512, 512 + 30 + 24 * len(legend)), BG)
+    top = 574  # below the art and the two caption lines
+    sheet = Image.new("RGB", (512, top + 24 * len(legend) + 10), BG)
     sheet.paste(art, (0, 0))
     draw = ImageDraw.Draw(sheet)
-    _label(draw, (10, 520), "Where the marks landed. Move them with the flags until they look right.",
-           fill=(240, 244, 248), size=19)
+    _label(draw, (10, 520), "Where the marks landed.", fill=(240, 244, 248), size=19)
+    _label(draw, (10, 544), "Move them with the flags until they look right.", fill=(240, 244, 248), size=19)
     for i, (colour, text) in enumerate(legend):
-        y = 548 + i * 24
+        y = top + i * 24
         draw.rectangle((12, y + 5, 34, y + 15), fill=colour)
         _label(draw, (44, y), text, size=18)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -451,10 +452,11 @@ def write_mascot(out: Path = OUT_DEFAULT, preview_path: Path | None = None,
     alpha = master.getchannel("A")
     frames = mascot_frames(master)
     box = ink_box(alpha)
-    source = str(MASTER.relative_to(REPO)) if REPO in MASTER.parents else MASTER.name
+    source = MASTER.relative_to(REPO).as_posix() if REPO in MASTER.parents else MASTER.name
 
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(emit(frames, mascot_anchors(), source), encoding="utf-8")
+    # Forward slashes and LF on every OS, so the file comes out the same everywhere.
+    out.write_text(emit(frames, mascot_anchors(), source), encoding="utf-8", newline="\n")
     print(f"wrote {out}")
     preview_path = preview_path or REPO / "build" / "mascot-preview.png"
     preview(frames, preview_path)
@@ -462,8 +464,11 @@ def write_mascot(out: Path = OUT_DEFAULT, preview_path: Path | None = None,
     if want_report:
         report(frames)
     if check_path:
-        overlay(master, {**mascot_anchors(), "left": (213, 444, 257, 518), "right": (314, 410, 462, 498)},
-                check_path, box)
+        bbox = lambda points: (min(x for x, _ in points), min(y for _, y in points),
+                               max(x for x, _ in points), max(y for _, y in points))
+        marks = {**mascot_anchors(), "left": bbox(MASCOT["left_eye"]), "right": bbox(MASCOT["right_eye"]),
+                 "mouth": MASCOT["mouth_open"]}
+        overlay(master, marks, check_path, box)
         print(f"wrote {check_path}")
     return out
 
@@ -479,7 +484,7 @@ def write_face(source: Path, opts: Options, out: Path = OUT_DEFAULT,
     geo = measure(alpha, opts)
     frames = ({"idle": alpha, "blink": alpha, "talk": alpha} if opts.plain
               else generic_frames(alpha, geo, opts.blink == "dark"))
-    label = str(source.relative_to(REPO)) if REPO in source.parents else source.name
+    label = source.relative_to(REPO).as_posix() if REPO in source.parents else source.name
 
     print(f"ink box:   x {box[0]}..{box[2]}  y {box[1]}..{box[3]}")
     print(f"eyes:      left {geo['left']}  right {geo['right']}")
@@ -490,7 +495,7 @@ def write_face(source: Path, opts: Options, out: Path = OUT_DEFAULT,
           f"think dot: {tuple(round(v) for v in geo['think_dot'])}")
 
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(emit(frames, geo, label, opts.threshold), encoding="utf-8")
+    out.write_text(emit(frames, geo, label, opts.threshold), encoding="utf-8", newline="\n")
     print(f"wrote {out}")
     preview_path = preview_path or REPO / "build" / "face-preview.png"
     preview(frames, preview_path, opts.threshold)

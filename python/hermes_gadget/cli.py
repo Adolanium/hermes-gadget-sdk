@@ -324,6 +324,11 @@ def cmd_face(args) -> int:
         print(f"the face command needs Pillow: pip install 'hermes-gadget[images]' ({exc})",
               file=sys.stderr)
         return 1
+    if not face.MASTER.is_file():  # a face goes into the firmware, so it's made in a checkout
+        print("hermes-gadget face runs from a checkout of the SDK (git clone "
+              "https://github.com/Adolanium/hermes-gadget-sdk), where the firmware it builds into lives.",
+              file=sys.stderr)
+        return 1
 
     out = Path(args.out) if args.out else face.OUT_DEFAULT
     preview_path = Path(args.preview) if args.preview else None
@@ -425,8 +430,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="A picture to make a face from. Omit to regenerate the shipped mascot.")
     f.add_argument("--mascot", action="store_true", help="Force the shipped mascot profile")
     f.add_argument("--out", help="Where to write the C++ (default: firmware/core/src/mascot_data.cpp)")
-    f.add_argument("--preview", help="Contact sheet of the frames (default: build/face-preview.png)")
-    f.add_argument("--check", help="Your art with the feature marks on it (default: build/face-check.png)")
+    f.add_argument("--preview", help="Contact sheet of the frames (default: build/face-preview.png, "
+                                     "or build/mascot-preview.png for the mascot)")
+    f.add_argument("--check", help="Your art with the feature marks on it (default: build/face-check.png; "
+                                   "for the mascot, only when given)")
     f.add_argument("--report", action="store_true",
                    help="Print how many bits each frame changes against idle, per size")
     f.add_argument("--mask", choices=("alpha", "bright", "dark"), default="alpha",
