@@ -27,15 +27,16 @@ def hermes_home(tmp_path, monkeypatch):
 
 
 def test_setup_enables_the_platform_in_config_yaml(hermes_home, monkeypatch):
-    import yaml
+    from hermes_cli.config import get_config_path, load_config
 
     from hermes_gadget_plugin import setup
 
     monkeypatch.setattr("hermes_cli.setup.prompt", lambda question, default=None, password=False: "9100")
     setup.interactive_setup()
-    config = yaml.safe_load((hermes_home / "config.yaml").read_text(encoding="utf-8"))
-    assert config["platforms"]["gadget"]["enabled"] is True
-    assert config["platforms"]["gadget"]["extra"]["port"] == 9100
+    assert get_config_path() == hermes_home / "config.yaml" and get_config_path().is_file()
+    gadget = load_config()["platforms"]["gadget"]
+    assert gadget["enabled"] is True
+    assert gadget["extra"]["port"] == 9100
 
 
 def test_pair_approves_through_hermes_pairing_store(hermes_home, capsys):
