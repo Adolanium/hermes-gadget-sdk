@@ -30,4 +30,12 @@ bool Axp2101::power_off() {
   return read_(0x10, &config, 1) && write_(0x10, static_cast<uint8_t>((config & ~0x02) | 0x01));
 }
 
+bool Axp2101::enable_aldo1_3v3() {
+  uint8_t voltage, enabled;
+  if (!read_(0x92, &voltage, 1) || !read_(0x90, &enabled, 1)) return false;
+  // ALDO1: 500 mV + 100 mV per step. Preserve the other rail controls.
+  return write_(0x92, static_cast<uint8_t>((voltage & 0xe0) | 28)) &&
+         write_(0x90, static_cast<uint8_t>(enabled | 0x01));
+}
+
 }  // namespace hg

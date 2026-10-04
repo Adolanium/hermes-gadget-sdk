@@ -175,7 +175,9 @@ extern "C" void app_main(void) {
   if (board.speaker.enabled && g_speaker.begin(board.speaker)) hal.speaker = &g_speaker;
   i2c_master_bus_handle_t i2c_bus = hgp::i2c::bus(board.i2c);
   if (board.axp2101 && g_power.begin(i2c_bus)) hal.power = &g_power;
-  if (board.codec.enabled && g_codec.begin(board.codec, i2c_bus)) {
+  const bool audio_power = !board.axp_audio_supply || g_power.enable_audio_supply();
+  if (!audio_power) ESP_LOGE(TAG, "audio supply unavailable");
+  if (board.codec.enabled && audio_power && g_codec.begin(board.codec, i2c_bus)) {
     if (g_codec_mic.begin(g_codec.in())) hal.mic = &g_codec_mic;
     if (g_codec_speaker.begin(g_codec.out())) hal.speaker = &g_codec_speaker;
   }

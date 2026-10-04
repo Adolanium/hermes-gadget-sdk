@@ -110,7 +110,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        board: [esp32s3-breadboard, esp32s3-touch-amoled-175, esp32s3-lcd-154]
+        board: [esp32s3-breadboard, esp32s3-touch-amoled-175, esp32s3-lcd-154, esp32s3-touch-amoled-175c]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

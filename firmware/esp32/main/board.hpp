@@ -94,6 +94,7 @@ struct BoardConfig {
   TouchConfig touch;
   ExpanderKeyConfig pwr_key;
   bool axp2101 = false;
+  bool axp_audio_supply = false;
   LatchPowerConfig latch_power;
   int status_led = -1;
   const char* talk_label = "TALK";

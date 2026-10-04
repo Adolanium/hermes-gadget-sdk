@@ -257,6 +257,7 @@ class TouchInput {
 class AxpPower final : public hg::Power {
  public:
   bool begin(i2c_master_bus_handle_t bus);
+  bool enable_audio_supply() { return chip_ && chip_->enable_aldo1_3v3(); }
   std::optional<hg::PowerStatus> read() override { return chip_->read(); }
   bool power_off() override { return chip_->power_off(); }
 

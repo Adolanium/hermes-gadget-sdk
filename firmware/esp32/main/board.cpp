@@ -12,6 +12,8 @@ namespace {
 #define HG_BOARD_NAME "esp32s3-breadboard"
 #elif CONFIG_HG_BOARD_AMOLED_175
 #define HG_BOARD_NAME "esp32s3-touch-amoled-1.75"
+#elif CONFIG_HG_BOARD_AMOLED_175C
+#define HG_BOARD_NAME "esp32s3-touch-amoled-1.75c"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154
 #define HG_BOARD_NAME "waveshare-esp32s3-lcd-154"
 #else
@@ -41,7 +43,7 @@ BoardConfig make() {
   b.cancel_label = "B2";
   return b;
 }
-#elif CONFIG_HG_BOARD_AMOLED_175
+#elif CONFIG_HG_BOARD_AMOLED_175 || CONFIG_HG_BOARD_AMOLED_175C
 // Waveshare ESP32-S3-Touch-AMOLED-1.75: round 466x466 AMOLED (CO5300, QSPI),
 // CST9217 touch, ES8311 + ES7210 codecs, AXP2101 PMIC, TCA9554 expander.
 // Pins: docs/hardware.md#esp32-s3-touch-amoled-175
@@ -82,6 +84,13 @@ BoardConfig make() {
   b.buttons = {0, -1, -1, -1};  // BOOT also works as TALK
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";
+#if CONFIG_HG_BOARD_AMOLED_175C
+  b.amoled.rst = 1;
+  b.touch.rst = 2;
+  b.codec.mclk = 16;
+  b.pwr_key = {};  // This model has no TCA9554. PWR retains its hardware role.
+  b.axp_audio_supply = true;  // ALDO1 supplies the analog audio circuit.
+#endif
   return b;
 }
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154

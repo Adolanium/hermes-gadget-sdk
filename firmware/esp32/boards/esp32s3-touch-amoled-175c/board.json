@@ -1,0 +1,6 @@
+{
+  "title": "Waveshare ESP32-S3-Touch-AMOLED-1.75C",
+  "summary": "Enclosed 1.75\" AMOLED touchscreen, onboard microphones and speaker. Experimental.",
+  "docs": "docs/hardware.md#esp32-s3-touch-amoled-175c",
+  "ready_made": true
+}

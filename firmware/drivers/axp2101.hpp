@@ -16,6 +16,7 @@ class Axp2101 final : public Power {
   Axp2101(Read read, Write write) : read_(std::move(read)), write_(std::move(write)) {}
   std::optional<PowerStatus> read() override;
   bool power_off() override;
+  bool enable_aldo1_3v3();  // Only for boards whose audio circuit requires this rail.
 
  private:
   Read read_;

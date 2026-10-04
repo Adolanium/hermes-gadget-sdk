@@ -57,3 +57,24 @@ TEST("AXP2101: battery, USB and charging readings never alter power configuratio
   CHECK_EQ(writes[0].first, uint8_t(0x10));
   CHECK_EQ(writes[0].second, uint8_t(0x35));
 }
+
+TEST("AXP2101: audio supply enables ALDO1 at 3.3 V and preserves other rails") {
+  std::array<uint8_t, 256> regs{};
+  regs[0x90] = 0xa4;
+  regs[0x92] = 0x60;
+  regs[0x62] = 0x08;  // charge current must stay unchanged
+  bool failed = false;
+  hg::Axp2101 power(
+      [&](uint8_t reg, uint8_t* out, size_t n) {
+        if (failed) return false;
+        for (size_t i = 0; i < n; ++i) out[i] = regs[reg + i];
+        return true;
+      },
+      [&](uint8_t reg, uint8_t value) { regs[reg] = value; return true; });
+  CHECK(power.enable_aldo1_3v3());
+  CHECK_EQ(regs[0x90], uint8_t(0xa5));
+  CHECK_EQ(regs[0x92], uint8_t(0x7c));
+  CHECK_EQ(regs[0x62], uint8_t(0x08));
+  failed = true;
+  CHECK(!power.enable_aldo1_3v3());
+}
