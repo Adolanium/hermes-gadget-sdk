@@ -315,6 +315,44 @@ def cmd_console(args) -> int:
     return 0
 
 
+# -- face -----------------------------------------------------------------------------------
+
+def cmd_face(args) -> int:
+    try:
+        from . import face
+    except ImportError as exc:  # Pillow lives behind the images extra
+        print(f"the face command needs Pillow: pip install 'hermes-gadget[images]' ({exc})",
+              file=sys.stderr)
+        return 1
+
+    out = Path(args.out) if args.out else face.OUT_DEFAULT
+    preview_path = Path(args.preview) if args.preview else None
+    check_path = Path(args.check) if args.check else None
+    image = Path(args.image).expanduser().resolve() if args.image else None
+
+    # No picture, or the project's own artwork, means the mascot profile: this is
+    # the one generator, and what tools/gen_mascot.py used to be.
+    if args.mascot or image is None or image == face.MASTER:
+        face.write_mascot(out=out, preview_path=preview_path, check_path=check_path,
+                          want_report=args.report)
+        return 0
+
+    opts = face.Options(
+        mask=args.mask, threshold=args.threshold,
+        crop=tuple(args.crop) if args.crop else None,
+        plain=args.plain, blink=args.blink,
+        face_x=args.face_x, eye_line=args.eye_line, eye_span=args.eye_span,
+        eye_size=args.eye_size, eye_ratio=args.eye_ratio,
+        eye_left=tuple(args.eye_left) if args.eye_left else None,
+        eye_right=tuple(args.eye_right) if args.eye_right else None,
+        eye_grow=args.eye_grow, mouth_grow=args.mouth_grow,
+        mouth_x=args.mouth_x, mouth_y=args.mouth_y, mouth_w=args.mouth_w, mouth_h=args.mouth_h,
+        ear_cup=tuple(args.ear_cup), think_dot=tuple(args.think_dot))
+    face.write_face(image, opts, out=out, preview_path=preview_path, check_path=check_path,
+                    want_report=args.report)
+    return 0
+
+
 # -- entry point ----------------------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -381,6 +419,51 @@ def build_parser() -> argparse.ArgumentParser:
     dg.add_argument("--baud", type=int, default=115200)
     dg.add_argument("--out", help="Report file (default: hermes-gadget-diag-<device>-<time>.txt)")
     dg.set_defaults(func=cmd_diag)
+
+    f = sub.add_parser("face", help="Generate the face the device draws, from the mascot or your own art")
+    f.add_argument("image", nargs="?",
+                   help="A picture to make a face from. Omit to regenerate the shipped mascot.")
+    f.add_argument("--mascot", action="store_true", help="Force the shipped mascot profile")
+    f.add_argument("--out", help="Where to write the C++ (default: firmware/core/src/mascot_data.cpp)")
+    f.add_argument("--preview", help="Contact sheet of the frames (default: build/face-preview.png)")
+    f.add_argument("--check", help="Your art with the feature marks on it (default: build/face-check.png)")
+    f.add_argument("--report", action="store_true",
+                   help="Print how many bits each frame changes against idle, per size")
+    f.add_argument("--mask", choices=("alpha", "bright", "dark"), default="alpha",
+                   help="Where the ink is: alpha (the picture has transparency), bright (light art "
+                        "on a dark background), dark (dark art on a light one). Generated images "
+                        "and screenshots need bright or dark.")
+    f.add_argument("--threshold", type=int, default=110, help="Ink cutoff, 0-255")
+    f.add_argument("--crop", type=int, nargs=4, metavar=("X0", "Y0", "X1", "Y1"),
+                   help="Crop first, in source pixels, then place the features: cropping moves the frame")
+    f.add_argument("--plain", action="store_true", help="No blink, no talk: for logos and objects")
+    f.add_argument("--blink", choices=("light", "dark"), default="light",
+                   help="light: the eye is drawn light and the blink covers it. dark: the eye is a "
+                        "shadow or a mask, so the blink darkens it.")
+    f.add_argument("--face-x", type=float, default=0.50, help="Face centre across the outline")
+    f.add_argument("--eye-line", type=float, default=0.40, help="Eye height down the outline")
+    f.add_argument("--eye-span", type=float, default=0.22, help="Distance between eye centres")
+    f.add_argument("--eye-size", type=float, default=0.05, help="Eye radius")
+    f.add_argument("--eye-ratio", type=float, default=0.60, help="Eye height over its width")
+    f.add_argument("--eye-left", type=float, nargs=4, metavar=("X", "Y", "W", "H"),
+                   help="One eye by hand, as fractions of the outline; give both eyes or neither, "
+                        "for a view where the two differ")
+    f.add_argument("--eye-right", type=float, nargs=4, metavar=("X", "Y", "W", "H"),
+                   help="The other eye, same fractions")
+    f.add_argument("--eye-grow", type=float, default=1.0,
+                   help="Scale the blink patch about its centre, when the eye is small in the frame")
+    f.add_argument("--mouth-grow", type=float, default=1.0, help="Same for the mouth")
+    f.add_argument("--mouth-x", type=float, default=None,
+                   help="Mouth centre across, if it is not under the eyes")
+    f.add_argument("--mouth-y", type=float, default=0.62, help="Mouth centre down the outline")
+    f.add_argument("--mouth-w", type=float, default=0.10, help="Mouth width")
+    f.add_argument("--mouth-h", type=float, default=0.045, help="Mouth height")
+    f.add_argument("--ear-cup", type=float, nargs=2, default=(0.62, 0.30),
+                   metavar=("X", "Y"), help="Where the listening waves start")
+    f.add_argument("--think-dot", type=float, nargs=2, default=(0.82, 0.11),
+                   metavar=("X", "Y"), help="Where the thinking dots go")
+    f.set_defaults(func=cmd_face)
+
     return p
 
 

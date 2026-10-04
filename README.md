@@ -172,6 +172,7 @@ Long replies turn their own pages, so a board without scroll buttons can still r
 |---|---|
 | [Getting started](docs/getting-started.md) | From zero to a paired device, simulator or hardware |
 | [Architecture](docs/architecture.md) | The core, rendering, the mascot, interaction, security |
+| [Faces](docs/faces.md) | Making the face on the screen your own artwork |
 | [Protocol](docs/protocol.md) | Every message between device and host |
 | [Hermes integration](docs/hermes-integration.md) | How the plugin uses Hermes, configuration, making replies fast |
 | [Simulator](docs/simulator.md) | Keys, boards, scripted and headless runs |

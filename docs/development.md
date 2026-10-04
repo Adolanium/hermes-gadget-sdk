@@ -12,7 +12,7 @@ firmware/tests/         Core unit tests (no dependencies)
 site/                   The browser installer (GitHub Pages): flashing, Wi-Fi setup, pairing
 tests/                  Python tests: plugin units, simulator ↔ hub, adapter on Hermes, gateway E2E
 docs/                   Architecture, protocol, integration, guides
-tools/                  gen_mascot.py (mascot bitmaps), make_logo.py (the logo), capture_window.py (README screenshots of the simulator window)
+tools/                  make_logo.py (the logo), check_versions.py (the release version check), capture_window.py (README screenshots of the simulator window)
 assets/mascot/          The mascot master image and its attribution
 ```
 
