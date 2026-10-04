@@ -32,6 +32,9 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      - name: Check the version
+        # The firmware, the Python package and the plugin must all carry the tag's version.
+        run: python tools/check_versions.py --tag "$TAG"
       - uses: actions/cache@v6
         with:
           path: ~/.platformio
@@ -43,7 +46,9 @@ jobs:
         run: pio run
       - name: Package
         working-directory: firmware/esp32
-        run: python tools/package_release.py --all --out dist --expect-version "${TAG#v}" --notes "$RUNNER_TEMP/notes.md"
+        run: >-
+          python tools/package_release.py --all --out dist --expect-version "${TAG#v}"
+          --notes "$RUNNER_TEMP/notes.md" --commit "$(git rev-parse HEAD)"
       - name: Publish
         working-directory: firmware/esp32
         env:

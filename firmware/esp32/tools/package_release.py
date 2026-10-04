@@ -35,6 +35,7 @@ PROJECT_DIR = Path(__file__).resolve().parent.parent
 PROJECT_NAME = "hermes_gadget"      # esp_app_desc_t.project_name of every Hermes Gadget image
 BOARD_TAG = b"HGBOARD="             # the board name the firmware reports (main/board.cpp)
 INSTALLER_URL = "https://adolanium.github.io/hermes-gadget-sdk/"
+GIT_URL = "https://github.com/Adolanium/hermes-gadget-sdk.git"
 TYPE_DATA, SUBTYPE_OTA, SUBTYPE_NVS = 0x01, 0x00, 0x02
 # Where the second-stage bootloader goes; every chip after the ESP32-S2 starts at 0.
 BOOTLOADER_OFFSET = {"esp32": 0x1000, "esp32s2": 0x1000}
@@ -190,10 +191,17 @@ def write_release(builds: list[Build], out: Path) -> dict:
     return manifest
 
 
-def release_notes(manifest: dict) -> str:
+def release_notes(manifest: dict, commit: str | None = None) -> str:
     version = manifest["version"]
     rows = "\n".join(f"| {b['title']} | `{b['image']['path']}` | `{b['app']['path']}` |" for b in manifest["builds"])
     chips = sorted({b["chip"].lower().replace("-", "") for b in manifest["builds"]})
+    plugin = "" if not commit else f"""
+**The Hermes plugin from the same commit:**
+
+```bash
+hermes plugins install {GIT_URL}#plugin --ref {commit} --enable
+```
+"""
     return f"""Hermes Gadget firmware {version}.
 
 **Install from your browser:** {INSTALLER_URL} (Chrome or Edge, over USB). It checks the board before \
@@ -207,7 +215,7 @@ writing, and a device you reinstall keeps its settings.
 hermes-gadget-<board>-{version}.bin`. This also erases the device's settings, so it pairs again as a new device.
 
 **Update a running device:** `hermes gadget update <device> hermes-gadget-<board>-{version}-app.bin`.
-
+{plugin}
 Checksums are in `SHA256SUMS`.
 """
 
@@ -221,6 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--project", type=Path, default=PROJECT_DIR, help="The firmware/esp32 directory")
     p.add_argument("--expect-version", help="Fail unless the firmware reports this version (e.g. from the tag)")
     p.add_argument("--notes", type=Path, help="Also write release notes (Markdown) to this file")
+    p.add_argument("--commit", help="The release's commit, for the pinned plugin install in the notes")
     args = p.parse_args(argv)
 
     try:
@@ -238,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"package_release: {exc}", file=sys.stderr)
         return 1
     if args.notes:
-        args.notes.write_text(release_notes(manifest), encoding="utf-8")
+        args.notes.write_text(release_notes(manifest, args.commit), encoding="utf-8")
     for build in manifest["builds"]:
         print(f"package_release: {build['image']['path']} ({build['image']['size'] // 1024} KB), "
               f"{build['app']['path']} ({build['app']['size'] // 1024} KB)")

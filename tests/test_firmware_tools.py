@@ -223,6 +223,16 @@ def test_every_board_comes_from_platformio_ini(project, tmp_path):
     text = notes.read_text(encoding="utf-8")
     assert package_release.INSTALLER_URL in text
     assert "| LCD 1.54 | `hermes-gadget-lcd-154-0.2.0.bin` | `hermes-gadget-lcd-154-0.2.0-app.bin` |" in text
+    assert "hermes plugins install" not in text  # no commit given, so no pinned plugin
+
+
+def test_release_notes_pin_the_plugin_to_the_release_commit(project, tmp_path):
+    project("breadboard")
+    notes = tmp_path / "notes.md"
+    commit = "75b8a689bce3925d46de5c256f53d343ae6b876f"
+    assert _package(project, "--all", "--out", str(tmp_path / "dist"), "--notes", str(notes), "--commit", commit) == 0
+    assert (f"hermes plugins install https://github.com/Adolanium/hermes-gadget-sdk.git#plugin --ref {commit} --enable"
+            in notes.read_text(encoding="utf-8"))
 
 
 def test_release_refuses_what_it_cannot_vouch_for(project, tmp_path, capsys):

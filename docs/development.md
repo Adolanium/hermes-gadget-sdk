@@ -94,9 +94,9 @@ It also writes `SHA256SUMS` and `manifest.json`, which tells the browser install
 
 To publish a release:
 
-1. Set `PROJECT_VER` in `firmware/esp32/CMakeLists.txt`, and the version in `pyproject.toml` and `plugin/plugin.yaml`.
+1. Set the new version in all four files that carry it: `PROJECT_VER` in `firmware/esp32/CMakeLists.txt`, `pyproject.toml`, `python/hermes_gadget/__init__.py` and `plugin/plugin.yaml`. `python tools/check_versions.py` says whether they agree, and CI fails when they don't.
 2. Merge, then push a tag: `git tag v0.2.0 && git push origin v0.2.0`.
-3. The **Release** workflow builds every board in `platformio.ini`, checks the firmware reports the tag's version, and publishes the files as a GitHub release.
+3. The **Release** workflow checks the four files against the tag, builds every board in `platformio.ini`, and publishes the files as a GitHub release. Its notes include the command that installs the plugin from the same commit (`hermes plugins install … --ref <commit>`).
 
 To package local builds: `pio run && python tools/package_release.py --all --out dist`.
 

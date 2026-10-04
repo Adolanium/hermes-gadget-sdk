@@ -55,6 +55,8 @@ hermes gateway setup                  # pick Hermes Gadget; restart the gateway 
 
 The setup step enables the platform, asks which port devices connect to (8765 by default), and prints the URL devices should use with a link to the browser installer. `hermes gadget info` shows the same later.
 
+That installs the plugin from `main`. To match a firmware release instead, use the install command in the [release's notes](https://github.com/Adolanium/hermes-gadget-sdk/releases), which pins the plugin to the release's commit with `--ref`.
+
 Working on the plugin itself? `hermes-gadget plugin install --link` links your checkout's `plugin/` into Hermes instead, so edits take effect on the next gateway start.
 
 Speech needs Hermes's STT and TTS configured: `hermes tools` / `hermes setup`, or the `stt:` and `tts:` sections of `config.yaml`. Without STT, voice messages still reach the agent, but as untranscribed audio notes.
