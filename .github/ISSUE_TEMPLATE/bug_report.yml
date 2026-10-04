@@ -1,0 +1,61 @@
+name: Bug report
+description: Something on a board, in the simulator, the installer or the plugin doesn't work.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Security problems go through the [security policy](https://github.com/Adolanium/hermes-gadget-sdk/security/advisories/new) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: board
+    attributes:
+      label: Board
+      options:
+        - Waveshare ESP32-S3-LCD-1.54
+        - Waveshare ESP32-S3-Touch-AMOLED-1.75
+        - ESP32-S3 breadboard build
+        - Simulator
+        - Another board
+        - No board (plugin or installer only)
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How the firmware got there
+      options:
+        - Browser installer
+        - Built and flashed myself
+        - Over-the-air update (hermes gadget update)
+        - Not applicable
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version
+      description: Shown in `hermes gadget devices`, the boot log, or the diagnostics report.
+      placeholder: "0.1.0"
+  - type: input
+    id: hermes
+    attributes:
+      label: Hermes Agent version
+      description: The output of `hermes --version`.
+  - type: textarea
+    id: diag
+    attributes:
+      label: Diagnostics report
+      description: |
+        For anything on a device, run `hermes-gadget diag --port <port>` with the board plugged in, and attach the file it saves (or paste it here).
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Other logs
+      description: The installer's **Technical details**, the gateway log, or the serial console, if they show the problem.
+      render: text

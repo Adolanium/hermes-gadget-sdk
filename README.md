@@ -194,6 +194,10 @@ Long replies turn their own pages, so a board without scroll buttons can still r
 
 Version 0.1. The core, the simulator and the plugin are tested end to end against a real Hermes gateway: CI runs those tests against Hermes Agent [`2eceb02`](https://github.com/NousResearch/hermes-agent/commit/2eceb0275501b09febdec88d08b80d1fff730cf8) (October 3, 2026) on every change, and against Hermes `main` once a day. The ESP32 firmware builds cleanly in CI for the ESP32-S3 breadboard and the ESP32-S3-Touch-AMOLED-1.75. After the first USB flash, new firmware installs over the air (`hermes gadget update`), and a build that can't reach Hermes rolls itself back. Not yet included: a wake word and Wi-Fi setup without a serial cable.
 
+## Contributing
+
+Bug reports from real boards, new boards, fixes and docs are all welcome; [CONTRIBUTING.md](CONTRIBUTING.md) explains how. Please report security problems privately, as described in [SECURITY.md](SECURITY.md).
+
 ## Affiliation and trademarks
 
 Hermes Gadget is an **independent, community-made project**. It is not affiliated with, endorsed by, sponsored by or supported by Nous Research.

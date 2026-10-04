@@ -1,0 +1,34 @@
+name: Board request
+description: Suggest a board for Hermes Gadget to support.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Boards with an ESP32-S3, PSRAM, a screen, a microphone and a speaker fit best. [docs/porting.md](https://github.com/Adolanium/hermes-gadget-sdk/blob/main/docs/porting.md) explains what a port involves.
+  - type: input
+    id: board
+    attributes:
+      label: Board
+      description: The name, and a link to the maker's page or wiki.
+    validations:
+      required: true
+  - type: textarea
+    id: parts
+    attributes:
+      label: What's on it
+      description: Chip and module (for example ESP32-S3R8, 16 MB flash), display and controller, microphone and audio chips, buttons or touch.
+    validations:
+      required: true
+  - type: textarea
+    id: sources
+    attributes:
+      label: Pinout and drivers
+      description: Links to the schematic, the maker's example code or board support package.
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Can you help?
+      options:
+        - label: I have this board and can test builds on it.
+        - label: I'd like to write the port myself.
