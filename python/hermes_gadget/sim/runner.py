@@ -125,6 +125,7 @@ class Simulator:
         if board not in BOARDS:
             raise ValueError(f"unknown board {board!r}; choose from {', '.join(BOARDS)}")
         self.board = BOARDS[board]
+        self.library = library
         self.state_dir = state_dir
         self.storage = JsonStorage(state_dir / "nvs.json" if state_dir else None)
         # Command-line settings win over what the device stored last time.
@@ -141,6 +142,7 @@ class Simulator:
         self.received: list[dict] = []      # inbound JSON
         self.on_flush: Callable[[int, int], None] | None = None
         self.on_log: Callable[[int, str], None] | None = None
+        self.on_message: Callable[[str, dict], None] | None = None
         self._dirty_rows: tuple[int, int] | None = None
         self._t0 = time.monotonic()
         self._wav_release_at: float | None = None
@@ -167,12 +169,16 @@ class Simulator:
         self.transport.connect(url, subprotocol)
 
     def transport_send_text(self, text: str) -> bool:
+        sent = self.transport.send(text)
         try:
-            self.sent.append(json.loads(text))
+            message = json.loads(text)
+            self.sent.append(message)
             del self.sent[:-200]
+            if sent and self.on_message and isinstance(message, dict):
+                self.on_message("sent", message)
         except ValueError:
             pass
-        return self.transport.send(text)
+        return sent
 
     def transport_send_binary(self, data: bytes) -> bool:
         return self.transport.send(data)
@@ -323,8 +329,11 @@ class Simulator:
                 self.device.transport_open()
             elif ev.kind == "text":
                 try:
-                    self.received.append(json.loads(ev.data))
+                    message = json.loads(ev.data)
+                    self.received.append(message)
                     del self.received[:-200]
+                    if self.on_message and isinstance(message, dict):
+                        self.on_message("received", message)
                 except ValueError:
                     pass
                 self.device.transport_text(ev.data)

@@ -24,7 +24,7 @@
 | Symptom | What to check |
 |---|---|
 | Demo only echoes text | That is the scripted demo. [Connect Hermes](connect-hermes.md) for agent replies |
-| Simulator records silence | Install the audio extra and enable live audio. Check the system microphone permissions and default input |
+| Simulator records silence | Install the audio extra and enable the microphone in **Settings** or use `--live-audio`. Check the system microphone permissions and default input. The audio status under the conversation reports microphone errors |
 | Voice is not transcribed | Configure speech recognition on the Hermes computer |
 | Replies are text only | Configure TTS, check that `speak_replies` is not `false`, and enable simulator live audio. Non-WAV TTS needs `ffmpeg` on the Hermes computer |
 

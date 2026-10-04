@@ -50,9 +50,13 @@ jobs:
       - uses: actions/setup-node@v7  # the installer's console client runs against the simulator core
         with:
           node-version: 22
+      - name: Install virtual display
+        run: sudo apt-get update && sudo apt-get install -y xvfb
       - name: Test
         # Tests that need a Hermes Agent checkout skip themselves here; hermes.yml runs them.
-        run: pytest -q
+        env:
+          HERMES_GADGET_UI_TESTS: "1"
+        run: xvfb-run -a pytest -q
 
   site:
     name: Installer site

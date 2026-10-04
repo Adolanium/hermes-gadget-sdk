@@ -9,7 +9,7 @@ firmware/core/          Portable device core (C++17), shared by the ESP32 and th
 firmware/sim/           C ABI wrapper the simulator loads (hgsim.dll / libhgsim.so)
 firmware/esp32/         ESP-IDF application and board configurations
 firmware/tests/         Core unit tests (no dependencies)
-site/                   The browser installer (GitHub Pages): flashing, Wi-Fi setup, pairing
+site/                   Product homepage, hosted guides, and browser installer (GitHub Pages)
 tests/                  Python tests: plugin units, simulator ↔ hub, adapter on Hermes, gateway E2E
 docs/                   Architecture, protocol, integration, guides
 tools/                  make_logo.py (the logo), check_versions.py (the release version check), capture_window.py (README screenshots of the simulator window)
@@ -21,12 +21,14 @@ assets/mascot/          The mascot master image and its attribution
 | Suite | Command | Needs |
 |---|---|---|
 | Core (C++) | `hermes-gadget build-sim --test`, or `ctest --test-dir build/host -C Release` | CMake + compiler |
-| Plugin units, simulator ↔ hub | `pytest` | Built simulator library (else skipped) |
+| Plugin units, simulator ↔ hub, desktop controls | `pytest` | Built simulator library; a desktop or Xvfb for window tests |
 | Adapter on real Hermes classes | `HERMES_AGENT_DIR=../hermes-agent ../hermes-agent/.venv/bin/python -m pytest tests/test_adapter_hermes.py` | A Hermes checkout and its virtualenv |
 | Full gateway end to end | `HERMES_GADGET_E2E=1 pytest tests/test_gateway_e2e.py` | The above; spawns `hermes gateway run` with a temporary `HERMES_HOME` |
 | Browser installer | `npm ci && npm test` in `site/` | Node.js 22 |
 
-CI runs the last two rows in `.github/workflows/hermes.yml`: against the Hermes commit pinned there (`HERMES_REF`) on every push and pull request, and against Hermes `main` once a day. To move the pin, run that workflow by hand with `hermes_ref: main`. When it passes, put the commit it printed into `HERMES_REF` and the README's status line.
+The Python jobs in `.github/workflows/ci.yml` run under `xvfb-run` so the desktop controls run against the simulator core and development hub. On a headless Linux machine, use `xvfb-run -a pytest`. Without a display, the window tests skip; set `HERMES_GADGET_UI_TESTS=1` to require them.
+
+CI runs the adapter and gateway suites in `.github/workflows/hermes.yml`: against the Hermes commit pinned there (`HERMES_REF`) on every push and pull request, and against Hermes `main` once a day. To move the pin, run that workflow by hand with `hermes_ref: main`. When it passes, put the commit it printed into `HERMES_REF` and the README's status line.
 
 The Linux jobs run on `ubuntu-24.04` rather than `ubuntu-latest`, so a new runner image arrives as a deliberate change instead of a surprise. Dependabot proposes the workflows' actions, the installer's npm packages and the Python dependencies weekly, a week after each release.
 

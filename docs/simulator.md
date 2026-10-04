@@ -24,6 +24,14 @@ A bug reproduced in the simulator is therefore a bug in the firmware.
 
 ## Running
 
+The main window shows the device and the current conversation. **Developer tools** replaces the conversation panel with sensors, device actions, the serial console, and logs. Choose **Back to conversation** to return.
+
+**Settings** changes the gateway address, board profile, microphone, and speaker. Audio uses the system's default devices; change those in your operating system's sound settings. A board change restarts the simulated device and keeps its stored identity. Large boards use a smaller zoom to fit the display, including half size on short screens.
+
+Typed messages and voice transcripts appear beside replies as they stream. **Copy reply** copies the latest reply. **Play last audio** replays the latest recorded reply through the computer's default output. Conversation text stays in memory, limited to the last 100 messages, and clears when you start a new session. Audio files remain in the state directory described below.
+
+![The desktop simulator with a live conversation](images/sim-window.png)
+
 ```bash
 hermes-gadget build-sim                     # once, and after changing firmware/core
 hermes-gadget sim --url ws://127.0.0.1:8765/gadget [--board sim-320x240] [--name "Desk"] [--live-audio]
@@ -47,9 +55,10 @@ A first session, start to finish:
 | **Ctrl+S** | Save a PNG screenshot into the state directory |
 | Text box | Send a typed message, as from a keyboard device |
 | **Speak WAV...** | Hold TALK while a WAV file plays into the microphone |
-| Wi-Fi checkbox | Simulate losing the network |
-| Sensors | Battery and temperature sliders, reported to Hermes as telemetry |
-| Serial console | The same commands as the board's UART console (`help`, `status`, `set server ...`) |
+| **Settings** | Change the gateway, board profile, or live audio; reconnect |
+| **Developer tools**, Wi-Fi checkbox | Simulate losing the network |
+| **Developer tools**, sensors | Battery and temperature sliders, reported to Hermes as telemetry |
+| **Developer tools**, serial console | The same commands as the board's UART console (`help`, `status`, `set server ...`) |
 
 The simulated device registers two demo actions the agent can use: `led.set` (a virtual LED in the window) and `buzzer.beep`.
 

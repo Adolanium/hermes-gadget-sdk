@@ -13,6 +13,7 @@ import logging
 import threading
 import time
 import wave
+from importlib import import_module
 from collections import deque
 from pathlib import Path
 
@@ -23,7 +24,7 @@ log = logging.getLogger("hermes_gadget.sim.audio")
 
 def sounddevice_available() -> bool:
     try:
-        import sounddevice  # noqa: F401
+        import_module("sounddevice")
     except Exception:  # ImportError, or OSError when PortAudio is missing
         return False
     return True
@@ -46,10 +47,19 @@ class Microphone:
         self._live_buf = bytearray()
         self._lock = threading.Lock()
         self.level = 0
+        self.error = ""
 
     @property
     def live(self) -> bool:
         return self._live_wanted
+
+    def set_live(self, enabled: bool) -> None:
+        if self.active:
+            raise RuntimeError("Finish the recording before changing the microphone.")
+        if enabled and not sounddevice_available():
+            raise RuntimeError('Install the audio extra: python -m pip install -e ".[audio]"')
+        self._live_wanted = enabled
+        self.error = ""
 
     def inject(self, pcm: bytes) -> None:
         """Queue audio (at the active rate) to be "spoken" into the mic."""
@@ -59,6 +69,7 @@ class Microphone:
         return sum(len(c) for c in self._queue) / 2 / self.rate if self.rate else 0.0
 
     def start(self, rate: int) -> bool:
+        self.error = ""
         self.rate = rate
         self.active = True
         self._last = time.monotonic()
@@ -73,7 +84,13 @@ class Microphone:
                 self._stream = sd.RawInputStream(samplerate=rate, channels=1, dtype="int16", callback=callback)
                 self._stream.start()
             except Exception as exc:
+                self.error = str(exc)
                 log.warning("live microphone unavailable (%s); using silence", exc)
+                if self._stream is not None:
+                    try:
+                        self._stream.close()
+                    except Exception:
+                        log.debug("could not close the unavailable microphone", exc_info=True)
                 self._stream = None
         return True
 
@@ -128,9 +145,23 @@ class Speaker:
         self._stream = None
         self._play_buf = bytearray()
         self._lock = threading.Lock()
+        self.error = ""
+
+    @property
+    def live(self) -> bool:
+        return self._live
+
+    def set_live(self, enabled: bool) -> None:
+        if enabled and not sounddevice_available():
+            raise RuntimeError('Install the audio extra: python -m pip install -e ".[audio]"')
+        self._live = enabled
+        self.error = ""
+        if not enabled:
+            self._close_stream()
 
     def begin(self, rate: int) -> bool:
         self.abort()
+        self.error = ""
         self.rate = rate
         self._open = True
         self._until = time.monotonic()
@@ -151,8 +182,9 @@ class Speaker:
                 self._stream = sd.RawOutputStream(samplerate=rate, channels=1, dtype="int16", callback=callback)
                 self._stream.start()
             except Exception as exc:
+                self.error = str(exc)
                 log.warning("live speaker unavailable (%s); recording only", exc)
-                self._stream = None
+                self._close_stream()
         return True
 
     def write(self, pcm: bytes) -> None:

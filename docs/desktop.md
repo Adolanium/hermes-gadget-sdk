@@ -99,7 +99,7 @@ Close the simulator, then start it with your computer's microphone and speakers 
 hermes-gadget sim --url ws://127.0.0.1:8765/gadget --board sim-466x466-round --live-audio
 ```
 
-Hold **Space**, speak, and release. The demo reports the clip and plays it back. Without live audio, TALK supplies silence. **Speak WAV...** sends a recording instead. Linux may also need the distribution's PortAudio package.
+Hold **Space**, speak, and release. The demo reports the clip and plays it back. Without live audio, TALK supplies silence. You can also enable the microphone and speaker in **Settings** without restarting the window. **Speak WAV...** sends a recording instead. Linux may also need the distribution's PortAudio package.
 
 ## 5. Connect your own Hermes
 

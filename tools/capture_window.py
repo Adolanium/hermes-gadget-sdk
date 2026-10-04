@@ -152,6 +152,7 @@ class Recorder(SimulatorWindow):
         self.run_hub(session.send_reply(ANSWER, turn="v"))
         yield 1.0
         self.stills["reply"] = self.grab(self.screen)
+        self.stills["window"] = self.grab()
         yield 1.5
         self.run_hub(session.turn_end("v"))
         self.run_hub(session.stop_audio())
