@@ -212,3 +212,5 @@ Everything else keeps its own license. None of it is copied into this repository
 | Python packages (`websockets`, and optionally `Pillow`, `sounddevice`, `pyserial`) | Plugin, simulator and tools | Their own licenses; see each project |
 
 The mascot artwork, and the logo and device bitmaps drawn from it, come from [Hermes Agent](https://github.com/NousResearch/hermes-agent) (MIT, © 2025 Nous Research); see [assets/mascot](assets/mascot) and [NOTICE](NOTICE).
+
+The AMOLED panel's start-up register values in `firmware/esp32/main/port_amoled.cpp` follow Waveshare's [board support package](https://components.espressif.com/components/waveshare/esp32_s3_touch_amoled_1_75) for the ESP32-S3-Touch-AMOLED-1.75 (Apache 2.0); see [NOTICE](NOTICE).

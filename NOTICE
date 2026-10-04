@@ -18,13 +18,20 @@ own code and documentation; it grants no rights to those names or marks.
 Third-party material
 --------------------
 The MIT license above covers only the code and documentation written for this
-project. Third-party code is not included in this repository; it is fetched at
-build or install time and keeps its own license: ESP-IDF, esp_codec_dev and
-esp_websocket_client (Apache License 2.0, Espressif Systems), and the Python
-packages listed in pyproject.toml (each under its own license).
+project. Except as noted below, third-party code is not included in this
+repository; it is fetched at build or install time and keeps its own license:
+ESP-IDF, esp_codec_dev and esp_websocket_client (Apache License 2.0, Espressif
+Systems), and the Python packages listed in pyproject.toml (each under its own
+license).
 
 assets/mascot/nous-girl-white-1024.png, the mascot bitmaps generated from it
 (firmware/core/src/mascot_data.cpp) and the project logo derived from it
 (docs/images/logo.png) are based on artwork from the Hermes Agent repository,
 https://github.com/NousResearch/hermes-agent, released under the MIT License,
 Copyright (c) 2025 Nous Research.
+
+The CO5300 panel start-up commands in firmware/esp32/main/port_amoled.cpp (the
+register values and their order) follow Waveshare's board support package for
+the ESP32-S3-Touch-AMOLED-1.75,
+https://components.espressif.com/components/waveshare/esp32_s3_touch_amoled_1_75,
+released by Waveshare under the Apache License 2.0.
