@@ -11,6 +11,8 @@
 
 namespace hgp {
 
+enum class LcdController { St7789, Box3 };
+
 struct LcdConfig {
   bool enabled = false;
   uint16_t width = 320, height = 240;  // after rotation
@@ -18,6 +20,8 @@ struct LcdConfig {
   int gap_x = 0, gap_y = 0;
   int mosi = -1, sclk = -1, cs = -1, dc = -1, rst = -1, backlight = -1;
   int spi_mhz = 40;
+  LcdController controller = LcdController::St7789;
+  bool reset_active_high = false;
 };
 
 struct I2sMicConfig {
@@ -56,12 +60,15 @@ struct CodecAudioConfig {
 };
 
 // CST9217 capacitive touch on the I2C bus: hold to talk, tap, swipe down to cancel.
+enum class TouchController { Cst9217, Box3 };
+
 struct TouchConfig {
   bool enabled = false;
   uint8_t addr = 0x5A;
   int rst = -1;
   uint16_t width = 0, height = 0;
   bool mirror_x = false, mirror_y = false;
+  TouchController controller = TouchController::Cst9217;
 };
 
 // A key whose level is read from a TCA9554 I/O expander input (e.g. a PMIC's

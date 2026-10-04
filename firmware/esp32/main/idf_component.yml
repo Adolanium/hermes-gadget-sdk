@@ -3,3 +3,6 @@ dependencies:
   espressif/esp_websocket_client: "^1.2.3"
   # ES8311 / ES7210 codecs on boards that use them
   espressif/esp_codec_dev: "~1.5"
+  espressif/esp_lcd_ili9341: "^2.1.0"
+  espressif/esp_lcd_touch_tt21100: "^1"
+  espressif/esp_lcd_touch_gt911: "^1"

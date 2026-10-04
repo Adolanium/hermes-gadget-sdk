@@ -169,11 +169,11 @@ extern "C" void app_main(void) {
   hal.storage = &g_storage;
   if (latch_power) hal.power = &g_latch_power;
   if (g_updater.capacity()) hal.updater = &g_updater;
-  if (board.lcd.enabled && g_display.begin(board.lcd)) hal.display = &g_display;
+  i2c_master_bus_handle_t i2c_bus = hgp::i2c::bus(board.i2c);
+  if (board.lcd.enabled && g_display.begin(board.lcd, i2c_bus)) hal.display = &g_display;
   else if (board.amoled.enabled && g_amoled.begin(board.amoled)) hal.display = &g_amoled;
   if (board.mic.enabled && g_mic.begin(board.mic)) hal.mic = &g_mic;
   if (board.speaker.enabled && g_speaker.begin(board.speaker)) hal.speaker = &g_speaker;
-  i2c_master_bus_handle_t i2c_bus = hgp::i2c::bus(board.i2c);
   if (board.axp2101 && g_power.begin(i2c_bus)) hal.power = &g_power;
   const bool audio_power = !board.axp_audio_supply || g_power.enable_audio_supply();
   if (!audio_power) ESP_LOGE(TAG, "audio supply unavailable");
@@ -186,7 +186,7 @@ extern "C" void app_main(void) {
                      g_touch.begin(board.touch, board.pwr_key, i2c_bus);
 
   hgp::diag::Parts parts;
-  parts.display = hal.display == &g_display ? "st7789" : hal.display == &g_amoled ? "co5300" : "none";
+  parts.display = hal.display == &g_display ? g_display.controller_name() : hal.display == &g_amoled ? "co5300" : "none";
   parts.mic = hal.mic == &g_codec_mic ? "es7210" : hal.mic == &g_mic ? "i2s" : "none";
   parts.speaker = hal.speaker == &g_codec_speaker ? "es8311" : hal.speaker == &g_speaker ? "i2s" : "none";
   parts.touch = touch && g_touch.has_touch();

@@ -7,6 +7,8 @@
 
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_lcd_touch_gt911.h"
+#include "esp_lcd_touch_tt21100.h"
 #include "freertos/task.h"
 
 namespace hgp {
@@ -23,7 +25,9 @@ bool TouchInput::begin(const TouchConfig& touch, const ExpanderKeyConfig& key, i
   if (!bus) return false;
   touch_ = touch;
   key_ = key;
-  if (touch.enabled) {
+  if (touch.enabled && touch.controller == TouchController::Box3) {
+    begin_box_touch(bus);
+  } else if (touch.enabled) {
     if (touch.rst >= 0) {
       gpio_config_t rst = {};
       rst.pin_bit_mask = 1ULL << touch.rst;
@@ -53,13 +57,21 @@ bool TouchInput::begin(const TouchConfig& touch, const ExpanderKeyConfig& key, i
     dev.scl_speed_hz = 400000;
     if (i2c_master_bus_add_device(bus, &dev, &key_dev_) != ESP_OK) key_dev_ = nullptr;
   }
-  if (!touch_dev_ && !key_dev_) return false;
+  if (!has_touch() && !key_dev_) return false;
   xTaskCreate(&TouchInput::task, "hg-touch", 3072, this, 5, nullptr);
-  ESP_LOGI(TAG, "touch %s, key %s", touch_dev_ ? "ready" : "off", key_dev_ ? "ready" : "off");
+  ESP_LOGI(TAG, "touch %s, key %s", has_touch() ? "ready" : "off", key_dev_ ? "ready" : "off");
   return true;
 }
 
 bool TouchInput::read_touch(TouchSample& out) {
+  if (managed_touch_) {
+    if (esp_lcd_touch_read_data(managed_touch_) != ESP_OK) return false;
+    uint16_t x = 0, y = 0;
+    uint8_t points = 0;
+    const bool down = esp_lcd_touch_get_coordinates(managed_touch_, &x, &y, nullptr, &points, 1);
+    out = {down && points > 0, static_cast<int16_t>(x), static_cast<int16_t>(y)};
+    return true;
+  }
   const uint8_t reg[2] = {0xD0, 0x00};
   if (i2c_master_transmit(touch_dev_, reg, sizeof(reg), 20) != ESP_OK) return false;
   // The controller needs ~2 ms before the read; at least one tick whatever the tick rate.
@@ -77,6 +89,32 @@ bool TouchInput::read_touch(TouchSample& out) {
   return true;
 }
 
+bool TouchInput::begin_box_touch(i2c_master_bus_handle_t bus) {
+  esp_lcd_panel_io_i2c_config_t io_cfg = {};
+  bool tt21100 = false;
+  if (i2c_master_probe(bus, 0x5d, 50) == ESP_OK || i2c_master_probe(bus, 0x14, 50) == ESP_OK) {
+    io_cfg = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
+    if (i2c_master_probe(bus, 0x5d, 50) != ESP_OK) io_cfg.dev_addr = 0x14;
+  } else if (i2c_master_probe(bus, 0x24, 50) == ESP_OK) {
+    io_cfg = ESP_LCD_TOUCH_IO_I2C_TT21100_CONFIG();
+    tt21100 = true;
+  } else {
+    return false;
+  }
+  esp_lcd_panel_io_handle_t io = nullptr;
+  if (esp_lcd_new_panel_io_i2c(bus, &io_cfg, &io) != ESP_OK) return false;
+  esp_lcd_touch_config_t cfg = {};
+  cfg.x_max = touch_.width;
+  cfg.y_max = touch_.height;
+  cfg.rst_gpio_num = GPIO_NUM_NC;  // Display initialization already reset the shared line.
+  cfg.int_gpio_num = GPIO_NUM_3;
+  cfg.flags.mirror_x = tt21100;
+  const esp_err_t err = tt21100 ? esp_lcd_touch_new_i2c_tt21100(io, &cfg, &managed_touch_)
+                              : esp_lcd_touch_new_i2c_gt911(io, &cfg, &managed_touch_);
+  if (err != ESP_OK) { esp_lcd_panel_io_del(io); return false; }
+  return true;
+}
+
 bool TouchInput::read_key(bool& pressed) {
   uint8_t reg = kTca9554Input, value = 0;
   if (i2c_master_transmit_receive(key_dev_, &reg, 1, &value, 1, 20) != ESP_OK) return false;
@@ -90,7 +128,7 @@ void TouchInput::task(void* arg) {
   bool was_touching = false, key_down = false;
   for (;;) {
     TouchSample s{};
-    if (self->touch_dev_ && self->read_touch(s)) {
+    if (self->has_touch() && self->read_touch(s)) {
       // Every sample while the finger is down (gestures need the motion), plus the lift.
       if (s.touching || was_touching) events::post(EventType::Touch, &s, sizeof(s));
       was_touching = s.touching;

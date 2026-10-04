@@ -14,6 +14,8 @@ namespace {
 #define HG_BOARD_NAME "esp32s3-touch-amoled-1.75"
 #elif CONFIG_HG_BOARD_AMOLED_175C
 #define HG_BOARD_NAME "esp32s3-touch-amoled-1.75c"
+#elif CONFIG_HG_BOARD_BOX3
+#define HG_BOARD_NAME "esp32-s3-box-3"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154
 #define HG_BOARD_NAME "waveshare-esp32s3-lcd-154"
 #else
@@ -130,6 +132,36 @@ BoardConfig make() {
   b.buttons = {0, 4, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "PLUS";
+  return b;
+}
+#elif CONFIG_HG_BOARD_BOX3
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.lcd.enabled = true;
+  b.lcd.controller = LcdController::Box3;
+  b.lcd.width = 320;
+  b.lcd.height = 240;
+  b.lcd.swap_xy = false;
+  b.lcd.mirror_x = true;
+  b.lcd.mirror_y = true;
+  b.lcd.invert = false;
+  b.lcd.mosi = 6;
+  b.lcd.sclk = 7;
+  b.lcd.cs = 5;
+  b.lcd.dc = 4;
+  b.lcd.rst = 48;
+  b.lcd.reset_active_high = true;  // Shared LCD/touch reset through an inverter.
+  b.lcd.backlight = 47;
+  b.i2c = {8, 18, 400000};
+  b.codec = {true, 2, 17, 45, 15, 16, 46};
+  b.touch.enabled = true;
+  b.touch.controller = TouchController::Box3;
+  b.touch.width = 320;
+  b.touch.height = 240;
+  b.buttons = {0, -1, -1, -1};
+  b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
   return b;
 }
 #elif CONFIG_HG_BOARD_CUSTOM

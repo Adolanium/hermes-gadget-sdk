@@ -12,6 +12,7 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_st7789.h"
 #include "esp_log.h"
+#include "panel_box3.hpp"
 
 namespace hgp {
 namespace {
@@ -29,8 +30,20 @@ bool SpiDisplay::on_trans_done(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event
   return woken == pdTRUE;
 }
 
-bool SpiDisplay::begin(const LcdConfig& cfg) {
+bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t bus) {
   cfg_ = cfg;
+  bool ili9341 = false;
+  if (cfg.controller == LcdController::Box3) {
+    if (!bus) return false;
+    if (i2c_master_probe(bus, 0x24, 50) != ESP_OK) {
+      if (i2c_master_probe(bus, 0x5d, 50) != ESP_OK && i2c_master_probe(bus, 0x14, 50) != ESP_OK) {
+        ESP_LOGE(TAG, "BOX-3 display revision could not be detected");
+        return false;
+      }
+      ili9341 = true;
+    }
+  }
+  controller_name_ = ili9341 ? "ili9342" : "st7789";
   const size_t px = static_cast<size_t>(cfg.width) * cfg.height;
   fb_ = static_cast<uint16_t*>(heap_caps_malloc(px * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (!fb_) fb_ = static_cast<uint16_t*>(heap_caps_malloc(px * 2, MALLOC_CAP_8BIT));
@@ -68,7 +81,16 @@ bool SpiDisplay::begin(const LcdConfig& cfg) {
   panel_cfg.reset_gpio_num = static_cast<gpio_num_t>(cfg.rst);
   panel_cfg.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
   panel_cfg.bits_per_pixel = 16;
-  ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io_, &panel_cfg, &panel_));
+  panel_cfg.flags.reset_active_high = cfg.reset_active_high;
+  ili9341_vendor_config_t vendor = {};
+  if (ili9341) {
+    vendor.init_cmds = kBox3PanelInit;
+    vendor.init_cmds_size = sizeof(kBox3PanelInit) / sizeof(kBox3PanelInit[0]);
+    panel_cfg.vendor_config = &vendor;
+    ESP_ERROR_CHECK(esp_lcd_new_panel_ili9341(io_, &panel_cfg, &panel_));
+  } else {
+    ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io_, &panel_cfg, &panel_));
+  }
   ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
   ESP_ERROR_CHECK(esp_lcd_panel_init(panel_));
   ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_, cfg.invert));
@@ -94,7 +116,7 @@ bool SpiDisplay::begin(const LcdConfig& cfg) {
     ESP_ERROR_CHECK(ledc_channel_config(&ch));
     set_backlight(100);
   }
-  ESP_LOGI(TAG, "ST7789 %ux%u ready", cfg.width, cfg.height);
+  ESP_LOGI(TAG, "%s %ux%u ready", controller_name_, cfg.width, cfg.height);
   return true;
 }
 
