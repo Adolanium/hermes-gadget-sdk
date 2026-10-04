@@ -200,6 +200,15 @@ Hermes Gadget is an **independent, community-made project**. It is not affiliate
 
 ## License
 
-The code and documentation are MIT licensed; see [LICENSE](LICENSE). That license covers this project's own work and grants no rights to Nous Research's names or marks.
+The MIT license ([LICENSE](LICENSE)) covers only the code and documentation written for this project. It grants no rights to Nous Research's names or marks.
+
+Everything else keeps its own license. None of it is copied into this repository; it is downloaded when you build or install:
+
+| Third-party code | Used for | License |
+|---|---|---|
+| [ESP-IDF](https://github.com/espressif/esp-idf) | The ESP32 framework and drivers | Apache 2.0 |
+| [esp_codec_dev](https://components.espressif.com/components/espressif/esp_codec_dev) | ES8311 / ES7210 audio codecs | Apache 2.0 |
+| [esp_websocket_client](https://components.espressif.com/components/espressif/esp_websocket_client) | The device's WebSocket connection | Apache 2.0 |
+| Python packages (`websockets`, and optionally `Pillow`, `sounddevice`, `pyserial`) | Plugin, simulator and tools | Their own licenses; see each project |
 
 The mascot artwork, and the logo and device bitmaps drawn from it, come from [Hermes Agent](https://github.com/NousResearch/hermes-agent) (MIT, © 2025 Nous Research); see [assets/mascot](assets/mascot) and [NOTICE](NOTICE).
