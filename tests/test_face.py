@@ -1,8 +1,7 @@
 """The face generator: `hermes_gadget.face` and the `hermes-gadget face` command.
 
-The load-bearing test is the first one. The mascot profile must reproduce
-`firmware/core/src/mascot_data.cpp`, byte for byte, because that file is what the
-firmware ships and there is now one generator rather than two.
+The mascot command must reproduce `firmware/core/src/mascot_data.cpp`, byte for
+byte, because that file is what the firmware ships.
 """
 
 from __future__ import annotations
@@ -33,10 +32,6 @@ def arrays(text: str) -> dict[str, bytes]:
         out[name] = bytes(int(v, 16) for v in re.findall(r"0x([0-9a-f]{2})", body))
         assert len(out[name]) == int(declared), f"{name} declares {declared} bytes"
     return out
-
-
-def test_mascot_profile_reproduces_the_shipped_file(tmp_path):
-    assert generate_mascot(tmp_path) == SHIPPED.read_text()
 
 
 def test_frames_are_well_formed(tmp_path):

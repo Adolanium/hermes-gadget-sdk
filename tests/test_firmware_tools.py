@@ -98,7 +98,7 @@ def test_stale_sdkconfig_is_reported(configs):
 
 def test_cli_exit_codes(configs, capsys):
     sdkconfig = configs("sdkconfig", GENERATED)
-    good = configs("good", "CONFIG_SPIRAM=y")
+    configs("good", "CONFIG_SPIRAM=y")
     bad = configs("bad", "CONFIG_SPIRAM_MODE_OCT=y")
     root = sdkconfig.parent
     assert check_config.main(["--sdkconfig", str(sdkconfig), "--defaults", "good", "--root", str(root)]) == 0

@@ -24,7 +24,6 @@ def test_markdown_is_flattened_for_small_screens():
 def test_typography_and_accents_fold_to_ascii_and_emoji_drop():
     out = textfmt.for_device("Café “quoted” — it’s 20°C \U0001F600")
     assert out == "Cafe \"quoted\" - it's 20 degC"
-    assert all(" " <= c <= "~" or c == "\n" for c in out)
 
 
 def test_think_blocks_never_reach_the_screen():

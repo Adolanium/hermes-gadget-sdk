@@ -99,7 +99,7 @@ TEST("crypto: base64 round trips every length") {
 }
 
 TEST("protocol: identity and auth mac match the host implementation") {
-  // Vectors shared with tests/test_protocol_vectors.py (computed with Python hashlib/hmac).
+  // Vectors shared with tests/test_protocol.py (computed with Python hashlib/hmac).
   uint8_t key[32];
   for (int i = 0; i < 32; ++i) key[i] = static_cast<uint8_t>(i);
   std::string id = hg::proto::device_id_for_key(key, sizeof(key));
