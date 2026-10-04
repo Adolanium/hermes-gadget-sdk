@@ -51,6 +51,7 @@ struct CodecAudioConfig {
   bool enabled = false;
   int mclk = -1, bclk = -1, ws = -1, dout = -1, din = -1;
   int pa = -1;               // speaker amplifier enable, active high
+  float amp_supply_v = 5.0f;  // amplifier supply; the ES8311 driver sets its output level from it
   float mic_gain_db = 24.0f;
 };
 
