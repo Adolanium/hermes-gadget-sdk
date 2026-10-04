@@ -112,6 +112,43 @@ Before relying on the port, run the [physical checklist](hardware-validation.md)
 
 Pin and supply references: [Waveshare schematic](https://files.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.75C/ESP32-S3-Touch-AMOLED-1.75C-schematic.pdf) and [manufacturer board definitions](https://github.com/waveshareteam/Waveshare-ESP32-components/tree/master/bsp/esp32_s3_touch_amoled_1_75c). The port reuses the existing CO5300, CST9217 and Espressif codec drivers; see the [license notes](../README.md#license).
 
+## LilyGO T-Display-S3
+
+Board option `tdisplay-s3`, for LilyGO's 1.9" module: an ESP32-S3R8 (8 MB octal PSRAM) with 16 MB flash, a 170×320 ST7789 panel, two buttons, a battery charger and a battery voltage divider. **This board has no microphone, speaker or audio codec**, so it works as a text gadget: Hermes replies, cards and prompts appear on the screen and typed messages go out. Holding TALK shows that no microphone is available. Nothing needs wiring.
+
+Unlike the SPI panels above, this one puts the ST7789 on an **8-bit i80 parallel bus**, so the port drives the LCD_CAM unit instead of SPI.
+
+| Part | Chip | Connection |
+|---|---|---|
+| Display | ST7789, i80 | D0–D7 39/40/41/42/45/46/47/48, DC 7, WR 8, CS 6, RST 5; gap (0, 35); 320×170 landscape |
+| Backlight | | GPIO 38 (LEDC) |
+| Panel power | | GPIO 15, high before the panel starts |
+| Battery | | GPIO 4 ADC through a 1:2 divider; no fuel gauge, so no percentage |
+| Buttons (to GND) | | TALK = BOOT (0), CANCEL = Button2 (14) |
+
+**Build and flash** it with PlatformIO:
+
+```bash
+cd firmware/esp32
+pio run -e tdisplay-s3 -t upload -t monitor
+```
+
+Or with `idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/tdisplay-s3/sdkconfig.defaults" build`. The USB-C port is the S3's own USB Serial/JTAG, so flashing and the serial console (115200 baud) both use it.
+
+### First flash: what to check
+
+This port is written from LilyGO's published pinout and examples. On the first flash:
+
+1. **Boot log:** `ST7789 320x170 ready on the i80 bus (gap 0,35)`. In `hermes-gadget diag` the parts line should read `display st7789-i80`.
+2. **Screen:** the mascot is centred, upright and not mirrored. If it is mirrored, swap `mirror_x`/`mirror_y`. A thin stripe at one edge means the gap is off — LilyGO warns that it is panel-specific even within one driver IC, so try neighbouring values and record what your panel needs.
+3. **GPIO 15:** the panel rail. On battery power the screen stays dark unless this pin is high; the driver raises it before initialising the panel.
+4. **Buttons:** BOOT is TALK and Button2 cancels. With no microphone, holding TALK flashes "Microphone unavailable" — that is expected on this board, not a fault.
+5. **Text:** `say hello` over the console, or a paired Hermes, should render on the display.
+
+Free GPIOs after the panel, buttons and battery: 1, 2, 3, 10, 11, 12, 13. An I2S microphone and amplifier need six of them, so voice is possible with external modules; the i80 bus uses LCD_CAM and audio uses I2S, so the two do not collide.
+
+Pins and the panel setup follow LilyGO's [T-Display-S3 examples](https://github.com/Xinyuan-LilyGO/T-Display-S3) (`examples/factory`) and the [pin map](https://lilygo.cc). No physical verification report is recorded yet; see the [hardware validation table](hardware-validation.md).
+
 ## ESP32-S3-Touch-AMOLED-1.75
 
 Board option `esp32s3-touch-amoled-175`, for Waveshare's all-in-one board: an ESP32-S3R8 (8 MB octal PSRAM) with 16 MB flash, a 1.75" 466×466 AMOLED, touch, two microphones, a speaker output, a battery charger and an optional case. Nothing needs wiring; plug a small 8 Ω speaker into the **SPK** connector to hear replies.

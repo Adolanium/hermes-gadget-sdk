@@ -14,6 +14,8 @@ namespace {
 #define HG_BOARD_NAME "esp32s3-touch-amoled-1.75"
 #elif CONFIG_HG_BOARD_AMOLED_175C
 #define HG_BOARD_NAME "esp32s3-touch-amoled-1.75c"
+#elif CONFIG_HG_BOARD_T_DISPLAY_S3
+#define HG_BOARD_NAME "tdisplay-s3"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154
 #define HG_BOARD_NAME "waveshare-esp32s3-lcd-154"
 #else
@@ -132,6 +134,46 @@ BoardConfig make() {
   b.cancel_label = "PLUS";
   return b;
 }
+#elif CONFIG_HG_BOARD_T_DISPLAY_S3
+// LilyGO T-Display-S3: 1.9" 170x320 ST7789 on an 8-bit i80 parallel bus, BOOT
+// (GPIO 0) and Button2 (GPIO 14), battery ADC on GPIO 4 behind a 1:2 divider.
+// GPIO 15 gates the panel's peripheral rail and must be high before the display
+// is initialised, or the screen stays dark on battery.
+// Pins: docs/hardware.md#lilygo-t-display-s3 (LilyGO's own examples).
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.lcd.enabled = true;
+  b.lcd.width = 320;  // the panel's 170x320 becomes 320x170 in landscape
+  b.lcd.height = 170;
+  b.lcd.swap_xy = true;
+  b.lcd.mirror_x = false;
+  b.lcd.mirror_y = true;
+  b.lcd.invert = true;
+  b.lcd.gap_x = 0;
+  b.lcd.gap_y = 35;  // LilyGO: the gap is panel-specific even within one driver IC
+  b.lcd.cs = 6;
+  b.lcd.dc = 7;
+  b.lcd.rst = 5;
+  b.lcd.backlight = 38;
+  b.lcd.bus.type = LcdBus::Type::I80;
+  b.lcd.bus.data[0] = 39;  // LCD D0..D7, in order
+  b.lcd.bus.data[1] = 40;
+  b.lcd.bus.data[2] = 41;
+  b.lcd.bus.data[3] = 42;
+  b.lcd.bus.data[4] = 45;
+  b.lcd.bus.data[5] = 46;
+  b.lcd.bus.data[6] = 47;
+  b.lcd.bus.data[7] = 48;
+  b.lcd.bus.wr = 8;
+  b.lcd.bus.pclk_mhz = 16;
+  // GPIO 4 is the battery divider at one-half, and there is no fuel gauge.
+  b.latch_power = {true, 4, 15, -1};
+  b.buttons = {0, 14, -1, -1};
+  b.talk_label = "BOOT";
+  b.cancel_label = "B2";
+  return b;
+}
 #elif CONFIG_HG_BOARD_CUSTOM
 // Kconfig leaves a disabled bool undefined, so map each one explicitly.
 #ifdef CONFIG_HG_LCD_SWAP_XY
@@ -195,6 +237,17 @@ BoardConfig make() {
 const BoardConfig& board_config() {
   static const BoardConfig config = make();
   return config;
+}
+
+int lcd_power_pin(const BoardConfig& b) {
+  // The T-Display-S3's panel rail is gated by GPIO 15. It reuses the battery
+  // latch's enable pin, so report it from there rather than from the LCD config.
+#if CONFIG_HG_BOARD_T_DISPLAY_S3
+  return b.latch_power.enable;
+#else
+  (void)b;
+  return -1;
+#endif
 }
 
 }  // namespace hgp

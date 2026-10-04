@@ -35,6 +35,8 @@ menu "Hermes Gadget"
             bool "Waveshare ESP32-S3-Touch-AMOLED-1.75C (32 MB flash, enclosed AMOLED)"
         config HG_BOARD_WS_ESP32S3_LCD_154
             bool "Waveshare ESP32-S3-LCD-1.54 (ST7789 240x240, ES8311 + ES7210 codecs)"
+        config HG_BOARD_T_DISPLAY_S3
+            bool "LilyGO T-Display-S3 (ST7789 320x170 on an i80 parallel bus, no audio)"
         config HG_BOARD_CUSTOM
             bool "Custom pins (configure below)"
     endchoice

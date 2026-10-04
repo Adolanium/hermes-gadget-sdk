@@ -17,6 +17,7 @@ idf_component_register(
         "port_display.cpp"
         "port_events.cpp"
         "port_ota.cpp"
+        "port_parallel.cpp"
         "port_power.cpp"
         "port_latch_power.cpp"
         "../../drivers/axp2101.cpp"

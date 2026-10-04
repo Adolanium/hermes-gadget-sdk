@@ -23,6 +23,7 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_lcd_panel_io.h"
+#include "esp_lcd_i80_bus.h"
 #include "esp_lcd_types.h"
 #include "esp_websocket_client.h"
 #include "esp_http_server.h"
@@ -163,6 +164,29 @@ class I2sSpeaker final : public hg::AudioOut {
   std::atomic<bool> draining_{false};
   std::atomic<bool> flush_{false};
   std::atomic<uint8_t> volume_{70};
+};
+
+// I80 (8-bit parallel) ST7789 panel via esp_lcd. Panels on LCD modules that
+// wire the controller to a parallel bus rather than SPI, e.g. LilyGO's
+// T-Display-S3. Same framebuffer and bounce-buffer scheme as SpiDisplay.
+class ParallelDisplay final : public hg::Display {
+ public:
+  bool begin(const LcdConfig& cfg, int power_pin);
+  hg::DisplayInfo info() const override;
+  uint16_t* framebuffer() override { return fb_; }
+  void flush(uint16_t y0, uint16_t y1) override;
+  void set_backlight(uint8_t percent) override;
+
+ private:
+  static bool on_trans_done(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t* edata, void* ctx);
+  LcdConfig cfg_{};
+  esp_lcd_i80_bus_handle_t i80_ = nullptr;
+  esp_lcd_panel_io_handle_t io_ = nullptr;
+  esp_lcd_panel_handle_t panel_ = nullptr;
+  uint16_t* fb_ = nullptr;
+  uint16_t* bounce_ = nullptr;  // DMA-capable staging rows
+  int bounce_rows_ = 0;
+  SemaphoreHandle_t done_ = nullptr;
 };
 
 // QSPI AMOLED (CO5300) via esp_lcd panel IO. Same framebuffer and bounce-buffer

@@ -1,0 +1,6 @@
+{
+  "title": "LilyGO T-Display-S3",
+  "summary": "1.9\" 320x170 screen, BOOT and a second button. No microphone or speaker: text only.",
+  "docs": "docs/hardware.md#lilygo-t-display-s3",
+  "ready_made": true
+}

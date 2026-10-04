@@ -11,6 +11,19 @@
 
 namespace hgp {
 
+// How the panel is wired to the chip. SPI panels take a clock and a data line;
+// an i80 panel takes an 8-bit data bus plus a write strobe (LCD modules that put
+// an ST7789 on a parallel bus, e.g. LilyGO's T-Display-S3).
+struct LcdBus {
+  enum class Type : uint8_t { Spi, I80 };
+  Type type = Type::Spi;
+  // I80 only: D0..D7 in order, then the write strobe. -1 on a SPI board.
+  int data[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
+  int wr = -1;
+  // I80 pixel clock in MHz. SPI uses spi_mhz.
+  int pclk_mhz = 16;
+};
+
 struct LcdConfig {
   bool enabled = false;
   uint16_t width = 320, height = 240;  // after rotation
@@ -18,6 +31,7 @@ struct LcdConfig {
   int gap_x = 0, gap_y = 0;
   int mosi = -1, sclk = -1, cs = -1, dc = -1, rst = -1, backlight = -1;
   int spi_mhz = 40;
+  LcdBus bus{};
 };
 
 struct I2sMicConfig {
@@ -100,6 +114,10 @@ struct BoardConfig {
   const char* talk_label = "TALK";
   const char* cancel_label = "CANCEL";
 };
+
+// GPIO held high to power the panel's peripheral rail. Boards without one
+// leave it -1; the driver must see it high before it initialises the panel.
+int lcd_power_pin(const BoardConfig& b);
 
 const BoardConfig& board_config();
 
