@@ -10,7 +10,7 @@ Open an [issue](https://github.com/Adolanium/hermes-gadget-sdk/issues/new/choose
 hermes-gadget diag --port COM5      # or /dev/ttyACM0, /dev/cu.usbmodem101, ...
 ```
 
-If the browser installer was involved, the **Technical details** log at the bottom of its page helps too.
+The [browser installer](https://adolanium.github.io/hermes-gadget-sdk/) saves the same report without Python: **Troubleshooting** → **Something else** → **Save a diagnostics report**. If the installer was involved, the **Technical details** log at the bottom of its page helps too.
 
 Security problems go through [SECURITY.md](SECURITY.md) instead, not a public issue.
 

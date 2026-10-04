@@ -3,6 +3,7 @@
 
 import { checkChip, imageParts, linkParams, loadManifest, sha256, validServer } from "./lib/boards.js";
 import { DeviceConsole, consoleSafe, redact } from "./lib/console.js";
+import { reportFileName, reportText } from "./lib/diagnostics.js";
 import { openConsole, reopen } from "./lib/serial.js";
 
 const REPO = "https://github.com/Adolanium/hermes-gadget-sdk";
@@ -12,7 +13,7 @@ const WIFI_PATIENCE_MS = 25000;
 const HERMES_PATIENCE_MS = 20000;
 
 const $ = (id) => document.getElementById(id);
-const state = { manifest: null, build: null, port: null, console: null, writing: false, poll: null };
+const state = { manifest: null, build: null, port: null, console: null, installing: false, writing: false, poll: null };
 
 // esptool-js is loaded only when a board is flashed, so the page works without it.
 const flasher = () => import("./lib/flasher.js");
@@ -41,13 +42,15 @@ function setNotice(id, text) {
   el.hidden = !text;
 }
 
+const scrollBehavior = () => (matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth");
+
 function goTo(step) {
   const index = STEPS.indexOf(step);
   STEPS.forEach((id, i) => {
     $(id).dataset.state = i < index ? "done" : i === index ? "active" : "locked";
   });
   $(step).querySelector("h2").focus({ preventScroll: true });
-  $(step).scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+  $(step).scrollIntoView({ behavior: scrollBehavior(), block: "start" });
 }
 
 function friendly(error) {
@@ -62,6 +65,14 @@ function friendly(error) {
     return "The board was disconnected. Plug it back in and try again.";
   }
   return message;
+}
+
+/** friendly(), plus where to look when the board is silent on the port the user picked. */
+function consoleTrouble(error) {
+  const text = friendly(error);
+  return /didn't answer on this port/.test(text)
+    ? `${text} If it has two USB ports, use the one marked UART. If it was just installed, press its RESET button.`
+    : text;
 }
 
 async function choosePort() {
@@ -170,6 +181,7 @@ async function install() {
   const port = await choosePort();
   if (!port) return;
   $("install-actions").hidden = true;
+  state.installing = true;
   let session = null;
   try {
     progress("Downloading the firmware...", null);
@@ -213,6 +225,7 @@ async function install() {
     await session?.transport.disconnect().catch(() => {});
   } finally {
     state.writing = false;
+    state.installing = false;
     $("install-actions").hidden = false;
   }
 }
@@ -299,11 +312,7 @@ async function saveSettings(event) {
   } catch (error) {
     status.hidden = true;
     log(`Saving the settings failed: ${error?.message ?? error}`);
-    let text = friendly(error);
-    if (/didn't answer on this port/.test(text)) {
-      text += " If it has two USB ports, use the one marked UART. If it was just installed, press its RESET button.";
-    }
-    setNotice("wifi-error", text);
+    setNotice("wifi-error", consoleTrouble(error));
     await disconnect();
   } finally {
     button.disabled = false;
@@ -366,6 +375,10 @@ function watchPairing(values) {
     }
     setNotice("pair-hint", hint);
     if (paired) {
+      const device = values.name || s.device_id;
+      const update = `hermes gadget update ${/\s/.test(device) ? `"${device}"` : device} --latest`;
+      $("update-command").textContent = update;
+      $("update-copy").dataset.copy = update;
       show("pair-done");
       stopWatching();
     }
@@ -399,6 +412,61 @@ $("another").addEventListener("click", async () => {
   location.reload();
 });
 
+// ---- diagnostics ----------------------------------------------------------------------------
+
+function saveFile(name, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+  const link = Object.assign(document.createElement("a"), { href: url, download: name });
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function saveDiagnostics() {
+  setNotice("diag-error", "");
+  if (state.installing) {
+    setNotice("diag-error", "The firmware is being installed. Save the report once it's done.");
+    return;
+  }
+  const button = $("diag-save");
+  const status = $("diag-status");
+  button.disabled = true;
+  try {
+    if (!(await connectConsole())) return;
+    status.hidden = false;
+    status.textContent = "Reading the report from the board...";
+    await state.console.waitForStatus();
+    const diagnostics = await state.console.diagnostics();
+    const name = reportFileName(diagnostics.report);
+    saveFile(name, reportText(diagnostics));
+    log(`Saved ${name}`);
+    status.textContent = `Saved ${name}. Attach it to your issue.`;
+  } catch (error) {
+    status.hidden = true;
+    log(`The diagnostics report failed: ${error?.message ?? error}`);
+    setNotice("diag-error", consoleTrouble(error));
+    if (!state.poll) await disconnect();
+  } finally {
+    button.disabled = false;
+  }
+}
+
+$("diag-save").addEventListener("click", saveDiagnostics);
+
+// ---- page-wide ------------------------------------------------------------------------------
+
+// Links that open a section on this page without touching the URL's #server=... part.
+document.addEventListener("click", (event) => {
+  const link = event.target.closest("[data-open]");
+  if (!link) return;
+  event.preventDefault();
+  const section = $(link.dataset.open);
+  section.open = true;
+  section.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
+  section.querySelector("summary").focus({ preventScroll: true });
+});
+
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-copy]");
   if (!button) return;
@@ -420,7 +488,7 @@ async function start() {
 
   if (!("serial" in navigator)) {
     show("unsupported");
-    for (const id of ["board-next", "skip-install", "install", "wifi-save"]) $(id).disabled = true;
+    for (const id of ["board-next", "skip-install", "install", "wifi-save", "diag-save"]) $(id).disabled = true;
   } else {
     navigator.serial.addEventListener("disconnect", (event) => {
       if (event.target === state.port && !state.writing) {

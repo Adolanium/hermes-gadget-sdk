@@ -104,7 +104,7 @@ If something on the board doesn't work, save a diagnostics report and attach it 
 hermes-gadget diag --port COM5
 ```
 
-It prints a short summary (reset reason, which parts came up, I2C chips that answer, Wi-Fi, the Hermes connection) and saves the full report with the recent log to a file.
+It prints a short summary (reset reason, which parts came up, I2C chips that answer, Wi-Fi, the Hermes connection) and saves the full report with the recent log to a file. Without Python, the [browser installer](https://adolanium.github.io/hermes-gadget-sdk/) saves the same file: **Troubleshooting** → **Something else** → **Save a diagnostics report**.
 
 ## Troubleshooting
 

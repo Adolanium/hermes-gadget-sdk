@@ -44,6 +44,8 @@ export class DeviceConsole {
     this._closed = false;
     this._failure = null;
     this._onLine = onLine;
+    this._capture = null;
+    this._busy = Promise.resolve();
     this._pump = this._read();
   }
 
@@ -58,6 +60,7 @@ export class DeviceConsole {
           const line = this._pending.slice(0, end).replace(/\r$/, "");
           this._pending = this._pending.slice(end + 1);
           this._onLine?.(line);
+          this._capture?.push(line);
           if (line.startsWith("@")) {
             this._replies.push(line);
             this._notify();
@@ -104,15 +107,30 @@ export class DeviceConsole {
    * arrives in time. Other "@" lines, such as a late reply to an earlier command, are skipped.
    */
   async command(line, timeoutMs = 3000, accept = (reply) => reply.startsWith("@")) {
+    return (await this._exchange(line, timeoutMs, accept)).reply;
+  }
+
+  /** Commands run one at a time, so two callers (the pairing watch and a report) never share replies.
+   * With `capture`, every line the board prints until the reply comes back too. */
+  _exchange(line, timeoutMs, accept, capture = false) {
+    const run = this._busy.then(() => this._send(line, timeoutMs, accept, capture));
+    this._busy = run.catch(() => {});
+    return run;
+  }
+
+  async _send(line, timeoutMs, accept, capture) {
     if (line.length > MAX_LINE) throw new ConsoleError("That value is too long for the board's console.");
     if (this._closed) throw this._lost();
     this._replies.length = 0;
+    this._capture = capture ? [] : null;
     try {
       await this._writer.write(encoder.encode(`${line}\n`));
+      return { reply: await this._reply(accept, Date.now() + timeoutMs), lines: this._capture ?? [] };
     } catch (error) {
-      throw this._lost(error);
+      throw error instanceof ConsoleError ? error : this._lost(error);
+    } finally {
+      this._capture = null;
     }
-    return this._reply(accept, Date.now() + timeoutMs);
   }
 
   /** The device's status, retried until the console answers: a board that just restarted is still
@@ -131,6 +149,19 @@ export class DeviceConsole {
     const reply = await this.command("status", 3000, isStatus);
     if (!reply) throw new ConsoleError("The board didn't report its status.");
     return JSON.parse(reply.slice("@status ".length));
+  }
+
+  /** The board's diagnostics report and recent log, read the way `hermes-gadget diag` reads them. */
+  async diagnostics() {
+    const { reply } = await this._exchange("diag", 8000, (line) => line.startsWith("@diag ") || line.startsWith("@error "));
+    if (!reply?.startsWith("@diag ")) {
+      throw new ConsoleError(reply ? `The board refused the report: ${reply.slice("@error ".length)}.`
+        : "The board didn't send its report.");
+    }
+    const report = JSON.parse(reply.slice("@diag ".length));
+    const { lines } = await this._exchange("diag log", 8000,
+      (line) => line === "@log end" || line.startsWith("@error "), true);
+    return { report, log: lines.filter((line) => line !== "@log end" && !line.startsWith("gadget>")) };
   }
 
   /** Store a setting in the device's flash. An empty value erases it. */
