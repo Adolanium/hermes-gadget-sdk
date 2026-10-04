@@ -123,6 +123,7 @@ hermes-gadget sim --url ws://127.0.0.1:8765/gadget --board sim-466x466-round
 | `sim-320x240` (default) | 320×240, like the breadboard build |
 | `sim-466x466-round` | The 1.75" AMOLED touch board |
 | `sim-480x320`, `sim-240x135` | Larger and smaller rectangular panels |
+| `sim-240x240` | The 1.54" LCD board |
 | `sim-240x240-nospeaker` | No speaker: replies are text only |
 
 Each simulated device keeps its own identity in `~/.hermes-gadget/sim/<name>/`, so several can be paired at once. It also runs headless from a script, for tests and screenshots. Everything is in [docs/simulator.md](docs/simulator.md).

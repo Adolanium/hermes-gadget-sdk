@@ -67,6 +67,7 @@ Like a board, the simulated device takes firmware updates (`hermes gadget update
 | `sim-320x240` | 320×240 | Default; matches the reference breadboard |
 | `sim-240x135` | 240×135 | Small TFT; text drops to scale 1 |
 | `sim-480x320` | 480×320 | Larger panel |
+| `sim-240x240` | 240×240 | The 1.54" LCD board: two buttons, no scroll buttons, so long replies page by themselves |
 | `sim-240x240-nospeaker` | 240×240 | No speaker, so replies stay text only |
 | `sim-466x466-round` | 466×466 round | The 1.75" AMOLED touch board: hold the mouse on the screen to talk, click to answer yes, drag down to cancel. No scroll buttons, so long replies page by themselves |
 
