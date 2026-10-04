@@ -192,7 +192,12 @@ Long replies turn their own pages, so a board without scroll buttons can still r
 
 ## Status
 
-Version 0.1. The core, the simulator and the plugin are tested end to end against a real Hermes gateway: CI runs those tests against Hermes Agent [`2eceb02`](https://github.com/NousResearch/hermes-agent/commit/2eceb0275501b09febdec88d08b80d1fff730cf8) (October 3, 2026) on every change, and against Hermes `main` once a day. The ESP32 firmware builds cleanly in CI for the ESP32-S3 breadboard and the ESP32-S3-Touch-AMOLED-1.75. After the first USB flash, new firmware installs over the air (`hermes gadget update`), and a build that can't reach Hermes rolls itself back. Not yet included: a wake word and Wi-Fi setup without a serial cable.
+Version 0.1, [released](https://github.com/Adolanium/hermes-gadget-sdk/releases/latest) with prebuilt firmware for three boards: the Waveshare ESP32-S3-LCD-1.54, the Waveshare ESP32-S3-Touch-AMOLED-1.75 and the ESP32-S3 breadboard build.
+
+- **Setup:** the [browser installer](https://adolanium.github.io/hermes-gadget-sdk/) flashes a board and connects it to Wi-Fi and Hermes.
+- **Updates:** after the first USB flash, new firmware installs over the air (`hermes gadget update`), and a build that can't reach Hermes rolls itself back.
+- **Testing:** the core, the simulator and the plugin are tested end to end against a real Hermes gateway. CI runs those tests against Hermes Agent [`2eceb02`](https://github.com/NousResearch/hermes-agent/commit/2eceb0275501b09febdec88d08b80d1fff730cf8) (October 3, 2026) on every change, and against Hermes `main` once a day. It also builds the firmware for every board.
+- **Not yet included:** a wake word, and Wi-Fi setup without a USB cable.
 
 ## Contributing
 
