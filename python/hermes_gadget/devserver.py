@@ -149,7 +149,28 @@ HELP = """commands:
   ask <title> | <question>     ask a yes/no question (TALK = yes, CANCEL = no)
   action <name> [json-args]    invoke a device action, e.g. action led.set {"color":"red"}
   image <path>                 send an image (needs Pillow)
+  update <path>                install a firmware image (firmware.bin) over the air
   quit"""
+
+
+async def _update(session: DeviceSession, path: str) -> None:
+    from hermes_gadget_plugin.ota import UpdateError
+
+    shown = -1
+
+    def progress(sent: int, total: int) -> None:
+        nonlocal shown
+        pct = sent * 100 // max(1, total)
+        if pct >= shown + 10 or sent == total:
+            shown = pct
+            print(f"  {session.name}: {pct}%")
+
+    try:
+        version = await session.update_firmware(Path(path).read_bytes(), progress=progress)
+    except UpdateError as exc:
+        print(f"  {session.name}: update failed: {exc.message}")
+        return
+    print(f"  {session.name}: installed {version}; it restarts now")
 
 
 async def _console(hub: DeviceHub, brain: EchoBrain, stop: asyncio.Event) -> None:
@@ -210,6 +231,9 @@ async def _console(hub: DeviceHub, brain: EchoBrain, stop: asyncio.Event) -> Non
                     if box:
                         img = imaging.to_rgb565(rest.strip(), *box)
                         await s.show_image(img.width, img.height, img.rgb565)
+            elif cmd == "update":
+                for s in sessions:
+                    s.spawn(_update(s, rest.strip()))
             elif cmd == "quit":
                 stop.set()
             else:

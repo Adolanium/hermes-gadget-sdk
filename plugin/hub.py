@@ -202,6 +202,7 @@ class DeviceSession:
         self._stream_counter = 0
         self._pending: dict[str, asyncio.Future] = {}
         self._tasks: set[asyncio.Task] = set()
+        self._ota_inbox: asyncio.Queue | None = None  # the device's ota.* replies, while an update runs
 
     # -- capabilities -----------------------------------------------------------
 
@@ -331,6 +332,21 @@ class DeviceSession:
         finally:
             self._pending.pop(action_id, None)
 
+    async def update_firmware(self, image, progress=None) -> str:
+        """Install a firmware image (``firmware.bin`` bytes or an ``ota.FirmwareImage``).
+
+        Returns the version the device installed; it then restarts and reconnects.
+        Raises ``ota.UpdateError`` when the image doesn't suit the device or the device refuses it.
+        """
+        from . import ota
+
+        img = image if isinstance(image, ota.FirmwareImage) else ota.inspect_image(image)
+        ota.check_for(img, self)
+        key = self.hub.store.key_for(self.device_id)
+        if key is None:
+            raise ota.UpdateError("not_enrolled", f"{self.device_id} has no enrolled key")
+        return await ota.send_update(self, img, key, progress=progress)
+
     async def close(self, reason: str = "") -> None:
         try:
             await self._ws.close(1000, reason[:100])
@@ -356,6 +372,9 @@ class DeviceSession:
         for fut in self._pending.values():
             if not fut.done():
                 fut.set_exception(ActionError(f"{self.name} disconnected"))
+        if self._ota_inbox is not None:
+            self._ota_inbox.put_nowait(
+                protocol.message("ota.error", code="disconnected", message=f"{self.name} disconnected"))
         if self._audio_out and self._audio_out._task:
             self._audio_out._task.cancel()
 
@@ -700,6 +719,10 @@ class DeviceHub:
     async def _h_pong(self, session: DeviceSession, msg: dict) -> None:
         pass  # last_rx already refreshed
 
+    async def _h_ota(self, session: DeviceSession, msg: dict) -> None:
+        if session._ota_inbox is not None:
+            session._ota_inbox.put_nowait(msg)
+
     _routes = {
         "text": _h_text,
         "audio.start": _h_audio_start,
@@ -713,4 +736,8 @@ class DeviceHub:
         "event": _h_event,
         "ping": _h_ping,
         "pong": _h_pong,
+        "ota.ready": _h_ota,
+        "ota.ack": _h_ota,
+        "ota.done": _h_ota,
+        "ota.error": _h_ota,
     }

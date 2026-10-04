@@ -51,7 +51,7 @@ from gateway.platforms.base import (
 from gateway.platforms.event import MessageEvent, MessageType
 
 from . import audio as gaudio
-from . import imaging, runtime, textfmt
+from . import imaging, ota, runtime, textfmt
 from .hub import DeviceHub, DeviceSession, HubDelegate
 from .store import DeviceStore
 
@@ -62,6 +62,7 @@ MAX_MESSAGE_LENGTH = 4000
 PAIRING_TTL_S = 3600          # mirrors Hermes's pairing-code lifetime
 PAIRING_POLL_S = 2.0
 PAIRING_GRACE_S = 6.0
+UPDATE_POLL_S = 3.0           # how often staged firmware ('hermes gadget update') is looked for
 # Trigger text for Hermes's unauthorized-DM flow. Never reaches the agent while the
 # device is unpaired; if approval races it, it is a cheap read-only command.
 PAIRING_TRIGGER = "/status"
@@ -154,6 +155,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._turns: Dict[str, str] = {}
         self._watch_task: Optional[asyncio.Task] = None
+        self._update_task: Optional[asyncio.Task] = None
+        self._installing: Dict[str, asyncio.Task] = {}  # device id -> staged update being installed
         self._registry_key = "default"
         self._prompts: Dict[str, List[_Prompt]] = {}  # device id -> questions, oldest (shown) first
         self._new_requested: Dict[str, float] = {}  # device id -> when it asked for a new session
@@ -191,6 +194,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._registry_key = getattr(self, "_owner_profile", None) or "default"
         runtime.register(self._registry_key, self)
         self._watch_task = asyncio.create_task(self._watch_pairing())
+        self._update_task = asyncio.create_task(self._watch_updates())
         self._mark_connected()
         self._wire_plugin_handlers(None)
         logger.info("[%s] devices connect to %s://<this host>:%s%s", self.name,
@@ -199,9 +203,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
 
     async def disconnect(self) -> None:
         runtime.unregister(self._registry_key, self)
-        if self._watch_task:
-            self._watch_task.cancel()
-            self._watch_task = None
+        for task in (self._watch_task, self._update_task):
+            if task:
+                task.cancel()
+        self._watch_task = self._update_task = None
         if self._hub:
             await self._hub.stop()
             self._hub = None
@@ -273,6 +278,50 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                         await self.on_ready(session)
                 except Exception as exc:
                     logger.debug("[%s] pairing sync failed for %s: %s", self.name, session.device_id, exc)
+
+    # -- firmware updates -------------------------------------------------------------
+
+    async def _watch_updates(self) -> None:
+        """Install firmware staged with 'hermes gadget update' once its device is online."""
+        queue = ota.UpdateQueue(self._store.path.parent)
+        while True:
+            await asyncio.sleep(UPDATE_POLL_S)
+            if not self._hub:
+                continue
+            for device_id in queue.pending():
+                session = self._hub.get(device_id)
+                running = self._installing.get(device_id)
+                if session is None or session.closed or (running and not running.done()):
+                    continue
+                self._installing[device_id] = session.spawn(self._install_staged(queue, session))
+
+    async def _install_staged(self, queue: ota.UpdateQueue, session: DeviceSession) -> None:
+        staged = queue.load(session.device_id)
+        if staged is None:
+            return
+        data, _meta = staged
+        reported = 0.0
+
+        def progress(sent: int, total: int) -> None:
+            nonlocal reported
+            if sent == total or time.monotonic() - reported >= 1.0:
+                reported = time.monotonic()
+                queue.report(session.device_id, state="sending", sent=sent, size=total)
+
+        logger.info("[%s] installing staged firmware on %s", self.name, session.device_id)
+        try:
+            version = await session.update_firmware(data, progress=progress)
+        except ota.UpdateError as exc:
+            # A device that dropped off gets the image again when it's back, a few times.
+            retry = exc.code in ota.RETRY_CODES and queue.count_attempt(session.device_id) < ota.MAX_ATTEMPTS
+            queue.report(session.device_id, state="retrying" if retry else "failed", code=exc.code, error=exc.message)
+            if not retry:
+                queue.drop(session.device_id)
+            logger.warning("[%s] firmware update for %s failed: %s", self.name, session.device_id, exc.message)
+            return
+        queue.report(session.device_id, state="done", version=version)
+        queue.drop(session.device_id)
+        logger.info("[%s] %s installed firmware %s", self.name, session.device_id, version)
 
     async def _claim_home(self, session: DeviceSession) -> None:
         """Make the first approved device the platform's home channel.

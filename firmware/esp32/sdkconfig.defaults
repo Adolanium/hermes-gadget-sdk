@@ -1,8 +1,12 @@
 # Defaults for every board. Board-specific overrides live in boards/<name>/sdkconfig.defaults
 # and are stacked with:  idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/<name>/sdkconfig.defaults" build
 
-# The app (Wi-Fi + TLS-capable WebSocket client + core) needs more than the 1 MB default partition.
-CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+# Two 1.9 MB app slots for over-the-air updates (partitions.csv). A new firmware
+# boots on probation: it must reach Hermes within 5 minutes or the bootloader
+# goes back to the previous one (port_ota.cpp).
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 
 # The core runs on the main task.

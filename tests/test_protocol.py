@@ -11,6 +11,9 @@ def test_device_id_and_mac_match_firmware_vectors():
     device_id = protocol.device_id_for_key(KEY)
     assert device_id == "hg-630dcd2966c43366"
     assert protocol.auth_mac(KEY, device_id, NONCE) == "AMUEF53Phk8+1vHw7R8PgiDwlPd8rXUx+cgyYv1YJX0="
+    empty_sha = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    assert (protocol.ota_mac(KEY, device_id, "AAECAwQFBgcICQoLDA0ODw==", empty_sha, 1234)
+            == "ieymn+y1CMEJ5uX8yGz8VrXxT2KKjSOnzJC5qagTTwk=")
 
 
 def test_mac_verification_rejects_wrong_key_nonce_or_device():

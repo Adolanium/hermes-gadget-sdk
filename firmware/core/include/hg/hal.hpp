@@ -92,6 +92,28 @@ class System {
   virtual void log(LogLevel level, std::string_view message) = 0;
 };
 
+// The slot a firmware update is written to. The core authorizes and checks the
+// image (size, SHA-256, the server's MAC) and streams it in; the port owns the
+// flash layout, the image format check and the restart.
+class Updater {
+ public:
+  virtual ~Updater() = default;
+  // The largest image the slot holds.
+  virtual size_t capacity() const = 0;
+  // Prepares the slot for `size` bytes. On failure, says why in `error`.
+  virtual bool begin(size_t size, std::string& error) = 0;
+  virtual bool write(const uint8_t* data, size_t len, std::string& error) = 0;
+  // Checks the complete image and makes it the one to boot next.
+  virtual bool finish(std::string& error) = 0;
+  virtual void abort() = 0;
+  // Restarts into the new image, after finish().
+  virtual void restart() = 0;
+  // This boot runs a newly installed image that hasn't proven itself yet:
+  // confirm() keeps it; without that the port goes back to the previous one.
+  virtual bool pending_verify() const { return false; }
+  virtual void confirm() {}
+};
+
 // Everything except `system` and `transport` may be null when the board lacks it.
 struct Hal {
   System* system = nullptr;
@@ -100,6 +122,7 @@ struct Hal {
   Display* display = nullptr;
   AudioIn* mic = nullptr;
   AudioOut* speaker = nullptr;
+  Updater* updater = nullptr;
 };
 
 }  // namespace hg

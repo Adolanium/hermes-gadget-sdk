@@ -428,3 +428,45 @@ def test_a_home_channel_set_in_the_profile_is_left_alone(gadget, make_sim):
     gadget.run(claim_in_profile_scope())
     assert gadget.adapter.config.home_channel is None
     assert gadget.saved_homes == []
+
+
+def _staging(monkeypatch, tmp_path):
+    """The queue 'hermes gadget update' writes to, polled quickly."""
+    from hermes_gadget_plugin import adapter as adapter_module
+    from hermes_gadget_plugin import ota
+
+    monkeypatch.setattr(adapter_module, "UPDATE_POLL_S", 0.2)
+    return ota.UpdateQueue(tmp_path / "plugin-data" / "gadget")
+
+
+def test_staged_firmware_is_installed_once_the_device_is_online(gadget, make_sim, monkeypatch, tmp_path):
+    from fakes.fake_firmware import fake_image
+    from hermes_gadget_plugin import ota
+
+    queue = _staging(monkeypatch, tmp_path)
+    sim = _paired_sim(gadget, make_sim, name="Desk")
+    device_id = sim.status()["device_id"]
+    image = ota.inspect_image(fake_image(board=sim.board.name, version="0.2.0"))
+    queue.stage(device_id, image)
+    assert sim.wait_for(lambda: (queue.status(device_id) or {}).get("state") == "done", timeout=30)
+    assert queue.status(device_id)["version"] == "0.2.0"
+    assert sim.update_image == image.data
+    assert queue.pending() == []  # installed once, not again after the restart
+    assert sim.wait_for(lambda: sim.restarts == 1, timeout=5)
+    assert sim.wait_screen("ready", timeout=15)
+    sim.run_for(1.0)
+    assert sim.restarts == 1
+
+
+def test_staged_firmware_the_device_refuses_is_dropped(gadget, make_sim, monkeypatch, tmp_path):
+    from fakes.fake_firmware import fake_image
+    from hermes_gadget_plugin import ota
+
+    queue = _staging(monkeypatch, tmp_path)
+    sim = _paired_sim(gadget, make_sim, name="Desk")
+    device_id = sim.status()["device_id"]
+    queue.stage(device_id, ota.inspect_image(fake_image(board="esp32s3-breadboard")))
+    assert sim.wait_for(lambda: (queue.status(device_id) or {}).get("state") == "failed", timeout=30)
+    status = queue.status(device_id)
+    assert status["code"] == "wrong_board" and "built for esp32s3-breadboard" in status["error"]
+    assert queue.pending() == [] and sim.update_image is None

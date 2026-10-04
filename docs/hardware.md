@@ -107,9 +107,25 @@ pio run -e esp32s3-breadboard -t upload -t monitor
 
 The firmware is written for ESP-IDF 5.3 and later. It has been compile-checked with ESP-IDF 6.1 through PlatformIO:
 
-- ESP32-S3 breadboard: app image 1.16 MB of the 1.5 MB partition, 13% of static RAM;
-- ESP32-S3-Touch-AMOLED-1.75: the same;
+- ESP32-S3 breadboard: app image 1.13 MB in a 1.94 MB app slot, 14% of static RAM;
+- ESP32-S3-Touch-AMOLED-1.75: 1.12 MB, otherwise the same;
 - classic ESP32 with custom pins.
+
+The flash holds two app slots (`partitions.csv`), so later firmware can arrive over the air. A board flashed with an earlier release gets the new partition table with its next USB flash. NVS stays where it was, so its settings and device key survive.
+
+## Updates over the air
+
+Once a board runs this firmware, new builds can reach it over Wi-Fi. On the Hermes host:
+
+```bash
+hermes gadget update "Kitchen" firmware/esp32/.pio/build/esp32s3-touch-amoled-175/firmware.bin
+```
+
+- The gateway installs the image as soon as the device is online, and the command waits and reports progress (`--no-wait` returns at once).
+- The device shows the progress, restarts into the new firmware, and keeps it once it reaches Hermes again.
+- If the new firmware doesn't reach Hermes within 5 minutes, or crashes before then, the device goes back to the previous one by itself.
+- Only the Hermes that enrolled the device can update it: every image is authorized with the device's own key. The command also refuses an image built for another board.
+- The dev server takes the same images: `update <path>` in its console.
 
 On Windows, keep the project on a short path such as `C:\src\hermes-gadget-sdk`. ESP-IDF's linker-script step can exceed the Windows command-line length limit when the build directory is deeply nested.
 
@@ -162,5 +178,5 @@ Machine-readable lines start with `@`, so tools can drive a bench device. `herme
 
 - Push-to-talk or tap with energy VAD. There is no wake word; the protocol leaves room for one (`audio.start.mode`).
 - Wi-Fi provisioning is over serial (or menuconfig). There is no SoftAP or BLE provisioning yet.
-- There is no OTA in this release.
+- Firmware updates are authorized with the device key, but images aren't signed: the bootloader runs whatever a trusted Hermes installs. Secure Boot isn't enabled.
 - The text font is ASCII only; the host folds other characters.

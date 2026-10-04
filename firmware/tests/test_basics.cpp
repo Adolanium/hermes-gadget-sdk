@@ -106,6 +106,9 @@ TEST("protocol: identity and auth mac match the host implementation") {
   CHECK_EQ(id, std::string("hg-630dcd2966c43366"));
   CHECK_EQ(hg::proto::auth_mac(key, sizeof(key), id, "bm9uY2Utbm9uY2Utbm9uY2U="),
            std::string("AMUEF53Phk8+1vHw7R8PgiDwlPd8rXUx+cgyYv1YJX0="));
+  CHECK_EQ(hg::proto::ota_mac(key, sizeof(key), id, "AAECAwQFBgcICQoLDA0ODw==",
+                              "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", 1234),
+           std::string("ieymn+y1CMEJ5uX8yGz8VrXxT2KKjSOnzJC5qagTTwk="));
 }
 
 TEST("protocol: binary frame header round trips") {
@@ -117,6 +120,9 @@ TEST("protocol: binary frame header round trips") {
   CHECK_EQ(f.stream, uint8_t(7));
   CHECK_EQ(f.seq, uint16_t(0x1234));
   CHECK_EQ(f.payload_len, size_t(4));
+  uint8_t firmware[4] = {0x03, 2, 0, 0};
+  CHECK(hg::proto::parse_binary(firmware, sizeof(firmware), f));
+  CHECK(f.channel == hg::proto::Channel::Firmware);
   uint8_t bad[4] = {0x09, 0, 0, 0};
   CHECK(!hg::proto::parse_binary(bad, sizeof(bad), f));
 }

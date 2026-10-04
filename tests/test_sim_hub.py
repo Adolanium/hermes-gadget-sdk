@@ -263,3 +263,71 @@ def test_round_touch_board_talks_with_the_screen(devserver, make_sim):
     assert sim.wait_for(lambda: any(m["type"] == "audio.end" for m in sim.sent), timeout=5)
     # Board settings ride on the same console as the core ones.
     assert sim.console("set touch_cancel pwr") == "@ok touch_cancel"
+
+
+def _update(loop_thread, sim, coro_fn):
+    """Run a firmware update on the hub's loop while the simulated device keeps stepping."""
+    import asyncio
+
+    fut = asyncio.run_coroutine_threadsafe(coro_fn(), loop_thread.loop)
+    assert sim.wait_for(fut.done, timeout=60)
+    return fut
+
+
+def test_firmware_update_installs_and_the_device_comes_back(loop_thread, devserver, make_sim):
+    from fakes.fake_firmware import fake_image
+
+    hub, _brain, url = devserver()
+    sim = make_sim(url)
+    assert sim.wait_screen("ready", timeout=10)
+    device_id = sim.status()["device_id"]
+    session = hub.get(device_id)
+    assert session.caps["ota"]["max_size"] == 0x1F0000
+    image = fake_image(board=sim.board.name, version="0.2.0", size=300_000)
+    progress = []
+
+    fut = _update(loop_thread, sim, lambda: session.update_firmware(image, progress=lambda s, t: progress.append(s)))
+    assert fut.result() == "0.2.0"
+    assert sim.update_image == image
+    assert progress[-1] == len(image)
+    assert sim.wait_for(lambda: sim.restarts == 1, timeout=5)  # after ota.done has left
+    assert sim.wait_for(lambda: hub.get(device_id) not in (None, session), timeout=15)  # it reconnected
+    assert sim.wait_screen("ready", timeout=10)
+
+
+def test_firmware_update_refusals(loop_thread, devserver, make_sim):
+    import hashlib
+
+    from fakes.fake_firmware import fake_image
+    from hermes_gadget_plugin import ota
+
+    hub, _brain, url = devserver()
+    sim = make_sim(url)
+    assert sim.wait_screen("ready", timeout=10)
+    session = hub.get(sim.status()["device_id"])
+
+    # Only the key the device enrolled can authorize an image.
+    image = ota.inspect_image(fake_image(board=sim.board.name))
+    fut = _update(loop_thread, sim, lambda: ota.send_update(session, image, bytes(32)))
+    assert isinstance(fut.exception(), ota.UpdateError) and fut.exception().code == "unauthorized"
+    assert sim.update_image is None
+
+    # An image for another board never leaves the host.
+    fut = _update(loop_thread, sim, lambda: session.update_firmware(fake_image(board="esp32s3-breadboard")))
+    assert fut.exception().code == "wrong_board"
+
+    # The device's own image check (here: the simulator's) has the last word.
+    bad = bytearray(fake_image(board=sim.board.name))
+    bad[0] = 0x00
+    not_an_app = ota.FirmwareImage(bytes(bad), "0.2.0", sim.board.name, hashlib.sha256(bad).hexdigest())
+    fut = _update(loop_thread, sim, lambda: ota.send_update(session, not_an_app, hub.store.key_for(session.device_id)))
+    assert fut.exception().code == "invalid"
+    assert sim.update_image is None and sim.restarts == 0
+    assert sim.wait_screen("ready", timeout=5)
+
+
+def test_a_new_firmware_is_kept_once_it_reaches_hermes(devserver, make_sim):
+    hub, _brain, url = devserver()
+    sim = make_sim(url, update_pending=True)
+    assert sim.wait_screen("ready", timeout=10)
+    assert sim.update_confirmed

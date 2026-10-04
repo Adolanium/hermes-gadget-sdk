@@ -70,8 +70,8 @@ Secrets go in `~/.hermes/.env`, following Hermes's rule that `.env` is only for 
 | Authorization state | `BasePlatformAdapter._is_sender_authorized()` | The runner-installed check; used to mirror approval and revocation to the device |
 | Agent tools | `ctx.register_tool(toolset="gadget")` | Part of the implicit `hermes-gadget` toolset; also usable from other chats |
 | Tool session context | `gateway.session_context.get_session_env` | `HERMES_SESSION_PLATFORM` / `HERMES_SESSION_CHAT_ID` pick the default device |
-| Durable state | `plugins.plugin_storage.plugin_data_dir("gadget")` | Enrolled device keys and pending pairing codes |
-| Host CLI | `ctx.register_cli_command("gadget", ...)` | `hermes gadget devices / forget / info` |
+| Durable state | `plugins.plugin_storage.plugin_data_dir("gadget")` | Enrolled device keys, pending pairing codes, and firmware staged for updates (`updates/`) |
+| Host CLI | `ctx.register_cli_command("gadget", ...)` | `hermes gadget devices / forget / info / update`. `update` stages an image in the plugin's data directory; the gateway's adapter installs it once the device is online and writes progress back for the command |
 | Send and cron targets | `parse_target_ref_fn` | `gadget:hg-0123456789abcdef` works with send_message and cron delivery |
 
 ### Voice round trip

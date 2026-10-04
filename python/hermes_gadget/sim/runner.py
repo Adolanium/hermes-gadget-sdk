@@ -23,6 +23,7 @@ from .transport import WsTransport
 log = logging.getLogger("hermes_gadget.sim")
 
 FIRMWARE_VERSION = "0.1.0-sim"
+UPDATE_SLOT_BYTES = 0x1F0000  # an app slot on the ESP32 boards (firmware/esp32/partitions.csv)
 
 
 @dataclass
@@ -117,6 +118,7 @@ class Simulator:
         live_audio: bool = False,
         library: Path | None = None,
         button_labels: tuple[str, str] | None = None,  # e.g. ("TALK", "CANCEL") to match hardware
+        update_pending: bool = False,  # boot as if running an update that isn't confirmed yet
     ):
         if board not in BOARDS:
             raise ValueError(f"unknown board {board!r}; choose from {', '.join(BOARDS)}")
@@ -141,13 +143,19 @@ class Simulator:
         self._t0 = time.monotonic()
         self._wav_release_at: float | None = None
         self.network_up = False
+        self.update_image: bytes | None = None  # the last firmware image the device installed
+        self.update_confirmed = False
+        self.restarts = 0
+        self._update_buf: bytearray | None = None
+        self._restart_requested = False
 
         b = self.board
         self.device = NativeDevice(
             self, width=b.width, height=b.height, board=b.name, firmware=FIRMWARE_VERSION, name=name,
             server_url=url, access_token=token, mic=b.mic, speaker=b.speaker, backlight=b.backlight,
             scroll_buttons=b.scroll_buttons, library=library, button_labels=button_labels,
-            round_panel=b.round, touch_screen=b.touch)
+            round_panel=b.round, touch_screen=b.touch, update_capacity=UPDATE_SLOT_BYTES,
+            update_pending=update_pending)
         self._round_spans = _circle_spans(b.width, b.height) if b.round else None
         self._register_actions()
 
@@ -230,6 +238,35 @@ class Simulator:
         if self.on_log:
             self.on_log(level, message)
 
+    def update_begin(self, size: int) -> bool:
+        self._update_buf = bytearray()
+        return True
+
+    def update_write(self, data: bytes) -> bool:
+        if self._update_buf is None:
+            return False
+        self._update_buf += data
+        return True
+
+    def update_finish(self) -> bool:
+        image, self._update_buf = self._update_buf, None
+        if not image or image[0] != 0xE9:  # like the ESP32 port, take only app images
+            return False
+        self.update_image = bytes(image)
+        if self.state_dir:
+            self.state_dir.mkdir(parents=True, exist_ok=True)
+            (self.state_dir / "update.bin").write_bytes(self.update_image)
+        return True
+
+    def update_abort(self) -> None:
+        self._update_buf = None
+
+    def update_restart(self) -> None:
+        self._restart_requested = True  # done in step(), outside the core's tick
+
+    def update_confirm(self) -> None:
+        self.update_confirmed = True
+
     # -- virtual peripherals -------------------------------------------------------------
 
     def _register_actions(self) -> None:
@@ -300,6 +337,17 @@ class Simulator:
             self._wav_release_at = None
             self.release("talk")
         self.device.tick()
+        if self._restart_requested:
+            self._restart_requested = False
+            self._restart()
+
+    def _restart(self) -> None:
+        """A reboot as Hermes sees it: the connection drops, then the device connects again."""
+        self.restarts += 1
+        up = self.network_up
+        self.set_network(False)
+        if up:
+            self.set_network(True)
 
     def run_for(self, seconds: float, interval: float = 0.01) -> None:
         end = time.monotonic() + seconds

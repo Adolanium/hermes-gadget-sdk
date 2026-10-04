@@ -29,6 +29,7 @@ enum class Screen : uint8_t {
   Image,
   Error,
   Prompt,  // a yes/no question from Hermes, answered with the buttons
+  Updating,  // installing a firmware update
 };
 
 enum class Link : uint8_t { Offline, Network, Connecting, Online };
