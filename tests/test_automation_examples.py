@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 from conftest import REPO, requires_sim
 from hermes_gadget.linux.client import Client
+from hermes_gadget_plugin.hub import ActionError
 
 
 def load_example(name):
@@ -132,7 +133,7 @@ def test_bridge_sensor_action_and_failure_use_the_core(devserver, loop_thread, t
         assert accepted["accepted"] is True
         assert invoke("automation.status", {"job": accepted["job"]}) == {
             "job": accepted["job"], "state": "pending"}
-        with pytest.raises(Exception, match="still pending"):
+        with pytest.raises(ActionError, match="still pending"):
             invoke("lamp.set", {"on": False})
         assert client.device.status()["phase"] == "online"
         state.gate.set()
@@ -143,7 +144,7 @@ def test_bridge_sensor_action_and_failure_use_the_core(devserver, loop_thread, t
         assert events == [("automation.completed", result, False)]
         assert state.calls[-1] == ("POST", "/api/services/light/turn_on", "Bearer test-token", {"entity_id": "light.desk"})
         before = len(state.calls)
-        with pytest.raises(Exception, match="expected only on"):
+        with pytest.raises(ActionError, match="expected only on"):
             invoke("lamp.set", {"on": True, "entity_id": "light.other"})
         assert len(state.calls) == before
         state.status = 500
@@ -164,6 +165,7 @@ def test_bridge_sensor_action_and_failure_use_the_core(devserver, loop_thread, t
 @pytest.fixture
 def mqtt_peer():
     packets = []
+    state = SimpleNamespace(acknowledge=True)
 
     class Handler(socketserver.BaseRequestHandler):
         def read(self, size):
@@ -200,7 +202,8 @@ def mqtt_peer():
                         topic = data[2:2 + size].decode()
                         mid, payload = data[2 + size:4 + size], data[4 + size:]
                         packets.append(("publish", header, topic, payload))
-                        self.request.sendall(b"\x40\x02" + mid)  # PUBACK
+                        if state.acknowledge:
+                            self.request.sendall(b"\x40\x02" + mid)  # PUBACK
                     elif header >> 4 == 14:
                         return
             except (EOFError, OSError):
@@ -211,7 +214,7 @@ def mqtt_peer():
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        yield server.server_address[1], packets
+        yield server.server_address[1], packets, state
     finally:
         server.shutdown()
         server.server_close()
@@ -221,7 +224,7 @@ def mqtt_peer():
 def test_mqtt_real_client_topics_acknowledgement_and_stale_readings(mqtt_peer):
     pytest.importorskip("paho.mqtt.client")
     module = load_example("mqtt")
-    port, packets = mqtt_peer
+    port, packets, _ = mqtt_peer
     backend = module.Mqtt("127.0.0.1", port, "desk/set", "room/temp", tls=False)
     try:
         deadline = time.monotonic() + 5
@@ -237,6 +240,20 @@ def test_mqtt_real_client_topics_acknowledgement_and_stale_readings(mqtt_peer):
         assert backend.read_temperature() is None
         backend.disconnected(None, None, None, None, None)
         assert backend.sample == (None, 0.0)
+    finally:
+        backend.close()
+
+
+def test_mqtt_missing_ack_is_a_failure_and_does_not_reconnect_the_command(mqtt_peer):
+    pytest.importorskip("paho.mqtt.client")
+    module = load_example("mqtt")
+    port, packets, state = mqtt_peer
+    state.acknowledge = False
+    backend = module.Mqtt("127.0.0.1", port, "desk/set", "room/temp", tls=False)
+    try:
+        with pytest.raises(RuntimeError, match="acknowledgement timed out"):
+            backend.set_lamp(False)
+        assert [p for p in packets if p[0] == "publish"] == [("publish", 0x32, "desk/set", b"OFF")]
     finally:
         backend.close()
 
