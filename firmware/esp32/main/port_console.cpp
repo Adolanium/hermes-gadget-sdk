@@ -36,7 +36,7 @@ int run(int argc, char** argv) {
 void begin() {
   static const char* const kCommands[] = {"help",      "status", "diag",   "get",         "set",       "say",
                                           "talk",      "release", "cancel", "new-session", "reconnect", "forget-key",
-                                          "factory-reset"};
+                                          "factory-reset", "settings"};
   for (const char* name : kCommands) {
     esp_console_cmd_t cmd = {};
     cmd.command = name;
