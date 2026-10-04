@@ -29,7 +29,7 @@ The common case is an SPI ST7789 panel, an I2S microphone, an I2S amplifier and 
    }
    ```
 
-3. Add `firmware/esp32/boards/my-board/sdkconfig.defaults` with the target, flash size, PSRAM mode, and `CONFIG_HG_BOARD_MY_BOARD=y`. Add a PlatformIO env if you use it.
+3. Add `firmware/esp32/boards/my-board/sdkconfig.defaults` with the target, flash size, PSRAM mode, and `CONFIG_HG_BOARD_MY_BOARD=y`. Where it picks another option of a choice the base file sets, such as the flash size, also turn the base option off (`# CONFIG_ESPTOOLPY_FLASHSIZE_4MB is not set`); the build checks that every line took effect ([build checks](development.md#build-checks)). Add a PlatformIO env if you use it.
 
 4. Add a simulator profile with the same screen size and peripherals to `BOARDS` in `python/hermes_gadget/sim/runner.py`, so UI work happens on the desktop.
 
