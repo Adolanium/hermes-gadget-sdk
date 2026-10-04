@@ -1,0 +1,10 @@
+#!/bin/sh
+# Control the installed system device as its dedicated service account.
+set -eu
+if [ "$(id -u)" -ne 0 ]; then
+    echo 'Use sudo hermes-gadget-device to control the system gadget.' >&2
+    exit 1
+fi
+export HGSIM_LIBRARY=/opt/hermes-gadget/current/libhgsim.so
+exec runuser -u hermes-gadget -- /opt/hermes-gadget/current/venv/bin/hermes-gadget \
+    linux --state-dir /var/lib/hermes-gadget "$@"

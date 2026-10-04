@@ -4,11 +4,60 @@ The Linux client runs the same device core as the ESP32 firmware. It keeps a
 device identity, pairs with Hermes, reconnects after network interruptions, and
 accepts local text messages and events. It runs without a desktop or display.
 
-The initial target is Raspberry Pi 4 or 5 with 64-bit Raspberry Pi OS Lite.
+The initial target is Raspberry Pi 4 or 5 with 64-bit Raspberry Pi OS Lite Trixie.
 This port is experimental. No physical Pi verification report is recorded yet.
 CI runs the native core and Linux socket tests on x86-64 and ARM64 Ubuntu.
 
-## Build and start
+## Install on Raspberry Pi
+
+Use Raspberry Pi Imager to install 64-bit Raspberry Pi OS Lite Trixie. Configure
+your network and SSH access there, then boot the Pi with a suitable power supply.
+The Linux client uses the OS network settings.
+
+Download the `hermes-gadget-VERSION-linux-arm64.tar.gz` archive and its `.sha256`
+file from a [release](https://github.com/Adolanium/hermes-gadget-sdk/releases) that
+includes the Pi package. Until the first such release is tagged, the same files
+are available in the `linux-arm64` artifact of a successful `main`
+[CI run](https://github.com/Adolanium/hermes-gadget-sdk/actions/workflows/ci.yml).
+Extract the artifact ZIP first if downloading from CI.
+
+In a directory containing just the chosen archive and checksum file:
+
+```bash
+sudo apt update
+sudo apt install python3-venv libportaudio2 libstdc++6
+sha256sum --check hermes-gadget-*-linux-arm64.tar.gz.sha256
+tar -xzf hermes-gadget-*-linux-arm64.tar.gz
+cd hermes-gadget-*-linux-arm64
+sudo sh install.sh
+sudoedit /etc/hermes-gadget/config.json
+```
+
+Set `server` to your Hermes host, such as `ws://192.168.1.20:8765/gadget`, and
+choose a `name`. Add `token` if your gateway requires it. The installer downloads
+Python dependencies into a private environment, creates the `hermes-gadget`
+service account, and installs the native core. No compiler is needed on the Pi.
+Configuration and device state stay outside the installed release directory.
+
+```bash
+sudo systemctl enable --now hermes-gadget
+sudo hermes-gadget-device status
+```
+
+Approve the pairing code on the Hermes host with `hermes gadget approve CODE`.
+Then use the installed device:
+
+```bash
+sudo hermes-gadget-device send "Hello from the Pi"
+sudo hermes-gadget-device messages
+```
+
+`hermes-gadget-device` runs controls as the service account and selects the
+correct state directory. Use it in place of `hermes-gadget linux` in the examples
+below when working with a package installation. To diagnose startup, use
+`sudo journalctl -u hermes-gadget -n 50`.
+
+## Build from source
 
 On Linux, install Python 3.10 or later, a C++17 compiler, CMake and Git. For
 Raspberry Pi OS:
@@ -76,6 +125,8 @@ consumer can ignore entries it already read. Restarting clears that history.
 
 Install PortAudio and the audio extra, then list the connected devices:
 
+The Pi installer already installs these dependencies. For a source checkout:
+
 ```bash
 sudo apt install libportaudio2
 python -m pip install -e '.[audio]'
@@ -119,6 +170,9 @@ Reattach an unplugged audio device and start a new recording to retry it.
 Use GPIO Zero with the lgpio backend on Pi 4 and Pi 5. On Raspberry Pi OS, install
 `python3-lgpio` and create the virtual environment with `--system-site-packages`
 so it can import that system package, then install `.[gpio]`.
+The Pi installer's environment already includes GPIO Zero and can import
+system packages. Install `python3-lgpio`, then restart the service. The installer
+adds the service account to existing `audio` and `gpio` groups.
 
 Add this object to the configuration:
 
@@ -227,12 +281,33 @@ when Hermes is unavailable. Pairing failures appear in `messages`.
 For systemd deployments, [linux/hermes-gadget.service](../linux/hermes-gadget.service)
 defines a dedicated `hermes-gadget` user, a private `/var/lib/hermes-gadget` state
 directory, and restart on failure. It expects an installation and virtual
-environment at `/opt/hermes-gadget`, plus a configuration file at
-`/etc/hermes-gadget/config.json`. Create those paths and the service account
-before installing the unit. Run control commands as the service account with
-`--state-dir /var/lib/hermes-gadget`.
+environment at `/opt/hermes-gadget/current`, plus a configuration file at
+`/etc/hermes-gadget/config.json`. The package installer creates these paths.
 
 The client only advertises configured display, audio and output actions. It
-reports no battery or ESP32 update slot. Software updates require stopping the process, updating the
-checkout, rebuilding the native library, and restarting with the same state
-directory.
+reports no battery or ESP32 update slot.
+
+## Update or roll back
+
+For a package installation, download and verify the new archive, extract it,
+then run its `install.sh` with sudo. The installer validates the new native
+library before stopping the current service. It switches the `current` link and
+restarts a previously running service. Reinstalling the same package is safe.
+The installer preserves `/etc/hermes-gadget/config.json` and
+`/var/lib/hermes-gadget/device.json`, including the pairing identity.
+
+Back up those two files securely before updating. Installed releases remain in
+`/opt/hermes-gadget/releases`; the `previous` link identifies the prior release.
+To roll back, rerun the installer from the previous release's archive. Check
+`sudo hermes-gadget-device status` after either operation. An interrupted
+dependency installation leaves a named incomplete directory; move that specific
+directory aside before retrying, as the installer instructs.
+
+For a source checkout, stop the process, update the checkout, rebuild the native
+library, and restart with the same state directory.
+
+To stop using the installed service, run `sudo systemctl disable --now
+hermes-gadget`. Remove its unit from `/etc/systemd/system/hermes-gadget.service`
+and its helper from `/usr/local/bin/hermes-gadget-device`, then run
+`sudo systemctl daemon-reload`. Application files are under
+`/opt/hermes-gadget`. Retain configuration and state if you may reinstall later.

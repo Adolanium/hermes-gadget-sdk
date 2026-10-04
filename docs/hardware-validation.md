@@ -1,5 +1,9 @@
 # Hardware capabilities and verification
 
+The Raspberry Pi 4/5 Linux port is experimental. ARM64 CI covers the native
+core, service, package installation and updates. USB audio, GPIO, and display
+tests use software drivers or test doubles. No physical Pi report is recorded.
+
 Firmware builds and simulator tests check software behavior. A physical verification report records what worked on a particular board revision, wiring, and firmware commit. A passing build alone does not establish that a microphone, power circuit, or display works on a device.
 
 ## Current hardware

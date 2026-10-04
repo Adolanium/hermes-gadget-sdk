@@ -6,6 +6,7 @@ Choose how you want to use Hermes Gadget. A board connects to your own Hermes Ag
 |---|---|---|
 | I have a supported board | [Set up a board](setup-board.md) | Chrome or Edge on a computer, a USB data cable, 2.4 GHz Wi-Fi, and Hermes |
 | I want to try it on my computer | [Try the simulator](desktop.md) | Python 3.10+, CMake 3.16+, and a C++17 compiler |
+| I have a Raspberry Pi | [Run a Linux gadget](linux.md) | Pi 4 or 5, 64-bit Raspberry Pi OS Lite Trixie, and Hermes; optional USB audio |
 | I want to build with the SDK | [Development](development.md) | A repository checkout and the tools for the part you want to change |
 
 Board setup uses prebuilt firmware. You do not need Python, CMake, or a compiler on the computer that flashes it.

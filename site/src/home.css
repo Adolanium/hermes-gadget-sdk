@@ -16,9 +16,10 @@ body { color-scheme:dark; background:#10151c; color:#f4f2ec; --text:#f4f2ec; --m
 .stage figcaption { color:#aab7c3; font-size:12px; margin-top:24px; text-align:center; }
 .paths-head { display:flex; justify-content:space-between; align-items:center; gap:24px; margin-bottom:20px; }
 .paths-head h2 { font-size:26px; font-weight:500; letter-spacing:-.5px; margin:0; }
-.path-grid { display:grid; grid-template-columns:repeat(3,1fr); border:1px solid var(--border); border-radius:11px; overflow:hidden; }
+.path-grid { display:grid; grid-template-columns:repeat(2,1fr); border:1px solid var(--border); border-radius:11px; overflow:hidden; }
 .path { display:block; padding:27px; background:#161d26; text-decoration:none; color:var(--text); }
-.path + .path { border-left:1px solid var(--border); }
+.path:nth-child(even) { border-left:1px solid var(--border); }
+.path:nth-child(n+3) { border-top:1px solid var(--border); }
 .path:hover { background:#202936; }
 .path .number { font:11px/1.5 ui-monospace,Consolas,monospace; color:var(--accent); }
 .path h3 { margin:12px 0 8px; font-size:19px; }

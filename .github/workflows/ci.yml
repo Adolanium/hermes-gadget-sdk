@@ -54,12 +54,29 @@ jobs:
         with:
           node-version: 22
       - name: Install virtual display
-        run: sudo apt-get update && sudo apt-get install -y xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb shellcheck
       - name: Test
         # Tests that need a Hermes Agent checkout skip themselves here; hermes.yml runs them.
         env:
           HERMES_GADGET_UI_TESTS: "1"
         run: xvfb-run -a pytest -q
+      - name: Build the Linux installation package
+        if: matrix.name == 'Linux ARM64'
+        run: |
+          python -m pip wheel --no-deps . --wheel-dir build/wheels
+          python linux/package.py --library build/host/libhgsim.so --wheel build/wheels/hermes_gadget-*.whl
+          shellcheck linux/install.sh linux/test_install.sh linux/hermes-gadget-device
+      - name: Test installation and updates on Debian Trixie
+        if: matrix.name == 'Linux ARM64'
+        run: |
+          archive=$(find dist -name '*-linux-arm64.tar.gz')
+          docker run --rm -v "$PWD:/source:ro" debian:trixie-slim sh /source/linux/test_install.sh "/source/$archive"
+      - uses: actions/upload-artifact@v7
+        if: matrix.name == 'Linux ARM64'
+        with:
+          name: linux-arm64
+          path: dist/hermes-gadget-*-linux-arm64.tar.gz*
+          if-no-files-found: error
 
   site:
     name: Installer site

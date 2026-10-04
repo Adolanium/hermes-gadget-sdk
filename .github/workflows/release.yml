@@ -20,8 +20,31 @@ concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
 
 jobs:
+  linux:
+    name: Build Linux ARM64
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build the native core and Python wheel
+        run: |
+          cmake -S firmware -B build/host -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/host --parallel
+          ctest --test-dir build/host --output-on-failure
+          python -m pip wheel --no-deps . --wheel-dir build/wheels
+          python linux/package.py --library build/host/libhgsim.so --wheel build/wheels/hermes_gadget-*.whl
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-arm64
+          path: dist/hermes-gadget-*-linux-arm64.tar.gz*
+          if-no-files-found: error
   release:
     name: Build and publish
+    needs: linux
     runs-on: ubuntu-24.04
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
@@ -49,6 +72,10 @@ jobs:
         run: >-
           python tools/package_release.py --all --out dist --expect-version "${TAG#v}"
           --notes "$RUNNER_TEMP/notes.md" --commit "$(git rev-parse HEAD)"
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-arm64
+          path: firmware/esp32/dist/
       - name: Publish
         working-directory: firmware/esp32
         env:

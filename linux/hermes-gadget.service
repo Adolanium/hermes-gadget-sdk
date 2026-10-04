@@ -9,8 +9,9 @@ User=hermes-gadget
 Group=hermes-gadget
 StateDirectory=hermes-gadget
 StateDirectoryMode=0700
-WorkingDirectory=/opt/hermes-gadget
-ExecStart=/opt/hermes-gadget/venv/bin/hermes-gadget linux --state-dir /var/lib/hermes-gadget run --config /etc/hermes-gadget/config.json
+WorkingDirectory=/opt/hermes-gadget/current
+Environment=HGSIM_LIBRARY=/opt/hermes-gadget/current/libhgsim.so
+ExecStart=/opt/hermes-gadget/current/venv/bin/hermes-gadget linux --state-dir /var/lib/hermes-gadget run --config /etc/hermes-gadget/config.json
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=15

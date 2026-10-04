@@ -46,6 +46,10 @@ Your Hermes does the thinking. Real conversations need Hermes Agent and the Gadg
 
 Check the exact model and connections in the [hardware guide](docs/hardware.md). Other boards need a [port](docs/porting.md).
 
+Raspberry Pi 4 and 5 have an experimental [Linux client](docs/linux.md) for
+64-bit Raspberry Pi OS Lite Trixie. Add USB audio, GPIO controls, or a display
+as needed. ARM64 release packages include the native core and a service installer.
+
 These ports build in CI. Physical verification reports are not yet recorded; treat them as experimental until the [hardware verification table](docs/hardware-validation.md) links a report for your revision.
 
 ## Try the demo from a checkout
