@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 
 import pytest
 
+from fakes.esp_console import respond
 from hermes_gadget import cli
 
 
@@ -86,3 +88,44 @@ def test_diag_explains_a_console_without_it(console, capsys):
     console({"diag": "@error unknown command (try: help)"})  # firmware older than diag
     assert cli.main(["diag", "--port", "COM9"]) == 1
     assert "No diag report from COM9 (@error unknown command" in capsys.readouterr().err
+
+
+class EspBoard(FakeConsole):
+    """A board's settings behind ESP-IDF's console, stored the way App::console parses `set`."""
+
+    def __init__(self):
+        super().__init__({})
+        self.settings: dict[str, str] = {}
+
+    def app(self, line: str) -> str:
+        command, _, rest = line.partition(" ")
+        if command == "set":
+            key, _, value = rest.partition(" ")
+            self.settings[key] = value.strip()
+            return f"@ok {key}"
+        return "@status {}" if command == "status" else "@error unknown command"
+
+    def write(self, data: bytes) -> None:
+        self.pending += respond(data.decode(), self.app).encode()
+
+
+def _provision(monkeypatch, board, **values):
+    monkeypatch.setattr(cli, "_serial", lambda port, baud: board)
+    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    settings = {"wifi_ssid": None, "wifi_pass": None, "server": None, "token": None, "name": None, **values}
+    return cli.cmd_provision(argparse.Namespace(port="COM5", baud=115200, **settings))
+
+
+def test_provision_gets_every_character_through_the_console(monkeypatch):
+    board = EspBoard()
+    values = {"wifi_ssid": 'Home  "5G"', "wifi_pass": 'p\\a "s"  @ok', "server": "ws://192.168.1.20:8765/gadget",
+              "name": "Desk Gadget"}
+    assert _provision(monkeypatch, board, **values) == 0
+    assert board.settings == values
+
+
+def test_provision_refuses_what_the_console_would_drop(monkeypatch, capsys):
+    board = EspBoard()
+    assert _provision(monkeypatch, board, wifi_ssid="Café", wifi_pass="secret") == 2
+    assert board.settings == {}
+    assert "wifi_ssid: the board's console only takes printable ASCII" in capsys.readouterr().err

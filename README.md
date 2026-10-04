@@ -98,7 +98,7 @@ hermes-gadget sim --url ws://127.0.0.1:8765/gadget --live-audio
 hermes gadget pair                                     # approves the code on the device's screen
 ```
 
-**3. Build the real thing:** pick the parts below, then flash it with `pio run -e esp32s3-breadboard -t upload` from `firmware/esp32`. The full walkthrough is in [docs/getting-started.md](docs/getting-started.md).
+**3. Set up a real board:** plug it in and open the **[browser installer](https://adolanium.github.io/hermes-gadget-sdk/)** in Chrome or Edge. It installs the firmware, connects the board to Wi-Fi and your Hermes, and walks you through pairing; no toolchain needed. To build the firmware yourself instead, see [docs/getting-started.md](docs/getting-started.md).
 
 ## The simulator
 
@@ -138,7 +138,10 @@ Each simulated device keeps its own identity in `~/.hermes-gadget/sim/<name>/`, 
 | Speaker (optional) | MAX98357A I2S amp + 4–8 Ω speaker | Without one, replies are text only |
 | Buttons | The DevKit's BOOT button, plus one more | TALK and CANCEL |
 
-**Prefer a ready-made board?** The Waveshare ESP32-S3-Touch-AMOLED-1.75 has a 1.75" AMOLED touchscreen, two microphones and a speaker output, and needs no wiring: `pio run -e esp32s3-touch-amoled-175 -t upload`. Hold the screen to talk, swipe down to cancel. See [docs/hardware.md](docs/hardware.md#esp32-s3-touch-amoled-175).
+**Prefer a ready-made board?** Two need no wiring, and the [browser installer](https://adolanium.github.io/hermes-gadget-sdk/) sets up either:
+
+- **Waveshare ESP32-S3-LCD-1.54:** a 240×240 screen, two microphones and an onboard speaker. BOOT talks, PLUS cancels. See [docs/hardware.md](docs/hardware.md#waveshare-esp32-s3-lcd-154).
+- **Waveshare ESP32-S3-Touch-AMOLED-1.75:** a round 1.75" AMOLED touchscreen, two microphones and a speaker output. Hold the screen to talk, swipe down to cancel. See [docs/hardware.md](docs/hardware.md#esp32-s3-touch-amoled-175).
 
 Pinout, flashing and the serial console are in [docs/hardware.md](docs/hardware.md). Other boards are a configuration change: [docs/porting.md](docs/porting.md).
 
@@ -208,6 +211,7 @@ Everything else keeps its own license. None of it is copied into this repository
 | [ESP-IDF](https://github.com/espressif/esp-idf) | The ESP32 framework and drivers | Apache 2.0 |
 | [esp_codec_dev](https://components.espressif.com/components/espressif/esp_codec_dev) | ES8311 / ES7210 audio codecs | Apache 2.0 |
 | [esp_websocket_client](https://components.espressif.com/components/espressif/esp_websocket_client) | The device's WebSocket connection | Apache 2.0 |
+| [esptool-js](https://github.com/espressif/esptool-js) | Flashing from the browser installer, added to the site when it's built | Apache 2.0 |
 | Python packages (`websockets`, and optionally `Pillow`, `sounddevice`, `pyserial`) | Plugin, simulator and tools | Their own licenses; see each project |
 
 The mascot artwork, and the logo and device bitmaps drawn from it, come from [Hermes Agent](https://github.com/NousResearch/hermes-agent) (MIT, © 2025 Nous Research); see [assets/mascot](assets/mascot) and [NOTICE](NOTICE).

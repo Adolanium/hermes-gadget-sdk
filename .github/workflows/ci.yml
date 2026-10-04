@@ -47,9 +47,32 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Build the simulator library
         run: hermes-gadget build-sim
+      - uses: actions/setup-node@v4  # the installer's console client runs against the simulator core
+        with:
+          node-version: 22
       - name: Test
         # Tests that need a Hermes Agent checkout skip themselves here; hermes.yml runs them.
         run: pytest -q
+
+  site:
+    name: Installer site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Install
+        working-directory: site
+        run: npm ci
+      - name: Test
+        working-directory: site
+        run: npm test
+      - name: Build
+        working-directory: site
+        run: node scripts/build.mjs
 
   esp32:
     name: ESP32 firmware (${{ matrix.board }})

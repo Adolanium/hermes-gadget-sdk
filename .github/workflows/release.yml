@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: write
+  actions: write  # to start the installer site's deploy
 
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
@@ -53,3 +54,8 @@ jobs:
           else
             gh release create "$TAG" dist/* --title "Hermes Gadget ${TAG#v}" --notes-file "$RUNNER_TEMP/notes.md"
           fi
+      - name: Update the installer site
+        # A release published with this workflow's token starts no other workflow, so start the deploy.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main

@@ -124,7 +124,9 @@ This port is written from Waveshare's published pinout and drivers. On the first
 
 ## Build and flash
 
-With ESP-IDF 5.3 or later installed (`. $IDF_PATH/export.sh`):
+**No toolchain needed:** the [browser installer](https://adolanium.github.io/hermes-gadget-sdk/) flashes each release's prebuilt firmware from Chrome or Edge, then sets up Wi-Fi and pairing. The release files are also on the [releases page](https://github.com/Adolanium/hermes-gadget-sdk/releases), for `esptool.py write_flash 0x0 hermes-gadget-<board>-<version>.bin`, which also erases the board's settings.
+
+To build it yourself, with ESP-IDF 5.3 or later installed (`. $IDF_PATH/export.sh`):
 
 ```bash
 cd firmware/esp32

@@ -9,6 +9,7 @@ firmware/core/          Portable device core (C++17), shared by the ESP32 and th
 firmware/sim/           C ABI wrapper the simulator loads (hgsim.dll / libhgsim.so)
 firmware/esp32/         ESP-IDF application and board configurations
 firmware/tests/         Core unit tests (no dependencies)
+site/                   The browser installer (GitHub Pages): flashing, Wi-Fi setup, pairing
 tests/                  Python tests: plugin units, simulator ↔ hub, adapter on Hermes, gateway E2E
 docs/                   Architecture, protocol, integration, guides
 tools/                  gen_mascot.py (mascot bitmaps), make_logo.py (the logo), capture_window.py (README screenshots of the simulator window)
@@ -23,6 +24,7 @@ assets/mascot/          The mascot master image and its attribution
 | Plugin units, simulator ↔ hub | `pytest` | Built simulator library (else skipped) |
 | Adapter on real Hermes classes | `HERMES_AGENT_DIR=../hermes-agent ../hermes-agent/.venv/bin/python -m pytest tests/test_adapter_hermes.py` | A Hermes checkout and its virtualenv |
 | Full gateway end to end | `HERMES_GADGET_E2E=1 pytest tests/test_gateway_e2e.py` | The above; spawns `hermes gateway run` with a temporary `HERMES_HOME` |
+| Browser installer | `npm ci && npm test` in `site/` | Node.js 22 |
 
 CI runs the last two rows in `.github/workflows/hermes.yml`: against the Hermes commit pinned there (`HERMES_REF`) on every push and pull request, and against Hermes `main` once a day. To move the pin, run that workflow by hand with `hermes_ref: main`. When it passes, put the commit it printed into `HERMES_REF` and the README's status line.
 
@@ -38,6 +40,19 @@ Cross-language guarantees:
 
 - `tests/test_protocol.py` and `firmware/tests/test_basics.cpp` share identity and HMAC vectors.
 - `test_sim_hub.py` runs the C++ core against the Python hub, including hostile handshakes.
+- `test_installer_console.py` runs the installer's console client (`site/src/lib/console.js`) against the C++ core, through a model of ESP-IDF's console (`tests/fakes/esp_console.py`): its echo, its ASCII-only input and its argument splitting.
+
+### The browser installer
+
+`site/` is a static page with no server, published to GitHub Pages by `.github/workflows/pages.yml` with the latest release's firmware. It flashes boards with [esptool-js](https://github.com/espressif/esptool-js) over Web Serial (Chrome and Edge), checks the chip against the release manifest first, and then talks to the firmware's serial console to set Wi-Fi, the Hermes address and the name. To try it locally with your own builds:
+
+```bash
+cd site && npm ci
+node scripts/build.mjs --firmware ../firmware/esp32/dist   # from tools/package_release.py
+python -m http.server 8000 --directory _site               # then open http://localhost:8000
+```
+
+Web Serial needs a secure context, which `localhost` counts as.
 
 ## Working on the plugin against a live Hermes
 
