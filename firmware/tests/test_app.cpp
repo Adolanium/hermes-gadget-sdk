@@ -1063,3 +1063,66 @@ TEST("settings: title hold and menu swipe work without starting a recording") {
   CHECK(!r.app.settings_open());
   CHECK(r.app.screen() == hg::Screen::Ready);
 }
+
+TEST("power: idle screen dims, sleeps and consumes the wake input without recording") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  CHECK_EQ(r.app.console("set screen_timeout -1"), std::string("@error screen_timeout must be 0..3600 seconds"));
+  r.advance(15000);
+  CHECK_EQ(r.fake.brightness, 10);
+  r.advance(15000);
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(!r.fake.mic_on);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.last("audio.start") == nullptr);
+  r.app.console("talk");
+  CHECK(r.fake.mic_on);
+  r.advance(1000);
+  r.app.console("cancel");
+  r.app.console("release");
+  r.server(R"({"type":"ping"})");
+  r.advance(30000);
+  CHECK_EQ(r.fake.brightness, 0);
+  r.server(R"({"type":"prompt","id":"wake","text":"Continue?"})");
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Prompt);
+  r.advance(30000);
+  CHECK_EQ(r.fake.brightness, 100);
+}
+
+TEST("power: failed readings replace stale data and shutdown requires a second local selection") {
+  struct Battery : hg::Power {
+    bool failed = false;
+    int shutdowns = 0;
+    std::optional<hg::PowerStatus> read() override {
+      if (failed) return std::nullopt;
+      return hg::PowerStatus{true, 3850, 65, false, false};
+    }
+    bool power_off() override { ++shutdowns; return true; }
+  } battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.bring_online(true);
+  Value status;
+  CHECK(hg::json::parse(r.app.status_json(), status));
+  CHECK_EQ(status["power"]["battery_mv"].as_int(), int64_t(3850));
+  r.advance(5000);
+  CHECK_EQ((*r.fake.last("state"))["sensors"]["battery_percent"].as_int(), int64_t(65));
+  battery.failed = true;
+  r.advance(5000);
+  CHECK(hg::json::parse(r.app.status_json(), status));
+  CHECK(!status["power"]["available"].as_bool());
+  CHECK(status["power"]["battery_mv"].is_null());
+  CHECK((*r.fake.last("state"))["sensors"]["battery_mv"].is_null());
+  r.app.open_settings();
+  for (int i = 0; i < 10; ++i) r.app.console("cancel");
+  CHECK_EQ(r.app.model().detail, std::string("Power off"));
+  r.app.console("talk"); r.app.console("release");
+  CHECK_EQ(battery.shutdowns, 0);
+  r.app.console("talk"); r.app.console("release");
+  CHECK_EQ(battery.shutdowns, 1);
+}

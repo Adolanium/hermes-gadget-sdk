@@ -58,6 +58,14 @@ Implement `hg::Display` (`firmware/core/include/hg/hal.hpp`):
 - **Monochrome or e-paper:** convert RGB565 to your format in `flush()`. The UI uses dark backgrounds with light text and accents, so thresholding the luminance works.
 - **Very small screens** (128×64): the layout scales text to 1×. You may want a slimmer layout; `Ui` reads only `DisplayInfo`.
 
+## Battery and power
+
+Set `Hal::power` only after the board's power driver starts successfully. `Power::read()` returns current readings or `nullopt` on a failed read. Each measurement is optional; omit a percentage when the hardware has no fuel gauge. `power_off()` requests a local shutdown and reports whether the request succeeded. The settings menu asks for a second selection before calling it.
+
+The AXP2101 implementation is in `firmware/drivers/axp2101.cpp`, with the ESP32 I2C connection in `port_power.cpp`. It leaves charger settings and supply rails unchanged. The core reports unavailable sensor values as JSON `null` to replace earlier readings at the gateway.
+
+A display that advertises `has_backlight` must accept zero percent to turn dark. `screen_timeout` dims and then darkens an idle display while keeping the device connected. Raw touch drivers should use `TouchGestures`, which consumes the first touch when waking. Button input through `App::on_button` does the same.
+
 ## Audio through a codec chip
 
 Boards like the ESP32-S3-BOX family and the ESP32-S3-Touch-AMOLED-1.75 route audio through codecs (ES7210 ADC, ES8311 DAC) configured over I2C. `CodecAudio`, `CodecMic` and `CodecSpeaker` in `port_codec.cpp` implement `hg::AudioIn` and `hg::AudioOut` on top of `esp_codec_dev` for that pair: fill in `BoardConfig::codec` and `BoardConfig::i2c`. Other codecs follow the same contracts:

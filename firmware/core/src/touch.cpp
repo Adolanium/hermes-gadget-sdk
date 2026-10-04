@@ -34,6 +34,7 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
   }
 
   if (state_ == State::Idle) {
+    if (app_.wake_display()) { state_ = State::Ignored; return; }
     state_ = app_.settings_title_hit(x, y) ? State::Settings : State::Pending;
     x0_ = x;
     y0_ = y;

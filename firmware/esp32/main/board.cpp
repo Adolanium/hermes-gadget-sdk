@@ -78,6 +78,7 @@ BoardConfig make() {
   // The side PWR key goes to the AXP2101; its conditioned level (SYS_OUT) is on expander
   // pin P4, high while pressed (Waveshare's hardware reference for this board).
   b.pwr_key = {true, 0x20, 4, true};
+  b.axp2101 = true;
   b.buttons = {0, -1, -1, -1};  // BOOT also works as TALK
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";

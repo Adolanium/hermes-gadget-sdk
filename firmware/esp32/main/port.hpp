@@ -15,6 +15,7 @@
 #include "freertos/FreeRTOS.h"  // must precede every other FreeRTOS header
 
 #include "board.hpp"
+#include "axp2101.hpp"
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
 #include "esp_codec_dev.h"
@@ -245,6 +246,17 @@ class TouchInput {
   ExpanderKeyConfig key_{};
   i2c_master_dev_handle_t touch_dev_ = nullptr;
   i2c_master_dev_handle_t key_dev_ = nullptr;
+};
+
+class AxpPower final : public hg::Power {
+ public:
+  bool begin(i2c_master_bus_handle_t bus);
+  std::optional<hg::PowerStatus> read() override { return chip_->read(); }
+  bool power_off() override { return chip_->power_off(); }
+
+ private:
+  i2c_master_dev_handle_t dev_ = nullptr;
+  std::unique_ptr<hg::Axp2101> chip_;
 };
 
 class Buttons {

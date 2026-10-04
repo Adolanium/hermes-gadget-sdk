@@ -92,6 +92,8 @@ class App {
   void close_settings();
   bool settings_open() const { return menu_ != Menu::Closed; }
   bool settings_title_hit(int x, int y) const;
+  // Returns true when this input only wakes a sleeping display.
+  bool wake_display();
 
   // Serial-console command (provisioning, bench automation). Returns the
   // response; machine-readable lines start with '@'.
@@ -164,6 +166,8 @@ class App {
   void settings_tick();
   void settings_model();
   void stop_hardware_check();
+  void power_tick();
+  json::Value power_value() const;
   json::Value status_value() const;
   std::string diag_report();
   std::string setting(std::string_view key, std::string_view fallback = {}) const;
@@ -213,7 +217,8 @@ class App {
   TalkMode talk_mode_ = TalkMode::Hold;
   uint8_t volume_ = 70;
   uint8_t brightness_ = 100;
-  enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, Microphone, Speaker, Display, Inputs, Info, Back };
+  enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, Microphone, Speaker, Display, Inputs, Info,
+                              Power, IdleTimer, PowerOff, Back };
   enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };
   Menu menu_ = Menu::Closed;
   HardwareCheck hardware_check_ = HardwareCheck::None;
@@ -221,6 +226,11 @@ class App {
   bool talk_held_ = false;
   bool settings_chord_fired_ = false;
   uint32_t talk_down_at_ = 0;
+  std::optional<PowerStatus> power_status_;
+  uint32_t power_read_at_ = 0, activity_at_ = 0;
+  uint32_t screen_timeout_ms_ = 0;
+  bool display_dimmed_ = false, display_sleeping_ = false, power_off_armed_ = false;
+  uint8_t wake_buttons_ = 0;
 
   // connection
   Phase phase_ = Phase::Boot;

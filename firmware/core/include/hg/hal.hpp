@@ -114,6 +114,22 @@ class Updater {
   virtual void confirm() {}
 };
 
+struct PowerStatus {
+  std::optional<bool> battery_present;
+  std::optional<uint16_t> battery_mv;
+  std::optional<uint8_t> battery_percent;
+  std::optional<bool> charging;
+  std::optional<bool> external_power;
+};
+
+class Power {
+ public:
+  virtual ~Power() = default;
+  // A failed read must return nullopt, never the previous reading.
+  virtual std::optional<PowerStatus> read() = 0;
+  virtual bool power_off() = 0;
+};
+
 // Everything except `system` and `transport` may be null when the board lacks it.
 struct Hal {
   System* system = nullptr;
@@ -123,6 +139,7 @@ struct Hal {
   AudioIn* mic = nullptr;
   AudioOut* speaker = nullptr;
   Updater* updater = nullptr;
+  Power* power = nullptr;
 };
 
 }  // namespace hg

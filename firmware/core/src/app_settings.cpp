@@ -11,12 +11,14 @@ bool App::settings_title_hit(int x, int y) const {
 
 bool App::open_settings() {
   if (prompt_showing() || ota_busy() || ota_ == Ota::Restarting) return false;
+  wake_display();
   if (settings_open()) { close_settings(); return true; }
   if (mode_ == Mode::Listening) cancel_listening("local settings");
   else if (mode_ == Mode::Thinking || mode_ == Mode::Responding) cancel_turn();
   stop_playback();
   dismiss_overlay();
   menu_ = Menu::Volume;
+  power_off_armed_ = false;
   check_result_.clear();
   update_model();
   return true;
@@ -50,10 +52,15 @@ void App::settings_input(Button button, bool pressed) {
       ((button == Button::Up || button == Button::Down) && pressed)) {
     stop_hardware_check();
     check_result_.clear();
+    power_off_armed_ = false;
     int item = static_cast<int>(menu_) + (button == Button::Up ? -1 : 1);
     if (item < static_cast<int>(Menu::Volume)) item = static_cast<int>(Menu::Back);
     if (item > static_cast<int>(Menu::Back)) item = static_cast<int>(Menu::Volume);
     menu_ = static_cast<Menu>(item);
+    if (!hal_.power && (menu_ == Menu::Power || menu_ == Menu::PowerOff)) {
+      menu_ = menu_ == Menu::Power ? (button == Button::Up ? Menu::Info : Menu::IdleTimer)
+                                   : (button == Button::Up ? Menu::IdleTimer : Menu::Back);
+    }
     return;
   }
   if (button != Button::Talk || pressed) return;
@@ -100,7 +107,23 @@ void App::settings_input(Button button, bool pressed) {
       hardware_check_ = HardwareCheck::Inputs;
       check_result_ = "Press a button. Release Cancel to leave.";
       break;
+    case Menu::IdleTimer: {
+      const uint32_t seconds = screen_timeout_ms_ / 1000;
+      const uint32_t next = seconds == 0 ? 30 : seconds < 60 ? 60 : seconds < 120 ? 120 : seconds < 300 ? 300 : 0;
+      console("set screen_timeout " + std::to_string(next));
+      break;
+    }
+    case Menu::PowerOff:
+      if (!power_off_armed_) {
+        power_off_armed_ = true;
+        check_result_ = "Select again to power off. Cancel goes back.";
+      } else {
+        power_off_armed_ = false;
+        check_result_ = hal_.power->power_off() ? "Power-off requested" : "Power-off failed. Try the physical PWR key.";
+      }
+      break;
     case Menu::Back: close_settings(); break;
+    case Menu::Power:
     case Menu::Info:
     case Menu::Closed: break;
   }
@@ -124,7 +147,7 @@ void App::settings_tick() {
 void App::settings_model() {
   UiModel& m = model_;
   m.screen = Screen::Settings;
-  m.headline = "Settings " + std::to_string(static_cast<int>(menu_)) + "/9";
+  m.headline = "Settings";
   m.scroll = 0;
   m.speaking = false;
   m.hint = profile_.touch_screen ? "Tap: change | Swipe: next"
@@ -166,6 +189,28 @@ void App::settings_model() {
       m.detail = "Device information";
       m.body = profile_.board + "\nFirmware " + profile_.firmware + "\n" + device_id_ + "\nMicrophone: " +
                (hal_.mic ? "available" : "unavailable") + "\nSpeaker: " + (hal_.speaker ? "available" : "unavailable");
+      break;
+    case Menu::Power:
+      m.detail = "Battery and power";
+      if (!power_status_) m.body = "Power readings unavailable.";
+      else {
+        const auto& p = *power_status_;
+        if (p.battery_present && !*p.battery_present) m.body = "No battery detected.\n";
+        if (p.battery_percent) m.body += std::to_string(*p.battery_percent) + "% (gauge estimate)\n";
+        if (p.battery_mv) m.body += std::to_string(*p.battery_mv) + " mV\n";
+        if (p.charging) m.body += *p.charging ? "Charging\n" : "Not charging\n";
+        if (p.external_power) m.body += *p.external_power ? "USB power\n" : "No USB power\n";
+        if (p.battery_percent && *p.battery_percent <= 10 && p.external_power == false) m.body += "Low battery: connect USB.";
+      }
+      break;
+    case Menu::IdleTimer:
+      m.detail = "Screen timeout";
+      m.body = screen_timeout_ms_ ? std::to_string(screen_timeout_ms_ / 1000) + " seconds\nDims halfway; first input wakes."
+                                 : "Always on\nSelect to enable automatic dimming and screen sleep.";
+      break;
+    case Menu::PowerOff:
+      m.detail = "Power off";
+      m.body = "Shut down the board. Use its PWR key to turn it on again.";
       break;
     case Menu::Back:
       m.detail = "Back to Hermes";

@@ -36,7 +36,7 @@ constexpr uint32_t kOtaRestartMs = 1000;    // time for ota.done to leave before
 constexpr uint32_t kBackoffMs[] = {1000, 2000, 4000, 8000, 15000, 30000};
 constexpr size_t kBackoffSteps = sizeof(kBackoffMs) / sizeof(kBackoffMs[0]);
 
-const char* const kSettingKeys[] = {"name", "server", "token", "talk_mode", "volume", "brightness", "wifi_ssid", "wifi_pass"};
+const char* const kSettingKeys[] = {"name", "server", "token", "talk_mode", "volume", "brightness", "screen_timeout", "wifi_ssid", "wifi_pass"};
 
 bool is_secret(std::string_view key) { return key == "token" || key == "wifi_pass"; }
 
@@ -104,6 +104,9 @@ void App::load_settings() {
   if (hal_.speaker) hal_.speaker->set_volume(volume_);
   brightness_ = static_cast<uint8_t>(std::max(5, std::min(100, std::atoi(setting("brightness", "100").c_str()))));
   if (hal_.display && hal_.display->info().has_backlight) hal_.display->set_backlight(brightness_);
+  screen_timeout_ms_ = static_cast<uint32_t>(std::max(0, std::min(3600, std::atoi(setting("screen_timeout", "0").c_str())))) * 1000;
+  activity_at_ = now();
+  display_dimmed_ = display_sleeping_ = false;
 }
 
 void App::add_action(Action action) {
@@ -428,6 +431,7 @@ void App::h_unpaired(const json::Value&) {
 bool App::can_talk() const { return phase_ == Phase::Online && paired_ && ota_ != Ota::Receiving; }
 
 void App::h_turn_start(const json::Value& m) {
+  wake_display();
   active_turn_ = m["turn"].as_string();
   turn_done_ = false;
   reply_final_ = false;
@@ -471,6 +475,7 @@ void App::h_transcript(const json::Value& m) {
 }
 
 void App::h_reply_delta(const json::Value& m) {
+  wake_display();
   if (mode_ == Mode::Listening) return;
   reply_ = m["text"].as_string();
   scroll_ = -1;
@@ -482,6 +487,7 @@ void App::h_reply_delta(const json::Value& m) {
 }
 
 void App::h_reply(const json::Value& m) {
+  wake_display();
   last_turn_rx_ = now();
   const std::string& text = m["text"].as_string();
   if (m["interim"].as_bool()) {
@@ -499,6 +505,7 @@ void App::h_reply(const json::Value& m) {
 }
 
 void App::h_audio_start(const json::Value& m) {
+  wake_display();
   if (settings_open()) close_settings();
   if (!hal_.speaker || mode_ == Mode::Listening) return;
   uint32_t rate = static_cast<uint32_t>(m["rate"].as_int(profile_.speaker_rate));
@@ -583,6 +590,7 @@ void App::on_transport_binary(const uint8_t* data, size_t len) {
 }
 
 void App::h_display(const json::Value& m) {
+  wake_display();
   card_title_ = m["title"].as_string();
   card_body_ = m["body"].as_string();
   card_scroll_ = 0;
@@ -593,6 +601,7 @@ void App::h_display(const json::Value& m) {
 }
 
 void App::h_image_start(const json::Value& m) {
+  wake_display();
   if (settings_open()) close_settings();
   if (!hal_.display || !ui_) return;
   const UiLayout& l = ui_->layout();
@@ -624,6 +633,7 @@ void App::h_image_end(const json::Value& m) {
 }
 
 void App::h_prompt(const json::Value& m) {
+  wake_display();
   if (settings_open()) close_settings();
   const std::string& id = m["id"].as_string();
   if (id.empty()) return;
@@ -715,6 +725,12 @@ void App::h_error(const json::Value& m) {
 // Input
 
 void App::on_button(Button button, bool pressed) {
+  const auto bit = static_cast<uint8_t>(1u << static_cast<unsigned>(button));
+  if (pressed && wake_display()) { wake_buttons_ |= bit; return; }
+  if (wake_buttons_ & bit) {
+    if (!pressed) wake_buttons_ &= static_cast<uint8_t>(~bit);
+    return;
+  }
   if (button == Button::Talk) {
     talk_held_ = pressed;
     if (pressed) talk_down_at_ = now();
@@ -908,6 +924,7 @@ void App::on_mic_samples(const int16_t* samples, size_t count) {
 }
 
 void App::submit_text(std::string_view text) {
+  wake_display();
   if (settings_open()) close_settings();
   std::string t = trim(text);
   if (t.empty()) return;
@@ -1008,6 +1025,19 @@ void App::flush_sensors() {
   if (now() - sensors_sent_ < kSensorIntervalMs) return;
   json::Value s = json::Value::object();
   for (const auto& kv : sensors_) s.set(kv.first, kv.second);
+  if (hal_.power) {
+    s.set("power_available", power_status_ ? 1 : 0);
+    for (const char* key : {"battery_present", "battery_mv", "battery_percent", "charging", "external_power"})
+      s.set(key, json::Value());
+    if (power_status_) {
+      const auto& p = *power_status_;
+      if (p.battery_present) s.set("battery_present", *p.battery_present ? 1 : 0);
+      if (p.battery_mv) s.set("battery_mv", *p.battery_mv);
+      if (p.battery_percent) s.set("battery_percent", *p.battery_percent);
+      if (p.charging) s.set("charging", *p.charging ? 1 : 0);
+      if (p.external_power) s.set("external_power", *p.external_power ? 1 : 0);
+    }
+  }
   json::Value msg = proto::message("state");
   msg.set("sensors", s);
   send(msg);
@@ -1187,6 +1217,7 @@ void App::h_ota_abort(const json::Value&) {
 
 void App::tick() {
   const uint32_t t = now();
+  power_tick();
   settings_tick();
 
   if (phase_ == Phase::Boot && static_cast<int32_t>(t - boot_until_) >= 0) {
@@ -1318,7 +1349,7 @@ void App::update_model() {
   if (m.link == Link::Offline && network_up_) m.link = Link::Network;
   if (settings_open()) {
     settings_model();
-    if (ui_) ui_->render(m);
+    if (ui_ && !display_sleeping_) ui_->render(m);
     return;
   }
 
@@ -1453,8 +1484,11 @@ void App::update_model() {
   }
   bool keeps_detail = m.screen == Screen::Pairing || m.screen == Screen::Boot || m.screen == Screen::Prompt;
   if (!notice_.empty() && !keeps_detail) m.detail = notice_;
+  if (m.screen == Screen::Ready && m.hero && power_status_ && power_status_->battery_percent &&
+      *power_status_->battery_percent <= 10 && power_status_->external_power == false)
+    m.detail = "Low battery: connect USB";
   if (!hint_flash_.empty()) m.hint = hint_flash_;
-  if (ui_) ui_->render(m);
+  if (ui_ && !display_sleeping_) ui_->render(m);
 }
 
 // --------------------------------------------------------------------------
@@ -1481,6 +1515,8 @@ json::Value App::status_value() const {
       .set("paired", paired_)
       .set("server", server_url_)
       .set("network", network_up_);
+  s.set("display_sleeping", display_sleeping_);
+  if (hal_.power) s.set("power", power_value());
   if (!pairing_code_.empty()) s.set("pairing_code", pairing_code_);
   if (!prompt_id_.empty()) s.set("prompt", prompt_id_);
   if (!fatal_.empty()) s.set("error", fatal_);
@@ -1555,6 +1591,9 @@ std::string App::console(std::string_view raw) {
       return "@value " + out.dump();
     }
     std::string value = ks == std::string::npos ? std::string() : trim(std::string_view(rest).substr(ks + 1));
+    if (key == "screen_timeout" && !value.empty() &&
+        (value.size() > 4 || value.find_first_not_of("0123456789") != std::string::npos || std::atoi(value.c_str()) > 3600))
+      return "@error screen_timeout must be 0..3600 seconds";
     if (!hal_.storage) return "@error no storage";
     if (value.empty()) hal_.storage->erase(key);
     else hal_.storage->set(key, value);

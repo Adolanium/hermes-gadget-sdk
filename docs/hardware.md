@@ -86,7 +86,7 @@ Board option `esp32s3-touch-amoled-175`, for Waveshare's all-in-one board: an ES
 | Touch | CST9217 | I2C 0x5A, RST 40 (INT 11 unused: polled) |
 | Speaker DAC | ES8311 | I2C 0x18; I2S MCLK 42, BCLK 9, WS 45, DOUT 8; amplifier enable 46 |
 | Microphones | ES7210 | I2C 0x40; I2S DIN 10 (shares the bus above), MIC1 + MIC2 |
-| Power | AXP2101 | I2C 0x34; left at its power-on defaults |
+| Power | AXP2101 | I2C 0x34; battery/USB readings and local power-off; charging and rails keep their defaults |
 | I/O expander | TCA9554 | I2C 0x20; P4 mirrors the PWR key |
 | I2C bus | | SDA 15, SCL 14, 400 kHz |
 | BOOT key | | GPIO 0 |
@@ -102,6 +102,12 @@ Board option `esp32s3-touch-amoled-175`, for Waveshare's all-in-one board: an ES
 | Hold BOOT | TALK, like holding the screen |
 
 `set touch_cancel swipe` keeps only the swipe as CANCEL, `set touch_cancel pwr` only the PWR key, and `set touch_cancel both` restores the default. The same gestures work on the `sim-466x466-round` simulator board with the mouse.
+
+The [device settings menu](using-gadget.md#device-settings-and-hardware-checks) shows battery voltage, the PMIC's estimated percentage, charging and USB power. Readings refresh every five seconds and appear in `status`, `diag` and Hermes sensor telemetry. Failed reads become unavailable; they do not retain a stale percentage. A low gauge estimate, 10 percent or less without USB, adds a reminder on the idle screen.
+
+Select **Power off** twice to request shutdown through the AXP2101. Use PWR to turn the board on again. This is a local control; Hermes has no power-off action. USB power may affect shutdown and wake behavior, so test both power sources on your board revision. The physical PWR key retains its existing Cancel behavior and the PMIC's own long-hold behavior.
+
+The driver follows [X-Powers' AXP2101 register documentation](https://files.waveshare.com/wiki/common/X-power-AXP2101_SWcharge_V1.0.pdf). It reads status, enabled measurements and gauge estimates. It does not change charging current, battery protection, gauge calibration or supply voltages. Battery estimates depend on the fitted cell. Physical power tests remain outstanding in the [verification table](hardware-validation.md).
 
 **Build and flash it** with PlatformIO:
 
@@ -204,7 +210,7 @@ gadget> status
 | `forget-key` | New device identity on next boot (re-enrollment and re-pairing) |
 | `factory-reset` | Erase the device key and all settings |
 
-The keys are `name`, `server`, `token`, `talk_mode` (`hold` or `tap`), `volume`, `brightness`, `wifi_ssid` and `wifi_pass`. The [device settings menu](using-gadget.md#device-settings-and-hardware-checks) saves volume, brightness and talk mode without a console.
+The keys are `name`, `server`, `token`, `talk_mode` (`hold` or `tap`), `volume`, `brightness`, `screen_timeout` (0..3600 seconds, 0 disables it), `wifi_ssid` and `wifi_pass`. The [device settings menu](using-gadget.md#device-settings-and-hardware-checks) saves volume, brightness, talk mode and screen timeout without a console.
 
 Machine-readable lines start with `@`, so tools can drive a bench device. `hermes-gadget provision` is a thin wrapper over these commands.
 

@@ -34,7 +34,12 @@ Tap CANCEL to move to the next item, then tap TALK to change it. On a touchscree
 | Display check | Show red, green, blue, white, and black bands |
 | Input check | Show the last button pressed; release CANCEL to leave the check |
 | Device information | Show the board, firmware, device ID, and available audio drivers |
+| Battery and power | Show available power readings on boards with a power driver |
+| Screen timeout | Choose always on, 30, 60, 120, or 300 seconds |
+| Power off | Select twice to shut down a board with a power driver |
 
-Volume, brightness, and talk mode survive restarts. Unavailable drivers show as unavailable. These checks help you test the hardware; a completed tone does not prove that a physical speaker produced sound.
+Volume, brightness, talk mode, and screen timeout survive restarts. Unavailable drivers show as unavailable. These checks help you test the hardware; a completed tone does not prove that a physical speaker produced sound.
+
+Screen timeout is off by default. When enabled, a brightness-capable display dims halfway through the idle period, then goes dark. The first button press or touch wakes it without recording or answering a prompt. Incoming replies and prompts wake it too. Recording, playback, settings, pairing and updates keep it awake. The processor and Wi-Fi remain running; this is screen sleep. Use the board's Power off control to shut down the device.
 
 Incoming confirmation prompts and firmware updates close settings. You cannot open settings during a prompt or update. The USB console also accepts `settings`, `settings close`, and `set brightness 50`.

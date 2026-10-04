@@ -11,12 +11,14 @@ idf_component_register(
         "port_display.cpp"
         "port_events.cpp"
         "port_ota.cpp"
+        "port_power.cpp"
+        "../../drivers/axp2101.cpp"
         "port_storage.cpp"
         "port_system.cpp"
         "port_touch.cpp"
         "port_wifi.cpp"
         "port_ws.cpp"
-    INCLUDE_DIRS "."
+    INCLUDE_DIRS "." "../../drivers"
     REQUIRES core
     # "driver" pulls in GPIO, I2S, LEDC and SPI on every ESP-IDF 5.x release.
     # ESP-IDF 6.x dropped I2S and LEDC from that catch-all, so name them too;

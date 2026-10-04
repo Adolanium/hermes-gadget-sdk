@@ -88,6 +88,7 @@ struct BoardConfig {
   CodecAudioConfig codec;
   TouchConfig touch;
   ExpanderKeyConfig pwr_key;
+  bool axp2101 = false;
   int status_led = -1;
   const char* talk_label = "TALK";
   const char* cancel_label = "CANCEL";
