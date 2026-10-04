@@ -9,6 +9,7 @@ import { copyFile, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { buildDocs } from "./docs.mjs";
 
 const site = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repo = resolve(site, "..");
@@ -17,6 +18,7 @@ const out = resolve(values.out ?? join(site, "_site"));
 
 await rm(out, { recursive: true, force: true });
 await cp(join(site, "src"), out, { recursive: true });
+await buildDocs(repo, out);
 
 const esptool = join(site, "node_modules", "esptool-js");
 await mkdir(join(out, "vendor"));

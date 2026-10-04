@@ -46,7 +46,9 @@ Cross-language guarantees:
 
 ### The browser installer
 
-`site/` is a static page with no server, published to GitHub Pages by `.github/workflows/pages.yml` with the latest release's firmware. It flashes boards with [esptool-js](https://github.com/espressif/esptool-js) over Web Serial (Chrome and Edge), checks the chip against the release manifest first, and then talks to the firmware's serial console to set Wi-Fi, the Hermes address and the name. To try it locally with your own builds:
+`site/` contains the product homepage, browser installer, and documentation, published to GitHub Pages by `.github/workflows/pages.yml` with the latest release's firmware. The build renders `docs/*.md` into the hosted guides with `marked`; edit the Markdown rather than the generated pages. Search runs in the browser and sends no queries to a server.
+
+The installer flashes boards with [esptool-js](https://github.com/espressif/esptool-js) over Web Serial (Chrome and Edge), checks the chip against the release manifest first, and then talks to the firmware's serial console to set Wi-Fi, the Hermes address, and the name. To try it locally with your own builds:
 
 ```bash
 cd site && npm ci
@@ -55,6 +57,10 @@ python -m http.server 8000 --directory _site               # then open http://lo
 ```
 
 Web Serial needs a secure context, which `localhost` counts as.
+
+For homepage and docs work, `npm run build` works without firmware. Run `npm run preview` to serve it at `http://127.0.0.1:8768`. The installer is at `installer.html`; old root links with `#server=...` still reach it with the address intact.
+
+Run `npm test` for the Node tests. After building, run `npx playwright install chromium` and `npm run test:browser` for browser tests. CI installs Chromium and runs both suites. Set `BROWSER_EXECUTABLE` to use an existing Chromium binary locally.
 
 ## Working on the plugin against a live Hermes
 

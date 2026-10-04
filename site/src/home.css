@@ -1,0 +1,32 @@
+/* Product introduction. The installer shares the base colours and controls. */
+body { color-scheme:dark; background:#10151c; color:#f4f2ec; --text:#f4f2ec; --muted:#aab7c3; --accent:#efb451; --accent-strong:#efb451; --accent-ink:#242019; --border:#303842; --border-strong:#48515c; --surface:#171e27; --surface-2:#202936; }
+.button { text-decoration:none; }
+.wrap { max-width:1200px; width:calc(100% - 72px); }
+.topbar { position:static; background:transparent; }
+.topbar-inner { height:88px; }
+.hero { grid-template-columns:1.15fr 1fr; padding:78px 0 65px; gap:50px; }
+.hero h1 { font:clamp(42px,4.5vw,64px)/1.08 Georgia,serif; letter-spacing:-2px; margin-bottom:28px; }
+.hero .lead { font-size:18px; line-height:1.7; max-width:500px; }
+.hero .actions { margin-top:30px; }
+.hero .hint { margin-top:18px; }
+.stage { margin:0; display:flex; flex-direction:column; align-items:center; position:relative; padding:20px 0; }
+.device-shell { width:min(350px,100%); aspect-ratio:1; padding:12px; border-radius:50%; border:1px solid #78808a; background:linear-gradient(135deg,#66717a,#222930 25%,#11161c 70%,#55606a); box-shadow:0 24px 40px #0006; }
+.device-shell img { width:100%; height:100%; border-radius:50%; display:block; image-rendering:pixelated; }
+.device-stand { width:124px; height:36px; background:linear-gradient(90deg,#232b34,#333c46,#232b34); border-radius:0 0 30% 30%; }
+.stage figcaption { color:#aab7c3; font-size:12px; margin-top:24px; text-align:center; }
+.paths-head { display:flex; justify-content:space-between; align-items:center; gap:24px; margin-bottom:20px; }
+.paths-head h2 { font-size:26px; font-weight:500; letter-spacing:-.5px; margin:0; }
+.path-grid { display:grid; grid-template-columns:repeat(3,1fr); border:1px solid var(--border); border-radius:11px; overflow:hidden; }
+.path { display:block; padding:27px; background:#161d26; text-decoration:none; color:var(--text); }
+.path + .path { border-left:1px solid var(--border); }
+.path:hover { background:#202936; }
+.path .number { font:11px/1.5 ui-monospace,Consolas,monospace; color:var(--accent); }
+.path h3 { margin:12px 0 8px; font-size:19px; }
+.path p { font-size:14px; color:var(--muted); margin:0 0 18px; }
+.path .link { color:var(--accent); font-size:14px; }
+.site-band { display:grid; grid-template-columns:repeat(3,1fr); gap:36px; padding:40px 0; }
+.site-band h3 { margin:0 0 8px; font-size:16px; }
+.site-band p { color:var(--muted); font-size:14px; margin:0; }
+.site-band a { color:var(--accent); }
+.footer { background:transparent; }
+@media(max-width:800px) { .wrap { width:calc(100% - 40px); } .topbar-inner { height:auto; min-height:76px; flex-wrap:wrap; gap:12px; padding:16px 0; } .topbar nav { gap:20px; } .hero { grid-template-columns:1fr; padding:40px 0; gap:20px; } .hero h1 { font-size:42px; } .hero .lead { font-size:16px; } .device-shell { width:280px; } .paths-head { display:block; } .path-grid,.site-band { grid-template-columns:1fr; } .path + .path { border-left:0; border-top:1px solid var(--border); } .site-band { gap:24px; } }

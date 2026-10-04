@@ -30,6 +30,6 @@
 
 ## Save a board report
 
-The [browser installer](https://adolanium.github.io/hermes-gadget-sdk/) can save a report under **Troubleshooting**, **Something else**, **Save a diagnostics report**. It includes the board status and recent log.
+The [browser installer](https://adolanium.github.io/hermes-gadget-sdk/installer.html) can save a report under **Troubleshooting**, **Something else**, **Save a diagnostics report**. It includes the board status and recent log.
 
 If you already use the SDK's serial tools, run `hermes-gadget diag --port COM5`, replacing `COM5` with your board's port. Attach the saved file and the steps to reproduce the problem to a [bug report](https://github.com/Adolanium/hermes-gadget-sdk/issues).

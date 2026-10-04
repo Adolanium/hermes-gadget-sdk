@@ -9,9 +9,13 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test \"test/*.test.mjs\""
+    "test": "node --test \"test/*.test.mjs\"",
+    "test:browser": "playwright test",
+    "preview": "node scripts/serve.mjs"
   },
   "devDependencies": {
-    "esptool-js": "0.7.0"
+    "@playwright/test": "1.62.1",
+    "esptool-js": "0.7.0",
+    "marked": "17.0.5"
   }
 }

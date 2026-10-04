@@ -25,7 +25,7 @@ Follow [Connect Hermes](connect-hermes.md#1-install-the-plugin) to install and e
 
 ## 3. Install and connect
 
-Open the [browser installer](https://adolanium.github.io/hermes-gadget-sdk/). Plug in the board and select its model.
+Open the [browser installer](https://adolanium.github.io/hermes-gadget-sdk/installer.html). Plug in the board and select its model.
 
 1. Install the firmware. Keep the cable connected until the installer says it has finished.
 2. Enter the Wi-Fi network, password, Hermes address, and device name.

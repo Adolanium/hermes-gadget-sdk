@@ -73,6 +73,12 @@ jobs:
       - name: Build
         working-directory: site
         run: node scripts/build.mjs
+      - name: Install browser
+        working-directory: site
+        run: npx playwright install --with-deps chromium
+      - name: Browser tests
+        working-directory: site
+        run: npx playwright test
 
   esp32:
     name: ESP32 firmware (${{ matrix.board }})

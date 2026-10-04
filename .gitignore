@@ -14,6 +14,8 @@ build/
 # Installer site
 site/node_modules/
 site/_site/
+site/test-results/
+site/playwright-report/
 
 # ESP-IDF / PlatformIO outputs
 firmware/esp32/build/
