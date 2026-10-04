@@ -1,6 +1,8 @@
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/wifi_setup.html" HG_WIFI_SETUP_HTML)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "wifi_setup.html")
-configure_file(wifi_setup_page.hpp.in wifi_setup_page.hpp @ONLY)
+if(NOT CMAKE_SCRIPT_MODE_FILE)
+    file(READ "${CMAKE_CURRENT_LIST_DIR}/wifi_setup.html" HG_WIFI_SETUP_HTML)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/wifi_setup.html")
+    configure_file(wifi_setup_page.hpp.in wifi_setup_page.hpp @ONLY)
+endif()
 
 idf_component_register(
     SRCS
