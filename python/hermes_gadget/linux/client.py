@@ -21,14 +21,35 @@ from ..sim.transport import WsTransport
 
 def load_config(path: Path) -> dict:
     config = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(config, dict) or set(config) - {"server", "name", "token"}:
-        raise ValueError("config must be an object containing server, name and optionally token")
-    for key, value in config.items():
+    if not isinstance(config, dict) or set(config) - {"server", "name", "token", "audio", "gpio"}:
+        raise ValueError("unknown configuration field; expected server, name, token, audio or gpio")
+    for key in {"server", "name", "token"} & config.keys():
+        value = config[key]
         if not isinstance(value, str) or len(value.encode()) > 500 or "\x00" in value:
             raise ValueError(f"invalid {key}: expected a string of at most 500 bytes")
     url = urlsplit(config.get("server", ""))
     if url.scheme not in {"ws", "wss"} or not url.hostname or url.username or url.password or url.fragment:
         raise ValueError("server must be a ws:// or wss:// URL without credentials or a fragment")
+    audio = config.get("audio", {})
+    if not isinstance(audio, dict) or set(audio) - {"input", "output", "rate"}:
+        raise ValueError("audio accepts input, output and rate")
+    for key in {"input", "output"} & audio.keys():
+        value = audio[key]
+        if not ((type(value) is int and value >= 0) or (isinstance(value, str) and value.strip())):
+            raise ValueError(f"audio.{key} must be a device number or name")
+    if type(audio.get("rate", 16000)) is not int or audio.get("rate", 16000) not in (8000, 16000, 24000, 32000, 44100, 48000):
+        raise ValueError("audio.rate must be 8000, 16000, 24000, 32000, 44100 or 48000")
+    gpio = config.get("gpio", {})
+    if not isinstance(gpio, dict) or set(gpio) - {"talk", "cancel", "status_led", "outputs", "chip"}:
+        raise ValueError("gpio accepts talk, cancel, status_led, outputs and chip")
+    outputs = gpio.get("outputs", {})
+    if not isinstance(outputs, dict) or any(not re.fullmatch(r"[a-z][a-z0-9_]{0,31}", name) for name in outputs):
+        raise ValueError("GPIO output names must start with a letter and use lowercase letters, digits or underscores")
+    pins = [gpio[key] for key in ("talk", "cancel", "status_led") if key in gpio] + list(outputs.values())
+    if any(type(pin) is not int or not 2 <= pin <= 27 for pin in pins) or len(set(pins)) != len(pins):
+        raise ValueError("GPIO pins must be distinct BCM numbers from 2 to 27")
+    if type(gpio.get("chip", 0)) is not int or not 0 <= gpio.get("chip", 0) <= 15:
+        raise ValueError("gpio.chip must be a number from 0 to 15")
     return config
 
 
@@ -78,10 +99,26 @@ class Client:
         self.state.data.update(server=config["server"], name=config.get("name", "Linux Gadget"),
                                token=config.get("token", ""))
         self.state.save()
+        from .audio import Audio
+
+        audio = config.get("audio", {})
+        self.audio = Audio(audio) if "input" in audio or "output" in audio else None
+        self.gpio = None
         self.device = NativeDevice(self, width=0, height=0, board="linux", firmware=__version__,
-                                   name=config.get("name", "Linux Gadget"), mic=False, speaker=False,
-                                   backlight=False, scroll_buttons=False, library=library)
+                                   name=config.get("name", "Linux Gadget"), mic="input" in audio,
+                                   speaker="output" in audio, mic_rate=audio.get("rate", 16000),
+                                   speaker_rate=audio.get("rate", 16000), audio_host=self.audio,
+                                   backlight=False, scroll_buttons=False, library=library,
+                                   button_labels=("TALK", "CANCEL"))
         self.transport = WsTransport()
+        try:
+            if config.get("gpio"):
+                from .gpio import Gpio
+
+                self.gpio = Gpio(config["gpio"], self.device)
+        except Exception:
+            self.close()
+            raise
 
     def start(self) -> None:
         self.device.begin()
@@ -118,19 +155,40 @@ class Client:
                 self.device.transport_binary(event.data)
             elif event.kind == "closed":
                 self.device.transport_closed(event.data or "closed")
+        if self.gpio:
+            self.gpio.step(self.now_ms(), self.device.status())
+        if self.audio:
+            pcm = self.audio.read()
+            if "input" in self.audio.errors:
+                if self.device.screen() == "listening":
+                    self.device.button(BUTTONS["cancel"], True)
+                    self.device.button(BUTTONS["cancel"], False)
+            elif pcm:
+                self.device.mic_samples(pcm)
         self.device.tick()
         self._check_storage()
 
     def close(self) -> None:
-        self.transport.shutdown()
-        self.device.close()
+        try:
+            if self.gpio:
+                self.gpio.close()
+        finally:
+            try:
+                if self.audio:
+                    self.audio.close()
+            finally:
+                self.transport.shutdown()
+                self.device.close()
 
     def command(self, request: dict) -> dict:
         if not isinstance(request, dict):
             raise TypeError("request must be an object")
         command = request.get("command")
         if command == "status":
-            return {**self.device.status(), "uptime_s": int(time.monotonic() - self.started)}
+            status = {**self.device.status(), "uptime_s": int(time.monotonic() - self.started)}
+            if self.audio:
+                status["audio"] = {**self.audio.devices, "errors": dict(self.audio.errors)}
+            return status
         if command == "messages":
             return {"messages": list(self.messages)}
         if command == "button":

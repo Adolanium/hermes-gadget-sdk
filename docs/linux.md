@@ -72,6 +72,85 @@ report the event without starting a turn. The service keeps the latest 20
 replies and notices in memory. `messages` includes sequence numbers so a local
 consumer can ignore entries it already read. Restarting clears that history.
 
+## Add USB audio
+
+Install PortAudio and the audio extra, then list the connected devices:
+
+```bash
+sudo apt install libportaudio2
+python -m pip install -e '.[audio]'
+hermes-gadget linux audio-devices
+```
+
+Add `audio` to your configuration. Use a device number from the list or a unique
+part of its name. Names are preferable when USB device numbers change:
+
+```json
+{
+  "server": "ws://192.168.1.20:8765/gadget",
+  "name": "Kitchen Gadget",
+  "audio": {"input": "USB Audio", "output": "USB Audio", "rate": 16000}
+}
+```
+
+Omit `input` or `output` when that device is absent. Supported sample rates are
+8000, 16000, 24000, 32000, 44100 and 48000 Hz, mono PCM16. The selected devices
+must support the configured rate. Stop the service and run:
+
+```bash
+hermes-gadget linux audio-check --config device-config.json
+```
+
+Speak for three seconds. The check prints the captured peak level and plays the
+clip back at half volume. It sends nothing to Hermes and saves no recording.
+If the check rejects 16000 Hz, try 48000 Hz or an ALSA device that supports
+conversion. Check capture levels with `alsamixer` if the signal is silent.
+The systemd service account needs access to `/dev/snd`, typically through the
+`audio` group. Test as that account when deploying a service.
+
+Restart the client, press TALK with `hermes-gadget linux button talk press`,
+then release with `hermes-gadget linux button talk release`. Use physical
+buttons for everyday voice interaction. `status` reports audio errors. A failed
+microphone stops the recording; the client does not substitute silent input.
+Reattach an unplugged audio device and start a new recording to retry it.
+
+## Add Raspberry Pi buttons and outputs
+
+Use GPIO Zero with the lgpio backend on Pi 4 and Pi 5. On Raspberry Pi OS, install
+`python3-lgpio` and create the virtual environment with `--system-site-packages`
+so it can import that system package, then install `.[gpio]`.
+
+Add this object to the configuration:
+
+```json
+"gpio": {
+  "chip": 0,
+  "talk": 17,
+  "cancel": 27,
+  "status_led": 22,
+  "outputs": {"desk_light": 23}
+}
+```
+
+The numbers are BCM GPIO numbers, not physical header positions. Each pin must
+be unique. Wire each momentary button between its GPIO and ground; the client
+enables pull-ups and debounces presses. Connect LEDs through a suitable series
+resistor. Use a driver circuit for loads a GPIO cannot supply. Only use
+3.3 V-compatible logic on the header.
+
+The status LED stays on when paired and connected, blinks slowly while offline
+or awaiting pairing, and blinks quickly during recording. `gpio.desk_light`
+becomes a device action with one boolean parameter, `on`. Only configured
+outputs are exposed. Outputs start off and return off on a clean shutdown.
+Do not use this software as a safety controller; a power failure cannot promise
+a controlled output transition.
+
+The service account needs access to `/dev/gpiochip0`, normally through the
+`gpio` group. Older Pi 5 kernels may expose the header on gpiochip4; set `chip`
+to 4 in that case. Verify the header controller with `gpioinfo` before wiring.
+See [GPIO Zero's pin documentation](https://gpiozero.readthedocs.io/en/stable/api_pins.html)
+for the lgpio backend and permissions.
+
 ## State and recovery
 
 The default state directory is `$XDG_STATE_HOME/hermes-gadget`, or
@@ -101,7 +180,7 @@ environment at `/opt/hermes-gadget`, plus a configuration file at
 before installing the unit. Run control commands as the service account with
 `--state-dir /var/lib/hermes-gadget`.
 
-The headless client reports no display, microphone, speaker, battery or ESP32
-update slot. Software updates require stopping the process, updating the
+The client only advertises configured audio and output actions. It reports no
+display, battery or ESP32 update slot. Software updates require stopping the process, updating the
 checkout, rebuilding the native library, and restarting with the same state
 directory.

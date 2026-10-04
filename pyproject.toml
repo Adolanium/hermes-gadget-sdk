@@ -18,11 +18,13 @@ dependencies = [
 [project.optional-dependencies]
 # Live microphone/speaker in the simulator (PortAudio wheels ship for Windows/macOS).
 audio = ["sounddevice>=0.4.6,<0.6"]
+# Optional Raspberry Pi digital controls. lgpio is supplied by Raspberry Pi OS.
+gpio = ["gpiozero>=2.0.1,<3"]
 # Serial provisioning and console for real boards.
 serial = ["pyserial>=3.5,<4"]
 # Image delivery in the development server.
 images = ["Pillow>=10,<13"]
-dev = ["pytest>=8,<10"]
+dev = ["pytest>=8,<10", "gpiozero>=2.0.1,<3"]
 
 [project.scripts]
 hermes-gadget = "hermes_gadget.cli:main"

@@ -101,15 +101,7 @@ class _Config(Structure):
     ]
 
 
-class Host(Protocol):
-    """What the simulator must provide in place of real drivers."""
-
-    def transport_connect(self, url: str, subprotocol: str) -> None: ...
-    def transport_send_text(self, text: str) -> bool: ...
-    def transport_send_binary(self, data: bytes) -> bool: ...
-    def transport_close(self) -> None: ...
-    def display_flush(self, y0: int, y1: int) -> None: ...
-    def display_backlight(self, percent: int) -> None: ...
+class AudioHost(Protocol):
     def mic_start(self, rate: int) -> bool: ...
     def mic_stop(self) -> None: ...
     def speaker_begin(self, rate: int) -> bool: ...
@@ -118,6 +110,17 @@ class Host(Protocol):
     def speaker_abort(self) -> None: ...
     def speaker_busy(self) -> bool: ...
     def speaker_volume(self, percent: int) -> None: ...
+
+
+class Host(AudioHost, Protocol):
+    """What the simulator must provide in place of real drivers."""
+
+    def transport_connect(self, url: str, subprotocol: str) -> None: ...
+    def transport_send_text(self, text: str) -> bool: ...
+    def transport_send_binary(self, data: bytes) -> bool: ...
+    def transport_close(self) -> None: ...
+    def display_flush(self, y0: int, y1: int) -> None: ...
+    def display_backlight(self, percent: int) -> None: ...
     def storage_get(self, key: str) -> str | None: ...
     def storage_set(self, key: str, value: str) -> None: ...
     def storage_erase(self, key: str) -> None: ...
@@ -202,7 +205,8 @@ class NativeDevice:
                  backlight: bool = True, scroll_buttons: bool = True, mic_rate: int = 16000,
                  speaker_rate: int = 16000, library: Path | None = None,
                  button_labels: tuple[str, str] | None = None, round_panel: bool = False,
-                 touch_screen: bool = False, update_capacity: int = 0, update_pending: bool = False):
+                 touch_screen: bool = False, update_capacity: int = 0, update_pending: bool = False,
+                 audio_host: AudioHost | None = None):
         self._lib = load_library(library)
         self._host_obj = host
         self.width, self.height = width, height
@@ -211,13 +215,13 @@ class NativeDevice:
         self._config = _Config(width, height, int(mic), int(speaker), int(backlight), int(scroll_buttons),
                                mic_rate, speaker_rate, *self._strings, int(round_panel), int(touch_screen),
                                update_capacity, int(update_pending))
-        self._callbacks = self._make_callbacks(host)
+        self._callbacks = self._make_callbacks(host, audio_host or host)
         self._handle = self._lib.hgsim_create(ctypes.byref(self._config), ctypes.byref(self._callbacks))
         if not self._handle:
             raise SimLibraryError("hgsim_create failed")
         self._action_refs: list[Any] = []
 
-    def _make_callbacks(self, h: Host) -> _Host:
+    def _make_callbacks(self, h: Host, audio: AudioHost) -> _Host:
         @_guard(None)
         def transport_connect(_u, url, sub):
             h.transport_connect(url.decode(), sub.decode() if sub else "")
@@ -232,19 +236,19 @@ class NativeDevice:
 
         @_guard(0)
         def mic_start(_u, rate):
-            return int(bool(h.mic_start(int(rate))))
+            return int(bool(audio.mic_start(int(rate))))
 
         @_guard(0)
         def spk_begin(_u, rate):
-            return int(bool(h.speaker_begin(int(rate))))
+            return int(bool(audio.speaker_begin(int(rate))))
 
         @_guard(None)
         def spk_write(_u, samples, count):
-            h.speaker_write(ctypes.string_at(samples, count * 2))
+            audio.speaker_write(ctypes.string_at(samples, count * 2))
 
         @_guard(0)
         def spk_busy(_u):
-            return int(bool(h.speaker_busy()))
+            return int(bool(audio.speaker_busy()))
 
         @_guard(-1)
         def storage_get(_u, key, out, cap):
@@ -299,13 +303,13 @@ class NativeDevice:
             _FLUSH(_guard(None)(lambda _u, y0, y1: h.display_flush(y0, y1))),
             _INT_ARG(_guard(None)(lambda _u, p: h.display_backlight(p))),
             _START(mic_start),
-            _VOID(_guard(None)(lambda _u: h.mic_stop())),
+            _VOID(_guard(None)(lambda _u: audio.mic_stop())),
             _START(spk_begin),
             _SPK_WRITE(spk_write),
-            _VOID(_guard(None)(lambda _u: h.speaker_end())),
-            _VOID(_guard(None)(lambda _u: h.speaker_abort())),
+            _VOID(_guard(None)(lambda _u: audio.speaker_end())),
+            _VOID(_guard(None)(lambda _u: audio.speaker_abort())),
             _INT_RET(spk_busy),
-            _INT_ARG(_guard(None)(lambda _u, p: h.speaker_volume(p))),
+            _INT_ARG(_guard(None)(lambda _u, p: audio.speaker_volume(p))),
             _STORAGE_GET(storage_get),
             _STORAGE_SET(storage_set),
             _STORAGE_ERASE(storage_erase),

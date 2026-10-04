@@ -126,6 +126,9 @@ Everything else keeps its own license. None of it is copied into this repository
 | [esp_websocket_client](https://components.espressif.com/components/espressif/esp_websocket_client) | The device's WebSocket connection | Apache 2.0 |
 | [esptool-js](https://github.com/espressif/esptool-js) | Flashing from the browser installer, added to the site when it's built | Apache 2.0 |
 | Python packages (`websockets`, and optionally `Pillow`, `sounddevice`, `pyserial`) | Plugin, simulator and tools | Their own licenses; see each project |
+| [GPIO Zero](https://github.com/gpiozero/gpiozero/blob/master/LICENSE.rst) | Optional Raspberry Pi buttons and digital outputs | BSD 3-Clause |
+| [lgpio](https://github.com/joan2937/lg/blob/master/UNLICENCE) | Linux GPIO access, installed from Raspberry Pi OS | Unlicense |
+| [python-sounddevice](https://github.com/spatialaudio/python-sounddevice/blob/master/LICENSE), [PortAudio](https://www.portaudio.com/license.html) | Optional live microphone and speaker on Linux | MIT licenses |
 
 The mascot artwork, and the logo and device bitmaps drawn from it, come from [Hermes Agent](https://github.com/NousResearch/hermes-agent) (MIT, © 2025 Nous Research); see [assets/mascot](assets/mascot) and [NOTICE](NOTICE).
 

@@ -15,6 +15,9 @@ def add_parser(sub) -> None:
     commands = parser.add_subparsers(dest="linux_command", required=True)
     service = commands.add_parser("run", help="Run the persistent device service")
     service.add_argument("--config", type=Path, required=True)
+    commands.add_parser("audio-devices", help="List available input and output devices")
+    audio_check = commands.add_parser("audio-check", help="Record a short clip and play it back locally")
+    audio_check.add_argument("--config", type=Path, required=True)
     commands.add_parser("status", help="Show connection, pairing code and service uptime")
     commands.add_parser("messages", help="Show the last 20 replies and notices")
     send = commands.add_parser("send", help="Send a text message to Hermes")
@@ -37,6 +40,24 @@ def main(args) -> int:
         print("The device service requires Linux.", file=sys.stderr)
         return 1
     try:
+        if args.linux_command == "audio-devices":
+            from .audio import backend
+
+            sd = backend()
+            try:
+                print(sd.query_devices())
+            except sd.PortAudioError as exc:
+                raise RuntimeError(str(exc)) from exc
+            return 0
+        if args.linux_command == "audio-check":
+            from .audio import backend, check_loopback
+
+            sd = backend()
+            try:
+                check_loopback(load_config(args.config).get("audio", {}))
+            except sd.PortAudioError as exc:
+                raise RuntimeError(str(exc)) from exc
+            return 0
         if args.linux_command == "run":
             config = load_config(args.config)
             stop = threading.Event()
@@ -57,6 +78,6 @@ def main(args) -> int:
         result = request(args.state_dir, message)
         print(json.dumps(result, indent=2))
         return 1 if "error" in result else 0
-    except (OSError, ValueError, RuntimeError) as exc:
+    except (OSError, ValueError, RuntimeError, ImportError) as exc:
         print(f"Linux gadget: {exc}", file=sys.stderr)
         return 1
