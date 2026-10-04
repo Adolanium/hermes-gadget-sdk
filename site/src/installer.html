@@ -13,6 +13,7 @@
   <meta property="og:image" content="https://adolanium.github.io/hermes-gadget-sdk/img/logo.png">
   <link rel="icon" href="img/logo.png" type="image/png">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="installer.css">
   <script type="module" src="app.js"></script>
 </head>
 <body>
@@ -32,23 +33,38 @@
   </header>
 
   <main class="wrap">
-    <section class="hero">
-      <div class="hero-text">
-        <p class="eyebrow">Browser installer</p>
-        <h1>Set up a Hermes Gadget</h1>
-        <p class="lead">Install the firmware on your board, connect it to Wi-Fi and pair it with your Hermes, all from this page. Nothing to download or build.</p>
-        <ul class="needs" aria-label="You need">
-          <li>Chrome or Edge on a computer</li>
-          <li>A USB data cable</li>
-          <li>Hermes with the Gadget plugin (<a href="#hermes-setup" data-open="hermes-setup">set it up</a>)</li>
-        </ul>
-      </div>
-      <figure class="hero-device">
-        <img src="img/screen-ready.png" alt="A gadget's round screen showing the Hermes mascot and &quot;Hold the screen to talk&quot;" width="466" height="466">
-      </figure>
-    </section>
+    <section class="install-title"><p class="eyebrow">From USB to your first conversation</p><h1>Let's set up your gadget.</h1><p class="lead">We'll walk through the board, your Hermes, and the connection.</p></section>
+    <ol class="stepper" aria-label="Setup progress"><li data-step="board" aria-current="step"><b>1</b>Board</li><li data-step="hermes"><b>2</b>Hermes</li><li data-step="install"><b>3</b>Install</li><li data-step="wifi"><b>4</b>Connect</li><li data-step="pair"><b>5</b>Pair</li></ol>
+    <div class="notice notice-error" id="unsupported" hidden>
+      <p><strong>This browser can't talk to USB devices.</strong> Open this page in Chrome or Edge on a computer. Safari, Firefox, phones and tablets don't support it.</p>
+    </div>
 
-    <details class="setup-hermes" id="hermes-setup">
+    <div class="installer-layout">
+    <ol class="steps" id="steps">
+      <li class="step" id="step-board" data-state="active">
+        <div class="step-head">
+          <span class="step-num" aria-hidden="true">1</span>
+          <h2 tabindex="-1">Which board do you have?</h2>
+          <p class="step-summary" id="board-summary"></p>
+        </div>
+        <div class="step-body">
+          <p class="hint">Match the exact model printed on your board. Check its wiring guide before continuing.</p>
+          <div class="boards" id="boards" role="radiogroup" aria-label="Board"></div>
+          <p class="hint other-board">Board not listed? See <a href="docs/porting.html">what a port involves</a>, or <a href="https://github.com/Adolanium/hermes-gadget-sdk/issues/new?template=new_board.yml">ask for it</a>.</p>
+          <div class="notice" id="no-firmware" hidden>
+            <p>No firmware has been published here yet. You can <a href="docs/hardware.html#build-and-flash">build and flash it yourself</a>, then come back to connect it to Wi-Fi.</p>
+          </div>
+          <div class="actions">
+            <button class="button primary" id="board-next" type="button" disabled>Continue to Hermes setup →</button>
+            <button class="button text" id="skip-install" type="button">It already runs Hermes Gadget: skip to Wi-Fi</button>
+          </div>
+        </div>
+      </li>
+
+      <li class="step" id="step-hermes" data-state="locked">
+        <div class="step-head"><span class="step-num" aria-hidden="true">2</span><h2 tabindex="-1">Prepare your Hermes</h2><p class="step-summary" id="hermes-summary"></p></div>
+        <div class="step-body">
+    <details open class="setup-hermes" id="hermes-setup">
       <summary>First time? Set up Hermes</summary>
       <p>On the computer that runs Hermes, install the plugin, then add Hermes Gadget to the gateway:</p>
       <div class="command">
@@ -59,36 +75,18 @@
         <code>hermes gateway setup</code>
         <button class="button small" type="button" data-copy="hermes gateway setup">Copy</button>
       </div>
-      <p class="hint">Choose <strong>Hermes Gadget</strong> and restart the gateway when it asks. It then prints a link to this page with your Hermes address filled in. <a href="https://github.com/Adolanium/hermes-gadget-sdk/blob/main/docs/getting-started.md#3-connect-to-hermes">Full guide</a></p>
+      <p class="hint">Choose <strong>Hermes Gadget</strong> and restart the gateway when it asks. It then prints a link to this page with your Hermes address filled in. <a href="docs/getting-started.html#3-connect-to-hermes">Full guide</a></p>
     </details>
 
-    <div class="notice notice-error" id="unsupported" hidden>
-      <p><strong>This browser can't talk to USB devices.</strong> Open this page in Chrome or Edge on a computer. Safari, Firefox, phones and tablets don't support it.</p>
-    </div>
 
-    <ol class="steps" id="steps">
-      <li class="step" id="step-board" data-state="active">
-        <div class="step-head">
-          <span class="step-num" aria-hidden="true">1</span>
-          <h2 tabindex="-1">Choose your board</h2>
-          <p class="step-summary" id="board-summary"></p>
-        </div>
-        <div class="step-body">
-          <div class="boards" id="boards" role="radiogroup" aria-label="Board"></div>
-          <p class="hint other-board">Board not listed? See <a href="https://github.com/Adolanium/hermes-gadget-sdk/blob/main/docs/porting.md">what a port involves</a>, or <a href="https://github.com/Adolanium/hermes-gadget-sdk/issues/new?template=new_board.yml">ask for it</a>.</p>
-          <div class="notice" id="no-firmware" hidden>
-            <p>No firmware has been published here yet. You can <a href="https://github.com/Adolanium/hermes-gadget-sdk/blob/main/docs/hardware.md#build-and-flash">build and flash it yourself</a>, then come back to connect it to Wi-Fi.</p>
-          </div>
-          <div class="actions">
-            <button class="button primary" id="board-next" type="button" disabled>Continue</button>
-            <button class="button text" id="skip-install" type="button">It already runs Hermes Gadget: skip to Wi-Fi</button>
-          </div>
+          <p>Keep the gateway running. <code>hermes gadget info</code> shows the address your board needs in the connection step.</p>
+          <p class="hint">Already installed the plugin? Check that the gateway is running, then continue. Voice also needs <a href="docs/connect-hermes.html#4-enable-speech">speech recognition and text-to-speech</a>.</p>
+          <div class="actions"><button class="button primary" id="hermes-next" type="button">Hermes is ready →</button><button class="button" id="hermes-back" type="button">Back</button></div>
         </div>
       </li>
-
       <li class="step" id="step-install" data-state="locked">
         <div class="step-head">
-          <span class="step-num" aria-hidden="true">2</span>
+          <span class="step-num" aria-hidden="true">3</span>
           <h2 tabindex="-1">Install the firmware</h2>
           <p class="step-summary" id="install-summary"></p>
         </div>
@@ -123,7 +121,7 @@
 
       <li class="step" id="step-wifi" data-state="locked">
         <div class="step-head">
-          <span class="step-num" aria-hidden="true">3</span>
+          <span class="step-num" aria-hidden="true">4</span>
           <h2 tabindex="-1">Connect it to Wi-Fi and Hermes</h2>
           <p class="step-summary" id="wifi-summary"></p>
         </div>
@@ -170,7 +168,7 @@
 
       <li class="step" id="step-pair" data-state="locked">
         <div class="step-head">
-          <span class="step-num" aria-hidden="true">4</span>
+          <span class="step-num" aria-hidden="true">5</span>
           <h2 tabindex="-1">Pair it with Hermes</h2>
         </div>
         <div class="step-body">
@@ -200,13 +198,17 @@
           </div>
           <div class="notice notice-warning" id="pair-hint" role="alert" hidden></div>
           <div class="actions">
+            <button class="button" id="pair-edit" type="button">Edit connection settings</button>
             <button class="button" id="disconnect" type="button">Disconnect</button>
             <button class="button text" id="another" type="button">Set up another board</button>
           </div>
         </div>
       </li>
     </ol>
-
+    <aside class="ready-list"><h2>Have these ready</h2><ul><li>Chrome or Edge on a computer</li><li>A USB data cable</li><li>A 2.4 GHz Wi-Fi network</li><li>Your Hermes computer</li></ul>
+      <section><h2>First time using the plugin?</h2><p>The Hermes step shows what to run on your Hermes computer.</p></section>
+      <section><h2>Already set up?</h2><p>Change Wi-Fi without reinstalling. Keep firmware current with <code>hermes gadget update</code>.</p><button class="button text" id="manage-existing" type="button">Manage an existing gadget →</button></section>
+    </aside></div>
     <details class="log">
       <summary>Technical details</summary>
       <pre id="log" tabindex="0" aria-label="Installer and board log"></pre>

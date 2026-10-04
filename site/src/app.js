@@ -7,7 +7,7 @@ import { reportFileName, reportText } from "./lib/diagnostics.js";
 import { openConsole, reopen } from "./lib/serial.js";
 
 const REPO = "https://github.com/Adolanium/hermes-gadget-sdk";
-const STEPS = ["step-board", "step-install", "step-wifi", "step-pair"];
+const STEPS = ["step-board", "step-hermes", "step-install", "step-wifi", "step-pair"];
 const POLL_MS = 1500;
 const WIFI_PATIENCE_MS = 25000;
 const HERMES_PATIENCE_MS = 20000;
@@ -47,7 +47,12 @@ const scrollBehavior = () => (matchMedia("(prefers-reduced-motion: reduce)").mat
 function goTo(step) {
   const index = STEPS.indexOf(step);
   STEPS.forEach((id, i) => {
-    $(id).dataset.state = i < index ? "done" : i === index ? "active" : "locked";
+    const name = i < index ? "done" : i === index ? "active" : "locked";
+    $(id).dataset.state = name;
+    const marker = document.querySelector('[data-step="' + id.slice(5) + '"]');
+    marker.dataset.state = name;
+    if (i === index) marker.setAttribute("aria-current", "step");
+    else marker.removeAttribute("aria-current");
   });
   $(step).querySelector("h2").focus({ preventScroll: true });
   $(step).scrollIntoView({ behavior: scrollBehavior(), block: "start" });
@@ -95,6 +100,7 @@ function renderBoards(manifest) {
     const input = document.createElement("input");
     input.type = "radio";
     input.name = "board";
+    input.disabled = !("serial" in navigator);
     input.value = build.board;
     input.addEventListener("change", () => {
       state.build = build;
@@ -106,7 +112,11 @@ function renderBoards(manifest) {
     const summary = document.createElement("span");
     summary.className = "board-summary";
     summary.textContent = build.summary;
-    card.append(input, title);
+    const icon = document.createElement("span");
+    icon.className = "board-icon" + (build.board.includes("amoled") ? " round" : build.ready_made ? "" : " breadboard");
+    icon.textContent = build.board.includes("amoled") ? "◉" : "▣";
+    icon.setAttribute("aria-hidden", "true");
+    card.append(input, icon, title);
     if (build.ready_made) {
       const badge = document.createElement("span");
       badge.className = "badge";
@@ -130,16 +140,23 @@ function renderBoards(manifest) {
 $("board-next").addEventListener("click", () => {
   $("board-summary").textContent = state.build.title;
   show("uart-hint", !state.build.ready_made);
+  goTo("step-hermes");
+});
+$("hermes-next").addEventListener("click", () => {
+  $("hermes-summary").textContent = "Gateway prepared";
   goTo("step-install");
 });
+$("hermes-back").addEventListener("click", () => goTo("step-board"));
+$("manage-existing").addEventListener("click", () => $("skip-install").click());
 
-$("skip-install").addEventListener("click", () => {
+$("skip-install").addEventListener("click", async () => {
+  await disconnect();
   $("board-summary").textContent = "Already running Hermes Gadget";
   $("install-summary").textContent = "Skipped";
   goTo("step-wifi");
 });
 
-// ---- step 2: the firmware -------------------------------------------------------------------
+// ---- step 3: the firmware -------------------------------------------------------------------
 
 function progress(text, fraction) {
   show("install-progress");
@@ -182,6 +199,7 @@ async function install() {
   if (!port) return;
   $("install-actions").hidden = true;
   state.installing = true;
+  $("manage-existing").disabled = true;
   let session = null;
   try {
     progress("Downloading the firmware...", null);
@@ -226,14 +244,15 @@ async function install() {
   } finally {
     state.writing = false;
     state.installing = false;
+    $("manage-existing").disabled = false;
     $("install-actions").hidden = false;
   }
 }
 
 $("install").addEventListener("click", install);
-$("install-back").addEventListener("click", () => goTo("step-board"));
+$("install-back").addEventListener("click", () => goTo("step-hermes"));
 
-// ---- step 3: Wi-Fi and Hermes ---------------------------------------------------------------
+// ---- step 4: Wi-Fi and Hermes ---------------------------------------------------------------
 
 function formValues() {
   const value = (id) => $(id).value.trim();
@@ -327,7 +346,7 @@ $("show-password").addEventListener("click", (event) => {
   event.currentTarget.setAttribute("aria-pressed", String(visible));
 });
 
-// ---- step 4: pairing ------------------------------------------------------------------------
+// ---- step 5: pairing ------------------------------------------------------------------------
 
 function check(id, stateName, label) {
   const item = $(id);
@@ -336,6 +355,8 @@ function check(id, stateName, label) {
 }
 
 function watchPairing(values) {
+  show("pair-done", false);
+  setNotice("pair-hint", "");
   const started = Date.now();
   let onWifiSince = null;
   let busy = false;
@@ -403,6 +424,10 @@ async function disconnect() {
   await port?.close().catch(() => {});
 }
 
+$("pair-edit").addEventListener("click", async () => {
+  await disconnect();
+  goTo("step-wifi");
+});
 $("disconnect").addEventListener("click", async () => {
   await disconnect();
   setNotice("pair-hint", "Disconnected. You can unplug the board; it keeps its settings.");
@@ -456,23 +481,16 @@ $("diag-save").addEventListener("click", saveDiagnostics);
 
 // ---- page-wide ------------------------------------------------------------------------------
 
-// Links that open a section on this page without touching the URL's #server=... part.
-document.addEventListener("click", (event) => {
-  const link = event.target.closest("[data-open]");
-  if (!link) return;
-  event.preventDefault();
-  const section = $(link.dataset.open);
-  section.open = true;
-  section.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
-  section.querySelector("summary").focus({ preventScroll: true });
-});
-
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-copy]");
   if (!button) return;
-  await navigator.clipboard.writeText(button.dataset.copy);
   const label = button.textContent;
-  button.textContent = "Copied";
+  try {
+    await navigator.clipboard.writeText(button.dataset.copy);
+    button.textContent = "Copied";
+  } catch {
+    button.textContent = "Select the command to copy";
+  }
   setTimeout(() => { button.textContent = label; }, 1500);
 });
 
@@ -488,7 +506,7 @@ async function start() {
 
   if (!("serial" in navigator)) {
     show("unsupported");
-    for (const id of ["board-next", "skip-install", "install", "wifi-save", "diag-save"]) $(id).disabled = true;
+    for (const id of ["board-next", "skip-install", "manage-existing", "hermes-next", "install", "wifi-save", "diag-save"]) $(id).disabled = true;
   } else {
     navigator.serial.addEventListener("disconnect", (event) => {
       if (event.target === state.port && !state.writing) {
