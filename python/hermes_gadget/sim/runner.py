@@ -15,14 +15,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from .. import png
+from .. import __version__, png
 from .audio_io import Microphone, Speaker, load_wav
 from .native import BUTTONS, NativeDevice
 from .transport import WsTransport
 
 log = logging.getLogger("hermes_gadget.sim")
 
-FIRMWARE_VERSION = "0.1.0-sim"
+FIRMWARE_VERSION = f"{__version__}-sim"
 UPDATE_SLOT_BYTES = 0x1F0000  # an app slot on the ESP32 boards (firmware/esp32/partitions.csv)
 
 
