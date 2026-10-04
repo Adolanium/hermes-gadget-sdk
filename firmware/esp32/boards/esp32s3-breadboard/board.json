@@ -1,0 +1,5 @@
+{
+  "title": "ESP32-S3 breadboard build",
+  "summary": "ESP32-S3-DevKitC-1 (N8R8 or N16R8) wired to an ST7789 screen, an INMP441 microphone and a MAX98357A amplifier.",
+  "docs": "docs/hardware.md#esp32-s3-breadboard"
+}

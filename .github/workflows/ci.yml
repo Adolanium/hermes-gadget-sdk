@@ -72,3 +72,12 @@ jobs:
       - name: Build
         working-directory: firmware/esp32
         run: pio run -e ${{ matrix.board }}
+      - name: Package
+        working-directory: firmware/esp32
+        run: python tools/package_release.py --board ${{ matrix.board }} --out dist
+      - name: Keep the images
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.board }}
+          path: firmware/esp32/dist/
+          if-no-files-found: error

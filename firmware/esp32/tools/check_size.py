@@ -17,22 +17,35 @@ import argparse
 import struct
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 ENTRY = struct.Struct("<2sBBII16sI")
 MAGIC = b"\xaa\x50"
 TYPE_APP = 0x00
 
 
-def app_slots(table: bytes) -> list[tuple[str, int]]:
-    """(label, size) of every app partition in a binary partition table."""
-    slots = []
+class Partition(NamedTuple):
+    type: int
+    subtype: int
+    offset: int
+    size: int
+    label: str
+
+
+def partitions(table: bytes) -> list[Partition]:
+    """Every entry of a binary partition table, in table order."""
+    entries = []
     for off in range(0, len(table) - ENTRY.size + 1, ENTRY.size):
-        magic, ptype, _subtype, _offset, size, label, _flags = ENTRY.unpack_from(table, off)
+        magic, ptype, subtype, offset, size, label, _flags = ENTRY.unpack_from(table, off)
         if magic != MAGIC:
             break  # 0xEBEB (MD5 entry) or 0xFFFF ends the table
-        if ptype == TYPE_APP:
-            slots.append((label.rstrip(b"\0").decode(errors="replace"), size))
-    return slots
+        entries.append(Partition(ptype, subtype, offset, size, label.rstrip(b"\0").decode(errors="replace")))
+    return entries
+
+
+def app_slots(table: bytes) -> list[tuple[str, int]]:
+    """(label, size) of every app partition in a binary partition table."""
+    return [(p.label, p.size) for p in partitions(table) if p.type == TYPE_APP]
 
 
 def main(argv: list[str] | None = None) -> int:

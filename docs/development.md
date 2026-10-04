@@ -66,6 +66,23 @@ Two checks stop a firmware build that would run with settings nobody asked for. 
 - **`tools/check_config.py`**, from `CMakeLists.txt` after the configuration is generated (so `idf.py` builds run it too). It fails when a line of `sdkconfig.defaults` or the board's defaults didn't reach the generated sdkconfig. That happens when a symbol is misspelled, belongs to another chip, or has an unmet dependency, and when an sdkconfig from an older checkout outlives a change to the defaults. In the last case, delete `sdkconfig.<board>` (PlatformIO) or the build directory, then build again. A board file that picks another option of a choice the base file sets says so with `# CONFIG_<base option> is not set`.
 - **`tools/check_size.py`**, after linking (`tools/pio_checks.py`). It fails when the app leaves less than 10% of its smallest app partition free. For `idf.py` builds, run it by hand: `python tools/check_size.py --app build/hermes_gadget.bin --partitions build/partition_table/partition-table.bin`.
 
+### Releases
+
+`tools/package_release.py` turns PlatformIO builds into release files. For each board:
+
+- **`hermes-gadget-<board>-<version>.bin`:** bootloader, partition table, OTA data and app in one image, from address 0. It is byte for byte what `esptool merge_bin` makes from the same build. Flashed at `0x0`, it also erases the device's settings.
+- **`hermes-gadget-<board>-<version>-app.bin`:** the app alone, for `hermes gadget update`.
+
+It also writes `SHA256SUMS` and `manifest.json`, which tells the browser installer each board's chip, flash size and PSRAM, and where the settings partition is. The installer writes everything around the settings, so a device you reinstall keeps its Wi-Fi, server and key. CI packages every board on every change and keeps the files as workflow artifacts.
+
+To publish a release:
+
+1. Set `PROJECT_VER` in `firmware/esp32/CMakeLists.txt`, and the version in `pyproject.toml` and `plugin/plugin.yaml`.
+2. Merge, then push a tag: `git tag v0.2.0 && git push origin v0.2.0`.
+3. The **Release** workflow builds every board in `platformio.ini`, checks the firmware reports the tag's version, and publishes the files as a GitHub release.
+
+To package local builds: `pio run && python tools/package_release.py --all --out dist`.
+
 Conventions:
 
 - **The core is single-threaded.** Ports marshal driver events onto the app thread; never call `hg::App` from an ISR or another task.
