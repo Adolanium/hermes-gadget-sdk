@@ -358,6 +358,7 @@ void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
       break;
     }
     case Screen::Image:
+    case Screen::Settings:
       break;
   }
 }

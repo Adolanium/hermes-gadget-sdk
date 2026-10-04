@@ -198,12 +198,13 @@ gadget> status
 | `talk` / `release` | Press or release TALK (bench automation) |
 | `cancel` | Press CANCEL |
 | `new-session` | Start a fresh conversation (same as holding CANCEL for 2 s) |
+| `settings` / `settings close` | Open or close the local settings and hardware checks |
 | `yes` / `no` | Answer the question on screen |
 | `reconnect` | Drop and re-open the Hermes connection |
 | `forget-key` | New device identity on next boot (re-enrollment and re-pairing) |
 | `factory-reset` | Erase the device key and all settings |
 
-The keys are `name`, `server`, `token`, `talk_mode` (`hold` or `tap`), `volume`, `wifi_ssid` and `wifi_pass`.
+The keys are `name`, `server`, `token`, `talk_mode` (`hold` or `tap`), `volume`, `brightness`, `wifi_ssid` and `wifi_pass`. The [device settings menu](using-gadget.md#device-settings-and-hardware-checks) saves volume, brightness and talk mode without a console.
 
 Machine-readable lines start with `@`, so tools can drive a bench device. `hermes-gadget provision` is a thin wrapper over these commands.
 
