@@ -191,7 +191,11 @@ ActionHandler = Callable[[dict], dict]
 
 
 class NativeDevice:
-    """One simulated device instance running the production core."""
+    """One device running the production core with host-provided drivers.
+
+    Zero width and height omit the display. Disabled peripherals never call
+    their host methods, so a headless host only needs transport, storage and system.
+    """
 
     def __init__(self, host: Host, *, width: int, height: int, board: str, firmware: str, name: str,
                  server_url: str = "", access_token: str = "", mic: bool = True, speaker: bool = True,
@@ -403,6 +407,8 @@ class NativeDevice:
         """Raw little-endian RGB565 for rows [y0, y1)."""
         w, h = c_int(), c_int()
         ptr = self._lib.hgsim_framebuffer(self._handle, ctypes.byref(w), ctypes.byref(h))
+        if not ptr:
+            return b""
         y1 = h.value if y1 is None else y1
         base = ctypes.cast(ptr, c_void_p).value + y0 * w.value * 2
         return ctypes.string_at(base, (y1 - y0) * w.value * 2)

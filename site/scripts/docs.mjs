@@ -4,7 +4,7 @@ import { join, posix } from "node:path";
 
 const REPO = "https://github.com/Adolanium/hermes-gadget-sdk";
 export const groups = [
-  ["Get started", [["getting-started", "Choose your path"], ["desktop", "Try the simulator"], ["setup-board", "Set up a board"], ["connect-hermes", "Connect Hermes"]]],
+  ["Get started", [["getting-started", "Choose your path"], ["desktop", "Try the simulator"], ["setup-board", "Set up a board"], ["linux", "Run a Linux gadget"], ["connect-hermes", "Connect Hermes"]]],
   ["Use your gadget", [["using-gadget", "Talk, type, and interrupt"], ["troubleshooting", "Fix a problem"], ["simulator", "Simulator controls"]]],
   ["Build with the SDK", [["development", "Development and tests"], ["porting", "Add a board or action"], ["faces", "Customize the face"], ["hardware", "Hardware and wiring"]]],
   ["Reference", [["hardware-validation", "Hardware verification"], ["protocol", "Protocol"], ["architecture", "Architecture"], ["hermes-integration", "Hermes integration"]]],

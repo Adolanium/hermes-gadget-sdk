@@ -65,6 +65,7 @@ typedef struct hgsim_host {
 } hgsim_host;
 
 typedef struct hgsim_config {
+  // Set both dimensions to zero for a headless device; otherwise 1..2048.
   int width;
   int height;
   int has_mic;

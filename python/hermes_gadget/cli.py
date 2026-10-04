@@ -366,6 +366,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-v", "--verbose", action="store_true")
     sub = p.add_subparsers(dest="command", required=True)
 
+    from .linux.cli import add_parser
+    add_parser(sub)
+
     from .sim.runner import BOARDS
 
     s = sub.add_parser("sim", help="Run the desktop simulator (the real device core)")

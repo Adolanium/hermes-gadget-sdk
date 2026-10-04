@@ -176,14 +176,15 @@ extern "C" {
 int hgsim_abi_version(void) { return HGSIM_ABI_VERSION; }
 
 hgsim* hgsim_create(const hgsim_config* cfg, const hgsim_host* host) {
-  if (!cfg || !host || cfg->width <= 0 || cfg->height <= 0) return nullptr;
+  if (!cfg || !host || cfg->width < 0 || cfg->height < 0 ||
+      cfg->width > 2048 || cfg->height > 2048 || (cfg->width == 0) != (cfg->height == 0)) return nullptr;
   auto* sim = new hgsim();
   sim->hal_impl = std::make_unique<SimHal>(*cfg, *host);
   SimHal* h = sim->hal_impl.get();
   sim->hal.system = h;
   sim->hal.transport = h;
   sim->hal.storage = h;
-  sim->hal.display = h;
+  sim->hal.display = cfg->width ? h : nullptr;
   sim->hal.mic = cfg->has_mic ? h : nullptr;
   sim->hal.speaker = cfg->has_speaker ? h : nullptr;
   if (cfg->update_capacity && host->update_begin) {

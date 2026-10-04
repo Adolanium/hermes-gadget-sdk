@@ -31,7 +31,7 @@ hermes-gadget = "hermes_gadget.cli:main"
 # The Hermes plugin directory doubles as an importable package so the
 # development server and tests run the exact code the gateway loads.
 package-dir = { "hermes_gadget" = "python/hermes_gadget", "hermes_gadget_plugin" = "plugin" }
-packages = ["hermes_gadget", "hermes_gadget.sim", "hermes_gadget_plugin"]
+packages = ["hermes_gadget", "hermes_gadget.sim", "hermes_gadget.linux", "hermes_gadget_plugin"]
 
 [tool.setuptools.package-data]
 hermes_gadget_plugin = ["plugin.yaml"]

@@ -86,6 +86,7 @@ These images show the simulator's device display. The [simulator guide](docs/sim
 | [Choose a starting point](docs/getting-started.md) | [Development and tests](docs/development.md) |
 | [Set up a board](docs/setup-board.md) | [Add a board, actions, or sensors](docs/porting.md) |
 | [Try the simulator](docs/desktop.md) | [Customize the face](docs/faces.md) |
+| [Run a Linux gadget](docs/linux.md) | [Hardware verification](docs/hardware-validation.md) |
 | [Connect Hermes](docs/connect-hermes.md) | [Architecture](docs/architecture.md) |
 | [Talk, type, and interrupt](docs/using-gadget.md) | [Protocol](docs/protocol.md) |
 | [Change Wi-Fi or update firmware](docs/setup-board.md#manage-an-existing-gadget) | [Hermes integration reference](docs/hermes-integration.md) |
