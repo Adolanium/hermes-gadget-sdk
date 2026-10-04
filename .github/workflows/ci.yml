@@ -20,9 +20,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Configure
         run: cmake -S firmware -B build/host -DCMAKE_BUILD_TYPE=Release
       - name: Build
@@ -32,14 +32,14 @@ jobs:
 
   python:
     name: Python ${{ matrix.python }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         python: ["3.10", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -47,23 +47,46 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Build the simulator library
         run: hermes-gadget build-sim
+      - uses: actions/setup-node@v7  # the installer's console client runs against the simulator core
+        with:
+          node-version: 22
       - name: Test
         # Tests that need a Hermes Agent checkout skip themselves here; hermes.yml runs them.
         run: pytest -q
 
+  site:
+    name: Installer site
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Install
+        working-directory: site
+        run: npm ci
+      - name: Test
+        working-directory: site
+        run: npm test
+      - name: Build
+        working-directory: site
+        run: node scripts/build.mjs
+
   esp32:
     name: ESP32 firmware (${{ matrix.board }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         board: [esp32s3-breadboard, esp32s3-touch-amoled-175, esp32s3-lcd-154]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.platformio
           key: platformio-${{ runner.os }}-${{ hashFiles('firmware/esp32/platformio.ini', 'firmware/esp32/main/idf_component.yml') }}
@@ -72,3 +95,12 @@ jobs:
       - name: Build
         working-directory: firmware/esp32
         run: pio run -e ${{ matrix.board }}
+      - name: Package
+        working-directory: firmware/esp32
+        run: python tools/package_release.py --board ${{ matrix.board }} --out dist
+      - name: Keep the images
+        uses: actions/upload-artifact@v7
+        with:
+          name: firmware-${{ matrix.board }}
+          path: firmware/esp32/dist/
+          if-no-files-found: error

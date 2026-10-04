@@ -173,13 +173,13 @@ def test_hermes_gadget_update_stages_and_waits_for_the_gateway(cli_store, monkey
     store.enroll(DEVICE_ID, KEY, name="Desk", board="sim-320x240")
     queue = ota.UpdateQueue(store.path.parent)
 
-    cli._cmd_update(types.SimpleNamespace(device="desk", image=str(firmware), no_wait=True, timeout=1))
+    cli._cmd_update(types.SimpleNamespace(latest=False, force=False, device="desk", image=str(firmware), no_wait=True, timeout=1))
     assert queue.pending() == [DEVICE_ID]
     assert "Staged firmware 0.2.0" in capsys.readouterr().out
 
     reports = iter([dict(state="sending", sent=50, size=100), dict(state="done", version="0.2.0")])
     monkeypatch.setattr(cli.time, "sleep", lambda s: queue.report(DEVICE_ID, **next(reports)))
-    cli._cmd_update(types.SimpleNamespace(device=DEVICE_ID, image=str(firmware), no_wait=False, timeout=30))
+    cli._cmd_update(types.SimpleNamespace(latest=False, force=False, device=DEVICE_ID, image=str(firmware), no_wait=False, timeout=30))
     out = capsys.readouterr().out
     assert "sending: 50%" in out and "Installed 0.2.0. Desk restarts into it" in out
 
@@ -190,6 +190,6 @@ def test_hermes_gadget_update_refuses_another_boards_image(cli_store):
     store, firmware = cli_store
     store.enroll(DEVICE_ID, KEY, name="Desk", board="esp32s3-breadboard")
     with pytest.raises(SystemExit) as stop:
-        cli._cmd_update(types.SimpleNamespace(device="Desk", image=str(firmware), no_wait=True, timeout=1))
+        cli._cmd_update(types.SimpleNamespace(latest=False, force=False, device="Desk", image=str(firmware), no_wait=True, timeout=1))
     assert "is built for sim-320x240, but Desk is esp32s3-breadboard" in str(stop.value)
     assert ota.UpdateQueue(store.path.parent).pending() == []

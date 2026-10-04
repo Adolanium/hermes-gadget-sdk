@@ -205,9 +205,20 @@ def _serial_command(ser, line: str, timeout: float = 3.0) -> str:
     return lines[-1] if lines and lines[-1].startswith("@") else ""
 
 
+def console_arg(value: str) -> str:
+    """``value`` as one argument for the board's console. ESP-IDF splits a line at spaces and reads
+    double quotes and backslashes, so quote it and escape those two."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def cmd_provision(args) -> int:
     settings = [("wifi_ssid", args.wifi_ssid), ("wifi_pass", args.wifi_pass), ("server", args.server),
                 ("token", args.token), ("name", args.name)]
+    for key, value in settings:
+        if value is not None and not (value.isascii() and value.isprintable()):
+            print(f"{key}: the board's console only takes printable ASCII; build this value into the firmware "
+                  "with idf.py menuconfig instead", file=sys.stderr)
+            return 2
     ser = _serial(args.port, args.baud)
     with ser:
         time.sleep(0.5)
@@ -215,7 +226,7 @@ def cmd_provision(args) -> int:
         for key, value in settings:
             if value is None:
                 continue
-            reply = _serial_command(ser, f"set {key} {value}")
+            reply = _serial_command(ser, f"set {key} {console_arg(value)}")
             shown = "<hidden>" if key in ("wifi_pass", "token") else value
             print(f"set {key} = {shown}: {reply or 'no answer'}")
             if not reply.startswith("@ok"):

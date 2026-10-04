@@ -32,13 +32,13 @@ env:
 jobs:
   integration:
     name: Plugin on Hermes (${{ github.event_name == 'schedule' && 'main' || inputs.hermes_ref || 'pinned' }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: hermes-gadget-sdk
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: NousResearch/hermes-agent
           ref: ${{ github.event_name == 'schedule' && 'main' || inputs.hermes_ref || env.HERMES_REF }}

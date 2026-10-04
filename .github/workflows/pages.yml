@@ -1,0 +1,64 @@
+name: Installer site
+
+# Builds the browser installer with the latest release's firmware and publishes it with GitHub
+# Pages: on every release, and when the site itself changes.
+on:
+  release:
+    types: [published]
+  push:
+    branches: [main]
+    paths: ["site/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Install
+        working-directory: site
+        run: npm ci
+      - name: Test
+        working-directory: site
+        run: npm test
+      - name: Fetch the latest release's firmware
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release
+          gh release download --repo "$GITHUB_REPOSITORY" --dir release \
+            --pattern manifest.json --pattern 'hermes-gadget-*.bin' \
+            || echo "No release yet: the page says so."
+      - name: Build
+        working-directory: site
+        run: node scripts/build.mjs --firmware ../release --out ../_site
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

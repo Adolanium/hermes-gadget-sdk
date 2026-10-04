@@ -1,9 +1,12 @@
-"""The firmware build checks in firmware/esp32/tools/."""
+"""The firmware build checks and release packaging in firmware/esp32/tools/."""
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import json
 import struct
+import sys
 from pathlib import Path
 
 import pytest
@@ -14,12 +17,14 @@ TOOLS = Path(__file__).resolve().parents[1] / "firmware" / "esp32" / "tools"
 def _load(name: str):
     spec = importlib.util.spec_from_file_location(name, TOOLS / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module  # dataclasses look their module up while the class is built
     spec.loader.exec_module(module)
     return module
 
 
 check_config = _load("check_config")
 check_size = _load("check_size")
+package_release = _load("package_release")
 
 
 @pytest.fixture
@@ -125,3 +130,129 @@ def test_size_check_needs_an_app_partition(tmp_path):
     app = tmp_path / "app.bin"
     app.write_bytes(b"\0")
     assert check_size.main(["--app", str(app), "--partitions", str(table)]) == 2
+
+
+# partitions.csv as built: (type, subtype, label, offset, size)
+LAYOUT = [(0x01, 0x02, "nvs", 0x9000, 0x6000), (0x01, 0x00, "otadata", 0xF000, 0x2000),
+          (0x01, 0x01, "phy_init", 0x11000, 0x1000), (0x00, 0x10, "ota_0", 0x20000, 0x1F0000),
+          (0x00, 0x11, "ota_1", 0x210000, 0x1F0000)]
+
+
+def _partition_table(layout=LAYOUT) -> bytes:
+    rows = b"".join(struct.pack("<2sBBII16sI", b"\xaa\x50", ptype, subtype, offset, size, label.encode(), 0)
+                    for ptype, subtype, label, offset, size in layout)
+    return rows + b"\xeb\xeb" + b"\xff" * 30 + b"\xff" * 32
+
+
+@pytest.fixture
+def project(tmp_path):
+    """A firmware/esp32 directory with PlatformIO build outputs for the boards it is asked for."""
+    from fakes.fake_firmware import fake_image
+
+    root = tmp_path / "esp32"
+    (root / "boards").mkdir(parents=True)
+    envs = []
+
+    def build(env: str, *, board_dir: str | None = None, version: str = "0.2.0", flash: str = "4MB",
+              psram: str | None = "OCT", image_board: str | None = None, meta: dict | None = None):
+        board_dir = board_dir or env
+        out = root / ".pio" / "build" / env
+        out.mkdir(parents=True)
+        (out / "bootloader.bin").write_bytes(b"\xe9\x03\x02\x20" + b"B" * 0x5000)
+        (out / "partitions.bin").write_bytes(_partition_table())
+        (out / "ota_data_initial.bin").write_bytes(b"\xff" * 0x2000)
+        (out / "firmware.bin").write_bytes(fake_image(board=image_board or env, version=version, size=0x30000))
+        sdk = ['CONFIG_IDF_TARGET="esp32s3"', "CONFIG_PARTITION_TABLE_OFFSET=0x8000",
+               f'CONFIG_ESPTOOLPY_FLASHSIZE="{flash}"']
+        if psram:
+            sdk += ["CONFIG_SPIRAM=y", f"CONFIG_SPIRAM_MODE_{psram}=y"]
+        (root / f"sdkconfig.{env}").write_text("\n".join(sdk) + "\n", encoding="utf-8")
+        (root / "boards" / board_dir).mkdir(exist_ok=True)
+        if meta is not None:
+            (root / "boards" / board_dir / "board.json").write_text(json.dumps(meta), encoding="utf-8")
+        envs.append(f"[env:{env}]\nboard_build.cmake_extra_args =\n    "
+                    f'-DSDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/{board_dir}/sdkconfig.defaults"\n')
+        (root / "platformio.ini").write_text("[env]\nframework = espidf\n\n" + "\n".join(envs), encoding="utf-8")
+        return out
+
+    build.root = root
+    return build
+
+
+def _package(project, *args):
+    return package_release.main(["--project", str(project.root), *args])
+
+
+def test_release_image_puts_every_part_at_its_address(project, tmp_path):
+    out_dir = project("amoled", flash="16MB", image_board="amoled-1.75",
+                      meta={"title": "Round AMOLED", "summary": "No wiring.", "ready_made": True})
+    dist = tmp_path / "dist"
+    assert _package(project, "--board", "amoled", "--out", str(dist), "--expect-version", "0.2.0") == 0
+
+    image = (dist / "hermes-gadget-amoled-0.2.0.bin").read_bytes()
+    app = (out_dir / "firmware.bin").read_bytes()
+    assert image[:0x5004] == (out_dir / "bootloader.bin").read_bytes()
+    assert image[0x8000:0x8000 + len(_partition_table())] == _partition_table()
+    assert image[0x9000:0xF000] == b"\xff" * 0x6000  # the settings area is erased
+    assert image[0xF000:0x11000] == b"\xff" * 0x2000
+    assert image[0x20000:] == app and len(image) == 0x20000 + len(app)
+    assert (dist / "hermes-gadget-amoled-0.2.0-app.bin").read_bytes() == app
+
+    manifest = json.loads((dist / "manifest.json").read_text(encoding="utf-8"))
+    build = manifest["builds"][0]
+    assert manifest["version"] == "0.2.0"
+    assert (build["board"], build["image_board"], build["title"], build["ready_made"]) == (
+        "amoled", "amoled-1.75", "Round AMOLED", True)
+    assert (build["chip"], build["flash_size"], build["psram"]) == ("ESP32-S3", "16MB", "octal")
+    assert build["settings"] == {"offset": 0x9000, "size": 0x6000}
+    assert build["image"]["sha256"] == hashlib.sha256(image).hexdigest() and build["image"]["size"] == len(image)
+    sums = (dist / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
+    assert f"{hashlib.sha256(image).hexdigest()}  hermes-gadget-amoled-0.2.0.bin" in sums
+    assert f"{hashlib.sha256(app).hexdigest()}  hermes-gadget-amoled-0.2.0-app.bin" in sums
+
+
+def test_every_board_comes_from_platformio_ini(project, tmp_path):
+    project("breadboard", psram="QUAD", meta={"title": "Breadboard"})
+    project("lcd-154", board_dir="waveshare-lcd-154", meta={"title": "LCD 1.54"})  # names needn't match
+    project("plain", psram=None)
+    dist, notes = tmp_path / "dist", tmp_path / "notes.md"
+    assert _package(project, "--all", "--out", str(dist), "--notes", str(notes)) == 0
+    builds = json.loads((dist / "manifest.json").read_text(encoding="utf-8"))["builds"]
+    assert [(b["board"], b["title"], b["psram"]) for b in builds] == [
+        ("breadboard", "Breadboard", "quad"), ("lcd-154", "LCD 1.54", "octal"), ("plain", "plain", None)]
+    text = notes.read_text(encoding="utf-8")
+    assert package_release.INSTALLER_URL in text
+    assert "| LCD 1.54 | `hermes-gadget-lcd-154-0.2.0.bin` | `hermes-gadget-lcd-154-0.2.0-app.bin` |" in text
+    assert "hermes plugins install" not in text  # no commit given, so no pinned plugin
+
+
+def test_release_notes_pin_the_plugin_to_the_release_commit(project, tmp_path):
+    project("breadboard")
+    notes = tmp_path / "notes.md"
+    commit = "75b8a689bce3925d46de5c256f53d343ae6b876f"
+    assert _package(project, "--all", "--out", str(tmp_path / "dist"), "--notes", str(notes), "--commit", commit) == 0
+    assert (f"hermes plugins install https://github.com/Adolanium/hermes-gadget-sdk.git#plugin --ref {commit} --enable"
+            in notes.read_text(encoding="utf-8"))
+
+
+def test_release_refuses_what_it_cannot_vouch_for(project, tmp_path, capsys):
+    project("one", version="0.2.0")
+    project("two", version="0.3.0")
+    dist = str(tmp_path / "dist")
+    assert _package(project, "--all", "--out", dist) == 1
+    assert "different versions: 0.2.0, 0.3.0" in capsys.readouterr().err
+
+    assert _package(project, "--board", "one", "--out", dist, "--expect-version", "1.0.0") == 1
+    assert "reports 0.2.0, not 1.0.0" in capsys.readouterr().err
+
+    assert _package(project, "--board", "three", "--out", dist) == 1
+    assert "not in platformio.ini: three" in capsys.readouterr().err
+
+    (project.root / ".pio" / "build" / "one" / "firmware.bin").unlink()
+    assert _package(project, "--board", "one", "--out", dist) == 1
+    assert "run: pio run -e one" in capsys.readouterr().err
+
+
+def test_merge_refuses_overlapping_parts():
+    with pytest.raises(package_release.PackageError, match="overlap"):
+        package_release.merge([(0, b"x" * 0x2000), (0x1000, b"y")])

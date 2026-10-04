@@ -72,7 +72,7 @@ Secrets go in `~/.hermes/.env`, following Hermes's rule that `.env` is only for 
 | Agent tools | `ctx.register_tool(toolset="gadget")` | Part of the implicit `hermes-gadget` toolset; also usable from other chats |
 | Tool session context | `gateway.session_context.get_session_env` | `HERMES_SESSION_PLATFORM` / `HERMES_SESSION_CHAT_ID` pick the default device |
 | Durable state | `plugins.plugin_storage.plugin_data_dir("gadget")` | Enrolled device keys, pending pairing codes, and firmware staged for updates (`updates/`) |
-| Host CLI | `ctx.register_cli_command("gadget", ...)` | `hermes gadget devices / forget / info / pair / update`. `pair` waits for a device to show a code and approves it after asking. `update` stages an image in the plugin's data directory; the gateway's adapter installs it once the device is online and writes progress back for the command |
+| Host CLI | `ctx.register_cli_command("gadget", ...)` | `hermes gadget devices / forget / info / pair / update`. `pair` waits for a device to show a code and approves it after asking. `update` stages an image in the plugin's data directory (a file, or with `--latest` the newest release's image for the device's board, checked against the release manifest); the gateway's adapter installs it once the device is online and writes progress back for the command |
 | Send and cron targets | `parse_target_ref_fn` | `gadget:hg-0123456789abcdef` works with send_message and cron delivery |
 
 ### Voice round trip
@@ -137,23 +137,26 @@ These work on current Hermes and are covered by `tests/test_adapter_hermes.py` a
 
 ## Suggested upstream changes (optional; nothing here blocks the SDK)
 
-Each would replace a workaround above with a small, generic hook that every platform plugin could use. None of them is specific to gadgets.
+Each would replace a workaround above with a small, generic hook that every platform plugin could use. None of them is specific to gadgets. The first four are open pull requests on Hermes Agent; until they merge, the SDK keeps the workarounds.
 
-1. **Pairing API for adapters.**
-   - *Where:* `gateway/platforms/base.py` plus the runner, which wires it through the existing `_hm_offer_pairing_code` logic.
-   - *What:* `async def request_pairing(self, source) -> PairingOffer | None`, returning `{code, command, expires_in}`, and an adapter hook `on_pairing_changed(user_id, approved: bool)` fired by `hermes pairing approve/revoke`.
+1. **Pairing API for adapters:** [NousResearch/hermes-agent#132448](https://github.com/NousResearch/hermes-agent/pull/132448), open.
+   - *What:*
+     - `BasePlatformAdapter.request_pairing(source) -> PairingOffer | None` returns the code the DM path would send (`code`, `command`, `expires_in`), behind the same gates and limits, without sending anything to the chat.
+     - `on_pairing_changed(user_id, approved)` is called once for each approval and revocation, from one watcher in the runner.
    - *Why:* devices, kiosks and any screen-first platform could show codes natively, without synthetic messages, text parsing or polling.
    - *SDK change afterwards:* `on_ready` calls `request_pairing`, and `_watch_pairing` is deleted.
-2. **Public "voice-first" platform flag.**
-   - *What:* a `PlatformEntry` field such as `speaks_replies: bool` (or a public adapter attribute) that the runner reads where it reads `voice.auto_tts` today.
+2. **Voice-first platforms:** [NousResearch/hermes-agent#132441](https://github.com/NousResearch/hermes-agent/pull/132441), open.
+   - *What:* two adapter class attributes. `speaks_replies_by_default = True` speaks replies without `voice.auto_tts`, and `/voice off` still silences a chat. `supports_voice_replies = False` keeps replies text, replacing the name checks for A2A.
    - *Why:* voice-native platforms (gadgets, phone bridges) want spoken replies by default without overriding a private method.
-   - *SDK change afterwards:* the override is removed and `speak_replies` maps onto the flag.
-3. **Mark STT echo sends.**
-   - *What:* add `metadata={"_stt_echo": True}` where the gateway echoes transcripts (`_echo_stt_transcripts`), mirroring the existing `_interim_send` flag.
+   - *SDK change afterwards:* the `_should_auto_tts_for_chat` override is removed, and `speak_replies` maps onto the attribute.
+3. **Transcript echoes for adapters:** [NousResearch/hermes-agent#132435](https://github.com/NousResearch/hermes-agent/pull/132435), open.
+   - *What:* `BasePlatformAdapter.send_transcript_echo(chat_id, transcript, metadata=None)`. By default it makes the same `send()` call as today; an adapter that overrides it gets the raw transcript.
    - *Why:* adapters could render transcripts distinctly without matching localized text.
-4. **Direct toolsets for a platform's own sessions.**
-   - *What:* a `PlatformEntry` field such as `direct_toolsets=("gadget",)` that tool search treats like `_DIRECT_SURFACE_TOOLSETS` when the session's platform matches.
+   - *SDK change afterwards:* the adapter overrides it, and the echo-text matching is deleted.
+4. **Direct toolsets for a platform's own sessions:** [NousResearch/hermes-agent#132449](https://github.com/NousResearch/hermes-agent/pull/132449), open.
+   - *What:* `PlatformEntry.direct_toolsets`. A toolset listed there is direct only in sessions on that platform.
    - *Why:* a platform-specific tool (here, controlling the device the user is holding) is part of that surface, and a search round trip costs latency on voice turns. Sessions on other platforms keep deferring it, so the core schema stays narrow.
+   - *SDK change afterwards:* `register_platform(..., direct_toolsets=("gadget",))`.
 
 5. **Per-platform reasoning default.**
    - *What:* a `platforms.<name>.reasoning_effort`, resolved after the session override and before the per-model and global settings.

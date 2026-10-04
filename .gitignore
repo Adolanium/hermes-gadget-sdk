@@ -11,6 +11,10 @@ build/
 # Host (CMake) builds
 /build/
 
+# Installer site
+site/node_modules/
+site/_site/
+
 # ESP-IDF / PlatformIO outputs
 firmware/esp32/build/
 firmware/esp32/.pio/

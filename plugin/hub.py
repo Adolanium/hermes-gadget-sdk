@@ -549,7 +549,8 @@ class DeviceHub:
                 raise Rejected("auth_failed", "enrollment key does not match device_id")
             self.store.enroll(device_id, key, name=str(hello.get("name") or ""), board=str(hello.get("board") or ""))
             log.info("enrolled new device %s (%s)", device_id, hello.get("name"))
-        self.store.touch(device_id, name=str(hello.get("name") or ""), board=str(hello.get("board") or ""))
+        self.store.touch(device_id, name=str(hello.get("name") or ""), board=str(hello.get("board") or ""),
+                         firmware=str(hello.get("firmware") or "")[:32])
         return hello
 
     async def _handle(self, ws) -> None:

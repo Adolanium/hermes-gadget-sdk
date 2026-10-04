@@ -1,0 +1,6 @@
+{
+  "title": "Waveshare ESP32-S3-LCD-1.54",
+  "summary": "1.54\" 240x240 screen, two microphones and an onboard speaker. Nothing to wire.",
+  "docs": "docs/hardware.md#waveshare-esp32-s3-lcd-154",
+  "ready_made": true
+}

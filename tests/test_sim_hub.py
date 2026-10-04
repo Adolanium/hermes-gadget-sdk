@@ -45,6 +45,9 @@ def test_device_key_is_enrolled_once_then_proven(devserver, make_sim, tmp_path):
     assert sim.wait_screen("ready", timeout=10)
     device_id = sim.status()["device_id"]
     assert hub.store.key_for(device_id) is not None
+    # The registry keeps what the device reported, for `hermes gadget devices` and `update --latest`.
+    record = hub.store.devices()[device_id]
+    assert (record["board"], record["firmware"]) == (sim.status()["board"], sim.status()["firmware"])
     sim.console("reconnect")
     assert sim.wait_screen("connecting", timeout=5)
     assert sim.wait_screen("ready", timeout=10)

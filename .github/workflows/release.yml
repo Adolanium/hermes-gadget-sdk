@@ -1,0 +1,66 @@
+name: Release
+
+# Pushing a tag vX.Y.Z builds every board in platformio.ini and publishes the images,
+# checksums and installer manifest as a GitHub release. PROJECT_VER in
+# firmware/esp32/CMakeLists.txt must match the tag.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and publish again, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: write
+  actions: write  # to start the installer site's deploy
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Check the version
+        # The firmware, the Python package and the plugin must all carry the tag's version.
+        run: python tools/check_versions.py --tag "$TAG"
+      - uses: actions/cache@v6
+        with:
+          path: ~/.platformio
+          key: platformio-${{ runner.os }}-${{ hashFiles('firmware/esp32/platformio.ini', 'firmware/esp32/main/idf_component.yml') }}
+      - name: Install PlatformIO
+        run: pip install platformio
+      - name: Build every board
+        working-directory: firmware/esp32
+        run: pio run
+      - name: Package
+        working-directory: firmware/esp32
+        run: >-
+          python tools/package_release.py --all --out dist --expect-version "${TAG#v}"
+          --notes "$RUNNER_TEMP/notes.md" --commit "$(git rev-parse HEAD)"
+      - name: Publish
+        working-directory: firmware/esp32
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --title "Hermes Gadget ${TAG#v}" --notes-file "$RUNNER_TEMP/notes.md"
+          fi
+      - name: Update the installer site
+        # A release published with this workflow's token starts no other workflow, so start the deploy.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main

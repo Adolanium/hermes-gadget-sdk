@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Set up a Hermes Gadget</title>
+  <meta name="description" content="Install the Hermes Gadget firmware on your board, connect it to Wi-Fi and pair it with your Hermes, from your browser.">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0b0f17">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Set up a Hermes Gadget">
+  <meta property="og:description" content="Install the firmware, connect to Wi-Fi and pair with your Hermes, from your browser.">
+  <meta property="og:image" content="https://adolanium.github.io/hermes-gadget-sdk/img/logo.png">
+  <link rel="icon" href="img/logo.png" type="image/png">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#steps">Skip to the installer</a>
+
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="./">
+        <img src="img/logo.png" alt="" width="32" height="32">
+        <span>Hermes Gadget</span>
+      </a>
+      <nav aria-label="Project">
+        <a href="https://github.com/Adolanium/hermes-gadget-sdk/blob/main/docs/getting-started.md">Docs</a>
+        <a href="https://github.com/Adolanium/hermes-gadget-sdk">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <div class="hero-text">
+        <p class="eyebrow">Browser installer</p>
+        <h1>Set up a Hermes Gadget</h1>
+        <p class="lead">Install the firmware on your board, connect it to Wi-Fi and pair it with your Hermes, all from this page. Nothing to download or build.</p>
+        <ul class="needs" aria-label="You need">
+          <li>Chrome or Edge on a computer</li>
+          <li>A USB data cable</li>
+          <li>Hermes with the Gadget plugin (<a href="https://github.com/Adolanium/hermes-gadget-sdk/blob/main/docs/getting-started.md#3-connect-to-hermes">set it up</a>)</li>
+        </ul>
+      </div>
+      <figure class="hero-device">
+        <img src="img/screen-ready.png" alt="A gadget's round screen showing the Hermes mascot and &quot;Hold the screen to talk&quot;" width="466" height="466">
+      </figure>
+    </section>
+
+    <div class="notice notice-error" id="unsupported" hidden>
+      <p><strong>This browser can't talk to USB devices.</strong> Open this page in Chrome or Edge on a computer. Safari, Firefox, phones and tablets don't support it.</p>
+    </div>
+
+    <ol class="steps" id="steps">
+      <li class="step" id="step-board" data-state="active">
+        <div class="step-head">
+          <span class="step-num" aria-hidden="true">1</span>
+          <h2 tabindex="-1">Choose your board</h2>
+          <p class="step-summary" id="board-summary"></p>
+        </div>
+        <div class="step-body">
+          <div class="boards" id="boards" role="radiogroup" aria-label="Board"></div>
+          <div class="notice" id="no-firmware" hidden>
+            <p>No firmware has been published here yet. You can <a href="https://github.com/Adolanium/hermes-gadget-sdk/blob/main/docs/hardware.md#build-and-flash">build and flash it yourself</a>, then come back to connect it to Wi-Fi.</p>
+          </div>
+          <div class="actions">
+            <button class="button primary" id="board-next" type="button" disabled>Continue</button>
+            <button class="button text" id="skip-install" type="button">It already runs Hermes Gadget: skip to Wi-Fi</button>
+          </div>
+        </div>
+      </li>
+
+      <li class="step" id="step-install" data-state="locked">
+        <div class="step-head">
+          <span class="step-num" aria-hidden="true">2</span>
+          <h2 tabindex="-1">Install the firmware</h2>
+          <p class="step-summary" id="install-summary"></p>
+        </div>
+        <div class="step-body">
+          <p>Plug the board into this computer with a USB data cable. Then click <strong>Connect and install</strong>, and choose the board in the list your browser shows.</p>
+          <p class="hint" id="uart-hint" hidden>On a DevKit with two USB ports, use the one marked <strong>UART</strong>. The board's console is there, and the next step needs it.</p>
+          <label class="check">
+            <input type="checkbox" id="keep-settings" checked>
+            <span>
+              <span class="check-label">Keep the board's settings</span>
+              <span class="hint">If it already runs Hermes Gadget, it keeps its Wi-Fi, Hermes address and pairing. Untick to start over; it then pairs again as a new device.</span>
+            </span>
+          </label>
+          <div class="progress" id="install-progress" hidden>
+            <p class="status" id="install-status" role="status" aria-live="polite"></p>
+            <div class="bar" role="progressbar" aria-labelledby="install-status" aria-valuemin="0" aria-valuemax="100" id="install-bar"><span></span></div>
+          </div>
+          <div class="notice notice-warning" id="install-warning" hidden>
+            <p id="install-warning-text"></p>
+            <div class="actions">
+              <button class="button primary" id="install-anyway" type="button">Install anyway</button>
+              <button class="button" id="install-cancel" type="button">Cancel</button>
+            </div>
+          </div>
+          <div class="notice notice-error" id="install-error" role="alert" hidden></div>
+          <div class="actions" id="install-actions">
+            <button class="button primary" id="install" type="button">Connect and install</button>
+            <button class="button" id="install-back" type="button">Back</button>
+          </div>
+        </div>
+      </li>
+
+      <li class="step" id="step-wifi" data-state="locked">
+        <div class="step-head">
+          <span class="step-num" aria-hidden="true">3</span>
+          <h2 tabindex="-1">Connect it to Wi-Fi and Hermes</h2>
+          <p class="step-summary" id="wifi-summary"></p>
+        </div>
+        <div class="step-body">
+          <form id="wifi-form" novalidate>
+            <div class="field">
+              <label for="ssid">Wi-Fi network</label>
+              <input id="ssid" name="ssid" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="32" required>
+              <p class="hint">2.4 GHz networks only: the board can't join a 5 GHz network.</p>
+            </div>
+            <div class="field">
+              <label for="password">Wi-Fi password</label>
+              <div class="with-button">
+                <input id="password" name="password" type="password" autocomplete="off" maxlength="64">
+                <button class="button small" id="show-password" type="button" aria-pressed="false" aria-controls="password">Show</button>
+              </div>
+            </div>
+            <div class="field">
+              <label for="server">Hermes address</label>
+              <input id="server" name="server" placeholder="ws://192.168.1.20:8765/gadget" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="200" required>
+              <p class="hint">Run <code>hermes gadget info</code> on your Hermes computer to see it. The link <code>hermes gateway setup</code> prints fills it in for you.</p>
+            </div>
+            <div class="field">
+              <label for="name">Device name <span class="optional">optional</span></label>
+              <input id="name" name="name" placeholder="Kitchen" autocomplete="off" maxlength="40">
+            </div>
+            <details class="field">
+              <summary>Access token</summary>
+              <input id="token" name="token" type="password" autocomplete="off" maxlength="128" aria-label="Access token">
+              <p class="hint">Only if your Hermes sets <code>GADGET_ACCESS_TOKEN</code>. Leave it empty to keep the board's current token.</p>
+            </details>
+            <p class="privacy">
+              <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" d="M4 7V5a4 4 0 1 1 8 0v2h.5A1.5 1.5 0 0 1 14 8.5v5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 13.5v-5A1.5 1.5 0 0 1 3.5 7H4Zm2 0h4V5a2 2 0 1 0-4 0v2Z"/></svg>
+              <span>These settings go straight to the board over USB. This page has no server and sends them nowhere else.</span>
+            </p>
+            <p class="status" id="wifi-status" role="status" aria-live="polite" hidden></p>
+            <div class="notice notice-error" id="wifi-error" role="alert" hidden></div>
+            <div class="actions">
+              <button class="button primary" id="wifi-save" type="submit">Save to the board</button>
+            </div>
+          </form>
+        </div>
+      </li>
+
+      <li class="step" id="step-pair" data-state="locked">
+        <div class="step-head">
+          <span class="step-num" aria-hidden="true">4</span>
+          <h2 tabindex="-1">Pair it with Hermes</h2>
+        </div>
+        <div class="step-body">
+          <ul class="checklist" aria-live="polite">
+            <li id="check-wifi" data-state="pending"><span class="mark" aria-hidden="true"></span><span>Joining the Wi-Fi network</span></li>
+            <li id="check-hermes" data-state="pending"><span class="mark" aria-hidden="true"></span><span>Reaching Hermes</span></li>
+            <li id="check-paired" data-state="pending"><span class="mark" aria-hidden="true"></span><span>Waiting for your approval</span></li>
+          </ul>
+          <div class="pairing" id="pairing" hidden>
+            <img src="img/screen-pairing.png" alt="" width="466" height="466">
+            <div>
+              <p>The board shows the code <strong class="code" id="pair-code"></strong>. On your Hermes computer, run:</p>
+              <div class="command">
+                <code>hermes gadget pair</code>
+                <button class="button small" type="button" data-copy="hermes gadget pair">Copy</button>
+              </div>
+              <p class="hint">It names the board and asks before approving it. You can also run <code id="approve-command"></code>.</p>
+            </div>
+          </div>
+          <div class="notice notice-success" id="pair-done" hidden>
+            <p><strong>Your gadget is ready.</strong> Hold TALK, or the screen on a touch board, and ask it something.</p>
+          </div>
+          <div class="notice notice-warning" id="pair-hint" role="alert" hidden></div>
+          <div class="actions">
+            <button class="button" id="disconnect" type="button">Disconnect</button>
+            <button class="button text" id="another" type="button">Set up another board</button>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <details class="log">
+      <summary>Technical details</summary>
+      <pre id="log" tabindex="0" aria-label="Installer and board log"></pre>
+    </details>
+
+    <section class="help" aria-labelledby="help-title">
+      <h2 id="help-title">Troubleshooting</h2>
+      <details>
+        <summary>The board isn't in the browser's list</summary>
+        <p>Try another cable: many USB cables only charge. On Windows, a DevKit's UART port needs the driver for its USB chip (CP210x or CH34x). On Linux, add yourself to the <code>dialout</code> group and log in again.</p>
+      </details>
+      <details>
+        <summary>It won't connect, or stops partway</summary>
+        <p>Close anything else using the port, such as a serial monitor or <code>idf.py monitor</code>. Then hold the board's BOOT button, press and release RESET (or plug it in while holding BOOT), let go of BOOT, and try again.</p>
+      </details>
+      <details>
+        <summary>It doesn't join the Wi-Fi</summary>
+        <p>Check the password, and that the network is 2.4 GHz. The board's console only takes plain ASCII, so a network name or password with other characters has to be built into the firmware instead (<code>idf.py menuconfig</code>, then <strong>Hermes Gadget</strong>).</p>
+      </details>
+      <details>
+        <summary>It's on Wi-Fi but doesn't reach Hermes</summary>
+        <p>Check the address with <code>hermes gadget info</code> on the Hermes computer, that the gateway is running, and that its firewall lets the board in on port 8765. The board has to be able to reach that address from its network.</p>
+      </details>
+      <details>
+        <summary>Something else</summary>
+        <p>Save a diagnostics report with <code>hermes-gadget diag --port &lt;port&gt;</code> and <a href="https://github.com/Adolanium/hermes-gadget-sdk/issues">open an issue</a> with it attached.</p>
+      </details>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <p>Hermes Gadget SDK is an independent community project, not affiliated with Nous Research. <span id="firmware-version"></span></p>
+      <p>
+        <a href="https://github.com/Adolanium/hermes-gadget-sdk">Source</a> ·
+        <a href="https://github.com/Adolanium/hermes-gadget-sdk/blob/main/LICENSE">MIT license</a> ·
+        Flashing by <a href="https://github.com/espressif/esptool-js">esptool-js</a> (<a href="vendor/esptool-js-LICENSE.txt">Apache 2.0</a>)
+      </p>
+    </div>
+  </footer>
+</body>
+</html>

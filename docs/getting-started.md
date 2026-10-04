@@ -55,6 +55,8 @@ hermes gateway setup                  # pick Hermes Gadget; restart the gateway 
 
 The setup step enables the platform, asks which port devices connect to (8765 by default), and prints the URL devices should use with a link to the browser installer. `hermes gadget info` shows the same later.
 
+That installs the plugin from `main`. To match a firmware release instead, use the install command in the [release's notes](https://github.com/Adolanium/hermes-gadget-sdk/releases), which pins the plugin to the release's commit with `--ref`.
+
 Working on the plugin itself? `hermes-gadget plugin install --link` links your checkout's `plugin/` into Hermes instead, so edits take effect on the next gateway start.
 
 Speech needs Hermes's STT and TTS configured: `hermes tools` / `hermes setup`, or the `stt:` and `tts:` sections of `config.yaml`. Without STT, voice messages still reach the agent, but as untranscribed audio notes.
@@ -80,7 +82,13 @@ The device switches to **Ready** within about 2 seconds. Hold Space to talk, or 
 
 ## 4. Real hardware
 
-See [hardware.md](hardware.md) for the reference wiring and for flashing with `idf.py` or PlatformIO. Once the board is flashed, configure it over USB serial:
+Plug the board into a computer and open the **[browser installer](https://adolanium.github.io/hermes-gadget-sdk/)** in Chrome or Edge. Use the link `hermes gateway setup` or `hermes gadget info` prints, and the Hermes address is filled in for you. The installer:
+
+1. checks that the board matches the firmware you picked, then installs it, keeping the board's settings if it already runs Hermes Gadget;
+2. gives it your Wi-Fi network, the Hermes address and a name, over USB;
+3. shows it joining Wi-Fi, reaching Hermes and asking to pair; approve it with `hermes gadget pair`.
+
+The breadboard build needs the wiring in [hardware.md](hardware.md) first. To build and flash the firmware yourself, see [hardware.md](hardware.md#build-and-flash). Then set it up from the installer's **skip to Wi-Fi** option, or over USB serial:
 
 ```bash
 pip install "hermes-gadget[serial]"

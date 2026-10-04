@@ -1,0 +1,17 @@
+{
+  "name": "hermes-gadget-installer",
+  "private": true,
+  "description": "Browser installer for Hermes Gadget firmware",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "devDependencies": {
+    "esptool-js": "0.7.0"
+  }
+}

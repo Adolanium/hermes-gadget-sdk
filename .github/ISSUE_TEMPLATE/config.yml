@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/Adolanium/hermes-gadget-sdk/security/advisories/new
+    about: Report it privately, not in a public issue.
+  - name: Installer troubleshooting
+    url: https://adolanium.github.io/hermes-gadget-sdk/#help-title
+    about: Common problems with flashing, Wi-Fi and reaching Hermes.
+  - name: A problem in Hermes Agent itself
+    url: https://github.com/NousResearch/hermes-agent/issues
+    about: Hermes Agent is a separate project by Nous Research.

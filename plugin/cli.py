@@ -73,7 +73,8 @@ def _cmd_devices(args) -> None:
     for device_id, rec in sorted(devices.items(), key=lambda kv: kv[1].get("name") or kv[0]):
         seen = rec.get("last_seen")
         when = _dt.datetime.fromtimestamp(seen).strftime("%Y-%m-%d %H:%M") if seen else "-"
-        print(f"{device_id}  {rec.get('name') or '-':<24} {rec.get('board') or '-':<28} last seen {when}")
+        print(f"{device_id}  {rec.get('name') or '-':<24} {rec.get('board') or '-':<28} "
+              f"{rec.get('firmware') or '-':<10} last seen {when}")
     print("\nApprove a new device: hermes gadget pair   |   Approved devices: hermes pairing list   |   "
           "Revoke: hermes pairing revoke gadget <device_id>")
 
@@ -97,24 +98,53 @@ def _cmd_forget(args) -> None:
     print(f"To also remove its chat approval: hermes pairing revoke gadget {device_id}")
 
 
+def _latest_firmware(rec: dict, name: str, board: str | None, force: bool) -> tuple[bytes, str] | None:
+    """The newest release's app image for the device's board, or None when it already runs it."""
+    from . import releases
+
+    if not board:
+        sys.exit(f"{name} hasn't reported its board yet. It does the next time it connects.")
+    try:
+        manifest = releases.latest_manifest()
+        build = releases.build_for(manifest, board)
+        version = manifest["version"]
+        if rec.get("firmware") == version and not force:
+            print(f"{name} already runs {version}, the latest release. --force installs it again.")
+            return None
+        print(f"Downloading firmware {version} for {build.get('title') or board}...")
+        return releases.download_app(manifest, build), f"Release {version}"
+    except releases.ReleaseError as exc:
+        sys.exit(str(exc))
+
+
 def _cmd_update(args) -> None:
     from .ota import UpdateError, UpdateQueue, inspect_image
 
-    path = Path(args.image)
-    try:
-        image = inspect_image(path.read_bytes())
-    except OSError as exc:
-        sys.exit(f"Can't read {path}: {exc}")
-    except UpdateError as exc:
-        sys.exit(f"{path} can't be installed: {exc.message}")
+    if bool(args.image) == bool(args.latest):
+        sys.exit("Give either a firmware image or --latest.")
     store = _store()
     device_id = _match(store, args.device)
     if device_id is None:
         sys.exit(1)
     rec = store.devices()[device_id]
     name, board = rec.get("name") or device_id, rec.get("board")
+    if args.latest:
+        found = _latest_firmware(rec, name, board, args.force)
+        if found is None:
+            return
+        data, source = found
+    else:
+        source = args.image
+        try:
+            data = Path(args.image).read_bytes()
+        except OSError as exc:
+            sys.exit(f"Can't read {source}: {exc}")
+    try:
+        image = inspect_image(data)
+    except UpdateError as exc:
+        sys.exit(f"{source} can't be installed: {exc.message}")
     if image.board and board and image.board != board:
-        sys.exit(f"{path} is built for {image.board}, but {name} is {board}.")
+        sys.exit(f"{source} is built for {image.board}, but {name} is {board}.")
 
     queue = UpdateQueue(store.path.parent)
     queue.stage(device_id, image)
@@ -224,7 +254,12 @@ def setup_argparse(parser) -> None:
                       help=f"Seconds to wait for a gadget to ask (default {PAIR_TIMEOUT_S})")
     update = subs.add_parser("update", help="Install new firmware on a gadget over the air")
     update.add_argument("device", help="Device id or name")
-    update.add_argument("image", help="The firmware image: firmware.bin from the PlatformIO build")
+    update.add_argument("image", nargs="?",
+                        help="The firmware image: firmware.bin from a build, or a release's -app.bin")
+    update.add_argument("--latest", action="store_true",
+                        help="Download the newest release's firmware for the device's board instead")
+    update.add_argument("--force", action="store_true",
+                        help="With --latest, install even if the device already runs that version")
     update.add_argument("--no-wait", action="store_true", help="Stage it and return; the gateway installs it")
     update.add_argument("--timeout", type=float, default=600, help="Seconds to wait for the install (default 600)")
     parser.set_defaults(func=handle)
