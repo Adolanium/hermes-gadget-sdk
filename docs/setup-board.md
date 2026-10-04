@@ -19,6 +19,8 @@ Have these ready:
 
 Match the exact model printed on the board. For another model, read [Add a board](porting.md).
 
+Read the [capability and verification table](hardware-validation.md). A firmware build does not replace testing on your board revision.
+
 ## 2. Prepare Hermes
 
 Follow [Connect Hermes](connect-hermes.md#1-install-the-plugin) to install and enable the Gadget plugin. Keep the device URL from `hermes gadget info` ready. Its installer link fills the address in for you.

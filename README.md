@@ -46,6 +46,8 @@ Your Hermes does the thinking. Real conversations need Hermes Agent and the Gadg
 
 Check the exact model and connections in the [hardware guide](docs/hardware.md). Other boards need a [port](docs/porting.md).
 
+These ports build in CI. Physical verification reports are not yet recorded; treat them as experimental until the [hardware verification table](docs/hardware-validation.md) links a report for your revision.
+
 ## Try the demo from a checkout
 
 <details>

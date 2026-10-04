@@ -1,10 +1,12 @@
 # Hardware
 
-The firmware is an ESP-IDF 5.x application (`firmware/esp32`) built on the portable core. The reference board uses common modules you can wire on a breadboard. Other boards are a configuration change; see [porting.md](porting.md).
+The firmware is an ESP-IDF application (`firmware/esp32`) built on the portable core. The reference board uses common modules you can wire on a breadboard. Other boards need a configuration and, where necessary, drivers; see [porting.md](porting.md).
+
+Check [capabilities and verification](hardware-validation.md) before choosing hardware. The release builds are experimental until a physical report is recorded for the exact model and revision.
 
 ## Requirements
 
-- **Chip:** an ESP32-S3 with PSRAM is recommended (N8R8 or N16R8). Plain ESP32/S2/C3/C6 work for displays up to about 240×240 without PSRAM, provided the framebuffer (width × height × 2 bytes) fits in internal RAM next to Wi-Fi.
+- **Chip:** the release profiles target ESP32-S3. Other ESP32 variants need their own configuration and validation. On a board without PSRAM, the framebuffer (width × height × 2 bytes) must fit in internal RAM next to Wi-Fi and audio buffers.
 - **Display:** an SPI ST7789 panel (240×320, 240×240 or 240×135). Other controllers need a different `esp_lcd` panel driver.
 - **Microphone:** an I2S MEMS microphone (INMP441, ICS-43434, SPH0645 style).
 - **Speaker (optional):** an I2S class-D amplifier (MAX98357A) and a 4–8 Ω speaker.

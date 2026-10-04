@@ -35,9 +35,11 @@ pytest                                # Python tests; Hermes ones skip without a
 - [ ] `firmware/esp32/platformio.ini`: an environment for it, which also puts it in the next release
 - [ ] `.github/workflows/ci.yml`: the environment in the firmware build matrix
 - [ ] `docs/hardware.md`: a section with the pins and a first-flash checklist
+- [ ] `docs/hardware-validation.md`: capabilities, exact revision, and experimental or verified status
+- [ ] Third-party drivers: upstream source/version, README license entry, required license texts and notices in source and release packages
 - [ ] Optionally, a simulator profile with the same screen in `python/hermes_gadget/sim/runner.py`
 
-Say in the PR what you tested on the real board. That's the part reviewers can't check themselves.
+Use the [physical test checklist](docs/hardware-validation.md#record-a-physical-test) and link the report in the PR. A port without a complete report stays experimental.
 
 ## Pull requests
 
