@@ -30,13 +30,13 @@ bool SpiDisplay::on_trans_done(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event
   return woken == pdTRUE;
 }
 
-bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t bus) {
+bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   cfg_ = cfg;
   bool ili9341 = false;
   if (cfg.controller == LcdController::Box3) {
-    if (!bus) return false;
-    if (i2c_master_probe(bus, 0x24, 50) != ESP_OK) {
-      if (i2c_master_probe(bus, 0x5d, 50) != ESP_OK && i2c_master_probe(bus, 0x14, 50) != ESP_OK) {
+    if (!i2c_bus) return false;
+    if (i2c_master_probe(i2c_bus, 0x24, 50) != ESP_OK) {
+      if (i2c_master_probe(i2c_bus, 0x5d, 50) != ESP_OK && i2c_master_probe(i2c_bus, 0x14, 50) != ESP_OK) {
         ESP_LOGE(TAG, "BOX-3 display revision could not be detected");
         return false;
       }
