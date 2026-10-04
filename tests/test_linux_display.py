@@ -9,6 +9,8 @@ from hermes_gadget.linux.client import Client, load_config
 from hermes_gadget.linux.display import Display
 from test_linux import wait
 
+pytest.importorskip("pygame", reason="optional display extra is not installed")
+
 
 @pytest.fixture(autouse=True)
 def dummy_display(monkeypatch):
