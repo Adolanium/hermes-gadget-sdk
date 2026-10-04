@@ -9,4 +9,9 @@ CONFIG_SPIRAM_SPEED_80M=y
 # The 434 KB framebuffer and audio buffers go to PSRAM.
 CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+# The USB-C port is the S3's own USB Serial/JTAG, and UART0 only reaches the header.
+# The console must live on USB: a secondary console is output-only, so commands
+# typed over USB would never arrive.
+# CONFIG_ESP_CONSOLE_UART_DEFAULT is not set
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_HG_BOARD_AMOLED_175=y

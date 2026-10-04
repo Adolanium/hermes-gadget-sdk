@@ -60,7 +60,8 @@ BoardConfig make() {
   b.touch.height = 466;
   b.touch.mirror_x = true;
   b.touch.mirror_y = true;
-  // The side PWR key goes to the AXP2101; its level (SYS_OUT) is mirrored on expander pin P4.
+  // The side PWR key goes to the AXP2101; its conditioned level (SYS_OUT) is on expander
+  // pin P4, high while pressed (Waveshare's hardware reference for this board).
   b.pwr_key = {true, 0x20, 4, true};
   b.buttons = {0, -1, -1, -1};  // BOOT also works as TALK
   b.talk_label = "BOOT";

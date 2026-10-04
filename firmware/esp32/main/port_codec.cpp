@@ -85,7 +85,7 @@ bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus)
   dac.pa_reverted = false;
   dac.master_mode = false;
   dac.use_mclk = true;
-  dac.hw_gain.pa_voltage = 3.3;
+  dac.hw_gain.pa_voltage = cfg.amp_supply_v;
   dac.hw_gain.codec_dac_voltage = 3.3;
   esp_codec_dev_cfg_t out_cfg = {};
   out_cfg.dev_type = ESP_CODEC_DEV_TYPE_OUT;

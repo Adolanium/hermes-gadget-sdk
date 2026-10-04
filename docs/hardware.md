@@ -73,16 +73,19 @@ cd firmware/esp32
 pio run -e esp32s3-touch-amoled-175 -t upload -t monitor
 ```
 
+The USB-C port is the S3's own USB. It shows up as a "USB JTAG/serial debug unit" (a COM port on Windows), and both flashing and the serial console use it.
+
 ### First flash: what to check
 
 This port is written from Waveshare's published pinout and drivers and compiles in CI, but it has not yet run on the board. On the first flash, go through this list and send the serial log (`pio device monitor` or `hermes-gadget console --port COMx`) for anything that looks wrong:
 
 1. **Boot log:** `CO5300 466x466 ready`, `codecs: speaker ready, microphones ready` and `touch ready, key ready`. A `did not answer` or `missing` line names the part to look at.
-2. **Screen:** the mascot is centred, upright and not mirrored, and the colours are right (amber accents, not blue). A thin stripe at one edge means the column offset is off.
-3. **Touch:** hold the screen and the listening waves appear; a swipe *down* (not up) cancels. A reversed swipe means the touch mirroring needs flipping.
-4. **PWR key:** a short press cancels and holding 2 s starts a new conversation without powering the board off.
-5. **Microphone:** say something; the waves move with your voice, and Hermes's transcript is right.
-6. **Speaker:** replies are clear and loud enough (`set volume 80`); no hiss between replies.
+2. **Console:** `hermes-gadget console --port COMx` on the USB-C port answers `status`. If the log shows but commands get no answer, the console is still on UART0.
+3. **Screen:** the mascot is centred, upright and not mirrored, and the colours are right (amber accents, not blue). A thin stripe at one edge means the column offset is off.
+4. **Touch:** hold the screen and the listening waves appear; a swipe *down* (not up) cancels. A reversed swipe means the touch mirroring needs flipping.
+5. **PWR key:** a short press cancels and holding 2 s starts a new conversation without powering the board off.
+6. **Microphone:** say something; the waves move with your voice, and Hermes's transcript is right.
+7. **Speaker:** replies are clear and loud enough (`set volume 80`); no hiss between replies.
 
 ## Build and flash
 
