@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68,<81"]
+requires = ["setuptools>=68,<85"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Hermes Gadget SDK contributors" }]
 dependencies = [
-  "websockets>=13,<16",
+  "websockets>=13,<17",
 ]
 
 [project.optional-dependencies]
