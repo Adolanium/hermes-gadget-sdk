@@ -7,6 +7,8 @@ CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 
 # The core runs on the main task.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+# Lets the console's `diag` report every task's unused stack.
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 
 # C++: the core uses std::string/std::vector/std::function, no exceptions or RTTI.
 CONFIG_COMPILER_CXX_EXCEPTIONS=n

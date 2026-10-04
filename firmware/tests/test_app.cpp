@@ -364,6 +364,30 @@ TEST("app: console reconfigures the server and reconnects") {
   CHECK(r.app.console("status").rfind("@status {", 0) == 0);
 }
 
+TEST("app: diag reports the core's state plus what the port adds") {
+  Rig r;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("diag log"), std::string("@error this device keeps no log"));
+  CHECK(r.app.console("help").find("diag") != std::string::npos);
+
+  r.app.on_diag = [](Value& report) { report.set("reset_reason", "brownout"); };
+  r.app.recent_log = [] { return std::string("I (10) hg: booted"); };
+  std::string out = r.app.console("diag");
+  CHECK(out.rfind("@diag {", 0) == 0);
+  Value v;
+  CHECK(hg::json::parse(out.substr(6), v));
+  CHECK_EQ(v["board"].as_string(), std::string("test-board"));
+  CHECK_EQ(v["firmware"].as_string(), std::string("1.2.3"));
+  CHECK_EQ(v["app"]["phase"].as_string(), std::string("online"));
+  CHECK_EQ(v["connection"]["network"].as_string(), std::string("test-wifi"));
+  CHECK_EQ(v["reset_reason"].as_string(), std::string("brownout"));
+  CHECK_EQ(r.app.console("diag log"), std::string("I (10) hg: booted\n@log end"));
+
+  r.app.on_transport_closed("server went away");
+  CHECK(hg::json::parse(r.app.console("diag").substr(6), v));
+  CHECK_EQ(v["connection"]["last_close"].as_string(), std::string("server went away"));
+}
+
 TEST("app: sensor readings are reported, rate limited") {
   Rig r;
   r.bring_online(true);

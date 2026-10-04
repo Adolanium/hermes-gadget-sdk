@@ -120,6 +120,7 @@ void dispatch(hg::App& app, hgp::Event& ev) {
 }  // namespace
 
 extern "C" void app_main(void) {
+  hgp::diag::begin();  // first, so `diag log` has the whole boot
   init_nvs();
   hgp::events::init();
   ESP_ERROR_CHECK(g_storage.begin() ? ESP_OK : ESP_FAIL);
@@ -145,6 +146,16 @@ extern "C" void app_main(void) {
   g_buttons.begin(board.buttons);
   const bool touch = (board.touch.enabled || board.pwr_key.enabled) &&
                      g_touch.begin(board.touch, board.pwr_key, i2c_bus);
+
+  hgp::diag::Parts parts;
+  parts.display = hal.display == &g_display ? "st7789" : hal.display == &g_amoled ? "co5300" : "none";
+  parts.mic = hal.mic == &g_codec_mic ? "es7210" : hal.mic == &g_mic ? "i2s" : "none";
+  parts.speaker = hal.speaker == &g_codec_speaker ? "es8311" : hal.speaker == &g_speaker ? "i2s" : "none";
+  parts.touch = touch && g_touch.has_touch();
+  parts.key = touch && g_touch.has_key();
+  parts.i2c = i2c_bus;
+  hgp::diag::set_parts(parts);
+  hgp::diag::log_boot_summary();
 
   hg::DeviceProfile profile;
   profile.board = board.name;
@@ -172,6 +183,8 @@ extern "C" void app_main(void) {
     if (key == "wifi_ssid" || key == "wifi_pass") g_wifi.reconfigure();
     if (key == "touch_cancel") apply_touch_cancel();
   };
+  app.on_diag = &hgp::diag::report;
+  app.recent_log = &hgp::diag::recent_log;
   app.begin();
   hgp::console::begin();
 

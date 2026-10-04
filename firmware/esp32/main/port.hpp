@@ -234,6 +234,8 @@ class CodecSpeaker final : public hg::AudioOut {
 class TouchInput {
  public:
   bool begin(const TouchConfig& touch, const ExpanderKeyConfig& key, i2c_master_bus_handle_t bus);
+  bool has_touch() const { return touch_dev_ != nullptr; }
+  bool has_key() const { return key_dev_ != nullptr; }
 
  private:
   static void task(void* arg);
@@ -275,5 +277,27 @@ namespace console {
 // Starts the serial console REPL; lines are executed by hg::App::console on the app task.
 void begin();
 }
+
+namespace diag {
+// What came up at boot, for the boot summary and the `diag` report.
+struct Parts {
+  const char* display = "none";
+  const char* mic = "none";
+  const char* speaker = "none";
+  bool touch = false;
+  bool key = false;
+  i2c_master_bus_handle_t i2c = nullptr;  // scanned by `diag`
+};
+
+// Starts keeping a RAM copy of recent log lines. Call first in app_main.
+void begin();
+void set_parts(const Parts& parts);
+// Reset reason, build, memory and parts, logged once the drivers are up.
+void log_boot_summary();
+// The port's half of the console's `diag` report (hg::App::on_diag).
+void report(hg::json::Value& r);
+// The log copy, oldest line first (hg::App::recent_log).
+std::string recent_log();
+}  // namespace diag
 
 }  // namespace hgp

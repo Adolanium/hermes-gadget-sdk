@@ -92,6 +92,11 @@ class App {
   std::string console(std::string_view line);
   // Invoked after a setting changes through the console (e.g. Wi-Fi keys).
   std::function<void(std::string_view key)> on_setting_changed;
+  // Adds the port's facts to the console's `diag` report: memory, reset reason,
+  // radio, which drivers came up.
+  std::function<void(json::Value& report)> on_diag;
+  // Recent log lines for `diag log`, oldest first. Ports that keep none leave it unset.
+  std::function<std::string()> recent_log;
 
   // --- introspection --------------------------------------------------------
   Screen screen() const { return model_.screen; }
@@ -138,6 +143,8 @@ class App {
   void h_prompt_close(const json::Value& m);
 
   void load_settings();
+  json::Value status_value() const;
+  std::string diag_report();
   std::string setting(std::string_view key, std::string_view fallback = {}) const;
   void connect_now();
   void schedule_reconnect();

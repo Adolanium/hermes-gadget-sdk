@@ -1198,7 +1198,9 @@ void App::update_model() {
 // --------------------------------------------------------------------------
 // Console
 
-std::string App::status_json() const {
+std::string App::status_json() const { return status_value().dump(); }
+
+json::Value App::status_value() const {
   json::Value s = json::Value::object();
   const char* phase = "boot";
   switch (phase_) {
@@ -1220,7 +1222,20 @@ std::string App::status_json() const {
   if (!pairing_code_.empty()) s.set("pairing_code", pairing_code_);
   if (!prompt_id_.empty()) s.set("prompt", prompt_id_);
   if (!fatal_.empty()) s.set("error", fatal_);
-  return s.dump();
+  return s;
+}
+
+std::string App::diag_report() {
+  json::Value r = json::Value::object();
+  r.set("device_id", device_id_).set("board", profile_.board).set("firmware", profile_.firmware);
+  json::Value conn = json::Value::object();
+  conn.set("attempts", attempts_).set("network", network_detail_);
+  if (!last_close_.empty()) conn.set("last_close", last_close_);
+  if (online_since_) conn.set("online_s", (now() - online_since_) / 1000);
+  r.set("connection", conn);
+  r.set("app", status_value());
+  if (on_diag) on_diag(r);
+  return "@diag " + r.dump();
 }
 
 bool App::known_setting(std::string_view key) const {
@@ -1244,10 +1259,17 @@ std::string App::console(std::string_view raw) {
     std::string keys;
     for (const char* k : kSettingKeys) keys += std::string(" ") + k;
     for (const auto& k : profile_.extra_settings) keys += " " + k;
-    return "@help commands: status | get <key> | set <key> <value> | say <text> | talk | release | cancel | "
-           "new-session | yes | no | reconnect | forget-key | factory-reset   keys:" + keys;
+    return "@help commands: status | diag [log] | get <key> | set <key> <value> | say <text> | talk | release | "
+           "cancel | new-session | yes | no | reconnect | forget-key | factory-reset   keys:" + keys;
   }
   if (cmd == "status") return "@status " + status_json();
+  if (cmd == "diag" && rest.empty()) return diag_report();
+  if (cmd == "diag" && rest == "log") {
+    if (!recent_log) return "@error this device keeps no log";
+    std::string out = recent_log();
+    if (!out.empty() && out.back() != '\n') out += '\n';
+    return out + "@log end";
+  }
   if (cmd == "get" || cmd == "set") {
     size_t ks = rest.find(' ');
     std::string key = rest.substr(0, ks);

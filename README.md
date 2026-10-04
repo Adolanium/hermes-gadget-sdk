@@ -129,7 +129,7 @@ Each simulated device keeps its own identity in `~/.hermes-gadget/sim/<name>/`, 
 
 ## Build one
 
-> **Untested on hardware.** Both board builds compile in CI, but neither has run on a real board yet. If you build one, watch the serial console on the first boot and [open an issue](https://github.com/Adolanium/hermes-gadget-sdk/issues) with its log if something looks wrong.
+> **Untested on hardware.** Both board builds compile in CI, but neither has run on a real board yet. If you build one and something looks wrong, run `hermes-gadget diag --port <port>` and [open an issue](https://github.com/Adolanium/hermes-gadget-sdk/issues) with the report it saves.
 
 | Part | Example | Notes |
 |---|---|---|
