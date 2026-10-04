@@ -1,9 +1,5 @@
 menu "Hermes Gadget"
 
-    config HG_FIRMWARE_VERSION
-        string "Firmware version reported to Hermes"
-        default "0.1.0"
-
     menu "Defaults (overridable from the serial console)"
         config HG_DEFAULT_NAME
             string "Device name"

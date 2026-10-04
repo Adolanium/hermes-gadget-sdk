@@ -106,6 +106,46 @@ class SimHal final : public hg::Display,
   std::vector<uint16_t> fb_;
 };
 
+// The update slot, apart from SimHal: hg::Updater and hg::AudioOut both have an abort().
+class SimUpdater final : public hg::Updater {
+ public:
+  SimUpdater(const hgsim_config& cfg, const hgsim_host& host)
+      : host_(host), capacity_(cfg.update_capacity), pending_(cfg.update_pending != 0) {}
+
+  size_t capacity() const override { return capacity_; }
+  bool begin(size_t size, std::string& error) override {
+    if (host_.update_begin && host_.update_begin(host_.user, size)) return true;
+    error = "the simulator can't take an update";
+    return false;
+  }
+  bool write(const uint8_t* data, size_t len, std::string& error) override {
+    if (host_.update_write && host_.update_write(host_.user, data, len)) return true;
+    error = "writing the update failed";
+    return false;
+  }
+  bool finish(std::string& error) override {
+    if (host_.update_finish && host_.update_finish(host_.user)) return true;
+    error = "not an ESP32 app image";
+    return false;
+  }
+  void abort() override {
+    if (host_.update_abort) host_.update_abort(host_.user);
+  }
+  void restart() override {
+    if (host_.update_restart) host_.update_restart(host_.user);
+  }
+  bool pending_verify() const override { return pending_; }
+  void confirm() override {
+    pending_ = false;
+    if (host_.update_confirm) host_.update_confirm(host_.user);
+  }
+
+ private:
+  hgsim_host host_;
+  size_t capacity_;
+  bool pending_;
+};
+
 int copy_out(const std::string& s, char* out, size_t cap) {
   if (!out || cap == 0) return static_cast<int>(s.size());
   size_t n = s.size() < cap - 1 ? s.size() : cap - 1;
@@ -118,6 +158,7 @@ int copy_out(const std::string& s, char* out, size_t cap) {
 
 struct hgsim {
   std::unique_ptr<SimHal> hal_impl;
+  std::unique_ptr<SimUpdater> updater;
   hg::Hal hal;
   std::unique_ptr<hg::App> app;
   std::unique_ptr<hg::TouchGestures> touch;
@@ -145,6 +186,10 @@ hgsim* hgsim_create(const hgsim_config* cfg, const hgsim_host* host) {
   sim->hal.display = h;
   sim->hal.mic = cfg->has_mic ? h : nullptr;
   sim->hal.speaker = cfg->has_speaker ? h : nullptr;
+  if (cfg->update_capacity && host->update_begin) {
+    sim->updater = std::make_unique<SimUpdater>(*cfg, *host);
+    sim->hal.updater = sim->updater.get();
+  }
 
   hg::DeviceProfile profile;
   profile.board = cfg->board ? cfg->board : "sim";

@@ -18,6 +18,7 @@ from dataclasses import dataclass
 VERSION = 1
 SUBPROTOCOL = "hermes-gadget.v1"
 AUTH_CONTEXT = b"hermes-gadget/v1|"
+OTA_CONTEXT = b"hermes-gadget/v1|ota|"
 DEVICE_ID_PREFIX = "hg-"
 DEVICE_ID_RE = re.compile(r"^hg-[0-9a-f]{16}$")
 KEY_BYTES = 32
@@ -25,6 +26,7 @@ KEY_BYTES = 32
 BINARY_HEADER = 4
 CHANNEL_AUDIO = 0x01
 CHANNEL_IMAGE = 0x02
+CHANNEL_FIRMWARE = 0x03
 
 
 @dataclass(frozen=True)
@@ -36,7 +38,7 @@ class BinaryFrame:
 
 
 def parse_binary(data: bytes) -> BinaryFrame | None:
-    if len(data) < BINARY_HEADER or data[0] not in (CHANNEL_AUDIO, CHANNEL_IMAGE):
+    if len(data) < BINARY_HEADER or data[0] not in (CHANNEL_AUDIO, CHANNEL_IMAGE, CHANNEL_FIRMWARE):
         return None
     channel, stream, seq = struct.unpack_from("<BBH", data)
     return BinaryFrame(channel, stream, seq, bytes(data[BINARY_HEADER:]))
@@ -57,6 +59,12 @@ def auth_mac(key: bytes, device_id: str, nonce: str) -> str:
 
 def verify_mac(key: bytes, device_id: str, nonce: str, mac: str) -> bool:
     return hmac.compare_digest(auth_mac(key, device_id, nonce), mac or "")
+
+
+def ota_mac(key: bytes, device_id: str, nonce: str, sha256_hex: str, size: int) -> str:
+    """Authorizes one firmware image (lowercase hex SHA-256 and size) against the device's nonce."""
+    msg = OTA_CONTEXT + f"{device_id}|{nonce}|{sha256_hex}|{size}".encode()
+    return base64.b64encode(hmac.new(key, msg, hashlib.sha256).digest()).decode()
 
 
 def decode_key(b64: str) -> bytes | None:

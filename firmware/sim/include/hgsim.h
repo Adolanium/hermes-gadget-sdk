@@ -22,7 +22,7 @@ extern "C" {
 #define HGSIM_API __attribute__((visibility("default")))
 #endif
 
-#define HGSIM_ABI_VERSION 4
+#define HGSIM_ABI_VERSION 5
 
 typedef struct hgsim hgsim;
 
@@ -54,6 +54,14 @@ typedef struct hgsim_host {
   uint32_t (*now_ms)(void* user);
   void (*random_bytes)(void* user, uint8_t* out, size_t len);
   void (*log)(void* user, int level, const char* message);
+  /* firmware update slot (see hg::Updater); used when config.update_capacity > 0.
+   * begin, write and finish return 1 on success. */
+  int (*update_begin)(void* user, size_t size);
+  int (*update_write)(void* user, const uint8_t* data, size_t len);
+  int (*update_finish)(void* user);
+  void (*update_abort)(void* user);
+  void (*update_restart)(void* user);
+  void (*update_confirm)(void* user);
 } hgsim_host;
 
 typedef struct hgsim_config {
@@ -75,6 +83,8 @@ typedef struct hgsim_config {
   const char* cancel_label;
   int round; /* circular panel (see hg::DisplayInfo::round) */
   int touch; /* the screen is the main input (see hg::TouchGestures) */
+  size_t update_capacity; /* bytes the update slot holds; 0 = no over-the-air updates */
+  int update_pending;     /* this boot runs an installed update that isn't confirmed yet */
 } hgsim_config;
 
 /* Action handler: fill `result_json` (a JSON object) and return 1, or write an

@@ -12,13 +12,14 @@ This is the contract between a device and the gadget plugin running inside the H
 
   | Offset | Size | Field                                 |
   |--------|------|---------------------------------------|
-  | 0      | u8   | channel: `0x01` audio, `0x02` image   |
-  | 1      | u8   | stream id (from the matching `*.start`) |
+  | 0      | u8   | channel: `0x01` audio, `0x02` image, `0x03` firmware |
+  | 1      | u8   | stream id (from the matching `*.start` or `ota.offer`) |
   | 2      | u16 LE | sequence number (wraps)             |
   | 4      | ...  | payload                               |
 
   - Audio payload: mono PCM16, little-endian, at the rate announced by `audio.start`.
   - Image payload: RGB565, little-endian, row-major. Each chunk continues where the previous one stopped.
+  - Firmware payload: the next bytes of the image; see [Firmware updates](#firmware-updates).
 
 ## Handshake
 
@@ -63,6 +64,7 @@ Because the id is derived from the key, nobody can claim another device's id wit
 ```
 
 - Every `caps` member is optional. A device without a speaker omits `speaker`, and the server then never sends it audio.
+- `caps.ota` (`{"max_size": 2031616}`) means the device installs firmware updates over this connection, up to `max_size` bytes.
 - `actions` is the device's tool manifest. Each action has a JSON-Schema `params` object and a `description` written for the model.
 - `token` is required only when the host sets `GADGET_ACCESS_TOKEN`. A mismatch is rejected with error code `bad_token`.
 
@@ -180,6 +182,42 @@ Devices must answer every `action` exactly once. The server times out after abou
 |---|---|
 | `{"type": "state", "sensors": {"battery_pct": 80, "temperature_c": 21.5}}` | Latest readings (rate limited by the device) |
 | `{"type": "event", "name": "button.long_press", "data": {...}, "notify": false}` | With `notify: true`, the event is delivered to the agent as a message |
+
+### Firmware updates
+
+A device that advertises `caps.ota` installs a new firmware image the server streams to it. Only the server holding the device's enrolled key can authorize an image:
+
+```
+server                                   device
+  | -- ota.offer -------------------------> |   size, SHA-256, version, stream
+  | <------------------------- ota.ready -- |   a fresh nonce
+  | -- ota.begin -------------------------> |   MAC over nonce, SHA-256 and size
+  | <--------------------- ota.ack (0) ---- |
+  | == binary channel 3, 4 KB frames =====> |
+  | <-------- ota.ack (every 16 KB) ------- |
+  | -- ota.end ---------------------------> |
+  | <-------------------------- ota.done -- |   then the device restarts into the new firmware
+```
+
+| Message | Direction | Meaning |
+|---|---|---|
+| `{"type": "ota.offer", "stream": 12, "size": 1172496, "sha256": "<64 hex>", "version": "0.2.0"}` | server → device | An image is coming. The device answers `ota.ready`, or `ota.error` (`too_large`, `unsupported`, ...) |
+| `{"type": "ota.ready", "nonce": "<base64 16 bytes>"}` | device → server | A fresh nonce for this update only |
+| `{"type": "ota.begin", "mac": "<base64 HMAC>"}` | server → device | Authorizes the image (below); the device answers `ota.ack` with offset 0 |
+| `{"type": "ota.ack", "offset": 16384}` | device → server | Bytes written so far: every 16 KB and at the end |
+| `{"type": "ota.end"}` | server → device | All bytes sent; the device checks the size and SHA-256, then the image itself |
+| `{"type": "ota.done", "version": "0.2.0"}` | device → server | Installed; the device restarts about a second later |
+| `{"type": "ota.error", "code": "checksum", "message": "..."}` | device → server | The update is abandoned. Codes: `unsupported`, `bad_offer`, `too_large`, `no_offer`, `unauthorized`, `flash`, `sequence`, `size`, `checksum`, `invalid`, `timeout`, `no_update` |
+| `{"type": "ota.abort"}` | server → device | Abandon the update in progress |
+
+```
+mac = HMAC-SHA256(key, "hermes-gadget/v1|ota|" + device_id + "|" + nonce + "|" + sha256_hex + "|" + size)
+```
+
+- `sha256_hex` is the lowercase hex SHA-256 of the whole image, and `size` its length in decimal.
+- The server keeps at most 64 KB unacknowledged. Frames carry consecutive sequence numbers from 0; a gap abandons the update (`sequence`).
+- An update that gets no data for 30 s is abandoned (`timeout`), and so is one whose connection drops.
+- The new firmware boots on probation. If it doesn't reach a server (`welcome`) within 5 minutes, or crashes first, the device goes back to the previous firmware.
 
 ### Heartbeat
 

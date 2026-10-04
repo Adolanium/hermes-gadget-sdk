@@ -262,6 +262,36 @@ class Buttons {
   Button buttons_[4];
 };
 
+// Over-the-air updates into the other app slot of partitions.csv. A new image
+// boots on probation: it must reach Hermes (hg::App confirms it on `welcome`)
+// within kConfirmWindowUs, or this rolls back to the previous one; a crash
+// before then makes the bootloader roll back on its own.
+class EspUpdater final : public hg::Updater {
+ public:
+  // Looks at the running image: if it is on probation, starts the rollback clock.
+  void start();
+  size_t capacity() const override;
+  bool begin(size_t size, std::string& error) override;
+  bool write(const uint8_t* data, size_t len, std::string& error) override;
+  bool finish(std::string& error) override;
+  void abort() override;
+  void restart() override;
+  bool pending_verify() const override { return pending_; }
+  void confirm() override;
+  // Running and next slot, and whether this boot is on probation (for `diag`).
+  hg::json::Value describe() const;
+
+ private:
+  static constexpr size_t kHeadBytes = 112;  // image + segment headers, then the app description up to its project name
+  const void* target_ = nullptr;             // esp_partition_t
+  uint32_t handle_ = 0;                      // esp_ota_handle_t
+  bool open_ = false;
+  bool pending_ = false;
+  size_t written_ = 0;
+  uint8_t head_[kHeadBytes] = {};
+  void* rollback_timer_ = nullptr;           // esp_timer_handle_t
+};
+
 class Wifi {
  public:
   void begin(NvsStorage& storage);

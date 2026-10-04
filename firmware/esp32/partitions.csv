@@ -1,0 +1,10 @@
+# Two app slots for over-the-air updates: the running firmware stays in one while
+# the next one is written to the other, and the bootloader can go back to it.
+# Fits 4 MB of flash and more. Every board flashed with this table keeps these
+# sizes until it is flashed over USB again, so don't shrink the slots.
+# Name,   Type, SubType, Offset,   Size
+nvs,      data, nvs,     0x9000,   0x6000
+otadata,  data, ota,     0xf000,   0x2000
+phy_init, data, phy,     0x11000,  0x1000
+ota_0,    app,  ota_0,   0x20000,  0x1f0000
+ota_1,    app,  ota_1,   0x210000, 0x1f0000

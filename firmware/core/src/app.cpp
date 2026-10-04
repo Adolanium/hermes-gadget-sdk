@@ -30,6 +30,9 @@ constexpr uint32_t kFrameMs = 100;
 constexpr uint32_t kSensorIntervalMs = 2000;
 constexpr uint32_t kDefaultCardMs = 15000;
 constexpr size_t kMicChunkSamples = 640;  // 40 ms at 16 kHz per binary frame
+constexpr size_t kOtaAckBytes = 16 * 1024;  // a firmware update acknowledges every 16 KB written
+constexpr uint32_t kOtaIdleMs = 30000;      // ...and is abandoned when no data comes for this long
+constexpr uint32_t kOtaRestartMs = 1000;    // time for ota.done to leave before the restart
 constexpr uint32_t kBackoffMs[] = {1000, 2000, 4000, 8000, 15000, 30000};
 constexpr size_t kBackoffSteps = sizeof(kBackoffMs) / sizeof(kBackoffMs[0]);
 
@@ -42,6 +45,21 @@ std::string trim(std::string_view s) {
   while (a < b && (s[a] == ' ' || s[a] == '\t' || s[a] == '\r' || s[a] == '\n')) ++a;
   while (b > a && (s[b - 1] == ' ' || s[b - 1] == '\t' || s[b - 1] == '\r' || s[b - 1] == '\n')) --b;
   return std::string(s.substr(a, b - a));
+}
+
+// Compares MACs without leaking where they first differ.
+bool same_secret(std::string_view a, std::string_view b) {
+  if (a.size() != b.size()) return false;
+  unsigned diff = 0;
+  for (size_t i = 0; i < a.size(); ++i) diff |= static_cast<unsigned char>(a[i] ^ b[i]);
+  return diff == 0;
+}
+
+std::string lower(std::string s) {
+  for (char& c : s) {
+    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+  }
+  return s;
 }
 
 }  // namespace
@@ -58,7 +76,9 @@ const App::Route App::kRoutes[] = {
     {"action", &App::h_action},           {"ping", &App::h_ping},
     {"notice", &App::h_notice},           {"error", &App::h_error},
     {"transcript", &App::h_transcript},   {"prompt", &App::h_prompt},
-    {"prompt.close", &App::h_prompt_close},
+    {"prompt.close", &App::h_prompt_close}, {"ota.offer", &App::h_ota_offer},
+    {"ota.begin", &App::h_ota_begin},     {"ota.end", &App::h_ota_end},
+    {"ota.abort", &App::h_ota_abort},
 };
 
 App::App(Hal& hal, DeviceProfile profile) : hal_(hal), profile_(std::move(profile)) {}
@@ -224,6 +244,11 @@ void App::schedule_reconnect() {
 
 void App::drop_session(std::string_view reason) {
   last_close_ = std::string(reason);
+  if (ota_busy()) {
+    if (ota_ == Ota::Receiving) hal_.updater->abort();
+    ota_reset();
+    log(LogLevel::Warn, "firmware update abandoned: the connection dropped");
+  }
   if (mode_ == Mode::Listening && hal_.mic) hal_.mic->stop();
   stop_playback();
   mode_ = Mode::Idle;
@@ -292,6 +317,11 @@ void App::send_hello() {
   if (profile_.has_scroll_buttons) inputs.push("up").push("down");
   caps.set("inputs", inputs);
   caps.set("talk_mode", talk_mode_ == TalkMode::Tap ? "tap" : "hold");
+  if (hal_.updater) {
+    json::Value ota = json::Value::object();
+    ota.set("max_size", hal_.updater->capacity());
+    caps.set("ota", ota);
+  }
 
   json::Value acts = json::Value::array();
   for (const auto& a : actions_) {
@@ -362,6 +392,11 @@ void App::h_welcome(const json::Value& m) {
     pairing_command_.clear();
   }
   log(LogLevel::Info, paired_ ? "online (paired)" : "online (waiting for pairing approval)");
+  // A freshly installed firmware has reached Hermes, so it can take the next update: keep it.
+  if (hal_.updater && hal_.updater->pending_verify()) {
+    hal_.updater->confirm();
+    log(LogLevel::Info, "new firmware " + profile_.firmware + " reached Hermes; keeping it");
+  }
 }
 
 void App::h_pairing(const json::Value& m) {
@@ -386,7 +421,7 @@ void App::h_unpaired(const json::Value&) {
 // --------------------------------------------------------------------------
 // Conversation
 
-bool App::can_talk() const { return phase_ == Phase::Online && paired_; }
+bool App::can_talk() const { return phase_ == Phase::Online && paired_ && ota_ != Ota::Receiving; }
 
 void App::h_turn_start(const json::Value& m) {
   active_turn_ = m["turn"].as_string();
@@ -501,6 +536,12 @@ void App::on_transport_binary(const uint8_t* data, size_t len) {
   last_rx_ = now();
   proto::BinaryFrame f;
   if (!proto::parse_binary(data, len, f)) return;
+  if (f.channel == proto::Channel::Firmware) {
+    const Ota before = ota_;
+    ota_chunk(f.stream, f.seq, f.payload, f.payload_len);
+    if (ota_ != before) update_model();  // a failed chunk ends the update screen
+    return;
+  }
   if (f.channel == proto::Channel::Audio) {
     if (in_stream_ < 0 || f.stream != in_stream_ || !hal_.speaker) return;
     size_t n = f.payload_len / 2;
@@ -952,6 +993,162 @@ void App::emit_event(std::string_view name, json::Value data, bool notify_agent)
 }
 
 // --------------------------------------------------------------------------
+// Firmware updates
+//
+// offer (size, SHA-256) -> ready (a fresh nonce) -> begin (the server's MAC over
+// nonce, SHA-256 and size, keyed with this device's key) -> binary chunks, each
+// 16 KB acknowledged -> end. The device checks the size, the SHA-256 and (through
+// the port) the image itself before it switches, and only the holder of its key
+// can authorize an image.
+
+bool App::ota_busy() const { return ota_ == Ota::Offered || ota_ == Ota::Receiving; }
+
+void App::ota_reset() {
+  ota_ = Ota::Idle;
+  ota_nonce_.clear();
+  ota_sha_.clear();
+  ota_version_.clear();
+  ota_size_ = ota_received_ = ota_acked_ = 0;
+  ota_hash_ = crypto::Sha256();
+}
+
+void App::ota_fail(std::string_view code, std::string_view message) {
+  if (ota_ == Ota::Receiving) hal_.updater->abort();
+  ota_reset();
+  json::Value err = proto::message("ota.error");
+  err.set("code", code).set("message", message);
+  send(err);
+  log(LogLevel::Warn, std::string("firmware update failed: ") + std::string(message));
+  notice_ = "Update failed: " + std::string(message);
+  notice_until_ = now() + 10000;
+}
+
+void App::h_ota_offer(const json::Value& m) {
+  if (!hal_.updater) {
+    ota_fail("unsupported", "this device can't install updates over the air");
+    return;
+  }
+  if (ota_busy()) {  // a new offer replaces one in progress
+    if (ota_ == Ota::Receiving) hal_.updater->abort();
+    ota_reset();
+  }
+  const int64_t size = m["size"].as_int(0);
+  const std::string sha = lower(m["sha256"].as_string());
+  const int64_t stream = m["stream"].as_int(0);
+  if (size <= 0 || sha.size() != 64 || sha.find_first_not_of("0123456789abcdef") != std::string::npos ||
+      stream < 1 || stream > 255) {
+    ota_fail("bad_offer", "an offer needs size, sha256 and stream");
+    return;
+  }
+  if (static_cast<uint64_t>(size) > hal_.updater->capacity()) {
+    ota_fail("too_large", "the image is " + std::to_string(size) + " bytes; the update slot holds " +
+                              std::to_string(hal_.updater->capacity()));
+    return;
+  }
+  uint8_t nonce[16];
+  hal_.system->random_bytes(nonce, sizeof(nonce));
+  ota_ = Ota::Offered;
+  ota_nonce_ = crypto::base64_encode(nonce, sizeof(nonce));
+  ota_size_ = static_cast<size_t>(size);
+  ota_sha_ = sha;
+  ota_version_ = m["version"].as_string();
+  ota_stream_ = static_cast<uint8_t>(stream);
+  ota_last_rx_ = now();
+  json::Value ready = proto::message("ota.ready");
+  ready.set("nonce", ota_nonce_);
+  send(ready);
+}
+
+void App::h_ota_begin(const json::Value& m) {
+  if (ota_ != Ota::Offered) {
+    ota_fail("no_offer", "ota.begin came without an offer");
+    return;
+  }
+  const std::string want = proto::ota_mac(key_.data(), key_.size(), device_id_, ota_nonce_, ota_sha_, ota_size_);
+  if (!same_secret(want, m["mac"].as_string())) {
+    ota_fail("unauthorized", "the update isn't authorized with this device's key");
+    return;
+  }
+  std::string error;
+  if (!hal_.updater->begin(ota_size_, error)) {
+    ota_fail("flash", error.empty() ? "can't prepare the update slot" : error);
+    return;
+  }
+  ota_ = Ota::Receiving;
+  ota_received_ = ota_acked_ = 0;
+  ota_seq_ = 0;
+  ota_hash_ = crypto::Sha256();
+  ota_last_rx_ = now();
+  stop_playback();
+  json::Value ack = proto::message("ota.ack");
+  ack.set("offset", 0);
+  send(ack);
+  log(LogLevel::Info, "installing firmware " + ota_version_ + " (" + std::to_string(ota_size_) + " bytes)");
+}
+
+void App::ota_chunk(uint8_t stream, uint16_t seq, const uint8_t* data, size_t len) {
+  if (ota_ != Ota::Receiving || stream != ota_stream_) return;
+  if (seq != ota_seq_) {
+    ota_fail("sequence", "a chunk of the image went missing");
+    return;
+  }
+  ++ota_seq_;
+  if (len > ota_size_ - ota_received_) {
+    ota_fail("size", "more data than the offer said");
+    return;
+  }
+  std::string error;
+  if (!hal_.updater->write(data, len, error)) {
+    ota_fail("flash", error.empty() ? "writing the update failed" : error);
+    return;
+  }
+  ota_hash_.update(data, len);
+  ota_received_ += len;
+  ota_last_rx_ = now();
+  if (ota_received_ - ota_acked_ >= kOtaAckBytes || ota_received_ == ota_size_) {
+    ota_acked_ = ota_received_;
+    json::Value ack = proto::message("ota.ack");
+    ack.set("offset", ota_received_);
+    send(ack);
+    update_model();
+  }
+}
+
+void App::h_ota_end(const json::Value&) {
+  if (ota_ != Ota::Receiving) {
+    ota_fail("no_update", "ota.end came without an update in progress");
+    return;
+  }
+  if (ota_received_ != ota_size_) {
+    ota_fail("size", "received " + std::to_string(ota_received_) + " of " + std::to_string(ota_size_) + " bytes");
+    return;
+  }
+  crypto::Digest digest = ota_hash_.finish();
+  if (crypto::hex(digest.data(), digest.size()) != ota_sha_) {
+    ota_fail("checksum", "the image doesn't match its SHA-256");
+    return;
+  }
+  std::string error;
+  if (!hal_.updater->finish(error)) {
+    ota_fail("invalid", error.empty() ? "the image was rejected" : error);
+    return;
+  }
+  json::Value done = proto::message("ota.done");
+  done.set("version", ota_version_);
+  send(done);
+  log(LogLevel::Info, "firmware " + ota_version_ + " installed; restarting into it");
+  ota_ = Ota::Restarting;
+  ota_restart_at_ = now() + kOtaRestartMs;
+}
+
+void App::h_ota_abort(const json::Value&) {
+  if (!ota_busy()) return;
+  if (ota_ == Ota::Receiving) hal_.updater->abort();
+  ota_reset();
+  log(LogLevel::Info, "firmware update cancelled by the server");
+}
+
+// --------------------------------------------------------------------------
 // Main loop
 
 void App::tick() {
@@ -980,6 +1177,16 @@ void App::tick() {
   } else if (phase_ == Phase::Online && t - last_rx_ > 3 * heartbeat_ms_) {
     hal_.transport->close();
     drop_session("server silent");
+    update_model();
+  }
+
+  if (ota_busy() && t - ota_last_rx_ > kOtaIdleMs) {
+    ota_fail("timeout", "the update stalled");
+    update_model();
+  }
+  if (ota_ == Ota::Restarting && static_cast<int32_t>(t - ota_restart_at_) >= 0) {
+    ota_ = Ota::Idle;  // hardware never returns from restart()
+    hal_.updater->restart();
     update_model();
   }
 
@@ -1081,6 +1288,20 @@ void App::update_model() {
     m.headline = "Hermes";
     m.detail = "starting - fw " + profile_.firmware;
     m.hint = device_id_;
+  } else if (ota_ == Ota::Receiving || ota_ == Ota::Restarting) {
+    m.screen = Screen::Updating;
+    m.hero = true;
+    m.caption_lines = 2;
+    const std::string version = ota_version_.empty() ? std::string("new firmware") : "firmware " + ota_version_;
+    if (ota_ == Ota::Restarting) {
+      m.headline = "Restarting";
+      m.detail = "Installed " + version;
+    } else {
+      m.headline = "Updating";
+      unsigned pct = ota_size_ ? static_cast<unsigned>(static_cast<uint64_t>(ota_received_) * 100 / ota_size_) : 0;
+      m.detail = version + ": " + std::to_string(pct) + "% of " + std::to_string((ota_size_ + 1023) / 1024) + " KB";
+    }
+    m.hint = "keep the power on";
   } else if (!fatal_.empty()) {
     m.screen = Screen::Error;
     m.hero = true;
@@ -1222,6 +1443,14 @@ json::Value App::status_value() const {
   if (!pairing_code_.empty()) s.set("pairing_code", pairing_code_);
   if (!prompt_id_.empty()) s.set("prompt", prompt_id_);
   if (!fatal_.empty()) s.set("error", fatal_);
+  if (ota_ != Ota::Idle) {
+    json::Value u = json::Value::object();
+    u.set("state", ota_ == Ota::Offered ? "offered" : ota_ == Ota::Receiving ? "receiving" : "restarting")
+        .set("version", ota_version_)
+        .set("received", ota_received_)
+        .set("size", ota_size_);
+    s.set("update", u);
+  }
   return s;
 }
 

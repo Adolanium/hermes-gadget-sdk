@@ -20,7 +20,7 @@ from .. import paths
 
 log = logging.getLogger("hermes_gadget.sim")
 
-ABI_VERSION = 4
+ABI_VERSION = 5
 
 BUTTON_TALK, BUTTON_CANCEL, BUTTON_UP, BUTTON_DOWN = 0, 1, 2, 3
 BUTTONS = {"talk": BUTTON_TALK, "cancel": BUTTON_CANCEL, "up": BUTTON_UP, "down": BUTTON_DOWN}
@@ -41,6 +41,8 @@ _NOW = CFUNCTYPE(c_uint32, c_void_p)
 _RANDOM = CFUNCTYPE(None, c_void_p, POINTER(c_uint8), c_size_t)
 _LOG = CFUNCTYPE(None, c_void_p, c_int, c_char_p)
 _ACTION = CFUNCTYPE(c_int, c_void_p, c_char_p, POINTER(c_char), c_size_t)
+_UPDATE_BEGIN = CFUNCTYPE(c_int, c_void_p, c_size_t)
+_UPDATE_WRITE = CFUNCTYPE(c_int, c_void_p, POINTER(c_uint8), c_size_t)
 
 
 class _Host(Structure):
@@ -66,6 +68,12 @@ class _Host(Structure):
         ("now_ms", _NOW),
         ("random_bytes", _RANDOM),
         ("log", _LOG),
+        ("update_begin", _UPDATE_BEGIN),
+        ("update_write", _UPDATE_WRITE),
+        ("update_finish", _INT_RET),
+        ("update_abort", _VOID),
+        ("update_restart", _VOID),
+        ("update_confirm", _VOID),
     ]
 
 
@@ -88,6 +96,8 @@ class _Config(Structure):
         ("cancel_label", c_char_p),
         ("round", c_int),
         ("touch", c_int),
+        ("update_capacity", c_size_t),
+        ("update_pending", c_int),
     ]
 
 
@@ -114,6 +124,12 @@ class Host(Protocol):
     def now_ms(self) -> int: ...
     def random_bytes(self, n: int) -> bytes: ...
     def log(self, level: int, message: str) -> None: ...
+    def update_begin(self, size: int) -> bool: ...
+    def update_write(self, data: bytes) -> bool: ...
+    def update_finish(self) -> bool: ...
+    def update_abort(self) -> None: ...
+    def update_restart(self) -> None: ...
+    def update_confirm(self) -> None: ...
 
 
 def _guard(default):
@@ -182,14 +198,15 @@ class NativeDevice:
                  backlight: bool = True, scroll_buttons: bool = True, mic_rate: int = 16000,
                  speaker_rate: int = 16000, library: Path | None = None,
                  button_labels: tuple[str, str] | None = None, round_panel: bool = False,
-                 touch_screen: bool = False):
+                 touch_screen: bool = False, update_capacity: int = 0, update_pending: bool = False):
         self._lib = load_library(library)
         self._host_obj = host
         self.width, self.height = width, height
         self._strings = [s.encode() for s in (board, firmware, name, server_url, access_token)]
         self._strings += [s.encode() for s in button_labels] if button_labels else [None, None]
         self._config = _Config(width, height, int(mic), int(speaker), int(backlight), int(scroll_buttons),
-                               mic_rate, speaker_rate, *self._strings, int(round_panel), int(touch_screen))
+                               mic_rate, speaker_rate, *self._strings, int(round_panel), int(touch_screen),
+                               update_capacity, int(update_pending))
         self._callbacks = self._make_callbacks(host)
         self._handle = self._lib.hgsim_create(ctypes.byref(self._config), ctypes.byref(self._callbacks))
         if not self._handle:
@@ -257,6 +274,18 @@ class NativeDevice:
         def log_cb(_u, level, msg):
             h.log(int(level), msg.decode("utf-8", "replace"))
 
+        @_guard(0)
+        def update_begin(_u, size):
+            return int(bool(h.update_begin(int(size))))
+
+        @_guard(0)
+        def update_write(_u, data, n):
+            return int(bool(h.update_write(ctypes.string_at(data, n))))
+
+        @_guard(0)
+        def update_finish(_u):
+            return int(bool(h.update_finish()))
+
         return _Host(
             None,
             _TRANSPORT_CONNECT(transport_connect),
@@ -279,6 +308,12 @@ class NativeDevice:
             _NOW(now_ms),
             _RANDOM(random_bytes),
             _LOG(log_cb),
+            _UPDATE_BEGIN(update_begin),
+            _UPDATE_WRITE(update_write),
+            _INT_RET(update_finish),
+            _VOID(_guard(None)(lambda _u: h.update_abort())),
+            _VOID(_guard(None)(lambda _u: h.update_restart())),
+            _VOID(_guard(None)(lambda _u: h.update_confirm())),
         )
 
     # -- lifecycle --------------------------------------------------------------------

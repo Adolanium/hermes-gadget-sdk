@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "driver/gpio.h"
+#include "esp_app_desc.h"
 #include "esp_log.h"
 #include "hg/touch.hpp"
 #include "nvs_flash.h"
@@ -27,6 +28,7 @@ hgp::CodecSpeaker g_codec_speaker;
 hgp::Buttons g_buttons;
 hgp::TouchInput g_touch;
 hgp::Wifi g_wifi;
+hgp::EspUpdater g_updater;
 hg::TouchGestures* g_gestures = nullptr;
 
 // touch_cancel: which inputs act as CANCEL on touch boards.
@@ -125,7 +127,9 @@ extern "C" void app_main(void) {
   hgp::events::init();
   ESP_ERROR_CHECK(g_storage.begin() ? ESP_OK : ESP_FAIL);
   const hgp::BoardConfig& board = hgp::board_config();
-  ESP_LOGI(TAG, "Hermes Gadget %s on %s", CONFIG_HG_FIRMWARE_VERSION, board.name);
+  const char* version = esp_app_get_description()->version;
+  ESP_LOGI(TAG, "Hermes Gadget %s on %s", version, board.name);
+  g_updater.start();  // a new firmware on probation starts its clock now
 
   // Wi-Fi first: the radio is the entropy source for the device key.
   g_wifi.begin(g_storage);
@@ -134,6 +138,7 @@ extern "C" void app_main(void) {
   hal.system = &g_system;
   hal.transport = &g_transport;
   hal.storage = &g_storage;
+  if (g_updater.capacity()) hal.updater = &g_updater;
   if (board.lcd.enabled && g_display.begin(board.lcd)) hal.display = &g_display;
   else if (board.amoled.enabled && g_amoled.begin(board.amoled)) hal.display = &g_amoled;
   if (board.mic.enabled && g_mic.begin(board.mic)) hal.mic = &g_mic;
@@ -159,7 +164,7 @@ extern "C" void app_main(void) {
 
   hg::DeviceProfile profile;
   profile.board = board.name;
-  profile.firmware = CONFIG_HG_FIRMWARE_VERSION;
+  profile.firmware = version;
   profile.default_name = CONFIG_HG_DEFAULT_NAME;
   profile.default_server_url = CONFIG_HG_DEFAULT_SERVER_URL;
   profile.default_access_token = CONFIG_HG_DEFAULT_ACCESS_TOKEN;
@@ -183,7 +188,10 @@ extern "C" void app_main(void) {
     if (key == "wifi_ssid" || key == "wifi_pass") g_wifi.reconfigure();
     if (key == "touch_cancel") apply_touch_cancel();
   };
-  app.on_diag = &hgp::diag::report;
+  app.on_diag = [](hg::json::Value& report) {
+    hgp::diag::report(report);
+    report.set("ota", g_updater.describe());
+  };
   app.recent_log = &hgp::diag::recent_log;
   app.begin();
   hgp::console::begin();

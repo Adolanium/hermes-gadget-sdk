@@ -15,11 +15,13 @@ constexpr int kVersion = 1;
 constexpr const char* kSubprotocol = "hermes-gadget.v1";
 // Domain-separation prefix for the auth MAC: HMAC(key, prefix + device_id + "|" + nonce).
 constexpr const char* kAuthContext = "hermes-gadget/v1|";
+// ...and for firmware updates: HMAC(key, prefix + device_id + "|" + nonce + "|" + sha256 + "|" + size).
+constexpr const char* kOtaContext = "hermes-gadget/v1|ota|";
 constexpr const char* kDeviceIdPrefix = "hg-";
 
 // Binary frame layout: [channel u8][stream u8][seq u16 LE][payload ...]
 constexpr size_t kBinaryHeader = 4;
-enum class Channel : uint8_t { Audio = 0x01, Image = 0x02 };
+enum class Channel : uint8_t { Audio = 0x01, Image = 0x02, Firmware = 0x03 };
 
 struct BinaryFrame {
   Channel channel;
@@ -36,6 +38,10 @@ void write_binary_header(uint8_t* dst, Channel channel, uint8_t stream, uint16_t
 std::string device_id_for_key(const uint8_t* key, size_t len);
 // Base64 HMAC proving possession of the device key for a server nonce.
 std::string auth_mac(const uint8_t* key, size_t key_len, std::string_view device_id, std::string_view nonce);
+// Base64 HMAC with which the server authorizes one firmware image (by its
+// lowercase hex SHA-256 and size) against the device's update nonce.
+std::string ota_mac(const uint8_t* key, size_t key_len, std::string_view device_id, std::string_view nonce,
+                    std::string_view sha256_hex, size_t size);
 
 json::Value message(std::string_view type);
 

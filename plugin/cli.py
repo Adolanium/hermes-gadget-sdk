@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import datetime as _dt
 import socket
+import sys
+import time
+from pathlib import Path
 
 
 def _store():
@@ -47,16 +50,70 @@ def _cmd_devices(args) -> None:
     print("\nApproved devices: hermes pairing list   |   Revoke: hermes pairing revoke gadget <device_id>")
 
 
-def _cmd_forget(args) -> None:
-    store = _store()
-    ref = args.device
+def _match(store, ref: str):
+    """The one enrolled device whose id or name is ``ref``, or None (after saying so)."""
     matches = [d for d, r in store.devices().items() if d == ref or (r.get("name") or "").lower() == ref.lower()]
     if len(matches) != 1:
         print(f"No single gadget matches {ref!r}. See: hermes gadget devices")
+        return None
+    return matches[0]
+
+
+def _cmd_forget(args) -> None:
+    store = _store()
+    device_id = _match(store, args.device)
+    if device_id is None:
         return
-    store.forget(matches[0])
-    print(f"Forgot the key for {matches[0]}; the device will re-enroll on its next connection.")
-    print(f"To also remove its chat approval: hermes pairing revoke gadget {matches[0]}")
+    store.forget(device_id)
+    print(f"Forgot the key for {device_id}; the device will re-enroll on its next connection.")
+    print(f"To also remove its chat approval: hermes pairing revoke gadget {device_id}")
+
+
+def _cmd_update(args) -> None:
+    from .ota import UpdateError, UpdateQueue, inspect_image
+
+    path = Path(args.image)
+    try:
+        image = inspect_image(path.read_bytes())
+    except OSError as exc:
+        sys.exit(f"Can't read {path}: {exc}")
+    except UpdateError as exc:
+        sys.exit(f"{path} can't be installed: {exc.message}")
+    store = _store()
+    device_id = _match(store, args.device)
+    if device_id is None:
+        sys.exit(1)
+    rec = store.devices()[device_id]
+    name, board = rec.get("name") or device_id, rec.get("board")
+    if image.board and board and image.board != board:
+        sys.exit(f"{path} is built for {image.board}, but {name} is {board}.")
+
+    queue = UpdateQueue(store.path.parent)
+    queue.stage(device_id, image)
+    print(f"Staged firmware {image.version} ({image.size // 1024} KB) for {name} ({device_id}).")
+    if args.no_wait:
+        print("The gateway installs it when the device is online.")
+        return
+    print("Waiting for the gateway to install it. Ctrl+C stops waiting; the update stays staged.")
+    deadline, last = time.monotonic() + args.timeout, None
+    while time.monotonic() < deadline:
+        status = queue.status(device_id) or {}
+        state = status.get("state")
+        line = {
+            "sending": f"  sending: {status.get('sent', 0) * 100 // max(1, status.get('size', 1))}%",
+            "retrying": f"  {status.get('error')}; trying again when the device is back",
+        }.get(state)
+        if line and line != last:
+            print(line)
+            last = line
+        if state == "done":
+            print(f"Installed {status.get('version') or image.version}. {name} restarts into it and keeps it "
+                  "once it reaches Hermes again.")
+            return
+        if state == "failed":
+            sys.exit(f"The update failed: {status.get('error')}")
+        time.sleep(1)
+    print("Still waiting. The update stays staged and installs once the gateway sees the device online.")
 
 
 def _cmd_info(args) -> None:
@@ -80,10 +137,16 @@ def setup_argparse(parser) -> None:
     forget = subs.add_parser("forget", help="Forget a gadget's key so it can re-enroll (after a factory reset)")
     forget.add_argument("device", help="Device id or name")
     subs.add_parser("info", help="Show the URL devices should connect to")
+    update = subs.add_parser("update", help="Install new firmware on a gadget over the air")
+    update.add_argument("device", help="Device id or name")
+    update.add_argument("image", help="The firmware image: firmware.bin from the PlatformIO build")
+    update.add_argument("--no-wait", action="store_true", help="Stage it and return; the gateway installs it")
+    update.add_argument("--timeout", type=float, default=600, help="Seconds to wait for the install (default 600)")
     parser.set_defaults(func=handle)
 
 
-_COMMANDS = {"devices": _cmd_devices, "ls": _cmd_devices, "forget": _cmd_forget, "info": _cmd_info}
+_COMMANDS = {"devices": _cmd_devices, "ls": _cmd_devices, "forget": _cmd_forget, "info": _cmd_info,
+             "update": _cmd_update}
 
 
 def handle(args) -> None:

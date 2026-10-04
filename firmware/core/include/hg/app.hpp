@@ -14,6 +14,7 @@
 #include <string_view>
 #include <vector>
 
+#include "hg/crypto.hpp"
 #include "hg/hal.hpp"
 #include "hg/json.hpp"
 #include "hg/ui.hpp"
@@ -141,6 +142,17 @@ class App {
   void h_error(const json::Value& m);
   void h_prompt(const json::Value& m);
   void h_prompt_close(const json::Value& m);
+  void h_ota_offer(const json::Value& m);
+  void h_ota_begin(const json::Value& m);
+  void h_ota_end(const json::Value& m);
+  void h_ota_abort(const json::Value& m);
+
+  // firmware updates
+  void ota_chunk(uint8_t stream, uint16_t seq, const uint8_t* data, size_t len);
+  // Abandons the update (if any) and tells the server why.
+  void ota_fail(std::string_view code, std::string_view message);
+  void ota_reset();
+  bool ota_busy() const;
 
   void load_settings();
   json::Value status_value() const;
@@ -267,6 +279,17 @@ class App {
   std::vector<std::pair<std::string, double>> sensors_;
   bool sensors_dirty_ = false;
   uint32_t sensors_sent_ = 0;
+
+  // a firmware update: offered (waiting for the server's MAC), receiving, or
+  // installed and about to restart
+  enum class Ota : uint8_t { Idle, Offered, Receiving, Restarting };
+  Ota ota_ = Ota::Idle;
+  std::string ota_nonce_, ota_sha_, ota_version_;
+  size_t ota_size_ = 0, ota_received_ = 0, ota_acked_ = 0;
+  uint8_t ota_stream_ = 0;
+  uint16_t ota_seq_ = 0;
+  uint32_t ota_last_rx_ = 0, ota_restart_at_ = 0;
+  crypto::Sha256 ota_hash_;
 
   uint32_t frame_at_ = 0;
 };

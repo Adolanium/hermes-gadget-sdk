@@ -56,6 +56,9 @@ State lives in `~/.hermes-gadget/sim/<name>/` (override with `--state-dir`):
 - `nvs.json`: device key and settings. Delete it to look like a brand-new device.
 - `audio/`: every reply the speaker played, as WAV.
 - `screenshots/`: screenshots saved with Ctrl+S.
+- `update.bin`: the last firmware image installed over the air.
+
+Like a board, the simulated device takes firmware updates (`hermes gadget update`, or `update <path>` in the dev server). It checks the image the way the core does and keeps only ESP32 app images. Then it "restarts": it drops the connection and connects again, still running the simulator.
 
 ## Boards
 

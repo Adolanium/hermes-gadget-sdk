@@ -5,11 +5,24 @@
 namespace hgp {
 namespace {
 
+// Every image carries "HGBOARD=<board name>" so `hermes gadget update` can refuse
+// an image built for another board. The name in the config points into it,
+// which also keeps the linker from dropping it.
+#if CONFIG_HG_BOARD_ESP32S3_BREADBOARD
+#define HG_BOARD_NAME "esp32s3-breadboard"
+#elif CONFIG_HG_BOARD_AMOLED_175
+#define HG_BOARD_NAME "esp32s3-touch-amoled-1.75"
+#else
+#define HG_BOARD_NAME "custom"
+#endif
+constexpr char kBoardTag[] = "HGBOARD=" HG_BOARD_NAME;
+constexpr const char* kBoardName = kBoardTag + 8;
+
 #if CONFIG_HG_BOARD_ESP32S3_BREADBOARD
 // Wiring table: docs/hardware.md#esp32-s3-breadboard
 BoardConfig make() {
   BoardConfig b{};
-  b.name = "esp32s3-breadboard";
+  b.name = kBoardName;
   b.lcd.enabled = true;
   b.lcd.width = 320;
   b.lcd.height = 240;
@@ -32,7 +45,7 @@ BoardConfig make() {
 // Pins: docs/hardware.md#esp32-s3-touch-amoled-175
 BoardConfig make() {
   BoardConfig b{};
-  b.name = "esp32s3-touch-amoled-1.75";
+  b.name = kBoardName;
   b.amoled.enabled = true;
   b.amoled.width = 466;
   b.amoled.height = 466;
@@ -93,7 +106,7 @@ constexpr bool kInvert = false;
 
 BoardConfig make() {
   BoardConfig b{};
-  b.name = "custom";
+  b.name = kBoardName;
 #if CONFIG_HG_LCD_ENABLED
   b.lcd.enabled = true;
   b.lcd.width = CONFIG_HG_LCD_WIDTH;

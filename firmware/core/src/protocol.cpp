@@ -7,7 +7,9 @@ namespace hg::proto {
 bool parse_binary(const uint8_t* data, size_t len, BinaryFrame& out) {
   if (len < kBinaryHeader) return false;
   uint8_t ch = data[0];
-  if (ch != static_cast<uint8_t>(Channel::Audio) && ch != static_cast<uint8_t>(Channel::Image)) return false;
+  if (ch != static_cast<uint8_t>(Channel::Audio) && ch != static_cast<uint8_t>(Channel::Image) &&
+      ch != static_cast<uint8_t>(Channel::Firmware))
+    return false;
   out.channel = static_cast<Channel>(ch);
   out.stream = data[1];
   out.seq = static_cast<uint16_t>(data[2] | (data[3] << 8));
@@ -33,6 +35,21 @@ std::string auth_mac(const uint8_t* key, size_t key_len, std::string_view device
   msg.append(device_id.data(), device_id.size());
   msg.push_back('|');
   msg.append(nonce.data(), nonce.size());
+  crypto::Digest mac =
+      crypto::hmac_sha256(key, key_len, reinterpret_cast<const uint8_t*>(msg.data()), msg.size());
+  return crypto::base64_encode(mac.data(), mac.size());
+}
+
+std::string ota_mac(const uint8_t* key, size_t key_len, std::string_view device_id, std::string_view nonce,
+                    std::string_view sha256_hex, size_t size) {
+  std::string msg = kOtaContext;
+  msg.append(device_id.data(), device_id.size());
+  msg.push_back('|');
+  msg.append(nonce.data(), nonce.size());
+  msg.push_back('|');
+  msg.append(sha256_hex.data(), sha256_hex.size());
+  msg.push_back('|');
+  msg += std::to_string(size);
   crypto::Digest mac =
       crypto::hmac_sha256(key, key_len, reinterpret_cast<const uint8_t*>(msg.data()), msg.size());
   return crypto::base64_encode(mac.data(), mac.size());

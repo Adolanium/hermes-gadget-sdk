@@ -62,6 +62,7 @@ bool animated(Screen s) {
   switch (s) {
     case Screen::Boot:
     case Screen::Connecting:
+    case Screen::Updating:
     case Screen::Ready:
     case Screen::Listening:
     case Screen::Thinking:
@@ -93,7 +94,8 @@ uint32_t hero_anim_key(const UiModel& m) {
   switch (m.screen) {
     case Screen::Listening: h.val(m.frame % 3).val(m.level / 20); break;
     case Screen::Thinking:
-    case Screen::Connecting: h.val((m.frame / 2) % 4); break;
+    case Screen::Connecting:
+    case Screen::Updating: h.val((m.frame / 2) % 4); break;
     case Screen::Responding: h.val((m.frame / 2) % 3); break;
     default: break;
   }
@@ -106,6 +108,7 @@ uint16_t caption_color(Screen s) {
     case Screen::Thinking: return kBlue;
     case Screen::Responding:
     case Screen::Connecting:
+    case Screen::Updating:
     case Screen::Pairing:
     case Screen::Prompt: return kAccent;
     case Screen::Offline:
@@ -130,6 +133,7 @@ const char* screen_name(Screen s) {
     case Screen::Image: return "image";
     case Screen::Error: return "error";
     case Screen::Prompt: return "prompt";
+    case Screen::Updating: return "updating";
   }
   return "unknown";
 }
@@ -311,6 +315,7 @@ void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
   switch (m.screen) {
     case Screen::Boot:
     case Screen::Connecting:
+    case Screen::Updating:
       spinner(kAccent);
       break;
     case Screen::Thinking:
@@ -487,7 +492,8 @@ void Ui::hero_anim_rows(const UiModel& m, int& y0, int& y1) const {
       break;
     }
     case Screen::Thinking:
-    case Screen::Connecting: {
+    case Screen::Connecting:
+    case Screen::Updating: {
       int ty = my + size * a.head_top_right.y / 1000;
       add(ty - size / 6, ty + size / 12);
       break;
@@ -545,7 +551,8 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
       }
       break;
     case Screen::Thinking: dots(kBlue, kBlueDim); break;
-    case Screen::Connecting: dots(kAccent, kAccentDim); break;
+    case Screen::Connecting:
+    case Screen::Updating: dots(kAccent, kAccentDim); break;
     default: break;
   }
 
