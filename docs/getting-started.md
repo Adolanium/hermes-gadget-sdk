@@ -46,15 +46,16 @@ hermes-gadget sim --url ws://127.0.0.1:8765/gadget   # terminal 2
 
 ## 3. Connect to Hermes
 
-Install the plugin into your Hermes home, enable it and start the gateway:
+Install the plugin into your Hermes and turn the platform on:
 
 ```bash
-hermes-gadget plugin install          # copies plugin/ to ~/.hermes/plugins/gadget (or $HERMES_HOME)
-hermes plugins enable gadget
-hermes config set platforms.gadget.enabled true
-hermes gateway run                    # or restart your gateway service
-hermes gadget info                    # prints the URL devices should use
+hermes plugins install https://github.com/Adolanium/hermes-gadget-sdk/tree/main/plugin --enable
+hermes gateway setup                  # pick Hermes Gadget; restart the gateway when it asks
 ```
+
+The setup step enables the platform, asks which port devices connect to (8765 by default), and prints the URL devices should use with a link to the browser installer. `hermes gadget info` shows the same later.
+
+Working on the plugin itself? `hermes-gadget plugin install --link` links your checkout's `plugin/` into Hermes instead, so edits take effect on the next gateway start.
 
 Speech needs Hermes's STT and TTS configured: `hermes tools` / `hermes setup`, or the `stt:` and `tts:` sections of `config.yaml`. Without STT, voice messages still reach the agent, but as untranscribed audio notes.
 
@@ -67,8 +68,10 @@ hermes-gadget sim --url ws://127.0.0.1:8765/gadget --name "Desk Gadget"
 Approve the pairing code it shows:
 
 ```bash
-hermes pairing approve gadget <CODE>
+hermes gadget pair                    # or: hermes pairing approve gadget <CODE>
 ```
+
+`hermes gadget pair` waits for a device to show a code, says which device it is, and asks before approving it.
 
 The device switches to **Ready** within about 2 seconds. Hold Space to talk, or type, and replies come from your Hermes with its normal tools, memory and skills. Try:
 

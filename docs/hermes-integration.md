@@ -52,6 +52,7 @@ Secrets go in `~/.hermes/.env`, following Hermes's rule that `.env` is only for 
 | Need | Hermes surface | Notes |
 |---|---|---|
 | Register a transport | `ctx.register_platform(...)` → `PlatformEntry` | `allowed_users_env`, `allow_all_env`, `platform_hint`, `max_message_length`, `parse_target_ref_fn` |
+| Setup wizard | `PlatformEntry.setup_fn` | `hermes gateway setup` lists Hermes Gadget and runs its step: enable the platform, pick the port (written with `hermes config set`'s writer), print the device URL and the installer link. The wizard then offers the gateway restart |
 | Inbound messages | `BasePlatformAdapter.handle_message(MessageEvent)` | text → `MessageType.TEXT`; voice → `MessageType.VOICE` with a WAV in `media_urls` |
 | Store voice audio | `cache_audio_from_bytes_async` | The gateway's own audio cache |
 | Speech-to-text | Gateway STT for VOICE messages (`stt.*` config) | Hermes transcribes; the device never runs ASR |
@@ -66,12 +67,12 @@ Secrets go in `~/.hermes/.env`, following Hermes's rule that `.env` is only for 
 | Images from the agent | `send_image_file()` / `send_image()` | Converted to RGB565 to fit the screen (needs Pillow) |
 | Confirmations (`/new`, `/undo`, model switches) | `send_slash_confirm()` + `tools.slash_confirm.resolve()` | Shown as a `prompt`; TALK resolves `once`, CANCEL `cancel`. The handler's reply goes back with `send()` |
 | Dangerous-command approvals | `_send_exec_approval_prompt(ExecApprovalPrompt)` + `tools.approval.resolve_gateway_approval()` | Shown as a `prompt`; TALK resolves `once`, CANCEL `deny`. On timeout Hermes calls `edit_message()` on the prompt, which withdraws it |
-| Pairing | Hermes DM pairing (`gateway/pairing.py`, `hermes pairing approve`) | See below |
+| Pairing | Hermes DM pairing (`gateway/pairing.py`, `hermes pairing approve`; `hermes gadget pair` approves through the same `PairingStore`) | See below |
 | Authorization state | `BasePlatformAdapter._is_sender_authorized()` | The runner-installed check; used to mirror approval and revocation to the device |
 | Agent tools | `ctx.register_tool(toolset="gadget")` | Part of the implicit `hermes-gadget` toolset; also usable from other chats |
 | Tool session context | `gateway.session_context.get_session_env` | `HERMES_SESSION_PLATFORM` / `HERMES_SESSION_CHAT_ID` pick the default device |
 | Durable state | `plugins.plugin_storage.plugin_data_dir("gadget")` | Enrolled device keys, pending pairing codes, and firmware staged for updates (`updates/`) |
-| Host CLI | `ctx.register_cli_command("gadget", ...)` | `hermes gadget devices / forget / info / update`. `update` stages an image in the plugin's data directory; the gateway's adapter installs it once the device is online and writes progress back for the command |
+| Host CLI | `ctx.register_cli_command("gadget", ...)` | `hermes gadget devices / forget / info / pair / update`. `pair` waits for a device to show a code and approves it after asking. `update` stages an image in the plugin's data directory; the gateway's adapter installs it once the device is online and writes progress back for the command |
 | Send and cron targets | `parse_target_ref_fn` | `gadget:hg-0123456789abcdef` works with send_message and cron delivery |
 
 ### Voice round trip
@@ -92,7 +93,7 @@ The SDK reuses Hermes's DM pairing instead of inventing its own:
 
 1. When an unknown device connects, the adapter dispatches a harmless `/status` message from it.
 2. Hermes's unauthorized-sender path answers with a pairing code. The adapter recognizes the `hermes pairing approve <platform> <CODE>` command in that reply and sends the device a `pairing` frame.
-3. The device shows the code. The owner runs the command on the Hermes host.
+3. The device shows the code. The owner runs `hermes gadget pair` on the Hermes host, which finds the waiting device and approves its code after asking, or runs the `hermes pairing approve` command the device shows.
 4. The adapter polls the runner's authorization check every 2 s, so approval reaches the device as `paired` without a reconnect. Revocation (`hermes pairing revoke gadget <id>`) reaches it as `unpaired`.
 
 **Home channel.** Hermes opens each new session on a platform without a home channel with a "type /sethome" notice, which a device without a keyboard can't act on. So when a device is approved and the gadget platform has no home channel (`platforms.gadget.home_channel` or `GADGET_HOME_CHANNEL`), the adapter makes that device the home channel, as `/sethome` would, and saves it to `config.yaml`. Cron results and messages sent to `gadget` then go to that device. Run `/sethome` from another device to move it, or set `auto_home: false` to turn this off.

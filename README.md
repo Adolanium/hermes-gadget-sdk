@@ -92,10 +92,10 @@ hermes-gadget sim --url ws://127.0.0.1:8765/gadget     # terminal 2: the simulat
 **2. Connect it to your Hermes:**
 
 ```bash
-hermes-gadget plugin install && hermes plugins enable gadget
-hermes config set platforms.gadget.enabled true && hermes gateway run
+hermes plugins install https://github.com/Adolanium/hermes-gadget-sdk/tree/main/plugin --enable
+hermes gateway setup                                   # pick Hermes Gadget, then restart the gateway
 hermes-gadget sim --url ws://127.0.0.1:8765/gadget --live-audio
-hermes pairing approve gadget <CODE>                   # the code on the device's screen
+hermes gadget pair                                     # approves the code on the device's screen
 ```
 
 **3. Build the real thing:** pick the parts below, then flash it with `pio run -e esp32s3-breadboard -t upload` from `firmware/esp32`. The full walkthrough is in [docs/getting-started.md](docs/getting-started.md).

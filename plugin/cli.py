@@ -7,6 +7,11 @@ import socket
 import sys
 import time
 from pathlib import Path
+from urllib.parse import quote
+
+# The browser installer: flashes a board over USB and gives it Wi-Fi and this Hermes's address.
+INSTALLER_URL = "https://adolanium.github.io/hermes-gadget-sdk/"
+PAIR_TIMEOUT_S = 300
 
 
 def _store():
@@ -15,6 +20,12 @@ def _store():
     from .store import DeviceStore
 
     return DeviceStore(plugin_data_dir("gadget"))
+
+
+def _pairing_store():
+    from gateway.pairing import PairingStore
+
+    return PairingStore()
 
 
 def _lan_address() -> str:
@@ -38,6 +49,22 @@ def _gadget_extra() -> dict:
         return {}
 
 
+def device_url(extra: dict) -> str:
+    """The URL devices on this network should use, from ``platforms.gadget.extra``."""
+    host = extra.get("host") or "0.0.0.0"
+    port = extra.get("port") or 8765
+    path = "/" + str(extra.get("path") or "/gadget").strip("/")
+    scheme = "wss" if extra.get("tls_cert") else "ws"
+    shown = _lan_address() if host in ("0.0.0.0", "::", "") else host
+    return f"{scheme}://{shown}:{port}{path}"
+
+
+def installer_link(server: str) -> str:
+    """The installer with this Hermes's address filled in. It rides in the fragment, which browsers
+    never send to the web host."""
+    return f"{INSTALLER_URL}#server={quote(server, safe='')}"
+
+
 def _cmd_devices(args) -> None:
     devices = _store().devices()
     if not devices:
@@ -47,7 +74,8 @@ def _cmd_devices(args) -> None:
         seen = rec.get("last_seen")
         when = _dt.datetime.fromtimestamp(seen).strftime("%Y-%m-%d %H:%M") if seen else "-"
         print(f"{device_id}  {rec.get('name') or '-':<24} {rec.get('board') or '-':<28} last seen {when}")
-    print("\nApproved devices: hermes pairing list   |   Revoke: hermes pairing revoke gadget <device_id>")
+    print("\nApprove a new device: hermes gadget pair   |   Approved devices: hermes pairing list   |   "
+          "Revoke: hermes pairing revoke gadget <device_id>")
 
 
 def _match(store, ref: str):
@@ -118,17 +146,70 @@ def _cmd_update(args) -> None:
 
 def _cmd_info(args) -> None:
     extra = _gadget_extra()
-    host = extra.get("host") or "0.0.0.0"
-    port = extra.get("port") or 8765
-    path = "/" + str(extra.get("path") or "/gadget").strip("/")
-    scheme = "wss" if extra.get("tls_cert") else "ws"
-    shown = _lan_address() if host in ("0.0.0.0", "::", "") else host
+    url = device_url(extra)
     print(f"platform enabled : {extra.get('enabled', False)}")
-    print(f"device URL       : {scheme}://{shown}:{port}{path}")
+    print(f"device URL       : {url}")
     print(f"device registry  : {_store().path}")
     if not extra.get("enabled"):
-        print("\nEnable it with:  hermes config set platforms.gadget.enabled true   (then restart the gateway)")
-    print("\nOn the device's serial console:  set server " + f"{scheme}://{shown}:{port}{path}")
+        print("\nEnable it with:  hermes gateway setup   (or: hermes config set platforms.gadget.enabled true, "
+              "then restart the gateway)")
+    print(f"\nSet up a device from Chrome or Edge:  {installer_link(url)}")
+    print(f"Or on the device's serial console:     set server {url}")
+
+
+def _waiting_devices(approvals) -> list[tuple[str, dict, str]]:
+    """Devices showing a pairing code that Hermes hasn't approved yet: (device id, record, code).
+
+    The gateway records each code as Hermes issues it; a fresh store is read on every call because
+    the gateway writes it from another process.
+    """
+    store = _store()
+    waiting = []
+    for device_id, rec in sorted(store.devices().items()):
+        pending = store.pairing_for(device_id)
+        if pending and not approvals.is_approved("gadget", device_id):
+            waiting.append((device_id, rec, pending[0]))
+    return waiting
+
+
+def _confirm(question: str) -> bool:
+    try:
+        return input(f"{question} [Y/n] ").strip().lower() in ("", "y", "yes")
+    except EOFError:
+        return False
+
+
+def _cmd_pair(args) -> None:
+    approvals = _pairing_store()
+    deadline = time.monotonic() + args.timeout
+    announced = False
+    while True:
+        waiting = _waiting_devices(approvals)
+        if waiting:
+            break
+        if time.monotonic() >= deadline:
+            sys.exit("No gadget asked to pair. Check that it shows a pairing code and that the gateway is "
+                     "running (hermes gadget info).")
+        if not announced:
+            print("Waiting for a gadget to show a pairing code. Ctrl+C stops waiting.")
+            announced = True
+        time.sleep(1)
+
+    approved = 0
+    for device_id, rec, code in waiting:
+        name = rec.get("name") or device_id
+        label = f"{name} ({device_id}{', ' + rec['board'] if rec.get('board') else ''})"
+        if not args.yes and not _confirm(f"Approve {label}, showing code {code}?"):
+            print(f"Left {name} unapproved.")
+            continue
+        if approvals.approve_code("gadget", code) is None:
+            print(f"Hermes didn't accept the code for {name}: it may have expired. The device gets a new one "
+                  "when it reconnects.")
+            continue
+        print(f"Approved {name}. It shows Ready within a few seconds.")
+        approved += 1
+    if not approved:
+        sys.exit(1)
 
 
 def setup_argparse(parser) -> None:
@@ -136,7 +217,11 @@ def setup_argparse(parser) -> None:
     subs.add_parser("devices", aliases=["ls"], help="List gadgets that have enrolled with this Hermes")
     forget = subs.add_parser("forget", help="Forget a gadget's key so it can re-enroll (after a factory reset)")
     forget.add_argument("device", help="Device id or name")
-    subs.add_parser("info", help="Show the URL devices should connect to")
+    subs.add_parser("info", help="Show the URL devices should connect to, and the installer link")
+    pair = subs.add_parser("pair", help="Approve a gadget that shows a pairing code")
+    pair.add_argument("--yes", "-y", action="store_true", help="Approve without asking")
+    pair.add_argument("--timeout", type=float, default=PAIR_TIMEOUT_S,
+                      help=f"Seconds to wait for a gadget to ask (default {PAIR_TIMEOUT_S})")
     update = subs.add_parser("update", help="Install new firmware on a gadget over the air")
     update.add_argument("device", help="Device id or name")
     update.add_argument("image", help="The firmware image: firmware.bin from the PlatformIO build")
@@ -146,7 +231,7 @@ def setup_argparse(parser) -> None:
 
 
 _COMMANDS = {"devices": _cmd_devices, "ls": _cmd_devices, "forget": _cmd_forget, "info": _cmd_info,
-             "update": _cmd_update}
+             "pair": _cmd_pair, "update": _cmd_update}
 
 
 def handle(args) -> None:

@@ -31,7 +31,7 @@ A first session, start to finish:
 
 1. Start Hermes with the gadget plugin (or `hermes-gadget devserver --pairing` for a stand-in that needs no Hermes).
 2. Run `hermes-gadget sim --url ws://127.0.0.1:8765/gadget --live-audio --board sim-466x466-round`.
-3. The screen shows a pairing code. Approve it on the Hermes host: `hermes pairing approve gadget <CODE>`.
+3. The screen shows a pairing code. Approve it on the Hermes host: `hermes gadget pair` (or `hermes pairing approve gadget <CODE>`).
 4. Hold **Space**, ask something, let go. Hermes answers on screen and through your speakers.
 5. Hold **Esc** for 2 s to start a fresh conversation.
 

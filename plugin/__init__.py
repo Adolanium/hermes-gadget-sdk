@@ -35,6 +35,12 @@ def _is_connected(config) -> bool:
     return True
 
 
+def _setup() -> None:
+    from .setup import interactive_setup
+
+    interactive_setup()
+
+
 def _parse_target(raw: str):
     """``gadget:<device-id>`` targets for send_message and cron delivery."""
     from .protocol import DEVICE_ID_RE
@@ -53,6 +59,7 @@ def register(ctx) -> None:
         adapter_factory=_make_adapter,
         check_fn=check_requirements,
         is_connected=_is_connected,
+        setup_fn=_setup,
         parse_target_ref_fn=_parse_target,
         install_hint="websockets is a core Hermes dependency; reinstall Hermes if it is missing",
         allowed_users_env="GADGET_ALLOWED_USERS",

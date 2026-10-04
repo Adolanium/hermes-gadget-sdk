@@ -170,7 +170,7 @@ Machine-readable lines start with `@`, so tools can drive a bench device. `herme
 2. **Wi-Fi:** credentials from NVS, else from menuconfig. Without credentials the screen says "No network".
 3. **Connect:** the device opens the WebSocket to `server`, retrying 1 → 30 s with backoff.
 4. **Authenticate:** it enrolls its key on first contact and proves it with an HMAC afterwards.
-5. **Pair or ready:** an unpaired device shows a pairing code (approve with `hermes pairing approve gadget <CODE>`); a paired one goes to **Ready**.
+5. **Pair or ready:** an unpaired device shows a pairing code (approve with `hermes gadget pair`); a paired one goes to **Ready**.
 
 ## Known limits of the reference firmware
 
