@@ -1,4 +1,4 @@
-// SPI ST7789 panel via esp_lcd. The full framebuffer lives in PSRAM; rows are
+// SPI LCD panels via esp_lcd. The full framebuffer lives in PSRAM; rows are
 // copied through a small DMA-capable bounce buffer on flush.
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h
 
@@ -48,24 +48,25 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   }
   controller_name_ = ili9341 ? "ili9342" : "st7789";
   if (cfg.controller == LcdController::CoreS3) {
-    if (!bus) return false;
+    if (!i2c_bus) return false;
     i2c_device_config_t device = {};
     device.dev_addr_length = I2C_ADDR_BIT_LEN_7;
     device.device_address = 0x38;
     device.scl_speed_hz = 100000;
     i2c_master_dev_handle_t touch = nullptr;
-    if (i2c_master_bus_add_device(bus, &device, &touch) != ESP_OK) return false;
+    if (i2c_master_bus_add_device(i2c_bus, &device, &touch) != ESP_OK) return false;
     uint8_t version = 0;
+    bool detected = false;
     for (int attempt = 0; attempt < 5; ++attempt) {
       const uint8_t work_mode[] = {0x00, 0x00};
       const uint8_t reg = 0xa6;
       if (i2c_master_transmit(touch, work_mode, sizeof(work_mode), 50) == ESP_OK &&
           i2c_master_transmit_receive(touch, &reg, 1, &version, 1, 50) == ESP_OK &&
-          (version == 0x10 || version == 0x12)) break;
+          (version == 0x10 || version == 0x12)) { detected = true; break; }
       vTaskDelay(pdMS_TO_TICKS(20));
     }
     i2c_master_bus_rm_device(touch);
-    if (version != 0x10 && version != 0x12) {
+    if (!detected) {
       ESP_LOGE(TAG, "unknown CoreS3 panel revision (touch firmware 0x%02x)", version);
       return false;
     }

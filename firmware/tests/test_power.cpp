@@ -2,6 +2,7 @@
 #include <vector>
 
 #include "axp2101.hpp"
+#include "cores3.hpp"
 #include "check.hpp"
 
 TEST("AXP2101: battery, USB and charging readings never alter power configuration") {
@@ -77,4 +78,61 @@ TEST("AXP2101: audio supply enables ALDO1 at 3.3 V and preserves other rails") {
   CHECK_EQ(regs[0x62], uint8_t(0x08));
   failed = true;
   CHECK(!power.enable_aldo1_3v3());
+}
+
+TEST("CoreS3: peripheral power preserves charger and external output configuration") {
+  std::array<uint8_t, 256> pmic{}, io{};
+  pmic.fill(0x60);
+  pmic[0x90] = 0xe4;
+  io.fill(0xff);
+  auto expected_pmic = pmic;
+  auto expected_io = io;
+  std::vector<uint32_t> delays;
+  hg::CoreS3Control control(
+      [&](uint8_t addr, uint8_t reg, uint8_t& value) {
+        value = (addr == 0x34 ? pmic : io)[reg]; return true;
+      },
+      [&](uint8_t addr, uint8_t reg, uint8_t value) {
+        (addr == 0x34 ? pmic : io)[reg] = value; return true;
+      },
+      [&](uint32_t ms) {
+        delays.push_back(ms);
+        if (ms == 10) { CHECK_EQ(io[0x02], 0xfa); CHECK_EQ(io[0x03], 0xfd); }
+        if (ms == 300) { CHECK_EQ(io[0x02], 0xff); CHECK_EQ(io[0x03], 0xff); }
+      });
+  CHECK(control.begin());
+  expected_pmic[0x92] = 0x6d;  // ALDO1: 1.8 V
+  expected_pmic[0x93] = 0x7c;  // ALDO2: 3.3 V
+  expected_pmic[0x90] = 0x67;  // enable audio rails, disable backlight
+  expected_io[0x04] = 0xfa;
+  expected_io[0x05] = 0x7d;
+  CHECK(pmic == expected_pmic);
+  CHECK(io == expected_io);
+  CHECK(delays == std::vector<uint32_t>({10, 300}));
+  CHECK(control.set_brightness(50));
+  CHECK_EQ(pmic[0x99], 0x78);  // DLDO1: 2.9 V, upper bits retained
+  CHECK_EQ(pmic[0x90], 0xe7);
+  CHECK(control.set_brightness(255));
+  CHECK_EQ(pmic[0x99], 0x7c);  // clamp to 3.3 V
+  CHECK(control.set_brightness(0));
+  CHECK_EQ(pmic[0x90], 0x67);
+  CHECK_EQ(pmic[0x62], 0x60);  // charging current is untouched
+  CHECK(io == expected_io);
+}
+
+TEST("CoreS3: failed power access stops initialization without releasing reset") {
+  bool read_ok = false;
+  int writes = 0, delays = 0;
+  hg::CoreS3Control control(
+      [&](uint8_t, uint8_t, uint8_t& value) { value = 0; return read_ok; },
+      [&](uint8_t, uint8_t, uint8_t) { ++writes; return false; },
+      [&](uint32_t) { ++delays; });
+  CHECK(!control.begin());
+  CHECK_EQ(writes, 0);
+  read_ok = true;
+  CHECK(!control.begin());
+  CHECK_EQ(writes, 1);
+  CHECK_EQ(delays, 0);
+  CHECK(!control.set_brightness(100));
+  CHECK_EQ(writes, 2);
 }

@@ -1,0 +1,6 @@
+{
+  "title": "M5Stack CoreS3",
+  "summary": "320×240 touchscreen, onboard audio and battery management. Experimental.",
+  "docs": "docs/hardware.md#m5stack-cores3",
+  "ready_made": true
+}

@@ -1,10 +1,8 @@
 // Board description: which peripherals exist and how they are wired.
 //
-// A board is data, not code: add one by returning another BoardConfig from
-// board.cpp (selected through the "Board" Kconfig choice). The drivers it can
-// pick from: an SPI ST7789 or a QSPI CO5300 AMOLED display; plain I2S
-// microphone and amplifier, or ES7210/ES8311 codecs; GPIO buttons, a CST9217
-// touchscreen and a key read through a TCA9554 expander. See docs/porting.md.
+// Select the board's pins and drivers in board.cpp through the Kconfig choice.
+// Board-specific power/reset sequencing runs before peripheral initialization.
+// See docs/porting.md for the display, audio, input and power contracts.
 #pragma once
 
 #include <cstdint>
@@ -49,7 +47,7 @@ struct I2cBusConfig {
   uint32_t hz = 400000;
 };
 
-// ES8311 (speaker DAC) and ES7210 (microphone ADC) sharing one duplex I2S bus,
+// ES8311/AW88298 (speaker) and ES7210 (microphone ADC) sharing one duplex I2S bus,
 // controlled over the I2C bus.
 enum class SpeakerCodec { Es8311, Aw88298 };
 
@@ -62,7 +60,7 @@ struct CodecAudioConfig {
   SpeakerCodec speaker = SpeakerCodec::Es8311;
 };
 
-// CST9217 capacitive touch on the I2C bus: hold to talk, tap, swipe down to cancel.
+// Capacitive touch on the I2C bus: hold to talk, tap, swipe down to cancel.
 enum class TouchController { Cst9217, Box3, Ft5x06 };
 
 struct TouchConfig {

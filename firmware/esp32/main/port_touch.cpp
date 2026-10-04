@@ -1,4 +1,4 @@
-// CST9217 touchscreen and a key mirrored on a TCA9554 expander, polled over
+// Touch controllers and a key mirrored on a TCA9554 expander, polled over
 // I2C from their own task. Samples become Touch and Key events; the app task
 // turns them into gestures (hg::TouchGestures) and button presses.
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h

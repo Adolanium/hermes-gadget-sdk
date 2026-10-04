@@ -1,4 +1,4 @@
-// The shared I2C bus, and audio through codec chips: an ES8311 DAC driving the
+// The shared I2C bus, and audio through codec chips: an ES8311 DAC or AW88298
 // speaker amplifier and an ES7210 ADC for the microphones, on one duplex I2S
 // bus (esp_codec_dev does the codec register work).
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h

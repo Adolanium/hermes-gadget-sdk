@@ -44,6 +44,7 @@ Your Hermes does the thinking. Real conversations need Hermes Agent and the Gadg
 | [Waveshare ESP32-S3-Touch-AMOLED-1.75](docs/hardware.md#esp32-s3-touch-amoled-175) | Hold the screen | Onboard microphones; speaker output |
 | [Waveshare ESP32-S3-Touch-AMOLED-1.75C](docs/hardware.md#esp32-s3-touch-amoled-175c) | Hold the screen | Onboard microphones and speaker; experimental |
 | [Espressif ESP32-S3-BOX-3](docs/hardware.md#esp32-s3-box-3) | Hold the screen or BOOT | Onboard microphones and speaker; experimental |
+| [M5Stack CoreS3](docs/hardware.md#m5stack-cores3) | Hold the screen | Onboard audio and battery management; experimental |
 | [ESP32-S3 breadboard build](docs/hardware.md) | Hold TALK | Wire the microphone and optional speaker |
 
 Check the exact model and connections in the [hardware guide](docs/hardware.md). Other boards need a [port](docs/porting.md).
@@ -131,6 +132,7 @@ Everything else keeps its own license. None of it is copied into this repository
 | [esp_codec_dev](https://components.espressif.com/components/espressif/esp_codec_dev) | ES8311 / ES7210 audio codecs | Apache 2.0 |
 | [esp_websocket_client](https://components.espressif.com/components/espressif/esp_websocket_client) | The device's WebSocket connection | Apache 2.0 |
 | Espressif [ILI9341 display](https://components.espressif.com/components/espressif/esp_lcd_ili9341), [GT911](https://components.espressif.com/components/espressif/esp_lcd_touch_gt911) and [TT21100](https://components.espressif.com/components/espressif/esp_lcd_touch_tt21100) touch drivers | BOX-3 display revisions and touch | Apache 2.0 |
+| Espressif [FT5x06 touch](https://components.espressif.com/components/espressif/esp_lcd_touch_ft5x06) driver | CoreS3 touch; ILI9341 and esp_codec_dev also provide its display and AW88298 audio drivers | Apache 2.0 |
 | [esptool-js](https://github.com/espressif/esptool-js) | Flashing from the browser installer, added to the site when it's built | Apache 2.0 |
 | Python packages (`websockets`, and optionally `Pillow`, `sounddevice`, `pyserial`) | Plugin, simulator and tools | Their own licenses; see each project |
 | [GPIO Zero](https://github.com/gpiozero/gpiozero/blob/master/LICENSE.rst) | Optional Raspberry Pi buttons and digital outputs | BSD 3-Clause |
@@ -141,5 +143,7 @@ Everything else keeps its own license. None of it is copied into this repository
 The mascot artwork, and the logo and device bitmaps drawn from it, come from [Hermes Agent](https://github.com/NousResearch/hermes-agent) (MIT, © 2025 Nous Research); see [assets/mascot](assets/mascot) and [NOTICE](NOTICE).
 
 The BOX-3 panel register values follow [Espressif's BSP](https://github.com/espressif/esp-bsp/tree/master/bsp/esp-box-3), Apache 2.0. The adapter uses zero-length sleep/display commands with explicit delays. Firmware packages include `hermes-gadget-<version>-licenses.zip` with this project's notices, license texts, and notices found in the installed ESP-IDF and managed component sources. The browser installer links that archive when the release supplies it.
+
+CoreS3's ILI9342E initialization table follows [Espressif's CoreS3 BSP](https://github.com/espressif/esp-bsp/tree/master/bsp/m5stack_core_s3), Apache 2.0. Its copyright and modification notice are retained in the source and [NOTICE](NOTICE). The power and reset adapter is original code based on the board's documented wiring and chip registers.
 
 The AMOLED panel's start-up register values in `firmware/esp32/main/port_amoled.cpp` follow Waveshare's [board support package](https://components.espressif.com/components/waveshare/esp32_s3_touch_amoled_1_75) for the ESP32-S3-Touch-AMOLED-1.75 (Apache 2.0, text in [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt)); see [NOTICE](NOTICE). The 1.75C profile reuses that driver and its license notice. Its pin map and audio supply configuration follow the [manufacturer's schematic](https://files.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.75C/ESP32-S3-Touch-AMOLED-1.75C-schematic.pdf).
