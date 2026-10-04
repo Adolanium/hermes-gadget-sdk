@@ -77,7 +77,7 @@ class DeviceStore:
             }
             self._save()
 
-    def touch(self, device_id: str, *, name: str = "", board: str = "") -> None:
+    def touch(self, device_id: str, *, name: str = "", board: str = "", firmware: str = "") -> None:
         with self._lock:
             rec = self._data["devices"].get(device_id)
             if rec is None:
@@ -87,6 +87,8 @@ class DeviceStore:
                 rec["name"] = name
             if board:
                 rec["board"] = board
+            if firmware:
+                rec["firmware"] = firmware
             self._save()
 
     def forget(self, device_id: str) -> bool:
