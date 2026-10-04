@@ -34,4 +34,5 @@ The CO5300 panel start-up commands in firmware/esp32/main/port_amoled.cpp (the
 register values and their order) follow Waveshare's board support package for
 the ESP32-S3-Touch-AMOLED-1.75,
 https://components.espressif.com/components/waveshare/esp32_s3_touch_amoled_1_75,
-released by Waveshare under the Apache License 2.0.
+released by Waveshare under the Apache License 2.0. A copy of that license is in
+LICENSES/Apache-2.0.txt.
