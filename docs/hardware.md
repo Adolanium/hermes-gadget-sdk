@@ -2,7 +2,7 @@
 
 The firmware is an ESP-IDF application (`firmware/esp32`) built on the portable core. The reference board uses common modules you can wire on a breadboard. Other boards need a configuration and, where necessary, drivers; see [porting.md](porting.md).
 
-Check [capabilities and verification](hardware-validation.md) before choosing hardware. The release builds are experimental until a physical report is recorded for the exact model and revision.
+Start with [Supported hardware](supported-hardware.md) for a board comparison, then check [capabilities and verification](hardware-validation.md). The release builds are experimental until a physical report is recorded for the exact model and revision.
 
 ## Requirements
 

@@ -38,22 +38,9 @@ Your Hermes does the thinking. Real conversations need Hermes Agent and the Gadg
 
 ## Supported hardware
 
-| Board | How you talk | Audio |
-|---|---|---|
-| [Waveshare ESP32-S3-LCD-1.54](docs/hardware.md#waveshare-esp32-s3-lcd-154) | Hold BOOT | Onboard microphones and speaker |
-| [Waveshare ESP32-S3-Touch-AMOLED-1.75](docs/hardware.md#esp32-s3-touch-amoled-175) | Hold the screen | Onboard microphones; speaker output |
-| [Waveshare ESP32-S3-Touch-AMOLED-1.75C](docs/hardware.md#esp32-s3-touch-amoled-175c) | Hold the screen | Onboard microphones and speaker; experimental |
-| [Espressif ESP32-S3-BOX-3](docs/hardware.md#esp32-s3-box-3) | Hold the screen or BOOT | Onboard microphones and speaker; experimental |
-| [M5Stack CoreS3](docs/hardware.md#m5stack-cores3) | Hold the screen | Onboard audio and battery management; experimental |
-| [ESP32-S3 breadboard build](docs/hardware.md) | Hold TALK | Wire the microphone and optional speaker |
+Hermes Gadget runs on ESP32-S3 boards and Raspberry Pi 4/5, with a desktop simulator for trying it without hardware. See [Supported hardware](docs/supported-hardware.md) to compare boards, controls, audio, and setup options.
 
-Check the exact model and connections in the [hardware guide](docs/hardware.md). Other boards need a [port](docs/porting.md).
-
-Raspberry Pi 4 and 5 have an experimental [Linux client](docs/linux.md) for
-64-bit Raspberry Pi OS Lite Trixie. Add USB audio, GPIO controls, or a display
-as needed. ARM64 release packages include the native core and a service installer.
-
-These ports build in CI. Physical verification reports are not yet recorded; treat them as experimental until the [hardware verification table](docs/hardware-validation.md) links a report for your revision.
+Hardware ports remain experimental until a complete physical verification report is recorded for the exact revision. Check the [verification table](docs/hardware-validation.md) before choosing a board.
 
 ## Try the demo from a checkout
 
