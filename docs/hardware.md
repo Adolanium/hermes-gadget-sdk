@@ -82,6 +82,62 @@ The USB-C port is the S3's own USB Serial/JTAG, so flashing and the serial conso
 4. **Speaker:** replies are clear and loud enough (`set volume 80`); no hiss between replies.
 5. **Buttons:** BOOT holds to talk, PLUS cancels, and holding PLUS for 2 s starts a new conversation.
 
+## ESP32-S3-BOX-3
+
+Use `esp32-s3-box-3` for Espressif's BOX-3 with 16 MB flash and 16 MB octal PSRAM. The original BOX and BOX-Lite need different profiles. This port is experimental, with no physical report recorded.
+
+| Part | Connection |
+|---|---|
+| 320×240 LCD | SPI MOSI 6, clock 7, CS 5, DC 4, shared reset 48 active high, backlight 47 |
+| Touch | TT21100 at 0x24 or GT911 at 0x5D/0x14; interrupt 3 |
+| I2C | SDA 8, SCL 18 |
+| ES8311 speaker / ES7210 microphones | MCLK 2, BCLK 17, WS 45, DOUT 15, DIN 16; amplifier enable 46 |
+| BOOT | GPIO 0, TALK |
+
+The driver identifies the display revision through the touch controller, following Espressif's board definitions. TT21100 selects ST7789; GT911 selects the ILI9342 initialization sequence through the ILI9341 driver. An unknown controller leaves the display unavailable and records an error. The display resets the shared line once before touch initialization.
+
+Hold the screen or BOOT to talk, swipe down to cancel, and hold the title for one second to open settings. The top mute button keeps its hardware function; it is not a CANCEL button. The front home key is unused. Dock sensors, expansion outputs and storage are not exposed by this profile.
+
+```bash
+cd firmware/esp32
+pio run -e esp32-s3-box-3 -t upload -t monitor
+```
+
+The USB-C port handles flashing and the serial console. For ESP-IDF, use `SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp32-s3-box-3/sdkconfig.defaults"` with a separate build directory and sdkconfig. Phone setup, pairing and OTA use the same flows as the other ESP32 boards.
+
+Run the [hardware checklist](hardware-validation.md) for the exact panel revision. Check touch alignment in all corners, display colors, audio interruption, the physical mute button, USB recovery and Wi-Fi setup. The settings menu provides local mic, speaker, display and input checks. No battery readings are advertised.
+
+References: [Espressif hardware overview](https://github.com/espressif/esp-box/blob/master/docs/hardware_overview/esp32_s3_box_3/hardware_overview_for_box_3.md) and [board definitions](https://github.com/espressif/esp-bsp/tree/master/bsp/esp-box-3). Display and touch drivers keep their Apache 2.0 license; see [README](../README.md#license) and the license archive distributed with firmware releases.
+
+## M5Stack CoreS3
+
+Use `m5stack-cores3` for the CoreS3 K128 with 16 MB flash and 8 MB **quad** PSRAM. Core, Core2 and CoreS3 SE are not covered by this profile. The port is experimental for both LCD revisions; physical reports remain outstanding.
+
+| Part | Connection |
+|---|---|
+| 320×240 LCD | MOSI 37, clock 36, CS 3, DC 35; reset through AW9523 P1_1 |
+| FT6336 touch | I2C 0x38; reset through AW9523 P0_0; polled |
+| I2C | SDA 12, SCL 11 |
+| AW88298 speaker / ES7210 microphones | MCLK 0, BCLK 34, WS 33, DOUT 13, DIN 14; reset through AW9523 P0_2 |
+| Power and backlight | AXP2101 at 0x34; AW9523 at 0x58; boost enable P1_7 |
+
+The display selects ILI9342C for touch firmware ID 0x10 and ILI9342E for 0x12. An unrecognized ID leaves the display unavailable and logs an error. M5Stack changed the LCD to ILI9342E in August 2026, so record the panel revision with test results.
+
+Hold the screen to talk, swipe down to cancel, and hold the title for one second to open settings. GPIO 0 carries the audio clock and is not a TALK button. The hardware power and reset buttons retain their functions. Camera, IMU, RTC, SD storage and expansion outputs are not exposed.
+
+The power adapter enables the audio supplies (ALDO1 at 1.8 V and ALDO2 at 3.3 V), the onboard boost, and peripheral reset lines. Brightness controls the DLDO1 backlight supply between 2.5 and 3.3 V; zero disables that rail. It preserves charger settings, other rail settings and USB/bus output-enable bits. Settings provide battery readings, local power-off, screen timeout and hardware checks.
+
+```bash
+cd firmware/esp32
+pio run -e m5stack-cores3 -t upload -t monitor
+```
+
+For ESP-IDF, use `SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/m5stack-cores3/sdkconfig.defaults"` with a separate build directory and sdkconfig. Use the USB-C data port for flashing and the console. To enter download mode, hold RESET for about three seconds until the green indicator lights. Phone Wi-Fi setup, pairing and OTA use the standard ESP32 flows.
+
+Before relying on the port, run the [physical checklist](hardware-validation.md), including all touch corners, LCD colors, microphone level, speaker playback and interruption, backlight range, USB recovery, and battery shutdown/wake. Test USB and battery power separately.
+
+References: [M5Stack hardware and recovery instructions](https://docs.m5stack.com/en/core/CoreS3), [Espressif board definitions](https://github.com/espressif/esp-bsp/tree/master/bsp/m5stack_core_s3), [AW9523 registers](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/products/core/CoreS3/AW9523B-EN.pdf), and [AXP2101 registers](https://files.waveshare.com/wiki/common/X-power-AXP2101_SWcharge_V1.0.pdf). See [README](../README.md#license) for driver licenses and the adapted ILI9342E table's notice.
+
 ## ESP32-S3-Touch-AMOLED-1.75C
 
 Use `esp32s3-touch-amoled-175c` for SKUs 33691/33692, the enclosed model with 32 MB flash and 8 MB octal PSRAM. This is an experimental port. Use its exact image; the 1.75 model's image has different pins.

@@ -25,6 +25,7 @@ assets/mascot/          The mascot master image and its attribution
 | Adapter on real Hermes classes | `HERMES_AGENT_DIR=../hermes-agent ../hermes-agent/.venv/bin/python -m pytest tests/test_adapter_hermes.py` | A Hermes checkout and its virtualenv |
 | Full gateway end to end | `HERMES_GADGET_E2E=1 pytest tests/test_gateway_e2e.py` | The above; spawns `hermes gateway run` with a temporary `HERMES_HOME` |
 | Browser installer | `npm ci && npm test` in `site/` | Node.js 22 |
+| Home Assistant / MQTT examples | `pytest tests/test_automation_examples.py` | Built native library and the `mqtt` extra; local peers need no external accounts |
 
 The Python jobs in `.github/workflows/ci.yml` run under `xvfb-run` so the desktop controls run against the simulator core and development hub. On a headless Linux machine, use `xvfb-run -a pytest`. Without a display, the window tests skip; set `HERMES_GADGET_UI_TESTS=1` to require them.
 
@@ -107,6 +108,8 @@ To publish a release:
 3. The **Release** workflow checks the four files against the tag, builds every board in `platformio.ini`, and publishes the files as a GitHub release. Its notes include the command that installs the plugin from the same commit (`hermes plugins install … --ref <commit>`).
 
 To package local builds: `pio run && python tools/package_release.py --all --out dist`.
+
+Each package also includes `hermes-gadget-<version>-licenses.zip`. It contains `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, `LICENSES/`, and license/notice files from the installed managed components and ESP-IDF source. Packaging finds ESP-IDF through `IDF_PATH`, or the PlatformIO framework directory under `PLATFORMIO_CORE_DIR`/`~/.platformio`. Keep the matching dependency sources installed when packaging release binaries. The archive has a checksum in the manifest and `SHA256SUMS`; the site copies it and links it from the installer. When adding a driver, update [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) and [NOTICE](../NOTICE) in the same PR.
 
 Conventions:
 

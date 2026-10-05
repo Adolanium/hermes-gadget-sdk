@@ -34,6 +34,7 @@ def test_package_has_matching_binary_checksums_licenses_and_service(tmp_path, mo
     assert files[wheel.name] == b"test wheel"
     assert b"MIT License" in files["LICENSE"]
     assert b"Waveshare" in files["NOTICE"]
+    assert b"[Paho MQTT]" in files["THIRD_PARTY_NOTICES.md"]
     assert b"Apache License" in files["LICENSES/Apache-2.0.txt"]
     assert b"User=hermes-gadget" in files["hermes-gadget.service"]
     for line in files["SHA256SUMS"].decode().splitlines():

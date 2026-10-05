@@ -259,6 +259,8 @@ touch-controller and direct-console behavior still need physical verification.
 
 ## State and recovery
 
+To expose an existing lamp and temperature sensor through this Linux client, use the [Home Assistant and MQTT examples](home-automation.md). They register named actions before pairing and perform network work outside the device loop.
+
 The default state directory is `$XDG_STATE_HOME/hermes-gadget`, or
 `~/.local/state/hermes-gadget`. To use another directory, put
 `--state-dir /path/to/state` immediately after `linux` in every command.

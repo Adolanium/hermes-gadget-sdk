@@ -42,6 +42,9 @@ jobs:
           gh release download --repo "$GITHUB_REPOSITORY" --dir release \
             --pattern manifest.json --pattern 'hermes-gadget-*.bin' \
             || echo "No release yet: the page says so."
+          gh release download --repo "$GITHUB_REPOSITORY" --dir release \
+            --pattern 'hermes-gadget-*-licenses.zip' \
+            || echo "This release has no separate license archive."
       - name: Build
         working-directory: site
         run: node scripts/build.mjs --firmware ../release --out ../_site

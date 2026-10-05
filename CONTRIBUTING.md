@@ -36,7 +36,7 @@ pytest                                # Python tests; Hermes ones skip without a
 - [ ] `.github/workflows/ci.yml`: the environment in the firmware build matrix
 - [ ] `docs/hardware.md`: a section with the pins and a first-flash checklist
 - [ ] `docs/hardware-validation.md`: capabilities, exact revision, and experimental or verified status
-- [ ] Third-party drivers: upstream source/version, README license entry, required license texts and notices in source and release packages
+- [ ] Third-party drivers: upstream source/version, entry in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), required license texts and notices in source and release packages
 - [ ] Optionally, a simulator profile with the same screen in `python/hermes_gadget/sim/runner.py`
 
 Use the [physical test checklist](docs/hardware-validation.md#record-a-physical-test) and link the report in the PR. A port without a complete report stays experimental.

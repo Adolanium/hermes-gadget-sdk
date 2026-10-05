@@ -33,6 +33,7 @@ hgp::Wifi g_wifi;
 hgp::EspUpdater g_updater;
 hgp::AxpPower g_power;
 hgp::LatchPower g_latch_power;
+hgp::CoreS3Board g_cores3;
 hg::TouchGestures* g_gestures = nullptr;
 
 // touch_cancel: which inputs act as CANCEL on touch boards.
@@ -170,10 +171,14 @@ extern "C" void app_main(void) {
   hal.storage = &g_storage;
   if (latch_power) hal.power = &g_latch_power;
   if (g_updater.capacity()) hal.updater = &g_updater;
-  if (board.lcd.enabled) {
+  i2c_master_bus_handle_t i2c_bus = hgp::i2c::bus(board.i2c);
+  const bool peripherals_ready = !board.cores3 || g_cores3.begin(i2c_bus);
+  if (board.cores3 && peripherals_ready)
+    g_display.board_backlight = [](uint8_t percent) { g_cores3.set_backlight(percent); };
+  if (peripherals_ready && board.lcd.enabled) {
     if (board.lcd.bus.type == hgp::LcdBus::Type::I80) {
       if (g_parallel.begin(board.lcd, hgp::lcd_power_pin(board))) hal.display = &g_parallel;
-    } else if (g_display.begin(board.lcd)) {
+    } else if (g_display.begin(board.lcd, i2c_bus)) {
       hal.display = &g_display;
     }
   } else if (board.amoled.enabled && g_amoled.begin(board.amoled)) {
@@ -181,25 +186,26 @@ extern "C" void app_main(void) {
   }
   if (board.mic.enabled && g_mic.begin(board.mic)) hal.mic = &g_mic;
   if (board.speaker.enabled && g_speaker.begin(board.speaker)) hal.speaker = &g_speaker;
-  i2c_master_bus_handle_t i2c_bus = hgp::i2c::bus(board.i2c);
   if (board.axp2101 && g_power.begin(i2c_bus)) hal.power = &g_power;
-  const bool audio_power = !board.axp_audio_supply || g_power.enable_audio_supply();
+  const bool audio_power = peripherals_ready && (!board.axp_audio_supply || g_power.enable_audio_supply());
   if (!audio_power) ESP_LOGE(TAG, "audio supply unavailable");
   if (board.codec.enabled && audio_power && g_codec.begin(board.codec, i2c_bus)) {
     if (g_codec_mic.begin(g_codec.in())) hal.mic = &g_codec_mic;
     if (g_codec_speaker.begin(g_codec.out())) hal.speaker = &g_codec_speaker;
   }
   g_buttons.begin(board.buttons);
-  const bool touch = (board.touch.enabled || board.pwr_key.enabled) &&
+  const bool touch = peripherals_ready && (board.touch.enabled || board.pwr_key.enabled) &&
                      g_touch.begin(board.touch, board.pwr_key, i2c_bus);
 
   hgp::diag::Parts parts;
-  parts.display = hal.display == &g_display ? "st7789"
+  parts.display = hal.display == &g_display ? g_display.controller_name()
                       : hal.display == &g_parallel ? "st7789-i80"
-                      : hal.display == &g_amoled   ? "co5300"
-                                                  : "none";
+                      : hal.display == &g_amoled ? "co5300"
+                                                : "none";
   parts.mic = hal.mic == &g_codec_mic ? "es7210" : hal.mic == &g_mic ? "i2s" : "none";
-  parts.speaker = hal.speaker == &g_codec_speaker ? "es8311" : hal.speaker == &g_speaker ? "i2s" : "none";
+  parts.speaker = hal.speaker == &g_codec_speaker ?
+      (board.codec.speaker == hgp::SpeakerCodec::Aw88298 ? "aw88298" : "es8311") :
+      hal.speaker == &g_speaker ? "i2s" : "none";
   parts.touch = touch && g_touch.has_touch();
   parts.key = touch && g_touch.has_key();
   parts.i2c = i2c_bus;

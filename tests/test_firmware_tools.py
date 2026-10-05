@@ -8,6 +8,7 @@ import json
 import re
 import struct
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -146,11 +147,12 @@ def _partition_table(layout=LAYOUT) -> bytes:
 
 
 @pytest.fixture
-def project(tmp_path):
+def project(tmp_path, monkeypatch):
     """A firmware/esp32 directory with PlatformIO build outputs for the boards it is asked for."""
     from fakes.fake_firmware import fake_image
 
     root = tmp_path / "esp32"
+    monkeypatch.setenv("IDF_PATH", str(tmp_path / "framework"))
     (root / "boards").mkdir(parents=True)
     envs = []
 
@@ -225,6 +227,31 @@ def test_every_board_comes_from_platformio_ini(project, tmp_path):
     assert package_release.INSTALLER_URL in text
     assert "| LCD 1.54 | `hermes-gadget-lcd-154-0.2.0.bin` | `hermes-gadget-lcd-154-0.2.0-app.bin` |" in text
     assert "hermes plugins install" not in text  # no commit given, so no pinned plugin
+
+
+def test_binary_release_keeps_driver_licenses_and_checksums(project, tmp_path, monkeypatch):
+    project("box3")
+    driver = project.root / "managed_components" / "example__touch"
+    driver.mkdir(parents=True)
+    (driver / "LICENSE").write_bytes(b"Manufacturer license\nCopyright Example\n")
+    framework = tmp_path / "framework"
+    framework.mkdir()
+    (framework / "NOTICE.txt").write_bytes(b"Framework notice\n")
+    monkeypatch.setenv("IDF_PATH", str(framework))
+    dist = tmp_path / "dist"
+    assert _package(project, "--all", "--out", str(dist)) == 0
+    manifest = json.loads((dist / "manifest.json").read_text())
+    license_file = manifest["licenses"]
+    archive_path = dist / license_file["path"]
+    with zipfile.ZipFile(archive_path) as archive:
+        assert archive.read("components/example__touch/LICENSE") == b"Manufacturer license\nCopyright Example\n"
+        assert archive.read("esp-idf/NOTICE.txt") == b"Framework notice\n"
+        assert b"Apache License" in archive.read("LICENSES/Apache-2.0.txt")
+        assert b"Espressif" in archive.read("NOTICE")
+        assert b"[Paho MQTT]" in archive.read("THIRD_PARTY_NOTICES.md")
+    digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+    assert license_file["sha256"] == digest
+    assert f"{digest}  hermes-gadget-0.2.0-licenses.zip" in (dist / "SHA256SUMS").read_text()
 
 
 def test_every_real_board_has_what_the_installer_shows():

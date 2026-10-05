@@ -47,7 +47,7 @@ jobs:
           python-version: ${{ matrix.python }}
           cache: pip
       - name: Install
-        run: pip install -e ".[dev,images,display]"
+        run: pip install -e ".[dev,images,display,mqtt]"
       - name: Build the simulator library
         run: hermes-gadget build-sim
       - uses: actions/setup-node@v7  # the installer's console client runs against the simulator core

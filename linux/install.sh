@@ -37,7 +37,7 @@ if [ ! -f "$destination/.installed" ]; then
     install -m 644 libhgsim.so "$destination/libhgsim.so"
     install -m 644 package.json "$destination/package.json"
     install -d -m 755 "$destination/licenses"
-    cp LICENSE NOTICE "$destination/licenses/"
+    cp LICENSE NOTICE THIRD_PARTY_NOTICES.md "$destination/licenses/"
     cp -R LICENSES "$destination/licenses/"
     python3 -m venv --system-site-packages "$destination/venv"
     "$destination/venv/bin/python" -m pip install "$source_dir/${wheel}[audio,gpio]"

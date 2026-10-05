@@ -1,28 +1,24 @@
 // Board description: which peripherals exist and how they are wired.
 //
-// A board is data, not code: add one by returning another BoardConfig from
-// board.cpp (selected through the "Board" Kconfig choice). The drivers it can
-// pick from: an SPI ST7789 or a QSPI CO5300 AMOLED display; plain I2S
-// microphone and amplifier, or ES7210/ES8311 codecs; GPIO buttons, a CST9217
-// touchscreen and a key read through a TCA9554 expander. See docs/porting.md.
+// Select the board's pins and drivers in board.cpp through the Kconfig choice.
+// Board-specific power/reset sequencing runs before peripheral initialization.
+// See docs/porting.md for the display, audio, input and power contracts.
 #pragma once
 
 #include <cstdint>
 
 namespace hgp {
 
-// How the panel is wired to the chip. SPI panels take a clock and a data line;
-// an i80 panel takes an 8-bit data bus plus a write strobe (LCD modules that put
-// an ST7789 on a parallel bus, e.g. LilyGO's T-Display-S3).
+// How an I80 panel is wired: eight data lines and a write strobe.
 struct LcdBus {
   enum class Type : uint8_t { Spi, I80 };
   Type type = Type::Spi;
-  // I80 only: D0..D7 in order, then the write strobe. -1 on a SPI board.
   int data[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
   int wr = -1;
-  // I80 pixel clock in MHz. SPI uses spi_mhz.
   int pclk_mhz = 16;
 };
+
+enum class LcdController { St7789, Box3, CoreS3 };
 
 struct LcdConfig {
   bool enabled = false;
@@ -32,6 +28,8 @@ struct LcdConfig {
   int mosi = -1, sclk = -1, cs = -1, dc = -1, rst = -1, backlight = -1;
   int spi_mhz = 40;
   LcdBus bus{};
+  LcdController controller = LcdController::St7789;
+  bool reset_active_high = false;
 };
 
 struct I2sMicConfig {
@@ -59,23 +57,29 @@ struct I2cBusConfig {
   uint32_t hz = 400000;
 };
 
-// ES8311 (speaker DAC) and ES7210 (microphone ADC) sharing one duplex I2S bus,
+// ES8311/AW88298 (speaker) and ES7210 (microphone ADC) sharing one duplex I2S bus,
 // controlled over the I2C bus.
+enum class SpeakerCodec { Es8311, Aw88298 };
+
 struct CodecAudioConfig {
   bool enabled = false;
   int mclk = -1, bclk = -1, ws = -1, dout = -1, din = -1;
   int pa = -1;               // speaker amplifier enable, active high
   float amp_supply_v = 5.0f;  // amplifier supply; the ES8311 driver sets its output level from it
   float mic_gain_db = 24.0f;
+  SpeakerCodec speaker = SpeakerCodec::Es8311;
 };
 
-// CST9217 capacitive touch on the I2C bus: hold to talk, tap, swipe down to cancel.
+// Capacitive touch on the I2C bus: hold to talk, tap, swipe down to cancel.
+enum class TouchController { Cst9217, Box3, Ft5x06 };
+
 struct TouchConfig {
   bool enabled = false;
   uint8_t addr = 0x5A;
   int rst = -1;
   uint16_t width = 0, height = 0;
   bool mirror_x = false, mirror_y = false;
+  TouchController controller = TouchController::Cst9217;
 };
 
 // A key whose level is read from a TCA9554 I/O expander input (e.g. a PMIC's
@@ -116,6 +120,7 @@ struct BoardConfig {
   ExpanderKeyConfig pwr_key;
   bool axp2101 = false;
   bool axp_audio_supply = false;
+  bool cores3 = false;
   LatchPowerConfig latch_power;
   int status_led = -1;
   const char* talk_label = "TALK";

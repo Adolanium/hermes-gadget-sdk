@@ -17,6 +17,7 @@
 
 #include "board.hpp"
 #include "axp2101.hpp"
+#include "cores3.hpp"
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
 #include "esp_codec_dev.h"
@@ -25,6 +26,7 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_io_i80.h"
 #include "esp_lcd_types.h"
+#include "esp_lcd_touch.h"
 #include "esp_websocket_client.h"
 #include "esp_http_server.h"
 #include "freertos/semphr.h"
@@ -113,15 +115,18 @@ class WsTransport final : public hg::Transport {
 
 class SpiDisplay final : public hg::Display {
  public:
-  bool begin(const LcdConfig& cfg);
+  bool begin(const LcdConfig& cfg, i2c_master_bus_handle_t bus);
+  const char* controller_name() const { return controller_name_; }
   hg::DisplayInfo info() const override;
   uint16_t* framebuffer() override { return fb_; }
   void flush(uint16_t y0, uint16_t y1) override;
   void set_backlight(uint8_t percent) override;
+  std::function<void(uint8_t)> board_backlight;
 
  private:
   static bool on_trans_done(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t* edata, void* ctx);
   LcdConfig cfg_{};
+  const char* controller_name_ = "st7789";
   esp_lcd_panel_io_handle_t io_ = nullptr;
   esp_lcd_panel_handle_t panel_ = nullptr;
   uint16_t* fb_ = nullptr;
@@ -266,17 +271,19 @@ class CodecSpeaker final : public hg::AudioOut {
 class TouchInput {
  public:
   bool begin(const TouchConfig& touch, const ExpanderKeyConfig& key, i2c_master_bus_handle_t bus);
-  bool has_touch() const { return touch_dev_ != nullptr; }
+  bool has_touch() const { return touch_dev_ != nullptr || managed_touch_ != nullptr; }
   bool has_key() const { return key_dev_ != nullptr; }
 
  private:
   static void task(void* arg);
   bool read_touch(TouchSample& out);
+  bool begin_box_touch(i2c_master_bus_handle_t bus);
   bool read_key(bool& pressed);
   TouchConfig touch_{};
   ExpanderKeyConfig key_{};
   i2c_master_dev_handle_t touch_dev_ = nullptr;
   i2c_master_dev_handle_t key_dev_ = nullptr;
+  esp_lcd_touch_handle_t managed_touch_ = nullptr;
 };
 
 class AxpPower final : public hg::Power {
@@ -289,6 +296,16 @@ class AxpPower final : public hg::Power {
  private:
   i2c_master_dev_handle_t dev_ = nullptr;
   std::unique_ptr<hg::Axp2101> chip_;
+};
+
+class CoreS3Board {
+ public:
+  bool begin(i2c_master_bus_handle_t bus);
+  void set_backlight(uint8_t percent);
+
+ private:
+  i2c_master_dev_handle_t pmic_ = nullptr, expander_ = nullptr;
+  std::unique_ptr<hg::CoreS3Control> control_;
 };
 
 class LatchPower final : public hg::Power {

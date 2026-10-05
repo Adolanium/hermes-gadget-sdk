@@ -14,6 +14,10 @@ namespace {
 #define HG_BOARD_NAME "esp32s3-touch-amoled-1.75"
 #elif CONFIG_HG_BOARD_AMOLED_175C
 #define HG_BOARD_NAME "esp32s3-touch-amoled-1.75c"
+#elif CONFIG_HG_BOARD_BOX3
+#define HG_BOARD_NAME "esp32-s3-box-3"
+#elif CONFIG_HG_BOARD_CORES3
+#define HG_BOARD_NAME "m5stack-cores3"
 #elif CONFIG_HG_BOARD_T_DISPLAY_S3
 #define HG_BOARD_NAME "tdisplay-s3"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154
@@ -134,6 +138,66 @@ BoardConfig make() {
   b.cancel_label = "PLUS";
   return b;
 }
+#elif CONFIG_HG_BOARD_BOX3
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.lcd.enabled = true;
+  b.lcd.controller = LcdController::Box3;
+  b.lcd.width = 320;
+  b.lcd.height = 240;
+  b.lcd.swap_xy = false;
+  b.lcd.mirror_x = true;
+  b.lcd.mirror_y = true;
+  b.lcd.invert = false;
+  b.lcd.mosi = 6;
+  b.lcd.sclk = 7;
+  b.lcd.cs = 5;
+  b.lcd.dc = 4;
+  b.lcd.rst = 48;
+  b.lcd.reset_active_high = true;
+  b.lcd.backlight = 47;
+  b.i2c = {8, 18, 400000};
+  b.codec = {true, 2, 17, 45, 15, 16, 46};
+  b.touch.enabled = true;
+  b.touch.controller = TouchController::Box3;
+  b.touch.width = 320;
+  b.touch.height = 240;
+  b.buttons = {0, -1, -1, -1};
+  b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
+  return b;
+}
+#elif CONFIG_HG_BOARD_CORES3
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.cores3 = true;
+  b.axp2101 = true;
+  b.i2c = {12, 11, 400000};
+  b.lcd.enabled = true;
+  b.lcd.controller = LcdController::CoreS3;
+  b.lcd.width = 320;
+  b.lcd.height = 240;
+  b.lcd.swap_xy = false;
+  b.lcd.mirror_x = false;
+  b.lcd.mirror_y = false;
+  b.lcd.invert = true;
+  b.lcd.mosi = 37;
+  b.lcd.sclk = 36;
+  b.lcd.cs = 3;
+  b.lcd.dc = 35;
+  b.codec = {true, 0, 34, 33, 13, 14, -1};
+  b.codec.speaker = SpeakerCodec::Aw88298;
+  b.touch.enabled = true;
+  b.touch.controller = TouchController::Ft5x06;
+  b.touch.addr = 0x38;
+  b.touch.width = 320;
+  b.touch.height = 240;
+  b.talk_label = "Hold screen";
+  b.cancel_label = "Swipe down";
+  return b;
+}
 #elif CONFIG_HG_BOARD_T_DISPLAY_S3
 // LilyGO T-Display-S3: 1.9" 170x320 ST7789 on an 8-bit i80 parallel bus, BOOT
 // (GPIO 0) and Button2 (GPIO 14), battery ADC on GPIO 4 behind a 1:2 divider.
@@ -144,20 +208,20 @@ BoardConfig make() {
   BoardConfig b{};
   b.name = kBoardName;
   b.lcd.enabled = true;
-  b.lcd.width = 320;  // the panel's 170x320 becomes 320x170 in landscape
+  b.lcd.width = 320;
   b.lcd.height = 170;
   b.lcd.swap_xy = true;
   b.lcd.mirror_x = false;
   b.lcd.mirror_y = true;
   b.lcd.invert = true;
   b.lcd.gap_x = 0;
-  b.lcd.gap_y = 35;  // LilyGO: the gap is panel-specific even within one driver IC
+  b.lcd.gap_y = 35;
   b.lcd.cs = 6;
   b.lcd.dc = 7;
   b.lcd.rst = 5;
   b.lcd.backlight = 38;
   b.lcd.bus.type = LcdBus::Type::I80;
-  b.lcd.bus.data[0] = 39;  // LCD D0..D7, in order
+  b.lcd.bus.data[0] = 39;
   b.lcd.bus.data[1] = 40;
   b.lcd.bus.data[2] = 41;
   b.lcd.bus.data[3] = 42;
@@ -167,8 +231,6 @@ BoardConfig make() {
   b.lcd.bus.data[7] = 48;
   b.lcd.bus.wr = 8;
   b.lcd.bus.pclk_mhz = 16;
-  // GPIO 4 is the battery divider at one-half. There is no fuel gauge and no
-  // charging signal pin brought out on this board, so both stay absent.
   b.latch_power = {true, 4, 15, -1, 38, 2, 4300, false};
   b.buttons = {0, 14, -1, -1};
   b.talk_label = "BOOT";

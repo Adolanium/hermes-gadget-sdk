@@ -16,6 +16,8 @@ Have these ready:
 | [Waveshare ESP32-S3-LCD-1.54](hardware.md#waveshare-esp32-s3-lcd-154) | BOOT to talk, PLUS to cancel; onboard microphones and speaker |
 | [Waveshare ESP32-S3-Touch-AMOLED-1.75](hardware.md#esp32-s3-touch-amoled-175) | Hold the screen to talk, swipe down to cancel; microphones and a speaker output |
 | [Waveshare ESP32-S3-Touch-AMOLED-1.75C](hardware.md#esp32-s3-touch-amoled-175c) | Hold the screen to talk, swipe down to cancel; onboard microphones and speaker; experimental |
+| [Espressif ESP32-S3-BOX-3](hardware.md#esp32-s3-box-3) | Hold the screen or BOOT to talk, swipe down to cancel; onboard microphones and speaker; experimental |
+| [M5Stack CoreS3](hardware.md#m5stack-cores3) | Hold the screen to talk, swipe down to cancel; onboard audio and battery management; experimental |
 | [ESP32-S3 breadboard build](hardware.md) | Wire the display, microphone, buttons, and optional speaker first |
 
 Match the exact model printed on the board. For another model, read [Add a board](porting.md).

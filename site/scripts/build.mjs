@@ -43,13 +43,14 @@ const manifest = values.firmware ? await readManifest(resolve(values.firmware)) 
 if (manifest) {
   const dir = resolve(values.firmware);
   await mkdir(join(out, "firmware"));
-  for (const build of manifest.builds) {
-    const data = await readFile(join(dir, build.image.path));
+  const files = [...manifest.builds.map((build) => build.image), ...(manifest.licenses ? [manifest.licenses] : [])];
+  for (const file of files) {
+    const data = await readFile(join(dir, file.path));
     const digest = createHash("sha256").update(data).digest("hex");
-    if (data.length !== build.image.size || digest !== build.image.sha256) {
-      throw new Error(`${build.image.path} doesn't match manifest.json`);
+    if (data.length !== file.size || digest !== file.sha256) {
+      throw new Error(`${file.path} doesn't match manifest.json`);
     }
-    await writeFile(join(out, "firmware", build.image.path), data);
+    await writeFile(join(out, "firmware", file.path), data);
   }
   await writeFile(join(out, "firmware", "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(`build: firmware ${manifest.version} for ${manifest.builds.map((b) => b.board).join(", ")}`);

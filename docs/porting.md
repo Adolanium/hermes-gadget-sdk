@@ -40,7 +40,7 @@ Before flashing, use **Custom pins** in menuconfig to try a wiring without writi
 
 ## A different display
 
-Three display paths ship: `SpiDisplay` (ST7789 over SPI), `ParallelDisplay` (ST7789 over an 8-bit I80 parallel bus), and `AmoledDisplay` (CO5300 over QSPI, for round AMOLED modules). For a round panel set `round` in the board config: the UI then keeps to the square inside the circle.
+Four display configurations ship: `SpiDisplay` supports ST7789 and ILI9342 variants over SPI; `ParallelDisplay` supports the ST7789 over an 8-bit I80 parallel bus; `AmoledDisplay` supports CO5300 over QSPI, including round AMOLED modules. For a round panel set `round` in the board config: the UI then keeps to the square inside the circle. BOX-3 uses the managed TT21100/GT911 touch drivers. Its LCD and touch share one reset line, so initialize the display before touch. CoreS3 uses FT5x06 for touch and detects the LCD revision through its firmware ID.
 
 `ParallelDisplay` is the T-Display-S3 reference. It holds the panel’s active-low RD input, GPIO9, high, configures an 8-bit bus with `esp_lcd_new_i80_bus()`, creates its I80 panel IO with `esp_lcd_new_panel_io_i80()`, and attaches the ST7789 using `esp_lcd_new_panel_st7789()`. Panel reset, initialization, inversion, axis swap, mirroring, address gap and display enable use the `esp_lcd_panel_*` operations; the board-specific ST7789 power/gamma registers are sent through `esp_lcd_panel_io_tx_param()`. Frame rows are transferred through the I80 panel IO in DMA-capable chunks. The T-Display-S3 backlight uses an AW9364 one-wire pulse-counter protocol on its backlight GPIO, not LEDC PWM: drive low for 3 ms to turn it off; drive high to wake/enable it, then send clock pulses to select one of 16 brightness steps. The port maps requested brightness to those steps.
 
@@ -65,6 +65,8 @@ Implement `hg::Display` (`firmware/core/include/hg/hal.hpp`):
 Set `Hal::power` only after the board's power driver starts successfully. `Power::read()` returns current readings or `nullopt` on a failed read. Each measurement is optional; omit a percentage when the hardware has no fuel gauge. `power_off()` requests a local shutdown and reports whether the request succeeded. The settings menu asks for a second selection before calling it.
 
 The AXP2101 implementation is in `firmware/drivers/axp2101.cpp`, with the ESP32 I2C connection in `port_power.cpp`. It leaves charger settings and supply rails unchanged. The core reports unavailable sensor values as JSON `null` to replace earlier readings at the gateway.
+
+CoreS3 has a separate `CoreS3Control` in `firmware/drivers/cores3.cpp`. It enables the required audio supplies, boost and AW9523 reset outputs before display, touch and audio initialization. Its masked writes preserve unrelated settings. `SpiDisplay::board_backlight` routes brightness through DLDO1 on this board. Native tests cover supply values, reset timing, preservation of other registers, brightness and failed I2C access. `CodecAudioConfig::speaker` selects the AW88298 driver for CoreS3; other profiles keep ES8311.
 
 A display that advertises `has_backlight` must accept zero percent to turn dark. `screen_timeout` dims and then darkens an idle display while keeping the device connected. Raw touch drivers should use `TouchGestures`, which consumes the first touch when waking. Button input through `App::on_button` does the same.
 
@@ -123,6 +125,8 @@ app.add_action(std::move(relay));
 The device declares its actions in `hello`. Hermes's model discovers them through the per-device context and `gadget_devices`, and calls them with `gadget_action`. No Hermes or plugin change is needed. Handlers run on the app task: keep them short, and post long work to another task and report completion with an event.
 
 The firmware ships `speaker.volume` and `screen.brightness` when the hardware allows. The simulator adds `led.set` and `buzzer.beep` as examples.
+
+For runnable Linux examples, see [Home Assistant and MQTT](home-automation.md). They expose fixed lamp targets, report temperature availability and return a job ID for work that completes asynchronously.
 
 ## A non-ESP32 device
 

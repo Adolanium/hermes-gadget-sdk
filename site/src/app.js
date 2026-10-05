@@ -524,6 +524,10 @@ async function start() {
   if (state.manifest?.builds.length) {
     renderBoards(state.manifest);
     $("firmware-version").textContent = `Firmware ${state.manifest.version}.`;
+    if (state.manifest.licenses) {
+      $("firmware-licenses").href = `firmware/${state.manifest.licenses.path}`;
+      show("firmware-licenses");
+    }
   } else {
     show("no-firmware");
   }

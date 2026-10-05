@@ -31,6 +31,11 @@ installed separately; their packages carry their respective license texts.
 The optional Linux display uses pygame (LGPL 2.1) and SDL2 (zlib), also
 installed separately. No pygame or SDL source is copied into this repository.
 
+The optional MQTT example uses Eclipse Paho MQTT Python, dual licensed under
+Eclipse Public License 2.0 and Eclipse Distribution License 1.0. It is installed
+separately; its package includes both license texts. No Paho source is copied
+into this repository.
+
 assets/mascot/nous-girl-white-1024.png, the mascot bitmaps generated from it
 (firmware/core/src/mascot_data.cpp) and the project logo derived from it
 (docs/images/logo.png) are based on artwork from the Hermes Agent repository,
@@ -43,3 +48,23 @@ the ESP32-S3-Touch-AMOLED-1.75,
 https://components.espressif.com/components/waveshare/esp32_s3_touch_amoled_1_75,
 released by Waveshare under the Apache License 2.0. A copy of that license is in
 LICENSES/Apache-2.0.txt.
+
+The BOX-3 panel initialization register values in
+firmware/esp32/main/panel_box3.hpp follow Espressif's ESP32-S3-BOX-3 BSP,
+https://github.com/espressif/esp-bsp/tree/master/bsp/esp-box-3,
+Copyright 2022-2026 Espressif Systems (Shanghai) CO LTD, Apache License 2.0.
+The adapter changes sleep-out and display-on to zero data bytes and explicit
+delays, and omits the legacy table terminator.
+
+The CoreS3 ILI9342E initialization table in firmware/esp32/main/panel_cores3.hpp
+is adapted from Espressif's m5stack_core_s3 BSP,
+https://github.com/espressif/esp-bsp/tree/master/bsp/m5stack_core_s3,
+Copyright 2026 Espressif Systems (Shanghai) CO LTD, Apache License 2.0.
+The adapter expresses the register payloads as C++ byte strings and uses
+zero-length sleep-out and display-on commands with explicit delays.
+
+The managed esp_lcd_ili9341, esp_lcd_touch, esp_lcd_touch_gt911,
+esp_lcd_touch_tt21100 and esp_lcd_touch_ft5x06 drivers are Espressif components
+under Apache License 2.0. CoreS3 audio uses esp_codec_dev's AW88298 driver.
+They are fetched at build time. Binary release packages include the installed
+component and ESP-IDF license files alongside this notice.
