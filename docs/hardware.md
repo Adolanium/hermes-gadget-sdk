@@ -177,7 +177,7 @@ Unlike the SPI panels above, this one puts the ST7789 on an **8-bit i80 parallel
 | Part | Chip | Connection |
 |---|---|---|
 | Display | ST7789, i80 | D0–D7 39/40/41/42/45/46/47/48, DC 7, WR 8, CS 6, RST 5; gap (0, 35); 320×170 landscape |
-| Backlight | | GPIO 38 (LEDC) |
+| Backlight | AW9364 | GPIO 38, 16-level pulse-count brightness control |
 | Panel power | | GPIO 15, high before the panel starts |
 | Battery | | GPIO 4 ADC through a 1:2 divider; no fuel gauge, so no percentage |
 | Buttons (to GND) | | TALK = BOOT (0), CANCEL = Button2 (14) |
@@ -200,6 +200,7 @@ This port is written from LilyGO's published pinout and examples. On the first f
 3. **GPIO 15:** the panel rail. On battery power the screen stays dark unless this pin is high; the driver raises it before initialising the panel.
 4. **Buttons:** BOOT is TALK and Button2 cancels. With no microphone, holding TALK flashes "Microphone unavailable" — that is expected on this board, not a fault.
 5. **Text:** `say hello` over the console, or a paired Hermes, should render on the display.
+6. **Backlight:** check low and full brightness, then let the idle timer turn the screen off and wake it immediately. Brightness should return to the selected setting.
 
 Free GPIOs after the panel, buttons and battery: 1, 2, 3, 10, 11, 12, 13. An I2S microphone and amplifier need six of them, so voice is possible with external modules; the i80 bus uses LCD_CAM and audio uses I2S, so the two do not collide.
 

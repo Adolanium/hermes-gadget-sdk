@@ -68,3 +68,12 @@ esp_lcd_touch_tt21100 and esp_lcd_touch_ft5x06 drivers are Espressif components
 under Apache License 2.0. CoreS3 audio uses esp_codec_dev's AW88298 driver.
 They are fetched at build time. Binary release packages include the installed
 component and ESP-IDF license files alongside this notice.
+
+The T-Display-S3 ST7789 initialization values and AW9364 backlight control in
+firmware/esp32/main/port_parallel.cpp follow Xinyuan-LilyGO's factory example,
+https://github.com/Xinyuan-LilyGO/T-Display-S3/blob/ec889e789b3cf093412689a143f7f37b42b56af7/examples/factory/factory.ino,
+Copyright (c) 2022 Xinyuan-LilyGO, MIT License.
+The adapter uses ESP-IDF GPIO and panel APIs, bounds brightness to 16 levels,
+protects pulse timing, and uses explicit microsecond delays for backlight reset
+and startup. The panel command lengths are stored separately from their values.
+The full upstream license is in LICENSES/LilyGO-MIT.txt.

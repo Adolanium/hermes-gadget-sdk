@@ -8,6 +8,9 @@
 //
 // The framebuffer lives in PSRAM, and rows reach the panel through a small
 // DMA-capable bounce buffer on flush.
+// Panel initialization and AW9364 control follow Xinyuan-LilyGO/T-Display-S3
+// examples/factory at ec889e789b3cf093412689a143f7f37b42b56af7 (MIT).
+// Copyright (c) 2022 Xinyuan-LilyGO. See LICENSES/LilyGO-MIT.txt and NOTICE.
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h
 
 #include <algorithm>
@@ -50,7 +53,8 @@ void set_aw9364(int pin, uint8_t value, uint8_t& level) {
   gpio_set_direction(static_cast<gpio_num_t>(pin), GPIO_MODE_OUTPUT);
   if (value == 0) {
     gpio_set_level(static_cast<gpio_num_t>(pin), 0);
-    vTaskDelay(pdMS_TO_TICKS(3));
+    // Hold low through reset even at 100 Hz, where 3 ms rounds to zero ticks.
+    esp_rom_delay_us(3000);
     level = 0;
     return;
   }
