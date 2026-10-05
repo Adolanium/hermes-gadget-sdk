@@ -247,6 +247,10 @@ def test_binary_release_keeps_driver_licenses_and_checksums(project, tmp_path, m
         assert archive.read("components/example__touch/LICENSE") == b"Manufacturer license\nCopyright Example\n"
         assert archive.read("esp-idf/NOTICE.txt") == b"Framework notice\n"
         assert b"Apache License" in archive.read("LICENSES/Apache-2.0.txt")
+        repo = TOOLS.parents[2]
+        for license_path in (repo / "LICENSES").rglob("*"):
+            if license_path.is_file():
+                assert archive.read(license_path.relative_to(repo).as_posix()) == license_path.read_bytes()
         assert b"Espressif" in archive.read("NOTICE")
         assert b"[Paho MQTT]" in archive.read("THIRD_PARTY_NOTICES.md")
     digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()

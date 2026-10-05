@@ -1,5 +1,5 @@
 import { Marked } from "marked";
-import { readFile, writeFile, mkdir, cp } from "node:fs/promises";
+import { readFile, writeFile, mkdir, cp, readdir, stat } from "node:fs/promises";
 import { join, posix } from "node:path";
 
 const REPO = "https://github.com/Adolanium/hermes-gadget-sdk";
@@ -60,6 +60,7 @@ export function renderDoc(id, markdown) {
 }
 
 export async function buildDocs(repo, out) {
+  await validateDocs(repo);
   const dir = join(out, "docs"), index = [];
   await mkdir(dir, {recursive:true});
   for (const id of pages) {
@@ -72,4 +73,63 @@ export async function buildDocs(repo, out) {
   await writeFile(join(dir, "search.json"), JSON.stringify(index));
   await cp(join(repo, "docs", "images"), join(dir, "images"), {recursive:true});
   console.log(`build: ${pages.size} documentation pages`);
+}
+
+// Check relative documentation links without network requests or scanning fenced examples.
+export async function validateDocs(repo) {
+  const guides = (await readdir(join(repo, "docs"))).filter(name => name.endsWith(".md"));
+  const registered = groups.flatMap(([, entries]) => entries.map(([id]) => `${id}.md`));
+  const problems = [];
+  for (const name of guides) {
+    if (!registered.includes(name)) problems.push(`docs/${name}: missing navigation/search registration`);
+  }
+  for (const name of registered) {
+    if (!guides.includes(name)) problems.push(`docs/${name}: registered guide does not exist`);
+  }
+  if (new Set(registered).size !== registered.length) problems.push("Duplicate guide registration");
+
+  const roots = (await readdir(repo)).filter(name => name.endsWith(".md"));
+  const sources = [...roots, ...guides.map(name => `docs/${name}`)];
+  const documents = new Map();
+  async function readDocument(path) {
+    if (documents.has(path)) return documents.get(path);
+    const markdown = await readFile(join(repo, path), "utf8");
+    const links = [];
+    const parser = new Marked({walkTokens(token) {
+      if (token.type === "link" || token.type === "image") links.push(token.href);
+      if (token.type === "html") {
+        for (const match of token.text.matchAll(/\b(?:href|src)=["']([^"']+)["']/g)) links.push(match[1]);
+      }
+    }});
+    parser.parse(markdown);
+    const article = renderDoc(path, markdown).split("<article>")[1].split("</article>")[0];
+    const anchors = new Set([...article.matchAll(/\bid=["']([^"']+)["']/g)].map(match => match[1]));
+    const document = {links, anchors};
+    documents.set(path, document);
+    return document;
+  }
+  for (const source of sources) {
+    const {links} = await readDocument(source);
+    for (const href of links) {
+      if (/^(?:[a-z][a-z\d+.-]*:|\/)/i.test(href)) continue;
+      const [location, rawFragment] = href.split("#");
+      const rawPath = location.split("?")[0];
+      const path = rawPath ? posix.normalize(posix.join(posix.dirname(source), decodeURIComponent(rawPath))) : source;
+      if (path.startsWith("../")) {
+        problems.push(`${source}: link leaves the repository: ${href}`);
+        continue;
+      }
+      try {
+        await stat(join(repo, path));
+        if (rawFragment && path.endsWith(".md")) {
+          const {anchors} = await readDocument(path);
+          if (!anchors.has(decodeURIComponent(rawFragment))) problems.push(`${source}: missing anchor: ${href}`);
+        }
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+        problems.push(`${source}: missing link target: ${href}`);
+      }
+    }
+  }
+  if (problems.length) throw new Error(`Documentation checks failed:\n${problems.join("\n")}`);
 }

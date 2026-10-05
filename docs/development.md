@@ -65,6 +65,10 @@ For homepage and docs work, `npm run build` works without firmware. Run `npm run
 
 Run `npm test` for the Node tests. After building, run `npx playwright install chromium` and `npm run test:browser` for browser tests. CI installs Chromium and runs both suites. Set `BROWSER_EXECUTABLE` to use an existing Chromium binary locally.
 
+The site build checks relative links and Markdown section anchors in root Markdown files and `docs/*.md`, including Markdown images and quoted HTML `href`/`src` attributes. Fenced examples, external URLs, and URLs starting with `/` are not checked. Every top-level guide in `docs/` must be registered once in `site/scripts/docs.mjs`; that registration publishes the page in navigation and search. Failures name the source file and missing target or registration.
+
+CI discovers firmware profiles from `firmware/esp32/platformio.ini` using the release packager's environment reader. Adding a profile includes it in the firmware build/package matrix without maintaining a second list. Firmware tooling tests also check installer metadata and verify that every file under `LICENSES/` reaches the release license archive.
+
 ## Working on the plugin against a live Hermes
 
 ```bash

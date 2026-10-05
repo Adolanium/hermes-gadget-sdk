@@ -33,7 +33,7 @@ pytest                                # Python tests; Hermes ones skip without a
 - [ ] `firmware/esp32/boards/<board>/sdkconfig.defaults`: target, flash size, PSRAM mode and the board choice. The build checks that every line took effect.
 - [ ] `firmware/esp32/boards/<board>/board.json`: the name and one-line description the browser installer shows
 - [ ] `firmware/esp32/platformio.ini`: an environment for it, which also puts it in the next release
-- [ ] `.github/workflows/ci.yml`: the environment in the firmware build matrix
+- [ ] Confirm CI discovers and builds the environment; its firmware matrix comes from `platformio.ini`
 - [ ] `docs/hardware.md`: a section with the pins and a first-flash checklist
 - [ ] `docs/supported-hardware.md`: the board's controls, audio, and setup link
 - [ ] `docs/hardware-validation.md`: capabilities, exact revision, and experimental or verified status

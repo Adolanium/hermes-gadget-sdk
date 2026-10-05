@@ -14,6 +14,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  boards:
+    name: Discover firmware boards
+    runs-on: ubuntu-24.04
+    outputs:
+      boards: ${{ steps.list.outputs.boards }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - id: list
+        working-directory: firmware/esp32
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+          from tools.package_release import environments
+          print("boards=" + json.dumps(list(environments(Path(".")))))
+          PY
+
   core:
     name: Firmware core (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -106,11 +126,12 @@ jobs:
 
   esp32:
     name: ESP32 firmware (${{ matrix.board }})
+    needs: boards
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        board: [esp32s3-breadboard, esp32s3-touch-amoled-175, esp32s3-lcd-154, esp32s3-touch-amoled-175c, esp32-s3-box-3, m5stack-cores3, tdisplay-s3]
+        board: ${{ fromJSON(needs.boards.outputs.boards) }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
