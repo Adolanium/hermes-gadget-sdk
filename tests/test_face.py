@@ -6,7 +6,11 @@ byte, because that file is what the firmware ships.
 
 from __future__ import annotations
 
+import os
 import re
+import shlex
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -241,7 +245,7 @@ def test_a_click_moves_the_mark_and_keeps_its_size():
 
 
 def test_the_picker_waits_for_all_three_features():
-    picker, geo = mascot_picker()
+    picker, _ = mascot_picker()
     assert picker.flags() is None
     picker.click(200, 400)
     picker.click(400, 400)
@@ -252,7 +256,7 @@ def test_the_picker_waits_for_all_three_features():
 
 
 def test_return_skips_only_the_optional_anchors():
-    picker, geo = mascot_picker()
+    picker, _ = mascot_picker()
     assert picker.skip() is False, "a required step cannot be skipped"
     picker.click(200, 400)   # near eye
     picker.click(400, 400)   # far eye
@@ -262,18 +266,69 @@ def test_return_skips_only_the_optional_anchors():
     assert picker.skip() is True, "and so can the think dot"
     assert picker.next_step() is None
     flags = parse_flags(picker.flags())
-    assert "--ear-cup" not in flags and "--think-dot" not in flags
+    assert flags["--ear-cup"] == ["0.6200", "0.3000"]
+    assert flags["--think-dot"] == ["0.8200", "0.1100"]
 
 
 def test_a_picked_anchor_overrides_the_default():
-    picker, geo = mascot_picker()
+    picker, _ = mascot_picker()
     picker.click(200, 400)
     picker.click(400, 400)
     picker.click(300, 600)
     picker.click(700, 200)   # where the waves should start on this art
     flags = parse_flags(picker.flags())
-    assert len(flags["--ear-cup"]) == 2
-    assert "--think-dot" not in flags, "skipping one anchor does not require the other"
+    assert flags["--ear-cup"] == ["0.7181", "0.1809"]
+    assert flags["--think-dot"] == ["0.8200", "0.1100"]
+
+
+@pytest.mark.parametrize("plain", [False, True])
+def test_picker_command_runs_in_the_shell_and_preserves_the_picture(tmp_path, plain):
+    from PIL import Image, ImageDraw
+
+    src = tmp_path / "artist's $face.png"
+    art = Image.new("RGB", (1200, 1200), (150, 150, 150))
+    ImageDraw.Draw(art).rectangle((192, 192, 703, 831), fill="white")
+    art.save(src)
+    opts = face.Options(mask="bright", threshold=200, crop=(64, 64, 1088, 1088),
+                        blink="dark", plain=plain, eye_left=(.25, .3, .125, .1),
+                        eye_right=(.75, .3, .125, .1), eye_grow=2, mouth_grow=2,
+                        mouth_w=.125, mouth_h=.1, ear_cup=(.25, .25), think_dot=(.75, .125))
+    master = face.load_master(src, mask=opts.mask, threshold=opts.threshold, crop=opts.crop)
+    alpha = master.getchannel("A")
+    picker = face.Picker(face.ink_box(alpha, opts.threshold), face.measure(alpha, opts), opts)
+    for x, y in ((256, 320), (512, 320), (384, 576)):
+        picker.click(x, y)
+    picker.skip()
+    picker.skip()
+
+    command = picker.command(src) + " --out face.cpp --preview preview.png --check check.png"
+    env = dict(os.environ, PYTHONPATH=str(REPO / "python"))
+    env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env["PATH"]
+    shell = (["powershell", "-NoProfile", "-NonInteractive", "-Command", command]
+             if os.name == "nt" else ["/bin/sh", "-c", command])
+    result = subprocess.run(shell, cwd=tmp_path, env=env, capture_output=True, text=True,
+                            timeout=60, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ink box:   x 128..640  y 128..768" in result.stdout
+    assert "eyes:      left (192, 256, 320, 384)  right (448, 256, 576, 384)" in result.stdout
+    assert "mouth:     (320, 512, 448, 640)" in result.stdout
+    assert "ear cup:   (256, 288)   think dot: (512, 208)" in result.stdout
+    data = arrays((tmp_path / "face.cpp").read_text())
+    assert len(data) == 12
+    assert (data["kIdle192"] == data["kBlink192"]) is plain
+    assert (data["kIdle192"] == data["kTalk192"]) is plain
+    assert Image.open(tmp_path / "check.png").size == (512, 704)
+
+
+def test_picked_mascot_positions_are_used_by_the_command(tmp_path, capsys):
+    picker, _ = mascot_picker()
+    for x, y in ((300, 300), (700, 300), (400, 700)):
+        picker.click(x, y)
+    assert cli.main(["face", str(MASTER), *shlex.split(picker.flags()),
+                     "--out", str(tmp_path / "face.cpp"), "--preview", str(tmp_path / "p.png"),
+                     "--check", str(tmp_path / "c.png")]) == 0
+    assert "mouth:     (377, 687, 423, 713)" in capsys.readouterr().out
+    assert (tmp_path / "face.cpp").read_text() != SHIPPED.read_text()
 
 
 def test_pick_without_a_picture_is_refused(capsys):

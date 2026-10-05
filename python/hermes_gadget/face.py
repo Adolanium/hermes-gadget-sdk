@@ -22,6 +22,8 @@ Pillow is needed, and lives behind the `images` extra.
 
 from __future__ import annotations
 
+import os
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -463,10 +465,10 @@ class Picker:
     the arithmetic testable without a display.
     """
 
-    def __init__(self, box, geo: dict, mask: str = "alpha"):
+    def __init__(self, box, geo: dict, opts: Options | None = None):
         self.box = tuple(box)
         self.geo = geo
-        self.mask = mask
+        self.opts = opts or Options()
         self.picks: dict[str, tuple[int, int]] = {}
         self.skipped: set[str] = set()
 
@@ -490,7 +492,7 @@ class Picker:
         name = self.next_step()
         if name is None:
             return False
-        self.picks[name] = (int(round(x)), int(round(y)))
+        self.picks[name] = (round(x), round(y))
         return True
 
     def skip(self) -> bool:
@@ -536,7 +538,12 @@ class Picker:
         """The flag line for a run, or None while a required pick is missing."""
         if any(name not in self.picks for name in REQUIRED_PICKS):
             return None
-        parts = ["--mask", self.mask]
+        parts = ["--mask", self.opts.mask, "--threshold", str(self.opts.threshold),
+                 "--blink", self.opts.blink]
+        if self.opts.crop:
+            parts += ["--crop", *(str(value) for value in self.opts.crop)]
+        if self.opts.plain:
+            parts.append("--plain")
         for side in ("left", "right"):
             fx, fy = self._fraction(*self.picks[side])
             fw, fh = self._size(self.geo[side])
@@ -546,10 +553,18 @@ class Picker:
         parts += ["--mouth-x", f"{mx:.4f}", "--mouth-y", f"{my:.4f}",
                   "--mouth-w", f"{mw:.4f}", "--mouth-h", f"{mh:.4f}"]
         for name, flag in (("ear_cup", "--ear-cup"), ("think_dot", "--think-dot")):
-            if name in self.picks:
-                ex, ey = self._fraction(*self.picks[name])
-                parts += [flag, f"{ex:.4f} {ey:.4f}"]
+            ex, ey = self._fraction(*self.marks()[name])
+            parts += [flag, f"{ex:.4f} {ey:.4f}"]
         return " ".join(parts)
+
+    def command(self, path: Path) -> str | None:
+        """A command for PowerShell on Windows, or a POSIX shell elsewhere."""
+        flags = self.flags()
+        if flags is None:
+            return None
+        source = str(path.expanduser().resolve())
+        quoted = "'" + source.replace("'", "''") + "'" if os.name == "nt" else shlex.quote(source)
+        return f"hermes-gadget face {quoted} {flags}"
 
 
 def pick_features(path: Path, opts: Options, side: int = 620) -> str:
@@ -572,7 +587,7 @@ def pick_features(path: Path, opts: Options, side: int = 620) -> str:
     master = load_master(path, mask=opts.mask, threshold=opts.threshold, crop=opts.crop)
     alpha = master.getchannel("A")
     box = ink_box(alpha, opts.threshold)
-    picker = Picker(box, measure(alpha, opts), opts.mask)
+    picker = Picker(box, measure(alpha, opts), opts)
     scale = side / master.width
 
     shown = Image.new("RGB", master.size, BG)
@@ -584,7 +599,7 @@ def pick_features(path: Path, opts: Options, side: int = 620) -> str:
     prompt = tk.Label(root, text=picker.prompt(), anchor="w", justify="left", font=("Helvetica", 14))
     prompt.pack(fill="x", padx=12, pady=(12, 6))
     canvas = tk.Canvas(root, width=side, height=side, highlightthickness=0,
-                       bg="#%02x%02x%02x" % BG)
+                       bg=f"#{BG[0]:02x}{BG[1]:02x}{BG[2]:02x}")
     canvas.pack(padx=12)
     photo = ImageTk.PhotoImage(shown)
     canvas.create_image(0, 0, anchor="nw", image=photo)
@@ -613,10 +628,9 @@ def pick_features(path: Path, opts: Options, side: int = 620) -> str:
                                    width=3, tags="mark")
 
     def show_flags() -> None:
-        line = picker.flags()
-        if line is None:
+        text = picker.command(path)
+        if text is None:
             return
-        text = f"hermes-gadget face {path.name} {line}"
         flags_box.delete("1.0", "end")
         flags_box.insert("1.0", text)
         print(text)

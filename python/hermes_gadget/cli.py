@@ -356,9 +356,8 @@ def cmd_face(args) -> int:
         face.pick_features(image, opts)
         return 0
 
-    # No picture, or the project's own artwork, means the mascot profile: the one
-    # generator, and what tools/gen_mascot.py used to be.
-    if args.mascot or image is None or image == face.MASTER:
+    # Keep the shipped mascot profile unless its picture has custom feature options.
+    if args.mascot or image is None or (image == face.MASTER and opts == face.Options()):
         face.write_mascot(out=out, preview_path=preview_path, check_path=check_path,
                           want_report=args.report)
         return 0
