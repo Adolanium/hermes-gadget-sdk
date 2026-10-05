@@ -33,21 +33,41 @@ esp_err_t error_response(httpd_req_t* req, const char* status, const std::string
   return httpd_resp_sendstr(req, result.dump().c_str());
 }
 
+// The IPv4 address of a socket name. With IPv6 enabled, esp_http_server listens
+// on a dual-stack IPv6 socket and lwIP reports IPv4 clients as ::ffff:a.b.c.d.
+bool ipv4_of(const sockaddr_storage& addr, uint32_t& out) {
+  if (addr.ss_family == AF_INET) {
+    out = reinterpret_cast<const sockaddr_in&>(addr).sin_addr.s_addr;
+    return true;
+  }
+#if CONFIG_LWIP_IPV6
+  if (addr.ss_family == AF_INET6) {
+    static constexpr uint8_t kMapped[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
+    const auto& ip6 = reinterpret_cast<const sockaddr_in6&>(addr).sin6_addr;
+    if (std::memcmp(ip6.s6_addr, kMapped, sizeof(kMapped)) != 0) return false;
+    std::memcpy(&out, ip6.s6_addr + 12, sizeof(out));
+    return true;
+  }
+#endif
+  return false;
+}
+
 bool local_request(httpd_req_t* req) {
-  sockaddr_in local{}, peer{};
+  sockaddr_storage local{}, peer{};
+  uint32_t local_ip = 0, peer_ip = 0;
   socklen_t length = sizeof(local);
   esp_netif_ip_info_t info{};
   auto* ap = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
   if (!ap || esp_netif_get_ip_info(ap, &info) != ESP_OK ||
       getsockname(httpd_req_to_sockfd(req), reinterpret_cast<sockaddr*>(&local), &length) != 0 ||
-      local.sin_family != AF_INET || local.sin_addr.s_addr != info.ip.addr) return false;
+      !ipv4_of(local, local_ip) || local_ip != info.ip.addr) return false;
   esp_netif_ip_info_t station{};
   auto* sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
   if (sta && esp_netif_get_ip_info(sta, &station) == ESP_OK && station.ip.addr &&
       (station.ip.addr & station.netmask.addr) == (info.ip.addr & station.netmask.addr)) return false;
   length = sizeof(peer);
   if (getpeername(httpd_req_to_sockfd(req), reinterpret_cast<sockaddr*>(&peer), &length) != 0 ||
-      peer.sin_family != AF_INET || (peer.sin_addr.s_addr & info.netmask.addr) != (info.ip.addr & info.netmask.addr)) return false;
+      !ipv4_of(peer, peer_ip) || (peer_ip & info.netmask.addr) != (info.ip.addr & info.netmask.addr)) return false;
   char host[32], origin[64];
   if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK ||
       (std::strcmp(host, "192.168.4.1") && std::strcmp(host, "192.168.4.1:80"))) return false;
