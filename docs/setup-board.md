@@ -72,4 +72,6 @@ USB remains available if phone setup cannot connect. The console accepts `wifi-s
 
 Open **Troubleshooting** in the browser installer. Under **Something else**, choose **Save a diagnostics report**. Attach the file to a [bug report](https://github.com/Adolanium/hermes-gadget-sdk/issues).
 
+Taking the gadget away from home? See [Using Tailscale Funnel for remote access](tailscale-funnel.md): the funnel URL works as the Hermes address on any network, including a phone's personal hotspot.
+
 Next: [Talk, type, and interrupt](using-gadget.md) or [troubleshooting](troubleshooting.md).

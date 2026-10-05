@@ -97,6 +97,7 @@ These images show the simulator's device display. The [simulator guide](docs/sim
 | [Connect Hermes](docs/connect-hermes.md) | [Architecture](docs/architecture.md) |
 | [Talk, type, and interrupt](docs/using-gadget.md) | [Protocol](docs/protocol.md) |
 | [Change Wi-Fi or update firmware](docs/setup-board.md#manage-an-existing-gadget) | [Hermes integration reference](docs/hermes-integration.md) |
+| [Remote access with Tailscale Funnel](docs/tailscale-funnel.md) | |
 | [Troubleshooting](docs/troubleshooting.md) | [Hardware and wiring](docs/hardware.md) |
 
 ## Project status

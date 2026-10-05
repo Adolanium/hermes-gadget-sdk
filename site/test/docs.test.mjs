@@ -4,6 +4,7 @@ import { docLink, renderDoc } from "../scripts/docs.mjs";
 
 test("published guides keep links to guides, anchors, images, and repository files", () => {
   assert.equal(docLink("desktop.md#windows"), "desktop.html#windows");
+  assert.equal(docLink("tailscale-funnel.md#connect-the-gadget"), "tailscale-funnel.html#connect-the-gadget");
   assert.equal(docLink("images/screen-ready.png"), "images/screen-ready.png");
   assert.equal(docLink("../python/hermes_gadget/sim/window.py"), "https://github.com/Adolanium/hermes-gadget-sdk/blob/main/python/hermes_gadget/sim/window.py");
   assert.equal(docLink("https://example.com/a.md"), "https://example.com/a.md");

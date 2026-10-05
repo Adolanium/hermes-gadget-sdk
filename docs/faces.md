@@ -59,6 +59,11 @@ Three things come out of it:
 **Look at the check image first.** It is the only way to see whether the marks landed on the
 features before spending a flash.
 
+The project's own mascot is the worked example on this page: `hermes-gadget face` with no picture
+regenerates it, and every number in the tables below is hers. Running the picker on
+`assets/mascot/nous-girl-white-1024.png` puts the marks on art whose answers are already known,
+which is the quickest way to see what they do.
+
 `--mask` says where the ink is in your picture:
 
 | Value | Meaning |
@@ -129,6 +134,36 @@ A logo or an object, with nothing to blink, can be generated as a still picture 
 
 Crop before you measure, not after: `--crop X0 Y0 X1 Y1` trims the source first, which moves
 the outline and therefore every fraction above.
+
+### Clicking the features instead of measuring them
+
+When the numbers are hard to guess, the window takes them off the picture:
+
+```
+hermes-gadget face my-face.png --mask bright --pick
+```
+
+It opens as the device sees it, with the marks the current numbers would draw on it. Click the
+centre of the near eye, then the far eye, then the mouth; press Return to leave the listening
+waves and the thinking dots where the geometry put them. A click moves that mark and keeps the
+size the measurement found, so a click only has to land on the feature. The window prints the
+flag line for a real run, and shows it in the window to copy:
+
+```
+hermes-gadget face my-face.png --mask bright --eye-left 0.2197 0.4602 0.0482 0.0746 ...
+```
+
+R starts over, Q closes the window. `--pick` writes nothing, so a mis-click cannot touch the
+artwork. It needs Tk, the same dependency the simulator window has.
+
+The copied command uses the full image path and keeps the crop, threshold, blink mode, and
+anchor positions shown in the picker. Enlarged eye and mouth sizes are already included in
+the coordinates; do not add the growth flags again. On Windows, paste the command into
+PowerShell. On macOS and Linux, use a POSIX shell such as Bash or Zsh. Add `--out`, `--preview`,
+or `--check` to choose output files before running it.
+
+With the project's mascot image, explicit feature coordinates generate your selected geometry.
+Run `hermes-gadget face --mascot` to reproduce the original shipped frames.
 
 ## Will the blink read?
 

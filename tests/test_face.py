@@ -6,7 +6,11 @@ byte, because that file is what the firmware ships.
 
 from __future__ import annotations
 
+import os
 import re
+import shlex
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -163,3 +167,183 @@ def test_the_command_wants_both_eyes_or_neither(tmp_path):
         cli.main(["face", str(src), "--mask", "bright", "--eye-left", "0.3", "0.4", "0.1", "0.1",
                   "--out", str(tmp_path / "x.cpp")])
     assert "both" in str(exc.value)
+
+
+# -- placing the features by hand ------------------------------------------------------------------------
+
+def parse_flags(line: str) -> dict:
+    """Split a flag line back into its parts, so a test can read the numbers."""
+    out, tokens, i = {}, line.split(), 0
+    scalar = ("--mask", "--mouth-x", "--mouth-y", "--mouth-w", "--mouth-h")
+    while i < len(tokens):
+        key = tokens[i]
+        if key in scalar:
+            out[key] = tokens[i + 1]
+            i += 2
+        elif key.startswith("--"):
+            values, j = [], i + 1
+            while j < len(tokens) and not tokens[j].startswith("--"):
+                values.append(tokens[j])
+                j += 1
+            out[key] = values
+            i = j
+        else:
+            i += 1
+    return out
+
+
+def mascot_picker():
+    """A picker over the mascot's own measurement, which the clicks are checked against."""
+    master = face.load_master(MASTER)
+    alpha = master.getchannel("A")
+    opts = face.Options(
+        eye_left=(0.2197, 0.4602, 0.0482, 0.0746), eye_right=(0.3826, 0.4349, 0.1404, 0.0835),
+        mouth_x=0.2562, mouth_y=0.6133, mouth_w=0.0493, mouth_h=0.0258)
+    geo = face.measure(alpha, opts)
+    return face.Picker(face.ink_box(alpha), geo), geo
+
+
+def test_clicking_the_mascots_features_gives_back_its_own_numbers():
+    """The round trip that makes the picker trustworthy: click her art, get her flags.
+
+    These are the coordinates the shipped frames were generated from, so a picker
+    that reproduces them can be trusted on a picture nobody has measured.
+    """
+    picker, geo = mascot_picker()
+    for name in ("left", "right"):
+        x0, y0, x1, y1 = geo[name]
+        picker.click((x0 + x1) / 2, (y0 + y1) / 2)
+    x0, y0, x1, y1 = geo["mouth"]
+    picker.click((x0 + x1) / 2, (y0 + y1) / 2)
+
+    flags = parse_flags(picker.flags())
+    assert flags["--mask"] == "alpha"
+    assert abs(float(flags["--eye-left"][0]) - 0.2197) < 0.003
+    assert abs(float(flags["--eye-left"][1]) - 0.4602) < 0.003
+    assert abs(float(flags["--eye-left"][2]) - 0.0482) < 0.003
+    assert abs(float(flags["--eye-right"][0]) - 0.3826) < 0.003
+    assert abs(float(flags["--eye-right"][2]) - 0.1404) < 0.003
+    assert abs(float(flags["--mouth-x"]) - 0.2562) < 0.003
+    assert abs(float(flags["--mouth-y"]) - 0.6133) < 0.003
+
+
+def test_a_click_moves_the_mark_and_keeps_its_size():
+    """The click gives a position; the size stays what the measurement found."""
+    picker, geo = mascot_picker()
+    picker.click(300, 300)   # the near eye, deliberately nowhere near the art
+    picker.click(700, 300)
+    picker.click(400, 700)
+
+    marks = picker.marks()
+    for name, click in (("left", 300), ("right", 700)):
+        x0, y0, x1, y1 = marks[name]
+        assert abs((x0 + x1) / 2 - click) <= 1, name
+        assert (x1 - x0, y1 - y0) == (geo[name][2] - geo[name][0],
+                                      geo[name][3] - geo[name][1]), name
+    x0, y0, x1, y1 = marks["mouth"]
+    assert abs((x0 + x1) / 2 - 400) <= 1 and abs((y0 + y1) / 2 - 700) <= 1
+
+
+def test_the_picker_waits_for_all_three_features():
+    picker, _ = mascot_picker()
+    assert picker.flags() is None
+    picker.click(200, 400)
+    picker.click(400, 400)
+    assert picker.flags() is None, "the mouth is still missing"
+    picker.click(300, 600)
+    assert picker.flags() is not None
+    assert "eye-left" in picker.prompt().lower() or picker.next_step() in ("ear_cup", "think_dot")
+
+
+def test_return_skips_only_the_optional_anchors():
+    picker, _ = mascot_picker()
+    assert picker.skip() is False, "a required step cannot be skipped"
+    picker.click(200, 400)   # near eye
+    picker.click(400, 400)   # far eye
+    picker.click(300, 600)   # mouth
+    assert picker.next_step() == "ear_cup"
+    assert picker.skip() is True, "the ear cup can be left to the geometry"
+    assert picker.skip() is True, "and so can the think dot"
+    assert picker.next_step() is None
+    flags = parse_flags(picker.flags())
+    assert flags["--ear-cup"] == ["0.6200", "0.3000"]
+    assert flags["--think-dot"] == ["0.8200", "0.1100"]
+
+
+def test_a_picked_anchor_overrides_the_default():
+    picker, _ = mascot_picker()
+    picker.click(200, 400)
+    picker.click(400, 400)
+    picker.click(300, 600)
+    picker.click(700, 200)   # where the waves should start on this art
+    flags = parse_flags(picker.flags())
+    assert flags["--ear-cup"] == ["0.7181", "0.1809"]
+    assert flags["--think-dot"] == ["0.8200", "0.1100"]
+
+
+@pytest.mark.parametrize("plain", [False, True])
+def test_picker_command_runs_in_the_shell_and_preserves_the_picture(tmp_path, plain):
+    from PIL import Image, ImageDraw
+
+    src = tmp_path / "artist's $face.png"
+    art = Image.new("RGB", (1200, 1200), (150, 150, 150))
+    ImageDraw.Draw(art).rectangle((192, 192, 703, 831), fill="white")
+    art.save(src)
+    opts = face.Options(mask="bright", threshold=200, crop=(64, 64, 1088, 1088),
+                        blink="dark", plain=plain, eye_left=(.25, .3, .125, .1),
+                        eye_right=(.75, .3, .125, .1), eye_grow=2, mouth_grow=2,
+                        mouth_w=.125, mouth_h=.1, ear_cup=(.25, .25), think_dot=(.75, .125))
+    master = face.load_master(src, mask=opts.mask, threshold=opts.threshold, crop=opts.crop)
+    alpha = master.getchannel("A")
+    picker = face.Picker(face.ink_box(alpha, opts.threshold), face.measure(alpha, opts), opts)
+    for x, y in ((256, 320), (512, 320), (384, 576)):
+        picker.click(x, y)
+    picker.skip()
+    picker.skip()
+
+    command = picker.command(src) + " --out face.cpp --preview preview.png --check check.png"
+    env = dict(os.environ, PYTHONPATH=str(REPO / "python"))
+    env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env["PATH"]
+    shell = (["powershell", "-NoProfile", "-NonInteractive", "-Command", command]
+             if os.name == "nt" else ["/bin/sh", "-c", command])
+    result = subprocess.run(shell, cwd=tmp_path, env=env, capture_output=True, text=True,
+                            timeout=60, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ink box:   x 128..640  y 128..768" in result.stdout
+    assert "eyes:      left (192, 256, 320, 384)  right (448, 256, 576, 384)" in result.stdout
+    assert "mouth:     (320, 512, 448, 640)" in result.stdout
+    assert "ear cup:   (256, 288)   think dot: (512, 208)" in result.stdout
+    data = arrays((tmp_path / "face.cpp").read_text())
+    assert len(data) == 12
+    assert (data["kIdle192"] == data["kBlink192"]) is plain
+    assert (data["kIdle192"] == data["kTalk192"]) is plain
+    assert Image.open(tmp_path / "check.png").size == (512, 704)
+
+
+def test_picked_mascot_positions_are_used_by_the_command(tmp_path, capsys):
+    picker, _ = mascot_picker()
+    for x, y in ((300, 300), (700, 300), (400, 700)):
+        picker.click(x, y)
+    assert cli.main(["face", str(MASTER), *shlex.split(picker.flags()),
+                     "--out", str(tmp_path / "face.cpp"), "--preview", str(tmp_path / "p.png"),
+                     "--check", str(tmp_path / "c.png")]) == 0
+    assert "mouth:     (377, 687, 423, 713)" in capsys.readouterr().out
+    assert (tmp_path / "face.cpp").read_text() != SHIPPED.read_text()
+
+
+def test_pick_without_a_picture_is_refused(capsys):
+    assert cli.main(["face", "--pick"]) == 1
+    assert "--pick needs a picture" in capsys.readouterr().err
+
+
+def test_the_picker_says_what_it_needs_when_there_is_no_tk(tmp_path, monkeypatch):
+    """The venv on the machine this was written on has no _tkinter; the message must say so."""
+    import sys
+    Image = pytest.importorskip("PIL.Image")
+    src = tmp_path / "face.png"
+    Image.new("RGB", (128, 128), (0, 0, 0)).save(src)
+    monkeypatch.setitem(sys.modules, "tkinter", None)  # None in sys.modules halts the import
+
+    with pytest.raises(SystemExit) as exc:
+        face.pick_features(src, face.Options(mask="bright"))
+    assert "Tk" in str(exc.value) and "brew install python-tk" in str(exc.value)
