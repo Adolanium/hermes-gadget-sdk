@@ -89,6 +89,8 @@ These images show the simulator's device display. The [simulator guide](docs/sim
 
 ## Project status
 
+See the [changelog](CHANGELOG.md) for release highlights and contributor credits.
+
 [Releases](https://github.com/Adolanium/hermes-gadget-sdk/releases/latest) include prebuilt firmware for the profiles listed in that release. Newly merged profiles need a source build until the next release. After the first USB flash, `hermes gadget update` installs new firmware over the air. A build that cannot reach Hermes rolls itself back.
 
 The simulator and firmware share a portable C++17 core. CI tests the core, Python tools, installer, and plugin against a real Hermes gateway, and builds every supported board. The [development guide](docs/development.md) describes the test suites and pinned Hermes version.
