@@ -91,9 +91,16 @@ struct ButtonConfig {
   int talk = -1, cancel = -1, up = -1, down = -1;  // active-low GPIOs, -1 = absent
 };
 
+// A battery behind a resistive divider, with a latch that keeps it powered.
 struct LatchPowerConfig {
   bool enabled = false;
   int adc = -1, enable = -1, charging = -1;
+  int backlight = -1;
+  // VBAT = VADC * ratio. Waveshare's LCD-1.54 divides by three; the T-Display-S3
+  // divides by two. Ignored when the ADC pin is -1.
+  int mv_ratio = 3;
+  uint16_t max_battery_mv = 4998;
+  bool power_off_supported = true;
 };
 
 struct BoardConfig {

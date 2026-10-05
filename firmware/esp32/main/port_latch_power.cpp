@@ -14,11 +14,20 @@ bool LatchPower::begin(const LatchPowerConfig& cfg) {
   output.pin_bit_mask = 1ULL << cfg.enable;
   output.mode = GPIO_MODE_OUTPUT;
   if (gpio_config(&output) != ESP_OK) return false;
-  gpio_config_t input = {};
-  input.pin_bit_mask = 1ULL << cfg.charging;
-  input.mode = GPIO_MODE_INPUT;
-  input.pull_up_en = GPIO_PULLUP_ENABLE;
-  if (gpio_config(&input) != ESP_OK) return false;
+  if (cfg.backlight >= 0) {
+    gpio_reset_pin(static_cast<gpio_num_t>(cfg.backlight));
+    gpio_set_direction(static_cast<gpio_num_t>(cfg.backlight), GPIO_MODE_OUTPUT);
+    gpio_set_level(static_cast<gpio_num_t>(cfg.backlight), 0);
+  }
+  // Only some boards route the charging signal to a GPIO. Leave it unconfigured
+  // otherwise: -1 would shift to a bogus pin mask and collide with the flash bus.
+  if (cfg.charging >= 0) {
+    gpio_config_t input = {};
+    input.pin_bit_mask = 1ULL << cfg.charging;
+    input.mode = GPIO_MODE_INPUT;
+    input.pull_up_en = GPIO_PULLUP_ENABLE;
+    if (gpio_config(&input) != ESP_OK) return false;
+  }
 
   adc_unit_t unit;
   if (adc_oneshot_io_to_channel(cfg.adc, &unit, &channel_) != ESP_OK) return false;
@@ -47,7 +56,8 @@ bool LatchPower::begin(const LatchPowerConfig& cfg) {
 
 std::optional<hg::PowerStatus> LatchPower::read() {
   hg::PowerStatus status;
-  status.charging = gpio_get_level(static_cast<gpio_num_t>(cfg_.charging)) == 0;
+  // Not every board brings the charging signal out to a pin.
+  if (cfg_.charging >= 0) status.charging = gpio_get_level(static_cast<gpio_num_t>(cfg_.charging)) == 0;
   if (!calibration_) return status;
   int total = 0;
   for (int i = 0; i < 8; ++i) {
@@ -57,14 +67,19 @@ std::optional<hg::PowerStatus> LatchPower::read() {
   }
   int mv;
   if (adc_cali_raw_to_voltage(calibration_, total / 8, &mv) != ESP_OK) return std::nullopt;
-  // Waveshare schematic R27=200k, R32=100k: VBAT = 3 * VADC.
-  // This circuit has no presence detector or fuel gauge; do not infer either.
-  if (mv >= 0 && mv <= 1666) status.battery_mv = static_cast<uint16_t>(mv * 3);
+  // ADC measures the divided battery node. On the T-Display-S3, the charger
+  // can hold this node above its no-battery threshold; it has no separate
+  // presence signal, so treat that reading as unavailable.
+  const int ratio = cfg_.mv_ratio > 0 ? cfg_.mv_ratio : 1;
+  const int battery_mv = mv * ratio;
+  if (mv >= 0 && battery_mv <= cfg_.max_battery_mv) status.battery_mv = static_cast<uint16_t>(battery_mv);
   return status;
 }
 
 bool LatchPower::power_off() {
-  // USB feeds VSYS independently, so this only disconnects the battery path.
+  if (!cfg_.power_off_supported) return false;
+  // Supported boards use a battery latch that disconnects the supply. USB may
+  // still power the device independently.
   return gpio_set_level(static_cast<gpio_num_t>(cfg_.enable), 0) == ESP_OK;
 }
 

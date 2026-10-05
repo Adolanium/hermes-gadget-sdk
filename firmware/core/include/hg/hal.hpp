@@ -127,6 +127,8 @@ class Power {
   virtual ~Power() = default;
   // A failed read must return nullopt, never the previous reading.
   virtual std::optional<PowerStatus> read() = 0;
+  // Override when this controls a peripheral rail rather than device shutdown.
+  virtual bool can_power_off() const { return true; }
   virtual bool power_off() = 0;
 };
 

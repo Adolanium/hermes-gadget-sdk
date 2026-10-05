@@ -167,8 +167,9 @@ BoardConfig make() {
   b.lcd.bus.data[7] = 48;
   b.lcd.bus.wr = 8;
   b.lcd.bus.pclk_mhz = 16;
-  // GPIO 4 is the battery divider at one-half, and there is no fuel gauge.
-  b.latch_power = {true, 4, 15, -1};
+  // GPIO 4 is the battery divider at one-half. There is no fuel gauge and no
+  // charging signal pin brought out on this board, so both stay absent.
+  b.latch_power = {true, 4, 15, -1, 38, 2, 4300, false};
   b.buttons = {0, 14, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "B2";

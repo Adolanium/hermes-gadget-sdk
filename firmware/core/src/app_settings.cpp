@@ -57,12 +57,14 @@ void App::settings_input(Button button, bool pressed) {
     if (item < static_cast<int>(Menu::Volume)) item = static_cast<int>(Menu::Back);
     if (item > static_cast<int>(Menu::Back)) item = static_cast<int>(Menu::Volume);
     menu_ = static_cast<Menu>(item);
-    if (!hal_.power && (menu_ == Menu::Power || menu_ == Menu::PowerOff)) {
+    const bool can_power_off = hal_.power && hal_.power->can_power_off();
+    if ((!hal_.power && menu_ == Menu::Power) ||
+        (!can_power_off && menu_ == Menu::PowerOff)) {
       menu_ = menu_ == Menu::Power ? (button == Button::Up ? Menu::Info : Menu::IdleTimer)
                                    : (button == Button::Up ? Menu::IdleTimer : Menu::WifiSetup);
     }
     if (!on_wifi_setup && menu_ == Menu::WifiSetup)
-      menu_ = button == Button::Up ? (hal_.power ? Menu::PowerOff : Menu::IdleTimer) : Menu::Back;
+      menu_ = button == Button::Up ? (can_power_off ? Menu::PowerOff : Menu::IdleTimer) : Menu::Back;
     return;
   }
   if (button != Button::Talk || pressed) return;

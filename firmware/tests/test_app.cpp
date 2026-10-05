@@ -1128,6 +1128,24 @@ TEST("power: failed readings replace stale data and shutdown requires a second l
   CHECK_EQ(battery.shutdowns, 1);
 }
 
+TEST("power: a peripheral rail cannot be selected as device power-off") {
+  struct PeripheralRail : hg::Power {
+    int shutdowns = 0;
+    std::optional<hg::PowerStatus> read() override { return hg::PowerStatus{}; }
+    bool can_power_off() const override { return false; }
+    bool power_off() override { ++shutdowns; return true; }
+  } rail;
+  Rig r;
+  r.hal.power = &rail;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 10; ++i) r.app.console("cancel");
+  CHECK(r.app.model().detail != "Power off");
+  r.app.console("talk"); r.app.console("release");
+  r.app.console("talk"); r.app.console("release");
+  CHECK_EQ(rail.shutdowns, 0);
+}
+
 TEST("Wi-Fi setup: bounded credentials require the current session and never replace valid output on failure") {
   hg::WifiCredentials out;
   std::string error;

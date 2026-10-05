@@ -23,7 +23,7 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_lcd_panel_io.h"
-#include "esp_lcd_i80_bus.h"
+#include "esp_lcd_io_i80.h"
 #include "esp_lcd_types.h"
 #include "esp_websocket_client.h"
 #include "esp_http_server.h"
@@ -186,6 +186,7 @@ class ParallelDisplay final : public hg::Display {
   uint16_t* fb_ = nullptr;
   uint16_t* bounce_ = nullptr;  // DMA-capable staging rows
   int bounce_rows_ = 0;
+  uint8_t backlight_level_ = 0;
   SemaphoreHandle_t done_ = nullptr;
 };
 
@@ -294,6 +295,7 @@ class LatchPower final : public hg::Power {
  public:
   bool begin(const LatchPowerConfig& cfg);
   std::optional<hg::PowerStatus> read() override;
+  bool can_power_off() const override { return cfg_.power_off_supported; }
   bool power_off() override;
 
  private:
