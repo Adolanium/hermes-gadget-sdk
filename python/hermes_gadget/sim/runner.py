@@ -57,6 +57,9 @@ BOARDS = {
     # A 1.9" 320x170 board with no audio hardware (e.g. LilyGO T-Display-S3).
     "sim-320x170-nospeaker": Board("sim-320x170-nospeaker", 320, 170, mic=False, speaker=False,
                                    scroll_buttons=False),
+    # A 5.0" 800x480 RGB touch board with no audio hardware (e.g. Elecrow CrowPanel 5.0).
+    "sim-800x480-nospeaker": Board("sim-800x480-nospeaker", 800, 480, mic=False, speaker=False,
+                                   scroll_buttons=False, touch=True),
 }
 
 

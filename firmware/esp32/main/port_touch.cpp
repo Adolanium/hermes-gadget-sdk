@@ -161,7 +161,7 @@ bool TouchInput::begin_box_touch(i2c_master_bus_handle_t bus) {
   cfg.x_max = touch_.width;
   cfg.y_max = touch_.height;
   cfg.rst_gpio_num = GPIO_NUM_NC;  // Display initialization already reset the shared line.
-  cfg.int_gpio_num = GPIO_NUM_3;
+  cfg.int_gpio_num = touch_.int_gpio >= 0 ? static_cast<gpio_num_t>(touch_.int_gpio) : GPIO_NUM_NC;
   cfg.flags.mirror_x = tt21100;
   const esp_err_t err = tt21100 ? esp_lcd_touch_new_i2c_tt21100(io, &cfg, &managed_touch_)
                               : esp_lcd_touch_new_i2c_gt911(io, &cfg, &managed_touch_);

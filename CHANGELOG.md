@@ -4,6 +4,7 @@
 
 ### Hardware and setup
 
+- Board support for the Elecrow CrowPanel 5.0-inch HMI (DIS07050H): 800×480 ILI6122/ILI5960 RGB panel, GT911 capacitive touch, ESP32-S3-WROOM-1-N4R8 with 8 MB PSRAM. The shared RGB display driver now supports a plain-GPIO panel-enable line and a controller with no command bring-up (the ILI6122) alongside the CrowPanel 2.1-inch's ST7701-over-PCF8574 path, and the touch driver reads its IRQ pin from the board config instead of a fixed GPIO. Experimental; not yet physically verified.
 - Show a QR code on the Wi-Fi setup screen so a phone camera can join the gadget's temporary network without typing. The code encodes the network name and password with the standard `WIFI:` scheme. The instructions stay printed beside it, since the phone still opens the setup address and some phones cannot scan. Screens without room for a scannable code beside the instructions keep the text-only screen.
 - Boards whose AXP2101 fuel gauge reports no valid estimate, such as the AMOLED-1.75C where it is never initialized and reads 0 on a full cell, now estimate the battery percentage from the cell voltage, so the low-battery reminder no longer sticks on a full battery. Contributed by MacroAnarchy.
 

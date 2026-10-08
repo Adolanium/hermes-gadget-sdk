@@ -28,6 +28,8 @@ namespace {
 #define HG_BOARD_NAME "tdisplay-s3"
 #elif CONFIG_HG_BOARD_CROWPANEL_21
 #define HG_BOARD_NAME "crowpanel-2.1"
+#elif CONFIG_HG_BOARD_CROWPANEL_50
+#define HG_BOARD_NAME "crowpanel-5.0"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154
 #define HG_BOARD_NAME "waveshare-esp32s3-lcd-154"
 #else
@@ -256,6 +258,7 @@ BoardConfig make() {
   b.codec = {true, 2, 17, 45, 15, 16, 46};
   b.touch.enabled = true;
   b.touch.controller = TouchController::Box3;
+  b.touch.int_gpio = 3;  // Box3 wires the touch IRQ to GPIO3
   b.touch.width = 320;
   b.touch.height = 240;
   b.buttons = {0, -1, -1, -1};
@@ -418,6 +421,54 @@ BoardConfig make() {
   b.buttons = {-1, -1, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "Knob";
+  return b;
+}
+#elif CONFIG_HG_BOARD_CROWPANEL_50
+// Elecrow CrowPanel 5.0-inch HMI (DIS07050H). 800x480 RGB ILI6122/ILI5960 with
+// GT911 capacitive touch. Pin map from Elecrow's official Arduino demo (repo
+// Elecrow-RD/CrowPanel-5.0-HMI-ESP32-Display-800x480). No onboard audio.
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.lcd.enabled = true;
+  b.lcd.width = 800;
+  b.lcd.height = 480;
+  b.lcd.round = false;
+  b.lcd.swap_xy = false;
+  b.lcd.mirror_x = false;
+  b.lcd.mirror_y = false;
+  b.lcd.backlight = 2;
+  // GPIO2 drives the backlight rail; the vendor sketch writes it HIGH on boot.
+  b.lcd.backlight_invert = false;
+  b.lcd.bus.type = LcdBus::Type::Rgb;
+  b.lcd.rgb.controller = RgbController::Ili6122;
+  b.lcd.rgb.de = 40;
+  b.lcd.rgb.vsync = 41;
+  b.lcd.rgb.hsync = 39;
+  b.lcd.rgb.pclk = 0;
+  // B0..B4, G0..G5, R0..R4 in the vendor sketch's D0..D15 order.
+  const int rgb_data[16] = {8, 3, 46, 9, 1, 5, 6, 7, 15, 16, 4, 45, 48, 47, 21, 14};
+  for (int i = 0; i < 16; ++i) b.lcd.rgb.data[i] = rgb_data[i];
+  b.lcd.rgb.disp_gpio = 38;  // GPIO_D panel-enable line; no I2C expander
+  b.lcd.rgb.i2c_expander = -1;
+  b.lcd.rgb.pclk_hz = 15000000;
+  // Scanout timings from the vendor LGFX config.
+  b.lcd.rgb.timings.hsync_pulse_width = 4;
+  b.lcd.rgb.timings.hsync_back_porch = 43;
+  b.lcd.rgb.timings.hsync_front_porch = 8;
+  b.lcd.rgb.timings.vsync_pulse_width = 4;
+  b.lcd.rgb.timings.vsync_back_porch = 12;
+  b.lcd.rgb.timings.vsync_front_porch = 8;
+  b.lcd.rgb.timings.pclk_active_neg = true;
+  b.i2c = {19, 20, 400000};
+  b.touch.enabled = true;
+  b.touch.controller = TouchController::Box3;  // managed GT911/TT21100 driver
+  b.touch.int_gpio = -1;  // touch INT not wired; the driver polls
+  b.touch.width = 800;
+  b.touch.height = 480;
+  b.buttons = {-1, -1, -1, -1};
+  b.talk_label = "BOOT";
+  b.cancel_label = "Screen";
   return b;
 }
 #elif CONFIG_HG_BOARD_CUSTOM
