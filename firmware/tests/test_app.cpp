@@ -55,6 +55,7 @@ struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Stor
   }
   bool set(std::string_view key, std::string_view value) override {
     if (storage_full) return false;
+    if (key.empty() || key.size() > 15) return false;  // NVS refuses longer keys, as the ESP32 port does
     kv[std::string(key)] = std::string(value);
     return true;
   }
@@ -1302,6 +1303,74 @@ TEST("power: failed readings replace stale data and shutdown requires a second l
   CHECK_EQ(battery.shutdowns, 1);
 }
 
+TEST("battery indicator: the top band shows the level, colours charging and low, and hides without a reading") {
+  for (bool round : {false, true}) {
+    FakeHal display;
+    if (round) display.make_round(466);
+    hg::Ui ui(display);
+    const int w = display.width;
+    const int y0 = 0, y1 = round ? 68 : 22;  // round: the panel above the UI square; else the top bar
+    const auto top = [&] {
+      return std::vector<uint16_t>(display.fb.begin() + y0 * w, display.fb.begin() + y1 * w);
+    };
+    const auto count = [&](uint16_t color) {
+      int n = 0;
+      for (uint16_t px : top()) n += px == color;
+      return n;
+    };
+    hg::UiModel m;
+    m.screen = hg::Screen::Ready;
+    m.link = hg::Link::Network;  // a yellow dot, so red and green below come from the battery
+    ui.render(m);
+    const auto none = top();
+    const uint16_t red = hg::rgb565(242, 95, 92), green = hg::rgb565(61, 214, 140);
+    m.battery = 65;
+    ui.render(m);
+    CHECK(top() != none);
+    CHECK_EQ(count(red), 0);
+    CHECK_EQ(count(green), 0);
+    m.battery = 8;
+    m.battery_low = true;
+    ui.render(m);
+    CHECK(count(red) > 0);  // low: red fill and text
+    CHECK_EQ(count(green), 0);
+    m.battery_charging = true;
+    ui.render(m);
+    CHECK(count(green) > 0);  // charging: green fill, and the text is no longer red
+    CHECK_EQ(count(red), 0);
+    // Percentage only: no icon, so charging turns the text green instead.
+    m.battery_icon = false;
+    ui.render(m);
+    CHECK(count(green) > 0);
+    const auto text_only = top();
+    m.battery_icon = true;
+    m.battery_text = false;
+    ui.render(m);
+    CHECK(top() != text_only);
+    CHECK(count(green) > 0);  // icon only: the fill
+    m.battery_text = true;
+    m.battery = -1;
+    m.battery_low = m.battery_charging = false;
+    ui.render(m);
+    CHECK(top() == none);
+    if (round) {
+      // Centred near the top edge, every lit pixel inside the circle.
+      m.battery = 100;
+      ui.render(m);
+      int min_x = w, max_x = 0, min_y = y1;
+      for (int y = 0; y < y1; ++y)
+        for (int x = 0; x < w; ++x)
+          if (display.fb[static_cast<size_t>(y * w + x)] != none[static_cast<size_t>(y * w + x)]) {
+            min_x = std::min(min_x, x); max_x = std::max(max_x, x); min_y = std::min(min_y, y);
+            const int dx = 2 * x + 1 - w, dy = 2 * y + 1 - w;
+            CHECK(dx * dx + dy * dy < w * w);
+          }
+      CHECK(std::abs((min_x + max_x) / 2 - w / 2) <= 2);
+      CHECK(min_y < 20);
+    }
+  }
+}
+
 TEST("display: an emissive panel leaves its background unlit; a backlit one keeps near black") {
   for (bool emissive : {false, true}) {
     FakeHal display;
@@ -1316,6 +1385,87 @@ TEST("display: an emissive panel leaves its background unlit; a backlit one keep
     CHECK_EQ(corner == 0, emissive);  // outside the UI square
     CHECK_EQ(centre_edge == 0, emissive);  // inside it, beside the mascot
   }
+}
+
+TEST("battery indicator: off by default, follows readings once chosen, and each select picks the next style") {
+  struct Battery : hg::Power {
+    hg::PowerStatus status{true, 3850, 65, false, false};
+    std::optional<hg::PowerStatus> read() override { return status; }
+    bool power_off() override { return true; }
+  } battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.bring_online(true);
+  CHECK_EQ(int(r.app.model().battery), -1);  // off until the user picks a style
+  CHECK(r.fake.kv.find("battery_display") == r.fake.kv.end());
+  CHECK_EQ(r.app.console("set battery_display both"), std::string("@ok battery_display"));
+  CHECK_EQ(int(r.app.model().battery), 65);
+  CHECK(r.app.model().battery_icon && r.app.model().battery_text);
+  CHECK(!r.app.model().battery_low);
+  battery.status = hg::PowerStatus{true, 3400, 7, false, false};
+  r.advance(5000);
+  CHECK_EQ(int(r.app.model().battery), 7);
+  CHECK(r.app.model().battery_low);
+  battery.status = hg::PowerStatus{true, 3400, 7, true, true};  // on USB and charging: no longer low
+  r.advance(5000);
+  CHECK(r.app.model().battery_charging);
+  CHECK(!r.app.model().battery_low);
+  battery.status = hg::PowerStatus{false, std::nullopt, 0, false, true};  // no battery fitted
+  r.advance(5000);
+  CHECK_EQ(int(r.app.model().battery), -1);
+  battery.status = hg::PowerStatus{true, 3850, 65, false, false};
+  r.advance(5000);
+  CHECK_EQ(int(r.app.model().battery), 65);
+  CHECK_EQ(r.app.console("set battery_display maybe"),
+           std::string("@error battery_display must be icon, percentage, both or off"));
+  CHECK_EQ(r.app.console("set battery_display off"), std::string("@ok battery_display"));
+  CHECK_EQ(r.fake.kv["battery_display"], std::string("off"));
+  CHECK_EQ(int(r.app.model().battery), -1);
+  // Each select on the battery page moves to the next style, saves it, and stays on the page.
+  r.app.open_settings();
+  for (int i = 0; i < 8; ++i) r.app.console("cancel");
+  CHECK_EQ(r.app.model().detail, std::string("Battery and power"));
+  CHECK(r.app.model().body.find("Indicator: Off\nTALK to change") != std::string::npos);  // a button board
+  struct Step { const char* saved; const char* shown; bool icon, text; };
+  for (const Step& step : {Step{"icon", "Icon", true, false}, Step{"percentage", "Percent", false, true},
+                           Step{"both", "Both", true, true}, Step{"off", "Off", true, true},
+                           Step{"icon", "Icon", true, false}}) {
+    r.app.console("talk"); r.app.console("release");
+    CHECK_EQ(r.fake.kv["battery_display"], std::string(step.saved));
+    CHECK(r.app.model().body.find(std::string("Indicator: ") + step.shown + "\n") != std::string::npos);
+    CHECK_EQ(r.app.model().detail, std::string("Battery and power"));
+    CHECK_EQ(int(r.app.model().battery), std::string(step.saved) == "off" ? -1 : 65);
+    CHECK_EQ(r.app.model().battery_icon, step.icon);
+    CHECK_EQ(r.app.model().battery_text, step.text);
+  }
+  r.app.console("settings close");
+  r.app.console("set battery_display both");
+  CHECK_EQ(int(r.app.model().battery), 65);
+}
+
+TEST("battery indicator: touch screens say tap") {
+  struct Battery : hg::Power {
+    std::optional<hg::PowerStatus> read() override { return hg::PowerStatus{true, 3850, 65, false, false}; }
+    bool power_off() override { return true; }
+  } battery;
+  Rig r(Rig::touch_profile());
+  r.hal.power = &battery;
+  r.bring_online(true);
+  r.app.open_settings();
+  for (int i = 0; i < 8; ++i) r.app.console("cancel");
+  CHECK_EQ(r.app.model().detail, std::string("Battery and power"));
+  CHECK(r.app.model().body.find("Indicator: Off\nTap to change") != std::string::npos);
+}
+
+TEST("battery indicator: boards without a power driver have no battery page") {
+  Rig r;
+  r.bring_online(true);
+  r.app.open_settings();
+  for (int i = 0; i < 20; ++i) {
+    CHECK(r.app.model().detail != "Battery and power");
+    r.app.console("cancel");
+  }
+  CHECK_EQ(int(r.app.model().battery), -1);
 }
 
 TEST("power: a peripheral rail cannot be selected as device power-off") {

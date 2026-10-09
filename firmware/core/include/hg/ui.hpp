@@ -52,6 +52,13 @@ struct UiModel {
   bool speaking = false;
   bool color_test = false;
   bool settings_hold = true;  // round panels draw the settings target only while holding it works
+  // Battery level, in the top bar (round panels: centred at the top edge, above
+  // the UI square): percent, or -1 to show none. Charging fills
+  // it green; low (and not on USB) fills it red.
+  int8_t battery = -1;
+  bool battery_icon = true, battery_text = true;  // which parts to draw
+  bool battery_charging = false;
+  bool battery_low = false;
   uint32_t frame = 0;    // animation frame, advanced by the app
   std::string hint;      // bottom bar
   std::string yes, no;   // answer buttons under the hero caption (Prompt screen)
@@ -103,6 +110,10 @@ class Ui {
   bool draw_qr(Canvas& c, const UiModel& m, int y0, int y1);
   void draw_bottom(Canvas& c, const UiModel& m);
   void draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r);
+  // Draws the battery icon and percent from x, vertically centred on cy.
+  void draw_battery(Canvas& c, const UiModel& m, int x, int cy);
+  int battery_width(const UiModel& m) const;
+  void draw_round_battery(const UiModel& m);
   struct HeroGeom {
     int size = 0, x = 0, y = 0;  // mascot
     int caption_y = 0, buttons_y = 0;
@@ -121,6 +132,7 @@ class Ui {
   UiLayout layout_;
   uint32_t hash_[4] = {0, 0, 0, 0};
   uint32_t hero_static_ = 0, hero_anim_ = 0;
+  uint32_t battery_hash_ = 0;
   bool hero_valid_ = false;
   bool valid_ = false;
 };
