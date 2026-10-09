@@ -193,6 +193,69 @@ def test_speaking_devices_default_to_spoken_replies(gadget, make_sim):
     assert a._should_auto_tts_for_chat(talker.status()["device_id"]) is False
 
 
+def _fake_tts(monkeypatch, tmp_path, *, fail=False):
+    """Hermes's text_to_speech_tool, recording what it was asked to say."""
+    import tools.tts_tool as tts_tool
+    from hermes_gadget_plugin import audio
+
+    said = []
+
+    def fake(text, output_path=None, **kw):
+        said.append(text)
+        if fail:
+            return json.dumps({"success": False, "error": "no TTS provider"})
+        path = tmp_path / f"spoken-{len(said)}.wav"
+        path.write_bytes(audio.wav_bytes(b"\x10\x00" * 8000, 16000))  # 0.5 s
+        return json.dumps({"success": True, "file_path": str(path)})
+
+    monkeypatch.setattr(tts_tool, "text_to_speech_tool", fake)
+    return said
+
+
+def test_an_agent_question_is_shown_and_spoken(gadget, make_sim, monkeypatch, tmp_path):
+    said = _fake_tts(monkeypatch, tmp_path)
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+    result = gadget.run(gadget.adapter.send_clarify(
+        chat_id=device_id, question="Tag release 0.5.139 now?", choices=["Tag it", "Wait for Tony"],
+        clarify_id="c1", session_key="sk"))
+    assert result.success
+    # Shown as Hermes's own numbered text: the next message, spoken or typed, answers it.
+    assert sim.wait_for(lambda: "Tag release 0.5.139 now?" in json.dumps(sim.received), timeout=5)
+    assert "Wait for Tony" in json.dumps(sim.received)
+    # And spoken, so a voice user hears the question instead of silence.
+    assert sim.wait_for(lambda: sim.last_received("audio.end") is not None, timeout=10)
+    assert said == ["Tag release 0.5.139 now? The choices are 1: Tag it. 2: Wait for Tony. "
+                    "Say the number or your own answer."]
+    assert not list(tmp_path.glob("spoken-*.wav"))  # the TTS file is cleaned up
+
+
+def test_an_open_question_is_spoken_as_asked(gadget, make_sim, monkeypatch, tmp_path):
+    said = _fake_tts(monkeypatch, tmp_path)
+    sim = _paired_sim(gadget, make_sim)
+    gadget.run(gadget.adapter.send_clarify(chat_id=sim.status()["device_id"], question="Which branch?",
+                                           choices=None, clarify_id="c2", session_key="sk"))
+    assert sim.wait_for(lambda: said == ["Which branch?"], timeout=5)
+
+
+def test_a_question_still_shows_when_speech_fails_or_is_off(gadget, make_sim, monkeypatch, tmp_path):
+    said = _fake_tts(monkeypatch, tmp_path, fail=True)
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+    assert gadget.run(gadget.adapter.send_clarify(chat_id=device_id, question="Ship it?", choices=["Yes", "No"],
+                                                  clarify_id="c3", session_key="sk")).success
+    assert sim.wait_for(lambda: "Ship it?" in json.dumps(sim.received), timeout=5)
+    assert sim.wait_for(lambda: said == [said[0]] if said else False, timeout=5)
+    assert sim.last_received("audio.start") is None
+
+    gadget.adapter._auto_tts_disabled_chats.add(device_id)  # "/voice off"
+    said.clear()
+    assert gadget.run(gadget.adapter.send_clarify(chat_id=device_id, question="Deploy?", choices=None,
+                                                  clarify_id="c4", session_key="sk")).success
+    sim.run_for(0.5)
+    assert said == []
+
+
 def test_whole_file_tts_is_decoded_resampled_and_played(gadget, make_sim, tmp_path):
     from hermes_gadget_plugin import audio
 
