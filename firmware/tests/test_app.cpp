@@ -1291,7 +1291,7 @@ TEST("power: a prompt turns a screen the power key turned off back on") {
   CHECK(r.app.screen() == hg::Screen::Prompt);
 }
 
-TEST("power: losing the connection turns a screen the power key turned off back on") {
+TEST("power: a dark screen stays dark while the connection drops and comes back") {
   KeyPower key;
   Rig r;
   r.fake.backlight = true;
@@ -1301,8 +1301,25 @@ TEST("power: losing the connection turns a screen the power key turned off back 
   r.advance(100);
   CHECK_EQ(r.fake.brightness, 0);
   r.app.on_transport_closed("gone");
-  r.advance(100);
-  CHECK_EQ(r.fake.brightness, 100);  // as with Screen timeout: the reconnecting screen shows
+  r.advance(5000);
+  CHECK_EQ(r.fake.brightness, 0);  // reconnecting in the dark (a commute must not light it)
+  r.app.on_network(false, "Wi-Fi lost");
+  r.app.on_network(true, "192.168.1.146");
+  r.advance(5000);
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_button(hg::Button::Talk, true);  // the user still wakes it
+  CHECK_EQ(r.fake.brightness, 100);
+  r.app.on_button(hg::Button::Talk, false);
+}
+
+TEST("power: a lit screen stays lit while reconnecting, as before") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  r.app.on_transport_closed("gone");
+  r.advance(60000);  // reconnect attempts fail: still not settled
+  CHECK_EQ(r.fake.brightness, 100);
 }
 
 TEST("power: the power key brings a dimmed screen back to full brightness") {
