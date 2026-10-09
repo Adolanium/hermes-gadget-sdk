@@ -9,6 +9,7 @@
 namespace hg {
 namespace {
 
+// The background: near black, or true black (unlit) on an emissive panel.
 constexpr uint16_t kBg = rgb565(10, 14, 20);
 constexpr uint16_t kBar = rgb565(24, 31, 42);
 constexpr uint16_t kText = rgb565(232, 238, 242);
@@ -140,7 +141,8 @@ const char* screen_name(Screen s) {
   return "unknown";
 }
 
-Ui::Ui(Display& display) : display_(display), panel_(display.info()), info_(panel_) {
+Ui::Ui(Display& display)
+    : display_(display), panel_(display.info()), info_(panel_), bg_(panel_.emissive ? 0 : kBg) {
   if (panel_.round) {
     // The largest square inside the circle; the corners of the panel do not exist.
     const int side = std::min(panel_.width, panel_.height) * 707 / 1000;
@@ -186,7 +188,7 @@ void Ui::render(const UiModel& m) {
   if (!valid_ && (ox_ || oy_)) {
     // Round panel: everything outside the UI area stays the background colour.
     Canvas panel(display_.framebuffer(), panel_.width, panel_.height, panel_.swap_bytes);
-    panel.fill_rect(0, 0, panel_.width, panel_.height, kBg);
+    panel.fill_rect(0, 0, panel_.width, panel_.height, bg_);
     display_.flush(0, panel_.height);
   }
   Canvas c = canvas();
@@ -269,7 +271,7 @@ void Ui::render(const UiModel& m) {
 void Ui::draw_top(Canvas& c, const UiModel& m) {
   const int s = layout_.scale;
   const int w = info_.width;
-  c.fill_rect(0, 0, w, layout_.top_h, panel_.round ? kBg : kBar);
+  c.fill_rect(0, 0, w, layout_.top_h, panel_.round ? bg_ : kBar);
   uint16_t dot = kRed;
   const char* label = "OFFLINE";
   switch (m.link) {
@@ -340,7 +342,7 @@ void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
     case Screen::Error: {
       c.fill_circle(cx, cy, r, kRed);
       int tw = Canvas::text_width("!", s);
-      c.text(cx - tw / 2, cy - (7 * s) / 2, "!", s, kBg);
+      c.text(cx - tw / 2, cy - (7 * s) / 2, "!", s, bg_);
       break;
     }
     case Screen::Pairing:
@@ -368,7 +370,7 @@ void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
     case Screen::Prompt: {
       c.fill_circle(cx, cy, r, kAccent);
       int tw = Canvas::text_width("?", s);
-      c.text(cx - tw / 2, cy - (7 * s) / 2, "?", s, kBg);
+      c.text(cx - tw / 2, cy - (7 * s) / 2, "?", s, bg_);
       break;
     }
     case Screen::Image:
@@ -382,7 +384,7 @@ void Ui::draw_header(Canvas& c, const UiModel& m) {
   const int s = layout_.scale;
   const int y0 = layout_.top_h;
   const int hh = layout_.header_h;
-  c.fill_rect(0, y0, info_.width, hh, kBg);
+  c.fill_rect(0, y0, info_.width, hh, bg_);
   int r = hh / 2 - 2 * s;
   int cx = 4 * s + r;
   int cy = y0 + hh / 2;
@@ -409,7 +411,7 @@ void Ui::draw_content(Canvas& c, const UiModel& m) {
   const int y1 = info_.height - layout_.bottom_h;
   const int margin = 4 * s;
   const int lh = Canvas::line_height(s);
-  c.fill_rect(0, y0, w, y1 - y0, kBg);
+  c.fill_rect(0, y0, w, y1 - y0, bg_);
   int y = y0 + margin;
 
   if (m.color_test) {
@@ -585,7 +587,7 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
   const int y0 = layout_.top_h;
   const int y1 = info_.height - layout_.bottom_h;
   const int lh = Canvas::line_height(s);
-  c.fill_rect(0, y0, w, y1 - y0, kBg);
+  c.fill_rect(0, y0, w, y1 - y0, bg_);
 
   const HeroGeom g = hero_geom(m);
   const int size = g.size, mx = g.x, my = g.y;
@@ -658,7 +660,7 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
 void Ui::draw_bottom(Canvas& c, const UiModel& m) {
   const int s = layout_.scale;
   const int y0 = info_.height - layout_.bottom_h;
-  c.fill_rect(0, y0, info_.width, layout_.bottom_h, panel_.round ? kBg : kBar);
+  c.fill_rect(0, y0, info_.width, layout_.bottom_h, panel_.round ? bg_ : kBar);
   std::string hint = fit(m.hint, cols_for(info_.width - 4 * s, s));
   c.text((info_.width - Canvas::text_width(hint, s)) / 2, y0 + s, hint, s, kDim);
 }

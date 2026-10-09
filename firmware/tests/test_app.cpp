@@ -63,6 +63,7 @@ struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Stor
   // Display
   int width = 320, height = 240;
   bool round = false;
+  bool emissive = false;
   bool backlight = false;
   int brightness = 0, volume = 0;
   std::vector<uint16_t> fb = std::vector<uint16_t>(320 * 240, 0);
@@ -73,6 +74,7 @@ struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Stor
     d.width = static_cast<uint16_t>(width);
     d.height = static_cast<uint16_t>(height);
     d.round = round;
+    d.emissive = emissive;
     d.has_backlight = backlight;
     return d;
   }
@@ -1298,6 +1300,22 @@ TEST("power: failed readings replace stale data and shutdown requires a second l
   CHECK_EQ(battery.shutdowns, 0);
   r.app.console("talk"); r.app.console("release");
   CHECK_EQ(battery.shutdowns, 1);
+}
+
+TEST("display: an emissive panel leaves its background unlit; a backlit one keeps near black") {
+  for (bool emissive : {false, true}) {
+    FakeHal display;
+    display.make_round(466);
+    display.emissive = emissive;
+    hg::Ui ui(display);
+    hg::UiModel m;
+    m.screen = hg::Screen::Ready;
+    m.hero = true;
+    ui.render(m);
+    const uint16_t corner = display.fb[0], centre_edge = display.fb[static_cast<size_t>(233 * 466 + 120)];
+    CHECK_EQ(corner == 0, emissive);  // outside the UI square
+    CHECK_EQ(centre_edge == 0, emissive);  // inside it, beside the mascot
+  }
 }
 
 TEST("power: a peripheral rail cannot be selected as device power-off") {
