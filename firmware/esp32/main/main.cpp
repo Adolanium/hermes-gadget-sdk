@@ -203,6 +203,7 @@ extern "C" void app_main(void) {
   if (board.axp2101 && g_power.begin(i2c_bus)) {
     hal.power = &g_power;
     if (board.axp_power_key) g_power.use_power_key();
+    g_power.use_curves(board.battery_curve, board.battery_charge_curve);
     // Wi-Fi retries back off only on battery; unknown counts as plugged in.
     g_wifi.on_battery = [] { return g_power.external_power() == std::optional<bool>(false); };
   }
@@ -265,6 +266,7 @@ extern "C" void app_main(void) {
   app.on_diag = [](hg::json::Value& report) {
     hgp::diag::report(report);
     report.set("ota", g_updater.describe());
+    if (const auto ma = g_power.charge_current_ma()) report.set("charge_current_ma", static_cast<unsigned>(*ma));
   };
   app.recent_log = &hgp::diag::recent_log;
   app.begin();

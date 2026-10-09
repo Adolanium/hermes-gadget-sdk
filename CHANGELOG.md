@@ -11,6 +11,7 @@
 
 ### Firmware
 
+- The AMOLED-1.75C shows its battery percentage from a discharge curve measured on its 500 mAh cell, smoothed over a minute and never rising on battery, instead of the AXP2101 gauge, which read up to 14 points low. While charging it follows a charge curve measured on the same cell, never falling, and shows 100 once charging is done; `diag` reports the PMIC's charge current limit. Builds on the voltage fallback for invalid gauge readings.
 - On battery, Wi-Fi retries back off from 3 s to 30 s, like the Hermes reconnect, instead of trying every 3 s, so a long stretch without coverage costs little. Plugged in, they stay at every 3 s.
 - The AMOLED-1.75C's PWR key puts the screen to sleep and wakes it with a short press. Only the AXP2101 sees this key, so the firmware enables the PMIC's short-press interrupt and polls it every 100 ms; holding PWR keeps the PMIC's own power behavior.
 - The `diag` report's I2C scan no longer gives up at the first probe that times out. On the AMOLED-1.75C it reported `bus stuck` after `0x18` while the AXP2101 at `0x34` was answering battery reads. A probe waited 10 ms, a single tick at the firmware's 100 Hz tick rate, which can run out before the transfer ends; a probe also times out while touch, codec or battery reads hold the bus. Each address now gets up to three 50 ms tries. An address that never answers is listed as `timeout at 0x19` and the scan goes on; only four in a row end it, as `bus stuck at` the first of them. `hermes-gadget diag` now separates the entries with commas. The scan is host-tested.

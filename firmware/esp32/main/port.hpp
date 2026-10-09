@@ -394,6 +394,10 @@ class AxpPower final : public hg::Power {
   // For boards whose PWR key reaches only the AXP2101 (BoardConfig::axp_power_key).
   void use_power_key();
   bool take_key_press() override { return key_ && chip_->take_key_press(); }
+  void use_curves(hg::Curve discharge, hg::Curve charge) {
+    if (chip_ && discharge) chip_->use_curves(discharge, charge);
+  }
+  std::optional<uint16_t> charge_current_ma() { return chip_ ? chip_->charge_current_ma() : std::nullopt; }
   std::optional<bool> external_power() override { return chip_->vbus_good(); }
 
  private:

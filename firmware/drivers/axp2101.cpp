@@ -26,15 +26,24 @@ std::optional<PowerStatus> Axp2101::read() {
       const uint16_t mv = static_cast<uint16_t>(((voltage[0] & 0x3f) << 8) | voltage[1]);
       if (mv >= 2000 && mv <= 5000) out.battery_mv = mv;
     }
+    std::optional<uint8_t> gauge;
     if (enable & 0x08) {
       // Trust the gauge only in its valid range. A gauge that reads 0 (never
       // initialized on this board) must not read as an empty battery when the
       // voltage says otherwise; derive percent from the voltage instead.
       uint8_t percent = 0;
       if (!read_(0xa4, &percent, 1)) return std::nullopt;  // a failed read is unavailable, not an estimate
-      const bool gauge_valid = percent >= 1 && percent <= 100;
-      if (gauge_valid)
-        out.battery_percent = percent;
+      if (percent >= 1 && percent <= 100) gauge = percent;
+    }
+    if (percent_ && out.battery_mv) {
+      // Status 2 (0x01) bits 2:0: 100 charge done; bits 6:5 01 charging.
+      using Charge = BatteryPercent::Charge;
+      const bool done = *out.external_power && (status[1] & 0x07) == 0x04;
+      const Charge charge = done ? Charge::Done : *out.charging ? Charge::Charging : Charge::Discharging;
+      out.battery_percent = percent_->update(*out.battery_mv, charge, gauge);
+    } else if (enable & 0x08) {
+      if (gauge)
+        out.battery_percent = gauge;
       else if (out.battery_mv)
         out.battery_percent = millivolts_to_percent(*out.battery_mv);
     }
@@ -63,6 +72,14 @@ bool Axp2101::enable_key_press() {
   uint8_t enabled;
   return read_(0x41, &enabled, 1) && write_(0x41, static_cast<uint8_t>(enabled | kKeyShortPress)) &&
          write_(0x49, kKeyShortPress);
+}
+
+std::optional<uint16_t> Axp2101::charge_current_ma() {
+  uint8_t reg;
+  if (!read_(0x62, &reg, 1)) return std::nullopt;
+  const unsigned n = reg & 0x1f;  // 25 mA steps to 200 mA, then 100 mA steps
+  if (n > 21) return std::nullopt;  // reserved
+  return static_cast<uint16_t>(n <= 8 ? 25 * n : 200 + 100 * (n - 8));
 }
 
 std::optional<bool> Axp2101::vbus_good() {

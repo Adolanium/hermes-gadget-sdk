@@ -106,6 +106,8 @@ BoardConfig make() {
   b.codec.mclk = 16;
   b.pwr_key = {};  // This model has no TCA9554: PWR's short press is read from the AXP2101.
   b.axp_power_key = true;
+  b.battery_curve = hg::kAmoled175cCurve;
+  b.battery_charge_curve = hg::kAmoled175cChargeCurve;
   b.axp_audio_supply = true;  // ALDO1 supplies the analog audio circuit.
 #endif
   return b;

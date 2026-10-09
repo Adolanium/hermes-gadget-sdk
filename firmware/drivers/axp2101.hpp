@@ -3,6 +3,7 @@
 #include <functional>
 #include <utility>
 
+#include "battery_curve.hpp"
 #include "hg/hal.hpp"
 
 namespace hg {
@@ -22,10 +23,17 @@ class Axp2101 final : public Power {
   bool enable_key_press();
   bool take_key_press();  // true once per short press
   std::optional<bool> vbus_good();  // external power present (status 0x00 bit 5)
+  // Curves measured on the board's cell. With them the percent is the smoothed
+  // discharge curve on battery, the charge curve (or the gauge) while charging and
+  // 100 once charged (BatteryPercent); without, the gauge or the linear fallback.
+  void use_curves(Curve discharge, Curve charge = {}) { percent_.emplace(discharge, charge); }
+  // The constant-current charge limit (ICC, 0x62), for diagnostics. Read only.
+  std::optional<uint16_t> charge_current_ma();
 
  private:
   Read read_;
   Write write_;
+  std::optional<BatteryPercent> percent_;
 };
 
 }  // namespace hg
