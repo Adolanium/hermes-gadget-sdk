@@ -29,4 +29,9 @@ bool AxpPower::begin(i2c_master_bus_handle_t bus) {
   return true;
 }
 
+void AxpPower::use_power_key() {
+  key_ = chip_ && chip_->enable_key_press();
+  if (!key_) ESP_LOGW("hg.power", "can't enable the PWR key's short press on the AXP2101");
+}
+
 }  // namespace hgp

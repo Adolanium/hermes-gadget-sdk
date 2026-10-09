@@ -134,6 +134,8 @@ class Power {
   // Override when this controls a peripheral rail rather than device shutdown.
   virtual bool can_power_off() const { return true; }
   virtual bool power_off() = 0;
+  // True once per short press of a power key only the PMIC can see. Polled.
+  virtual bool take_key_press() { return false; }
 };
 
 // Everything except `system` and `transport` may be null when the board lacks it.

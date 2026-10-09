@@ -388,10 +388,14 @@ class AxpPower final : public hg::Power {
   bool enable_audio_supply() { return chip_ && chip_->enable_aldo1_3v3(); }
   std::optional<hg::PowerStatus> read() override { return chip_->read(); }
   bool power_off() override { return chip_->power_off(); }
+  // For boards whose PWR key reaches only the AXP2101 (BoardConfig::axp_power_key).
+  void use_power_key();
+  bool take_key_press() override { return key_ && chip_->take_key_press(); }
 
  private:
   i2c_master_dev_handle_t dev_ = nullptr;
   std::unique_ptr<hg::Axp2101> chip_;
+  bool key_ = false;
 };
 
 class CoreS3Board {

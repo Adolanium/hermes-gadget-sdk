@@ -55,4 +55,21 @@ bool Axp2101::enable_aldo1_3v3() {
          write_(0x90, static_cast<uint8_t>(enabled | 0x01));
 }
 
+// IRQ enable 1 (0x41) and IRQ status 1 (0x49), bit 3: PWRON short press.
+// Status bits clear when written back as 1.
+constexpr uint8_t kKeyShortPress = 0x08;
+
+bool Axp2101::enable_key_press() {
+  uint8_t enabled;
+  return read_(0x41, &enabled, 1) && write_(0x41, static_cast<uint8_t>(enabled | kKeyShortPress)) &&
+         write_(0x49, kKeyShortPress);
+}
+
+bool Axp2101::take_key_press() {
+  uint8_t status;
+  if (!read_(0x49, &status, 1) || !(status & kKeyShortPress)) return false;
+  write_(0x49, kKeyShortPress);
+  return true;
+}
+
 }  // namespace hg
