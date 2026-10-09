@@ -188,7 +188,12 @@ void AmoledDisplay::flush(uint16_t y0, uint16_t y1) {
 
 void AmoledDisplay::set_backlight(uint8_t percent) {
   const uint8_t level = static_cast<uint8_t>(255u * std::min<uint8_t>(percent, 100) / 100u);
+  // Zero is screen sleep: turn the panel's output off too (display off keeps
+  // its memory, so drawing continues and waking needs no redraw delay).
+  if (level && !panel_on_) command(0x29, nullptr, 0);  // display on
   command(0x51, &level, 1);
+  if (!level && panel_on_) command(0x28, nullptr, 0);  // display off
+  panel_on_ = level != 0;
 }
 
 }  // namespace hgp

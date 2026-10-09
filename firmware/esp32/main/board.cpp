@@ -109,6 +109,7 @@ BoardConfig make() {
   b.battery_curve = hg::kAmoled175cCurve;
   b.battery_charge_curve = hg::kAmoled175cChargeCurve;
   b.axp_audio_supply = true;  // ALDO1 supplies the analog audio circuit.
+  b.codec.speaker_pa = true;  // the amplifier draws power only while sound plays
 #endif
   return b;
 }

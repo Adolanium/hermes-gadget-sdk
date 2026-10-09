@@ -273,6 +273,7 @@ class AmoledDisplay final : public hg::Display {
   uint16_t* bounce_ = nullptr;
   SemaphoreHandle_t done_ = nullptr;
   std::optional<hg::BandFlush> bands_;
+  bool panel_on_ = true;
 };
 
 // Logs a failed ESP-IDF call. A display's begin() returns false on one, so the
