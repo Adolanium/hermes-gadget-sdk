@@ -11,6 +11,7 @@
 
 ### Firmware
 
+- The AMOLED-1.75C light-sleeps while dozing: on battery, with the screen off, idle and connected (or waiting between Wi-Fi attempts). The speaker codec and its I2S channel close while dozing, the speaker task waits instead of polling, and touch is checked every 50 ms. On USB it never light-sleeps, so the serial console, flashing and JTAG keep working. Waking the screen or plugging in retries Wi-Fi at once.
 - A dark screen stays dark while Wi-Fi or the connection to Hermes drops and reconnects; it used to light up and, without a screen timeout, stay on until someone turned it off.
 - Boards with a separate ES7210 microphone ADC (the AMOLED-1.75 and 1.75C, the 1.85C V2 and the LCD-1.54) power it down between recordings instead of running and reading it continuously, which saves battery. Recording starts by draining the audio the I2S channel kept while the ADC was off and dropping 20 ms while it settles. Boards whose microphone shares the speaker's codec keep reading continuously.
 - Battery life on the AMOLED-1.75C: the speaker amplifier is powered only while sound plays, and the CPU scales down to 80 MHz when idle instead of running at 240 MHz. AMOLED panels also switch their output off during screen sleep, not only their brightness.

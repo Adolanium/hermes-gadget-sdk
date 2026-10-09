@@ -13,3 +13,15 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_HG_BOARD_AMOLED_175C=y
 # Battery life: scale the CPU down to 80 MHz when idle (see app_main).
 CONFIG_PM_ENABLE=y
+# Light sleep while dozing (on battery, screen off, idle; see EspSystem::enable_doze).
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+# And never while a USB host is connected: the serial console and JTAG stop
+# working under light sleep. The app's on-battery check is the main guard.
+CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
+# Wi-Fi wakes for each beacon from light sleep on the slow clock's timing. The
+# default 150 kHz RC drifts enough to miss beacons on a weak link; the board has
+# no 32 kHz crystal, so use the steadier 17.5 MHz / 256 oscillator.
+# CONFIG_RTC_CLK_SRC_INT_RC is not set
+CONFIG_RTC_CLK_SRC_INT_8MD256=y
+# Counts light sleep for the log line that ends each doze (EspSystem::set_dozing).
+CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y

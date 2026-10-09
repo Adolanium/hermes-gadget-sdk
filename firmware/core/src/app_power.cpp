@@ -9,11 +9,19 @@ bool App::wake_display() {
   const bool sleeping = display_sleeping_;
   if (display_dimmed_ || sleeping) {
     display_dimmed_ = display_sleeping_ = false;
+    on_battery_ = false;  // checked afresh before the next doze
+    set_dozing(false);  // before drawing: the port wakes its peripherals
     hal_.display->set_backlight(brightness_);
     if (ui_) ui_->invalidate();
     update_model();
   }
   return sleeping;
+}
+
+void App::set_dozing(bool dozing) {
+  if (dozing == dozing_) return;
+  dozing_ = dozing;
+  if (hal_.system) hal_.system->set_dozing(dozing);
 }
 
 void App::on_power_key() {
@@ -37,7 +45,14 @@ void App::power_tick() {
   if (hal_.power && now() - power_key_polled_at_ >= kPowerKeyPollMs) {
     power_key_polled_at_ = now();
     if (hal_.power->take_key_press()) on_power_key();
+    // Dozing needs the battery to be the only supply; check as often as the key
+    // while the screen is dark, so plugging in ends a doze within ~100 ms.
+    if (display_sleeping_) {
+      const auto external = hal_.power->external_power();
+      on_battery_ = external.has_value() && !*external;
+    }
   }
+  bool doze = false;
   // Without a timeout, only a screen the power key turned off needs watching.
   if (hal_.display && hal_.display->info().has_backlight && (screen_timeout_ms_ || display_sleeping_)) {
     // The settings menu can sleep too; the wake input leaves it on the same item.
@@ -60,7 +75,11 @@ void App::power_tick() {
         hal_.display->set_backlight(std::min<uint8_t>(brightness_, 10));
       }
     }
+    // Online, or waiting for Wi-Fi between join attempts (the port holds the chip
+    // awake while an attempt runs). Reconnecting to Hermes isn't idle: awake.
+    doze = idle && display_sleeping_ && on_battery_;
   }
+  set_dozing(doze);
 }
 
 json::Value App::power_value() const {

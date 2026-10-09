@@ -104,6 +104,9 @@ class App {
   // A short press of the PMIC's power key: turns the screen off, or back on.
   // Wi-Fi and the Hermes connection stay up.
   void on_power_key();
+  // Dozing (System::set_dozing): the port's loop may wait this long for events.
+  static constexpr uint32_t kDozeWaitMs = 100;
+  bool dozing() const { return dozing_; }
   bool start_wifi_setup();
   void close_wifi_setup();
   bool wifi_setup_open() const { return !wifi_setup_text_.empty(); }
@@ -254,6 +257,8 @@ class App {
   uint32_t power_read_at_ = 0, activity_at_ = 0, power_key_polled_at_ = 0;
   uint32_t screen_timeout_ms_ = 0;
   bool display_dimmed_ = false, display_sleeping_ = false, power_off_armed_ = false;
+  bool dozing_ = false, on_battery_ = false;
+  void set_dozing(bool dozing);
   uint8_t wake_buttons_ = 0;
 
   // connection

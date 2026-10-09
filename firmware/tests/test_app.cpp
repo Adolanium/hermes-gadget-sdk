@@ -20,6 +20,12 @@ struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Stor
   // System
   uint32_t clock = 1000;
   uint32_t now_ms() override { return clock; }
+  bool dozing = false;
+  int doze_changes = 0;
+  void set_dozing(bool d) override {
+    dozing = d;
+    ++doze_changes;
+  }
   void random_bytes(uint8_t* out, size_t len) override {
     for (size_t i = 0; i < len; ++i) out[i] = static_cast<uint8_t>(i);
   }
@@ -82,7 +88,11 @@ struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Stor
     fb.assign(static_cast<size_t>(diameter * diameter), 0);
   }
   uint16_t* framebuffer() override { return fb.data(); }
-  void set_backlight(uint8_t percent) override { brightness = percent; }
+  bool lit_while_dozing = false;  // the screen was turned on before the port woke
+  void set_backlight(uint8_t percent) override {
+    brightness = percent;
+    if (percent && dozing) lit_while_dozing = true;
+  }
   void flush(uint16_t y0, uint16_t y1) override {
     ++flushes;
     flushed_rows += y1 - y0;
@@ -1226,6 +1236,8 @@ namespace {
 // A PMIC whose power key the board can only see as short presses.
 struct KeyPower : hg::Power {
   int presses = 0;
+  std::optional<bool> usb = false;  // on battery unless a test plugs it in
+  std::optional<bool> external_power() override { return usb; }
   std::optional<hg::PowerStatus> read() override { return hg::PowerStatus{true, 3900, 70, false, false}; }
   bool power_off() override { return true; }
   bool take_key_press() override {
@@ -1334,6 +1346,116 @@ TEST("power: the power key brings a dimmed screen back to full brightness") {
   key.presses = 1;
   r.advance(100);
   CHECK_EQ(r.fake.brightness, 100);
+}
+
+TEST("doze: a dark, idle screen on battery dozes; any input ends it before drawing") {
+  KeyPower key;
+  Rig r;
+  r.fake.backlight = true;
+  r.hal.power = &key;
+  r.bring_online(true);
+  r.advance(1000);
+  CHECK(!r.fake.dozing);  // the screen is on
+  key.presses = 1;
+  r.advance(200);
+  CHECK_EQ(r.fake.brightness, 0);
+  CHECK(r.fake.dozing);
+  CHECK(r.app.dozing());
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK(!r.fake.dozing);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(!r.fake.lit_while_dozing);
+  r.app.on_button(hg::Button::Talk, false);
+}
+
+TEST("doze: external power never dozes, and plugging in ends a doze within 100 ms") {
+  KeyPower key;
+  key.usb = true;
+  Rig r;
+  r.fake.backlight = true;
+  r.hal.power = &key;
+  r.bring_online(true);
+  key.presses = 1;
+  r.advance(1000);
+  CHECK_EQ(r.fake.brightness, 0);
+  CHECK(!r.fake.dozing);  // dark but plugged in: USB debugging keeps working
+  key.usb = false;
+  r.advance(200);
+  CHECK(r.fake.dozing);
+  key.usb = true;
+  r.advance(100);
+  CHECK(!r.fake.dozing);
+  CHECK_EQ(r.fake.brightness, 0);  // the screen stays off; only the doze ends
+}
+
+TEST("doze: an unknown power source counts as plugged in") {
+  KeyPower key;
+  key.usb = std::nullopt;  // the PMIC didn't answer
+  Rig r;
+  r.fake.backlight = true;
+  r.hal.power = &key;
+  r.bring_online(true);
+  key.presses = 1;
+  r.advance(1000);
+  CHECK_EQ(r.fake.brightness, 0);
+  CHECK(!r.fake.dozing);
+  CHECK_EQ(r.fake.doze_changes, 0);
+}
+
+TEST("doze: a prompt or a lost connection ends it; Screen timeout dozes too") {
+  KeyPower key;
+  Rig r;
+  r.fake.backlight = true;
+  r.hal.power = &key;
+  r.bring_online(true);
+  key.presses = 1;
+  r.advance(200);
+  CHECK(r.fake.dozing);
+  r.server(R"({"type":"prompt","id":"wake","text":"Continue?"})");
+  r.advance(10);
+  CHECK(!r.fake.dozing);
+  r.app.console("no");
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  r.server(R"({"type":"ping"})");
+  r.advance(25000);
+  r.server(R"({"type":"ping"})");
+  r.advance(10000);
+  CHECK_EQ(r.fake.brightness, 0);
+  CHECK(r.fake.dozing);
+  r.app.on_transport_closed("gone");
+  r.advance(10);
+  CHECK(!r.fake.dozing);
+}
+
+TEST("doze: without Wi-Fi it keeps dozing between join attempts; reconnecting to Hermes is awake") {
+  KeyPower key;
+  Rig r;
+  r.fake.backlight = true;
+  r.hal.power = &key;
+  r.bring_online(true);
+  key.presses = 1;
+  r.advance(200);
+  CHECK(r.fake.dozing);
+  r.app.on_network(false, "Wi-Fi lost (reason 200)");
+  r.advance(60000);
+  CHECK(r.fake.dozing);  // the port wakes the chip for each attempt
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_network(true, "192.168.1.146");
+  r.advance(1500);  // Wi-Fi is back: reconnecting to Hermes
+  CHECK(!r.fake.dozing);
+}
+
+TEST("doze: boards without a power reading never doze") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  r.server(R"({"type":"ping"})");
+  r.advance(25000);
+  r.server(R"({"type":"ping"})");
+  r.advance(10000);
+  CHECK_EQ(r.fake.brightness, 0);
+  CHECK(!r.fake.dozing);
 }
 
 TEST("power: an idle settings menu sleeps on every view; the wake input restores it where it was") {

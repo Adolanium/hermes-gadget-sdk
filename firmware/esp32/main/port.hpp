@@ -105,6 +105,18 @@ class EspSystem final : public hg::System {
   uint32_t now_ms() override;
   void random_bytes(uint8_t* out, size_t len) override;
   void log(hg::LogLevel level, std::string_view message) override;
+  // Boards with BoardConfig::light_sleep: keeps the chip out of light sleep
+  // except while dozing. Call before power management enables light sleep.
+  bool enable_doze();
+  void set_dozing(bool dozing) override;
+  static bool dozing_now();  // for tasks that poll: poll less while dozing
+  std::function<void()> on_doze_start;  // e.g. power the speaker down
+  std::function<void()> on_doze_end;    // e.g. power it up, retry Wi-Fi now: the user is back
+
+ private:
+  esp_pm_lock_handle_t awake_ = nullptr;  // held whenever not dozing
+  bool dozing_ = false;
+  int64_t doze_started_us_ = 0;
 };
 
 class NvsStorage final : public hg::Storage {
@@ -357,10 +369,23 @@ class CodecSpeaker final : public hg::AudioOut {
   void abort() override;
   bool busy() const override;
   void set_volume(uint8_t percent) override;
+  // While dozing: close the DAC and its I2S channel (an enabled channel holds a
+  // power lock that keeps the chip out of light sleep). Only for a speaker codec
+  // the microphones don't share. begin() powers it back up before playing.
+  void allow_power_down(const esp_codec_dev_sample_info_t& format) {
+    format_ = format;
+    can_power_down_ = true;
+  }
+  void power_down();
+  void power_up();
 
  private:
   static void task(void* arg);
   esp_codec_dev_handle_t dev_ = nullptr;
+  esp_codec_dev_sample_info_t format_ = {};
+  bool can_power_down_ = false, powered_ = true;
+  uint8_t volume_ = 70;
+  TaskHandle_t task_ = nullptr;
   bool stereo32_ = false;
   int32_t* stereo_ = nullptr;
   std::optional<hg::SpeakerPa> pa_;  // set when this speaker, not esp_codec_dev, drives the PA pin

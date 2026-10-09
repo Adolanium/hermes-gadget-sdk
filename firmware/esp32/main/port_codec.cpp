@@ -239,8 +239,26 @@ bool CodecSpeaker::begin(esp_codec_dev_handle_t dev, bool stereo32, int pa) {
     stereo_ = static_cast<int32_t*>(heap_caps_malloc(kSpeakerChunk * 2 * sizeof(int32_t), MALLOC_CAP_8BIT));
     if (!stereo_) return false;
   }
-  xTaskCreate(&CodecSpeaker::task, "hg-spk", 4096, this, 7, nullptr);
+  xTaskCreate(&CodecSpeaker::task, "hg-spk", 4096, this, 7, &task_);
   return true;
+}
+
+void CodecSpeaker::power_down() {
+  if (!dev_ || !can_power_down_ || !powered_ || busy()) return;
+  esp_codec_dev_close(dev_);
+  powered_ = false;
+}
+
+void CodecSpeaker::power_up() {
+  if (!dev_ || powered_) return;
+  esp_codec_dev_sample_info_t fs = format_;
+  if (esp_codec_dev_open(dev_, &fs) != ESP_CODEC_DEV_OK) {
+    ESP_LOGW(TAG, "speaker did not start");
+    return;
+  }
+  esp_codec_dev_set_out_vol(dev_, volume_);
+  esp_codec_dev_set_out_mute(dev_, true);  // unmuted while something plays
+  powered_ = true;
 }
 
 bool CodecSpeaker::begin(uint32_t sample_rate) {
@@ -251,6 +269,7 @@ bool CodecSpeaker::begin(uint32_t sample_rate) {
     return false;
   }
   abort();
+  power_up();  // a reply can start before the doze that powered it down ends
   open_ = true;
   draining_ = false;
   return true;
@@ -262,6 +281,7 @@ void CodecSpeaker::write(const int16_t* samples, size_t count) {
   // The app task is the only writer, so the room can only grow before the send.
   size_t fit = hg::whole_sample_bytes(bytes, xStreamBufferSpacesAvailable(buffer_));
   size_t sent = xStreamBufferSend(buffer_, samples, fit, 0);
+  if (task_) xTaskNotifyGive(task_);  // an idle speaker task waits for this
   if (sent < bytes) ESP_LOGW(TAG, "playback buffer full, dropped %u bytes", static_cast<unsigned>(bytes - sent));
 }
 
@@ -275,6 +295,7 @@ void CodecSpeaker::abort() {
   draining_ = false;
   if (pa_) pa_->abort();
   flush_ = true;
+  if (task_) xTaskNotifyGive(task_);
 }
 
 bool CodecSpeaker::busy() const {
@@ -282,7 +303,8 @@ bool CodecSpeaker::busy() const {
 }
 
 void CodecSpeaker::set_volume(uint8_t percent) {
-  if (dev_) esp_codec_dev_set_out_vol(dev_, percent > 100 ? 100 : percent);
+  volume_ = percent > 100 ? 100 : percent;
+  if (dev_ && powered_) esp_codec_dev_set_out_vol(dev_, volume_);
 }
 
 void CodecSpeaker::task(void* arg) {
@@ -312,7 +334,9 @@ void CodecSpeaker::task(void* arg) {
         if (pa) pa->disable();
         playing = false;
       }
-      if (pa) vTaskDelay(pdMS_TO_TICKS(20));
+      // Idle: wait for write()/abort() instead of waking every 20 ms, so a doze
+      // can light-sleep. Draining (playing) keeps the short poll.
+      if (pa) ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(playing ? 20 : 1000));
       continue;
     }
     if (!playing) {

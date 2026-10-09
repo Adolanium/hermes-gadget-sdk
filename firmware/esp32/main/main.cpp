@@ -90,6 +90,15 @@ void add_status_led(hg::App& app, int gpio) {
   app.add_action(std::move(led));
 }
 
+// Light sleep disables every GPIO it doesn't know about; these must keep their
+// level so the panel, touch controller, amplifier and buses survive a doze.
+void keep_pins_through_sleep(const hgp::BoardConfig& b) {
+  const int pins[] = {b.amoled.cs, b.amoled.sclk, b.amoled.d0, b.amoled.d1, b.amoled.d2, b.amoled.d3,
+                      b.amoled.rst, b.touch.rst, b.codec.pa, b.i2c.sda, b.i2c.scl};
+  for (int pin : pins)
+    if (pin >= 0) gpio_sleep_sel_dis(static_cast<gpio_num_t>(pin));
+}
+
 void dispatch(hg::App& app, hgp::Event& ev) {
   using hgp::EventType;
   const char* text = reinterpret_cast<const char*>(ev.data);
@@ -173,12 +182,13 @@ extern "C" void app_main(void) {
 #endif
 #if CONFIG_PM_ENABLE
   // Boards that enable power management let the CPU drop to 80 MHz when idle;
-  // drivers hold it up while they work. No light sleep: the display, touch and
-  // audio paths expect their clocks to keep running.
+  // drivers hold it up while they work. Light sleep only on boards that ask for
+  // it, and then only while dozing: the app holds the chip awake otherwise
+  // (EspSystem::enable_doze), so the display, touch, audio and USB keep working.
   esp_pm_config_t pm = {};
   pm.max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ;
   pm.min_freq_mhz = 80;
-  pm.light_sleep_enable = false;
+  pm.light_sleep_enable = board.light_sleep && g_system.enable_doze();
   if (esp_pm_configure(&pm) != ESP_OK) ESP_LOGW(TAG, "power management unavailable; the CPU stays at full speed");
 #endif
   g_updater.expect_board(board.name);
@@ -223,6 +233,8 @@ extern "C" void app_main(void) {
   if (board.codec.enabled && audio_power && g_codec.begin(board.codec, i2c_bus)) {
     if (g_codec_mic.begin(g_codec.in(), board.codec.rmnm_mics, g_codec.mic_link())) hal.mic = &g_codec_mic;
     if (g_codec_speaker.begin(g_codec.out(), board.codec.stereo32, board.codec.speaker_pa ? board.codec.pa : -1)) hal.speaker = &g_codec_speaker;
+    // Light-sleep boards power the DAC down while dozing, if the mics don't share it.
+    if (board.light_sleep && g_codec.mic_link().switchable) g_codec_speaker.allow_power_down(g_codec.mic_link().format);
   }
   g_buttons.begin(board.buttons);
   const bool touch = peripherals_ready && (board.touch.enabled || board.pwr_key.enabled || board.encoder.a >= 0) &&
@@ -280,13 +292,20 @@ extern "C" void app_main(void) {
     if (const auto ma = g_power.charge_current_ma()) report.set("charge_current_ma", static_cast<unsigned>(*ma));
   };
   app.recent_log = &hgp::diag::recent_log;
+  if (board.light_sleep) keep_pins_through_sleep(board);
+  g_system.on_doze_start = [] { g_codec_speaker.power_down(); };
+  g_system.on_doze_end = [] {
+    g_codec_speaker.power_up();
+    g_wifi.retry_now();
+  };
   app.begin();
   hgp::console::begin();
 
   for (;;) {
     hgp::Event ev;
     // Block briefly for events, then run the core's timers and animations.
-    if (hgp::events::receive(ev, pdMS_TO_TICKS(10))) {
+    // Dozing, the chip may sleep between events; input and the network still wake it.
+    if (hgp::events::receive(ev, pdMS_TO_TICKS(app.dozing() ? hg::App::kDozeWaitMs : 10))) {
       do {
         dispatch(app, ev);
         hgp::events::release(ev);
