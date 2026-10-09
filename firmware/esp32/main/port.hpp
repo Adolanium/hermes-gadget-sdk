@@ -317,21 +317,32 @@ class CodecAudio {
   bool begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus);
   esp_codec_dev_handle_t out() const { return out_; }
   esp_codec_dev_handle_t in() const { return in_; }
+  // How CodecMic powers its ADC down between captures (MicPower).
+  struct MicLink {
+    bool switchable = false;  // a recording-only codec, not shared with the speaker
+    i2s_chan_handle_t rx = nullptr;
+    esp_codec_dev_sample_info_t format = {};
+    float gain_db = 0;
+  };
+  MicLink mic_link() const { return mic_link_; }
 
  private:
   i2s_chan_handle_t tx_ = nullptr, rx_ = nullptr;
   esp_codec_dev_handle_t out_ = nullptr, in_ = nullptr;
+  MicLink mic_link_;
 };
 
 class CodecMic final : public hg::AudioIn {
  public:
-  bool begin(esp_codec_dev_handle_t dev, bool rmnm);
+  bool begin(esp_codec_dev_handle_t dev, bool rmnm, const CodecAudio::MicLink& link);
   bool start(uint32_t sample_rate) override;
   void stop() override { capturing_ = false; }
 
  private:
   static void task(void* arg);
   esp_codec_dev_handle_t dev_ = nullptr;
+  CodecAudio::MicLink link_;
+  TaskHandle_t task_ = nullptr;
   bool rmnm_ = false;
   int16_t* raw_ = nullptr;
   std::atomic<bool> capturing_{false};

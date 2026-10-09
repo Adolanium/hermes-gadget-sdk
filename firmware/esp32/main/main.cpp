@@ -221,7 +221,7 @@ extern "C" void app_main(void) {
   const bool audio_power = peripherals_ready && (!board.axp_audio_supply || g_power.enable_audio_supply());
   if (!audio_power) ESP_LOGE(TAG, "audio supply unavailable");
   if (board.codec.enabled && audio_power && g_codec.begin(board.codec, i2c_bus)) {
-    if (g_codec_mic.begin(g_codec.in(), board.codec.rmnm_mics)) hal.mic = &g_codec_mic;
+    if (g_codec_mic.begin(g_codec.in(), board.codec.rmnm_mics, g_codec.mic_link())) hal.mic = &g_codec_mic;
     if (g_codec_speaker.begin(g_codec.out(), board.codec.stereo32, board.codec.speaker_pa ? board.codec.pa : -1)) hal.speaker = &g_codec_speaker;
   }
   g_buttons.begin(board.buttons);

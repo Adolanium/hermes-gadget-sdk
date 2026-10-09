@@ -11,6 +11,7 @@
 
 ### Firmware
 
+- Boards with a separate ES7210 microphone ADC (the AMOLED-1.75 and 1.75C, the 1.85C V2 and the LCD-1.54) power it down between recordings instead of running and reading it continuously, which saves battery. Recording starts by draining the audio the I2S channel kept while the ADC was off and dropping 20 ms while it settles. Boards whose microphone shares the speaker's codec keep reading continuously.
 - Battery life on the AMOLED-1.75C: the speaker amplifier is powered only while sound plays, and the CPU scales down to 80 MHz when idle instead of running at 240 MHz. AMOLED panels also switch their output off during screen sleep, not only their brightness.
 - The AMOLED-1.75C shows its battery percentage from a discharge curve measured on its 500 mAh cell, smoothed over a minute and never rising on battery, instead of the AXP2101 gauge, which read up to 14 points low. While charging it follows a charge curve measured on the same cell, never falling, and shows 100 once charging is done; `diag` reports the PMIC's charge current limit. Builds on the voltage fallback for invalid gauge readings.
 - On battery, Wi-Fi retries back off from 3 s to 30 s, like the Hermes reconnect, instead of trying every 3 s, so a long stretch without coverage costs little. Plugged in, they stay at every 3 s.
