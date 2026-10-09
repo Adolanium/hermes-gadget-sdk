@@ -52,6 +52,7 @@ from gateway.platforms.event import MessageEvent, MessageType
 
 from . import audio as gaudio
 from . import imaging, ota, runtime, textfmt
+from .battery_log import BatteryLog
 from .hub import DeviceHub, DeviceSession, HubDelegate
 from .store import DeviceStore
 
@@ -147,6 +148,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._max_utterance_s = float(extra.get("max_utterance_s") or 60)
         self._speak_replies = _flag(extra.get("speak_replies"), True)
         self._auto_home = _flag(extra.get("auto_home"), True)
+        self._battery_log_on = _flag(extra.get("battery_log"), False)
+        self._battery_log: Optional[BatteryLog] = None
         self._tls_cert = extra.get("tls_cert")
         self._tls_key = extra.get("tls_key")
         self._access_token = extra_or_secret(extra, "access_token", "GADGET_ACCESS_TOKEN") or None
@@ -174,6 +177,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         from plugins.plugin_storage import plugin_data_dir
 
         self._store = DeviceStore(plugin_data_dir(PLATFORM_NAME))
+        if self._battery_log_on:
+            self._battery_log = BatteryLog(plugin_data_dir(PLATFORM_NAME) / "battery")
         try:
             ssl_ctx = self._ssl_context()
         except (OSError, ssl.SSLError) as exc:
@@ -396,6 +401,14 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         await self.handle_message(self._event(
             session, f"ev-{uuid.uuid4().hex[:6]}", f"[Gadget event] {name} {payload}".strip(),
             message_type=MessageType.TEXT, allow_gateway_control=False))
+
+    async def on_state(self, session: DeviceSession, sensors: dict) -> None:
+        if not self._battery_log:
+            return
+        try:
+            self._battery_log.record(session.device_id, sensors)
+        except OSError as exc:
+            logger.warning("gadget: could not write the battery log for %s: %s", session.device_id, exc)
 
     async def on_disconnect(self, session: DeviceSession) -> None:
         if self._hub and session.device_id not in self._hub.sessions:
