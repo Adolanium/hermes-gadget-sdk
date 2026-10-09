@@ -31,12 +31,28 @@ void Wifi::begin(NvsStorage& storage) {
   ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &Wifi::on_event, this));
   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
   ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
+#if CONFIG_PM_ENABLE
+  if (esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "hg-wifi-join", &attempt_lock_) != ESP_OK) attempt_lock_ = nullptr;
+#endif
   ESP_ERROR_CHECK(esp_wifi_start());
+}
+
+void Wifi::hold_while_attempting() {
+  const bool want = retry_.attempting();
+  if (!attempt_lock_ || want == attempt_held_) return;
+  attempt_held_ = want;
+  if (want) esp_pm_lock_acquire(attempt_lock_);
+  else esp_pm_lock_release(attempt_lock_);
+}
+
+void Wifi::retry_now() {
+  retry_.retry_now(now_ms());
 }
 
 void Wifi::join(const char* ssid, const char* password) {
   configured_ = false;
-  retry_at_ = 0;
+  retry_.connected();  // nothing pending until this join is under way
+  hold_while_attempting();
   esp_wifi_disconnect();
   const size_t ssid_size = std::strlen(ssid), pass_size = std::strlen(password);
   if (!ssid_size || ssid_size > 32 || pass_size > 64) {
@@ -51,7 +67,9 @@ void Wifi::join(const char* ssid, const char* password) {
   if (esp_wifi_set_config(WIFI_IF_STA, &cfg) != ESP_OK) return;
   configured_ = true;
   events::post(EventType::NetDown, "Joining Wi-Fi", 13);
-  if (esp_wifi_connect() != ESP_OK) retry_at_ = now_ms() + 3000;
+  retry_.started(now_ms());
+  if (esp_wifi_connect() != ESP_OK) retry_.start_failed(now_ms());
+  hold_while_attempting();
 }
 
 void Wifi::reconfigure() {
@@ -65,11 +83,13 @@ void Wifi::reconfigure() {
 
 void Wifi::disconnected() {
   wait_disconnect_ = false;
-  if (configured_) retry_at_ = now_ms() + 3000;
+  if (configured_) retry_.lost(now_ms(), on_battery && on_battery());
+  hold_while_attempting();
 }
 
 void Wifi::connected(hg::App& app) {
-  retry_at_ = 0;
+  retry_.connected();
+  hold_while_attempting();
   if (!joining_ || wait_disconnect_) return;
   wifi_ap_record_t ap = {};
   if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK ||
@@ -113,10 +133,8 @@ void Wifi::tick(hg::App& app, uint32_t now) {
   }
   if (http_ && (static_cast<int32_t>(now - setup_until_) >= 0 ||
                 (close_at_ && static_cast<int32_t>(now - close_at_) >= 0))) app.close_wifi_setup();
-  if (configured_ && retry_at_ && static_cast<int32_t>(now - retry_at_) >= 0) {
-    retry_at_ = 0;
-    if (esp_wifi_connect() != ESP_OK) retry_at_ = now + 3000;
-  }
+  if (configured_ && retry_.due(now) && esp_wifi_connect() != ESP_OK) retry_.start_failed(now);
+  hold_while_attempting();
 }
 
 void Wifi::on_event(void*, const char* base, int32_t id, void* data) {

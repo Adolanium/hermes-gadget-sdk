@@ -185,3 +185,20 @@ TEST("AXP2101: the power key's short press is read once and cleared; enabling to
   CHECK(!power.take_key_press());  // a failed read is no press
   CHECK(!power.enable_key_press());
 }
+
+TEST("AXP2101: external power is read from VBUS good, and a failed read is unknown") {
+  uint8_t status = 0x20;
+  bool fail = false;
+  hg::Axp2101 power(
+      [&](uint8_t reg, uint8_t* out, size_t n) {
+        if (fail || reg != 0x00 || n != 1) return false;
+        *out = status;
+        return true;
+      },
+      [&](uint8_t, uint8_t) { return false; });
+  CHECK(power.vbus_good() == std::optional<bool>(true));
+  status = 0x08;  // battery present, no VBUS
+  CHECK(power.vbus_good() == std::optional<bool>(false));
+  fail = true;
+  CHECK(!power.vbus_good().has_value());
+}

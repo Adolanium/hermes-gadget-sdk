@@ -65,6 +65,12 @@ bool Axp2101::enable_key_press() {
          write_(0x49, kKeyShortPress);
 }
 
+std::optional<bool> Axp2101::vbus_good() {
+  uint8_t status;
+  if (!read_(0x00, &status, 1)) return std::nullopt;
+  return (status & 0x20) != 0;
+}
+
 bool Axp2101::take_key_press() {
   uint8_t status;
   if (!read_(0x49, &status, 1) || !(status & kKeyShortPress)) return false;

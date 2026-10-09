@@ -136,6 +136,9 @@ class Power {
   virtual bool power_off() = 0;
   // True once per short press of a power key only the PMIC can see. Polled.
   virtual bool take_key_press() { return false; }
+  // Whether external (USB) power is present right now: a cheap read, polled while
+  // the screen is off. Unknown means "assume plugged in", which never dozes.
+  virtual std::optional<bool> external_power() { return std::nullopt; }
 };
 
 // Everything except `system` and `transport` may be null when the board lacks it.

@@ -21,6 +21,7 @@ class Axp2101 final : public Power {
   // interrupt registers only, and drops a press latched before it.
   bool enable_key_press();
   bool take_key_press();  // true once per short press
+  std::optional<bool> vbus_good();  // external power present (status 0x00 bit 5)
 
  private:
   Read read_;
