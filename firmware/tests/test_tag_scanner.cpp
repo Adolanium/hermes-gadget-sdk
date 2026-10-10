@@ -34,6 +34,19 @@ TEST("TagScanner: finds the tag whatever the chunk boundaries") {
   }
 }
 
+TEST("TagScanner: a nameless copy of the tag is skipped") {
+  // Images built from main before this fix (never released) store the bare search text ahead of the real tag.
+  std::string body = "HGBOARD=";
+  body.push_back('\0');
+  body += "code HGBOARD=esp32s3-touch-amoled-1.75c";
+  body.push_back('\0');
+  for (size_t chunk : {1u, 5u, 4096u}) {
+    hg::TagScanner scanner("HGBOARD=");
+    CHECK_EQ(feed_in_chunks(scanner, bytes(body), chunk), 1);
+    CHECK_EQ(scanner.value(), std::string("esp32s3-touch-amoled-1.75c"));
+  }
+}
+
 TEST("TagScanner: an image without the tag is never found") {
   hg::TagScanner scanner("HGBOARD=");
   std::vector<uint8_t> image = bytes("HGBOARD HGBOAR= HG BOARD=nope");

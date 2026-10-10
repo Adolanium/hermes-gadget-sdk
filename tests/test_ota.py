@@ -22,6 +22,13 @@ def test_an_image_says_what_it_is():
     assert ota.inspect_image(fake_image(board=None)).board is None  # firmware older than the board tag
 
 
+def test_a_nameless_copy_of_the_board_tag_is_skipped():
+    # Images built from main before this fix (never released) also hold the device's bare search text ahead of the real tag.
+    data = bytearray(fake_image(board="esp32s3-touch-amoled-1.75c"))
+    data[1024:1033] = b"HGBOARD=\0"
+    assert ota.inspect_image(bytes(data)).board == "esp32s3-touch-amoled-1.75c"
+
+
 @pytest.mark.parametrize("data, code", [
     (b"not firmware" * 100, "not_an_image"),
     (b"\xe9" + bytes(400), "not_an_image"),

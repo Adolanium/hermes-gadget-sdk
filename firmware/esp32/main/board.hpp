@@ -206,5 +206,7 @@ struct BoardConfig {
 int lcd_power_pin(const BoardConfig& b);
 
 const BoardConfig& board_config();
+// "HGBOARD=<board name>", the tag every image carries.
+const char* board_tag();
 
 }  // namespace hgp

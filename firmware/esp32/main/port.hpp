@@ -22,6 +22,7 @@
 #include "shared_reply.hpp"
 #include "speaker_pa.hpp"
 #include "tag_scanner.hpp"
+#include "ws_link.hpp"
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
 #include "esp_codec_dev.h"
@@ -121,14 +122,25 @@ class WsTransport final : public hg::Transport {
   bool send_text(std::string_view text) override;
   bool send_binary(const uint8_t* data, size_t len) override;
   void close() override;
-  uint32_t generation() const { return generation_.load(); }
+  uint32_t generation() const { return gens_.current(); }
+  // True once if the current connection was lost. Backs up the WsClosed event,
+  // which the client may post from the app task itself while the queue is full.
+  bool take_lost() { return gens_.take_lost(); }
 
  private:
   static void on_event(void* arg, const char* base, int32_t id, void* data);
+  // Sends run on their own task, so a slow or dead link never stalls the app
+  // task (and with it the screen): send_*() only queue a copy.
+  static void tx_task(void* arg);
+  bool enqueue(uint8_t opcode, const void* data, size_t len);
   esp_websocket_client_handle_t client_ = nullptr;
-  std::atomic<uint32_t> generation_{0};
+  QueueHandle_t tx_ = nullptr;
+  hg::ws::Generations gens_;
   std::string url_, subprotocol_;
-  std::string rx_;  // fragment reassembly (WebSocket task only)
+  // Fragment reassembly, WebSocket task only: an old client's task can still be
+  // delivering a frame after close(), so connect() leaves this alone. Each
+  // message's first frame clears it.
+  std::string rx_;
   uint8_t rx_opcode_ = 0;
 };
 
@@ -445,7 +457,9 @@ class EspUpdater final : public hg::Updater {
  private:
   static constexpr size_t kHeadBytes = 112;  // image + segment headers, then the app description up to its project name
   std::string board_;
-  hg::TagScanner board_tag_{"HGBOARD="};
+  // Searches for the first 8 bytes of board_tag(): a separate "HGBOARD=" literal
+  // here would put a nameless copy of the tag in every image, ahead of the real one.
+  hg::TagScanner board_tag_{std::string_view()};
   const void* target_ = nullptr;             // esp_partition_t
   uint32_t handle_ = 0;                      // esp_ota_handle_t
   bool open_ = false;

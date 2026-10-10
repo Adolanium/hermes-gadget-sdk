@@ -101,10 +101,14 @@ def app_identity(app: bytes) -> tuple[str, str]:
     project = _cstr(app[80:112])
     if project != PROJECT_NAME:
         raise PackageError(f"firmware.bin is {project!r}, not Hermes Gadget firmware")
+    board = ""
     tag = app.find(BOARD_TAG)
-    if tag < 0:
+    while tag >= 0 and not board:  # older images also hold a nameless copy of the tag
+        board = _cstr(app[tag + len(BOARD_TAG): tag + len(BOARD_TAG) + 64])
+        tag = app.find(BOARD_TAG, tag + 1)
+    if not board:
         raise PackageError("firmware.bin carries no board name (HGBOARD=...)")
-    return _cstr(app[48:80]), _cstr(app[tag + len(BOARD_TAG): tag + len(BOARD_TAG) + 64])
+    return _cstr(app[48:80]), board
 
 
 def merge(parts: list[tuple[int, bytes]]) -> bytes:

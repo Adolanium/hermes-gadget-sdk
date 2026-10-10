@@ -28,6 +28,11 @@ class TagScanner {
         }
         continue;
       }
+      if (c == '\0' && value_.empty()) {
+        // "<tag>\0" names nothing (a copy of the bare tag); keep looking.
+        matched_ = 0;
+        continue;
+      }
       if (c == '\0' || value_.size() >= max_value_) {
         done_ = true;
         return true;

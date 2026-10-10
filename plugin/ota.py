@@ -75,8 +75,9 @@ def inspect_image(data: bytes) -> FirmwareImage:
         raise UpdateError("wrong_firmware", f"the image is {project!r}, not Hermes Gadget firmware")
     board = None
     tag = data.find(BOARD_TAG)
-    if tag >= 0:
+    while tag >= 0 and board is None:  # older images also hold a nameless copy of the tag
         board = _cstr(data[tag + len(BOARD_TAG): tag + len(BOARD_TAG) + 64]) or None
+        tag = data.find(BOARD_TAG, tag + 1)
     return FirmwareImage(data=data, version=_cstr(data[48:80]), board=board,
                          sha256=hashlib.sha256(data).hexdigest())
 

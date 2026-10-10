@@ -200,7 +200,7 @@ pio run -e esp32s3-touch-amoled-175c -t upload -t monitor
 
 For ESP-IDF, use `SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp32s3-touch-amoled-175c/sdkconfig.defaults"` with a separate build directory and sdkconfig. The release workflow packages a distinct image and board identity, which prevents installing another model's OTA image.
 
-Before relying on the port, run the [physical checklist](hardware-validation.md). Check screen orientation and edges, touch alignment, microphone level, a spoken reply, Wi-Fi setup and USB recovery. Test charging, shutdown and wake separately on USB and battery. No physical report is recorded yet.
+Before relying on the port, run the [physical checklist](hardware-validation.md). Check screen orientation and edges, touch alignment, microphone level, a spoken reply, Wi-Fi setup and USB recovery. Test charging, shutdown and wake separately on USB and battery. A [physical report for SKU 33691](hardware-validation.md#waveshare-amoled-175c-physical-report) is recorded. It ran on a working branch rather than a build of `main`, so the port stays experimental.
 
 Pin and supply references: [Waveshare schematic](https://files.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.75C/ESP32-S3-Touch-AMOLED-1.75C-schematic.pdf) and [manufacturer board definitions](https://github.com/waveshareteam/Waveshare-ESP32-components/tree/master/bsp/esp32_s3_touch_amoled_1_75c). The port reuses the existing CO5300, CST9217 and Espressif codec drivers; see the [license notes](../README.md#license).
 

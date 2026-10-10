@@ -274,6 +274,8 @@ extern "C" void app_main(void) {
         hgp::events::release(ev);
       } while (hgp::events::receive(ev, 0));
     }
+    // A loss whose WsClosed event was dropped; harmless if it was delivered too.
+    if (g_transport.take_lost()) app.on_transport_closed("disconnected");
     g_buttons.poll(app);
     g_wifi.tick(app, g_system.now_ms());
     if (g_gestures) g_gestures->tick(g_system.now_ms());

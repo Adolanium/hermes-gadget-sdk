@@ -74,7 +74,7 @@ bool EspUpdater::begin(size_t size, std::string& error) {
   handle_ = handle;
   open_ = true;
   written_ = 0;
-  board_tag_ = hg::TagScanner("HGBOARD=");
+  board_tag_ = hg::TagScanner(std::string_view(board_tag(), 8));
   ESP_LOGI(TAG, "writing %u bytes to %s", static_cast<unsigned>(size), target->label);
   return true;
 }
