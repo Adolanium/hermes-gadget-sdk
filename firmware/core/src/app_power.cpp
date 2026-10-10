@@ -16,6 +16,16 @@ bool App::wake_display() {
   return sleeping;
 }
 
+void App::on_power_key() {
+  if (!hal_.display || !hal_.display->info().has_backlight) return;
+  if (display_sleeping_ || display_dimmed_) {
+    wake_display();
+    return;
+  }
+  display_sleeping_ = true;
+  hal_.display->set_backlight(0);
+}
+
 void App::power_tick() {
   if (hal_.power && (!power_read_at_ || now() - power_read_at_ >= 5000)) {
     power_status_ = hal_.power->read();
@@ -23,19 +33,33 @@ void App::power_tick() {
     sensors_dirty_ = true;
     if (settings_open()) update_model();
   }
-  if (!hal_.display || !hal_.display->info().has_backlight || !screen_timeout_ms_) return;
-  // The settings menu can sleep too; the wake input leaves it on the same item.
-  const bool idle = mode_ == Mode::Idle && !speaking() && !talk_held_ && !cancel_held_ &&
-                    !prompt_showing() && wifi_setup_text_.empty() && !ota_busy() && ota_ != Ota::Restarting && overlay_ == Overlay::None &&
-                    (phase_ == Phase::NoNetwork || (phase_ == Phase::Online && paired_));
-  if (!idle) { wake_display(); return; }
-  const uint32_t elapsed = now() - activity_at_;
-  if (elapsed >= screen_timeout_ms_ && !display_sleeping_) {
-    display_sleeping_ = true;
-    hal_.display->set_backlight(0);
-  } else if (elapsed >= screen_timeout_ms_ / 2 && !display_dimmed_ && !display_sleeping_) {
-    display_dimmed_ = true;
-    hal_.display->set_backlight(std::min<uint8_t>(brightness_, 10));
+  constexpr uint32_t kPowerKeyPollMs = 100;
+  if (hal_.power && now() - power_key_polled_at_ >= kPowerKeyPollMs) {
+    power_key_polled_at_ = now();
+    if (hal_.power->take_key_press()) on_power_key();
+  }
+  // Without a timeout, only a screen the power key turned off needs watching.
+  if (hal_.display && hal_.display->info().has_backlight && (screen_timeout_ms_ || display_sleeping_)) {
+    // The settings menu can sleep too; the wake input leaves it on the same item.
+    const bool busy = mode_ != Mode::Idle || speaking() || talk_held_ || cancel_held_ || prompt_showing() ||
+                      !wifi_setup_text_.empty() || ota_busy() || ota_ == Ota::Restarting || overlay_ != Overlay::None;
+    const bool settled = phase_ == Phase::NoNetwork || (phase_ == Phase::Online && paired_);
+    const bool idle = !busy && settled;
+    // Something for the user wakes the screen. A connection still settling keeps a
+    // lit screen lit, but leaves a dark one dark: Wi-Fi coming and going (a commute)
+    // must not turn the screen on and leave it on.
+    if (busy || (!settled && !display_sleeping_)) {
+      wake_display();
+    } else if (idle && screen_timeout_ms_) {
+      const uint32_t elapsed = now() - activity_at_;
+      if (elapsed >= screen_timeout_ms_ && !display_sleeping_) {
+        display_sleeping_ = true;
+        hal_.display->set_backlight(0);
+      } else if (elapsed >= screen_timeout_ms_ / 2 && !display_dimmed_ && !display_sleeping_) {
+        display_dimmed_ = true;
+        hal_.display->set_backlight(std::min<uint8_t>(brightness_, 10));
+      }
+    }
   }
 }
 

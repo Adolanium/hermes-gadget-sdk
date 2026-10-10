@@ -17,6 +17,10 @@ class Axp2101 final : public Power {
   std::optional<PowerStatus> read() override;
   bool power_off() override;
   bool enable_aldo1_3v3();  // Only for boards whose audio circuit requires this rail.
+  // The power key, for boards where only the PMIC sees it. Enabling changes the
+  // interrupt registers only, and drops a press latched before it.
+  bool enable_key_press();
+  bool take_key_press();  // true once per short press
 
  private:
   Read read_;
