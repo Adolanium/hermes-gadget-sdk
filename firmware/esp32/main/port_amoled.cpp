@@ -176,6 +176,7 @@ hg::DisplayInfo AmoledDisplay::info() const {
   di.has_backlight = true;  // brightness command 0x51
   di.round = cfg_.round;
   di.corner_inset = cfg_.corner_inset;
+  di.emissive = true;
   return di;
 }
 

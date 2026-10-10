@@ -9,6 +9,7 @@
 namespace hg {
 namespace {
 
+// The background: near black, or true black (unlit) on an emissive panel.
 constexpr uint16_t kBg = rgb565(10, 14, 20);
 constexpr uint16_t kBar = rgb565(24, 31, 42);
 constexpr uint16_t kText = rgb565(232, 238, 242);
@@ -140,7 +141,8 @@ const char* screen_name(Screen s) {
   return "unknown";
 }
 
-Ui::Ui(Display& display) : display_(display), panel_(display.info()), info_(panel_) {
+Ui::Ui(Display& display)
+    : display_(display), panel_(display.info()), info_(panel_), bg_(panel_.emissive ? 0 : kBg) {
   if (panel_.round) {
     // The largest square inside the circle; the corners of the panel do not exist.
     const int side = std::min(panel_.width, panel_.height) * 707 / 1000;
@@ -186,16 +188,20 @@ void Ui::render(const UiModel& m) {
   if (!valid_ && (ox_ || oy_)) {
     // Round panel: everything outside the UI area stays the background colour.
     Canvas panel(display_.framebuffer(), panel_.width, panel_.height, panel_.swap_bytes);
-    panel.fill_rect(0, 0, panel_.width, panel_.height, kBg);
+    panel.fill_rect(0, 0, panel_.width, panel_.height, bg_);
     display_.flush(0, panel_.height);
   }
+  if (panel_.round) draw_round_battery(m);
   Canvas c = canvas();
   const int y_header = layout_.top_h;
   const int y_content = y_header + layout_.header_h;
   const int y_bottom = h - layout_.bottom_h;
 
   uint32_t hashes[4];
-  hashes[0] = Hash().add(m.title).val(m.link).val(panel_.round && m.screen == Screen::Settings).val(panel_.round && m.settings_hold).get();
+  hashes[0] = Hash().add(m.title).val(m.link).val(panel_.round && m.screen == Screen::Settings).val(panel_.round && m.settings_hold)
+                  .val(panel_.round ? int8_t(-1) : m.battery).val(!panel_.round && m.battery_charging)
+                  .val(!panel_.round && m.battery_icon).val(!panel_.round && m.battery_text)
+                  .val(!panel_.round && m.battery_low).get();
   hashes[1] = Hash()
                   .val(m.screen)
                   .add(m.headline)
@@ -269,7 +275,7 @@ void Ui::render(const UiModel& m) {
 void Ui::draw_top(Canvas& c, const UiModel& m) {
   const int s = layout_.scale;
   const int w = info_.width;
-  c.fill_rect(0, 0, w, layout_.top_h, panel_.round ? kBg : kBar);
+  c.fill_rect(0, 0, w, layout_.top_h, panel_.round ? bg_ : kBar);
   uint16_t dot = kRed;
   const char* label = "OFFLINE";
   switch (m.link) {
@@ -295,9 +301,67 @@ void Ui::draw_top(Canvas& c, const UiModel& m) {
   int label_x = w - pad - label_w;
   c.text(label_x, ty, label, s, kDim);
   int r = std::max(2, 3 * s / 2 + 1);
-  c.fill_circle(label_x - 3 * s - r, layout_.top_h / 2, r, dot);
-  int title_cols = cols_for(label_x - 6 * s - 2 * r - pad, s);
+  const int dot_x = label_x - 3 * s - r;
+  c.fill_circle(dot_x, layout_.top_h / 2, r, dot);
+  int title_end = dot_x - r;
+  if (m.battery >= 0) {
+    title_end -= 4 * s + battery_width(m);
+    draw_battery(c, m, title_end, layout_.top_h / 2);
+  }
+  int title_cols = cols_for(title_end - 3 * s - pad, s);
   c.text(pad, ty, fit(m.title, title_cols), s, kText);
+}
+
+// Round panels: the battery is centred at the very top of the panel, above the UI
+// square, as high as the circle leaves it room plus a small margin.
+void Ui::draw_round_battery(const UiModel& m) {
+  const int s = layout_.scale;
+  const int bh = 7 * s;  // the taller of the icon (5s + 1) and the text (7s)
+  const int hw = (m.battery >= 0 ? battery_width(m) : 0) / 2 + 2 * s;
+  const int radius = panel_.width / 2;
+  int y0 = 0;
+  // The first row where the strip's top corners lie inside the circle.
+  while (y0 < oy_ && (radius - y0) * (radius - y0) + hw * hw > radius * radius) ++y0;
+  y0 = std::min(y0 + 3 * s, std::max(0, oy_ - bh));
+  const int y1 = std::min<int>(oy_, y0 + bh);
+  const uint32_t key = Hash().val(m.battery).val(m.battery_charging).val(m.battery_low).val(m.battery_icon)
+                           .val(m.battery_text).val(y0).get();
+  if (valid_ && key == battery_hash_) return;
+  battery_hash_ = key;
+  Canvas panel(display_.framebuffer(), panel_.width, panel_.height, panel_.swap_bytes);
+  // Clear the band the strip can occupy at any level, so a shorter or hidden strip leaves nothing behind.
+  panel.fill_rect(0, 0, panel_.width, oy_, bg_);
+  if (m.battery >= 0) draw_battery(panel, m, (panel_.width - battery_width(m)) / 2, (y0 + y1) / 2);
+  display_.flush(0, static_cast<uint16_t>(oy_));
+}
+
+int Ui::battery_width(const UiModel& m) const {
+  const int s = layout_.scale;
+  const int icon = m.battery_icon ? 10 * s : 0;
+  const int text = m.battery_text ? Canvas::text_width(std::to_string(m.battery) + "%", s) : 0;
+  return icon + text + (icon && text ? 2 * s : 0);
+}
+
+// A battery outline with a terminal nub, filled to the level, then the percent.
+void Ui::draw_battery(Canvas& c, const UiModel& m, int x, int cy) {
+  const int s = layout_.scale;
+  if (m.battery_icon) {
+    const int bw = 9 * s, bh = 5 * s + 1, t = std::max(1, s / 2);
+    const int y = cy - bh / 2;
+    const uint16_t fill = m.battery_charging ? kGreen : m.battery_low ? kRed : kText;
+    c.fill_rect(x, y, bw, bh, kDim);
+    c.fill_rect(x + t, y + t, bw - 2 * t, bh - 2 * t, panel_.round ? bg_ : kBar);
+    c.fill_rect(x + bw, cy - s, s, 2 * s, kDim);
+    const int inner = bw - 4 * t;
+    const int level = std::max(m.battery > 0 ? 1 : 0, inner * std::min<int>(m.battery, 100) / 100);
+    c.fill_rect(x + 2 * t, y + 2 * t, level, bh - 4 * t, fill);
+    x += 12 * s;
+  }
+  if (m.battery_text) {
+    // Without the icon, the text itself turns green while charging.
+    const uint16_t col = m.battery_charging ? (m.battery_icon ? kDim : kGreen) : m.battery_low ? kRed : kDim;
+    c.text(x, cy - (font::kGlyphHeight * s) / 2, std::to_string(m.battery) + "%", s, col);
+  }
 }
 
 void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
@@ -340,7 +404,7 @@ void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
     case Screen::Error: {
       c.fill_circle(cx, cy, r, kRed);
       int tw = Canvas::text_width("!", s);
-      c.text(cx - tw / 2, cy - (7 * s) / 2, "!", s, kBg);
+      c.text(cx - tw / 2, cy - (7 * s) / 2, "!", s, bg_);
       break;
     }
     case Screen::Pairing:
@@ -368,7 +432,7 @@ void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
     case Screen::Prompt: {
       c.fill_circle(cx, cy, r, kAccent);
       int tw = Canvas::text_width("?", s);
-      c.text(cx - tw / 2, cy - (7 * s) / 2, "?", s, kBg);
+      c.text(cx - tw / 2, cy - (7 * s) / 2, "?", s, bg_);
       break;
     }
     case Screen::Image:
@@ -382,7 +446,7 @@ void Ui::draw_header(Canvas& c, const UiModel& m) {
   const int s = layout_.scale;
   const int y0 = layout_.top_h;
   const int hh = layout_.header_h;
-  c.fill_rect(0, y0, info_.width, hh, kBg);
+  c.fill_rect(0, y0, info_.width, hh, bg_);
   int r = hh / 2 - 2 * s;
   int cx = 4 * s + r;
   int cy = y0 + hh / 2;
@@ -409,7 +473,7 @@ void Ui::draw_content(Canvas& c, const UiModel& m) {
   const int y1 = info_.height - layout_.bottom_h;
   const int margin = 4 * s;
   const int lh = Canvas::line_height(s);
-  c.fill_rect(0, y0, w, y1 - y0, kBg);
+  c.fill_rect(0, y0, w, y1 - y0, bg_);
   int y = y0 + margin;
 
   if (m.color_test) {
@@ -585,7 +649,7 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
   const int y0 = layout_.top_h;
   const int y1 = info_.height - layout_.bottom_h;
   const int lh = Canvas::line_height(s);
-  c.fill_rect(0, y0, w, y1 - y0, kBg);
+  c.fill_rect(0, y0, w, y1 - y0, bg_);
 
   const HeroGeom g = hero_geom(m);
   const int size = g.size, mx = g.x, my = g.y;
@@ -658,7 +722,7 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
 void Ui::draw_bottom(Canvas& c, const UiModel& m) {
   const int s = layout_.scale;
   const int y0 = info_.height - layout_.bottom_h;
-  c.fill_rect(0, y0, info_.width, layout_.bottom_h, panel_.round ? kBg : kBar);
+  c.fill_rect(0, y0, info_.width, layout_.bottom_h, panel_.round ? bg_ : kBar);
   std::string hint = fit(m.hint, cols_for(info_.width - 4 * s, s));
   c.text((info_.width - Canvas::text_width(hint, s)) / 2, y0 + s, hint, s, kDim);
 }

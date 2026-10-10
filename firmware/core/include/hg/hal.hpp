@@ -29,6 +29,9 @@ struct DisplayInfo {
   // Extra left and right padding for the top bar's text, for a rectangular
   // panel with rounded corners.
   uint8_t corner_inset = 0;
+  // An OLED/AMOLED panel: unlit pixels draw no power, so the background is
+  // true black instead of the near-black used on backlit LCDs.
+  bool emissive = false;
 };
 
 // A full-frame RGB565 framebuffer owned by the port (PSRAM on hardware).

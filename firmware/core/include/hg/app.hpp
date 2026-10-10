@@ -250,6 +250,9 @@ class App {
   std::optional<PowerStatus> power_status_;
   uint32_t power_read_at_ = 0, activity_at_ = 0;
   uint32_t screen_timeout_ms_ = 0;
+  // What the battery indicator shows, in the order a tap cycles through.
+  enum class BatteryIndicator : uint8_t { Icon, Percentage, Both, Off };
+  BatteryIndicator battery_display_ = BatteryIndicator::Off;
   bool display_dimmed_ = false, display_sleeping_ = false, power_off_armed_ = false;
   uint8_t wake_buttons_ = 0;
 

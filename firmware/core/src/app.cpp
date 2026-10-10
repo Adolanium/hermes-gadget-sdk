@@ -36,7 +36,7 @@ constexpr uint32_t kOtaRestartMs = 1000;    // time for ota.done to leave before
 constexpr uint32_t kBackoffMs[] = {1000, 2000, 4000, 8000, 15000, 30000};
 constexpr size_t kBackoffSteps = sizeof(kBackoffMs) / sizeof(kBackoffMs[0]);
 
-const char* const kSettingKeys[] = {"name", "server", "token", "talk_mode", "volume", "brightness", "screen_timeout", "wifi_ssid", "wifi_pass"};
+const char* const kSettingKeys[] = {"name", "server", "token", "talk_mode", "volume", "brightness", "screen_timeout", "battery_display", "wifi_ssid", "wifi_pass"};
 
 bool is_secret(std::string_view key) { return key == "token" || key == "wifi_pass"; }
 
@@ -105,6 +105,10 @@ void App::load_settings() {
   brightness_ = static_cast<uint8_t>(std::max(5, std::min(100, std::atoi(setting("brightness", "100").c_str()))));
   if (hal_.display && hal_.display->info().has_backlight) hal_.display->set_backlight(brightness_);
   screen_timeout_ms_ = static_cast<uint32_t>(std::max(0, std::min(3600, std::atoi(setting("screen_timeout", "0").c_str())))) * 1000;
+  const std::string indicator = setting("battery_display", "off");
+  battery_display_ = indicator == "icon" ? BatteryIndicator::Icon
+                       : indicator == "percentage" ? BatteryIndicator::Percentage
+                       : indicator == "both" ? BatteryIndicator::Both : BatteryIndicator::Off;
   activity_at_ = now();
   display_dimmed_ = display_sleeping_ = false;
 }
@@ -1350,6 +1354,16 @@ void App::update_model() {
   m.speaking = speaking();
   m.color_test = false;
   m.settings_hold = settings_hold_live();
+  m.battery = -1;
+  m.battery_charging = m.battery_low = false;
+  m.battery_icon = battery_display_ != BatteryIndicator::Percentage;
+  m.battery_text = battery_display_ != BatteryIndicator::Icon;
+  if (battery_display_ != BatteryIndicator::Off && power_status_ && power_status_->battery_percent && power_status_->battery_present != false) {
+    const auto& p = *power_status_;
+    m.battery = static_cast<int8_t>(std::min<int>(*p.battery_percent, 100));
+    m.battery_charging = p.charging == true;
+    m.battery_low = *p.battery_percent <= 10 && p.external_power == false;
+  }
 
   switch (phase_) {
     case Phase::NoNetwork:
@@ -1621,6 +1635,9 @@ std::string App::console(std::string_view raw) {
     if (key == "screen_timeout" && !value.empty() &&
         (value.size() > 4 || value.find_first_not_of("0123456789") != std::string::npos || std::atoi(value.c_str()) > 3600))
       return "@error screen_timeout must be 0..3600 seconds";
+    if (key == "battery_display" && !value.empty() && value != "icon" && value != "percentage" && value != "both" &&
+        value != "off")
+      return "@error battery_display must be icon, percentage, both or off";
     if (!hal_.storage) return "@error no storage";
     if (value.empty()) hal_.storage->erase(key);
     else if (!hal_.storage->set(key, value)) return "@error could not save " + key;
