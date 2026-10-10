@@ -27,6 +27,7 @@
 
 ### Hermes plugin
 
+- `battery_log: true` in the gadget platform's `extra` keeps each device's battery readings (voltage, percent, charging, USB power) in a CSV under the plugin's data directory, a row every 30 seconds, to calibrate a board's battery percentage from a full discharge. Off by default.
 - Spoken replies stay paced after the text-to-speech producer pauses. A sign error in the hub's stall handling let the rest of a reply go out in one burst after the first pause, which could overflow a device's speaker buffer. A fake-clock test now holds every frame within the playback lead, before and after a stall.
 - Enrollment by unapproved devices is bounded: at most 16 may wait to be paired, 4 per network address, and an unapproved record expires an hour after the device's last contact. `hermes gadget pair --yes` approves blindly only when one device is waiting; `hermes gadget pair <device>` picks one. `hermes gadget devices` marks devices still waiting to pair.
 - `hermes gadget forget` takes effect on a running gateway. The device store re-reads `devices.json` before every operation and writes through a per-process temporary file, so the gateway no longer keeps a stale copy of a forgotten key or writes it back when the device reconnects.

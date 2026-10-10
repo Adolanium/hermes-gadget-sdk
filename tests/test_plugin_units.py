@@ -134,3 +134,38 @@ def test_an_unapproved_device_expires_and_an_approved_one_stays(tmp_path, monkey
     assert store.key_for("hg-0123456789abcdef") is None, "an unapproved record is gone after its TTL"
     assert "hg-0123456789abcdef" not in store.devices()
     assert store.key_for("hg-fedcba9876543210") == b"j" * 32, "an approved record stays"
+
+
+def test_battery_log_writes_a_row_per_interval_and_at_once_on_a_power_change(tmp_path):
+    import csv
+
+    from hermes_gadget_plugin.battery_log import BatteryLog
+
+    now = [1_700_000_000.0]
+    log = BatteryLog(tmp_path, clock=lambda: now[0], interval_s=30)
+    reading = {"battery_mv": 3950, "battery_percent": 72, "charging": 0, "external_power": 0, "battery_present": 1}
+    assert log.record("hg-1/../x", reading) == tmp_path / "hg-1_.._x.csv"  # the id cannot leave the directory
+    now[0] += 10
+    assert log.record("hg-1/../x", {**reading, "battery_mv": 3949}) is None  # not due yet
+    now[0] += 5
+    assert log.record("hg-1/../x", {**reading, "charging": 1, "external_power": 1}) is not None  # USB plugged in
+    now[0] += 30
+    assert log.record("hg-1/../x", {**reading, "battery_mv": 3990, "charging": 1, "external_power": 1}) is not None
+    assert log.record("hg-1/../x", {"temperature": 21}) is None  # no battery reading: nothing to log
+    rows = list(csv.DictReader((tmp_path / "hg-1_.._x.csv").open()))
+    assert [r["battery_mv"] for r in rows] == ["3950", "3950", "3990"]
+    assert [r["charging"] for r in rows] == ["0", "1", "1"]
+    assert rows[0]["unix_s"] == "1700000000" and rows[0]["battery_percent"] == "72"
+
+
+def test_battery_log_rolls_over_a_full_file(tmp_path):
+    from hermes_gadget_plugin.battery_log import BatteryLog
+
+    now = [0.0]
+    log = BatteryLog(tmp_path, clock=lambda: now[0], interval_s=1, max_bytes=200)
+    for i in range(20):
+        now[0] += 1
+        log.record("hg-1", {"battery_mv": 4000 - i})
+    assert (tmp_path / "hg-1.1.csv").exists()
+    assert (tmp_path / "hg-1.csv").stat().st_size < 400
+    assert (tmp_path / "hg-1.csv").read_text().startswith("time,unix_s,battery_mv")
