@@ -200,7 +200,12 @@ extern "C" void app_main(void) {
   }
   if (board.mic.enabled && g_mic.begin(board.mic)) hal.mic = &g_mic;
   if (board.speaker.enabled && g_speaker.begin(board.speaker)) hal.speaker = &g_speaker;
-  if (board.axp2101 && g_power.begin(i2c_bus)) hal.power = &g_power;
+  if (board.axp2101 && g_power.begin(i2c_bus)) {
+    hal.power = &g_power;
+    if (board.axp_power_key) g_power.use_power_key();
+    // Wi-Fi retries back off only on battery; unknown counts as plugged in.
+    g_wifi.on_battery = [] { return g_power.external_power() == std::optional<bool>(false); };
+  }
   const bool audio_power = peripherals_ready && (!board.axp_audio_supply || g_power.enable_audio_supply());
   if (!audio_power) ESP_LOGE(TAG, "audio supply unavailable");
   if (board.codec.enabled && audio_power && g_codec.begin(board.codec, i2c_bus)) {

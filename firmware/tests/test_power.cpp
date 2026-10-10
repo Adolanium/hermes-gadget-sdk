@@ -147,3 +147,58 @@ TEST("CoreS3: failed power access stops initialization without releasing reset")
   CHECK(!control.set_brightness(100));
   CHECK_EQ(writes, 2);
 }
+
+TEST("AXP2101: the power key's short press is read once and cleared; enabling touches only interrupts") {
+  std::array<uint8_t, 256> regs{};
+  regs[0x41] = 0x40;  // another interrupt already enabled
+  regs[0x49] = 0x08;  // a press from before boot
+  bool fail_reads = false;
+  std::vector<std::pair<uint8_t, uint8_t>> writes;
+  hg::Axp2101 power(
+      [&](uint8_t reg, uint8_t* out, size_t n) {
+        if (fail_reads) return false;
+        for (size_t i = 0; i < n; ++i) out[i] = regs[reg + i];
+        return true;
+      },
+      [&](uint8_t reg, uint8_t value) {
+        writes.emplace_back(reg, value);
+        if (reg == 0x49) regs[reg] = static_cast<uint8_t>(regs[reg] & ~value);  // write 1 to clear
+        else regs[reg] = value;
+        return true;
+      });
+  CHECK(power.enable_key_press());
+  CHECK_EQ(writes.size(), size_t(2));
+  CHECK(writes[0] == std::make_pair(uint8_t(0x41), uint8_t(0x48)));  // short press added, the rest kept
+  CHECK(writes[1] == std::make_pair(uint8_t(0x49), uint8_t(0x08)));  // the old press is dropped
+  CHECK(!power.take_key_press());
+
+  writes.clear();
+  regs[0x49] = 0x0c;  // short press, plus a long press that isn't ours to clear
+  CHECK(power.take_key_press());
+  CHECK(!power.take_key_press());
+  CHECK_EQ(writes.size(), size_t(1));
+  CHECK(writes[0] == std::make_pair(uint8_t(0x49), uint8_t(0x08)));
+  CHECK_EQ(regs[0x49], uint8_t(0x04));
+
+  regs[0x49] = 0x08;
+  fail_reads = true;
+  CHECK(!power.take_key_press());  // a failed read is no press
+  CHECK(!power.enable_key_press());
+}
+
+TEST("AXP2101: external power is read from VBUS good, and a failed read is unknown") {
+  uint8_t status = 0x20;
+  bool fail = false;
+  hg::Axp2101 power(
+      [&](uint8_t reg, uint8_t* out, size_t n) {
+        if (fail || reg != 0x00 || n != 1) return false;
+        *out = status;
+        return true;
+      },
+      [&](uint8_t, uint8_t) { return false; });
+  CHECK(power.vbus_good() == std::optional<bool>(true));
+  status = 0x08;  // battery present, no VBUS
+  CHECK(power.vbus_good() == std::optional<bool>(false));
+  fail = true;
+  CHECK(!power.vbus_good().has_value());
+}

@@ -194,6 +194,7 @@ struct BoardConfig {
   ExpanderResetConfig expander_reset;
   bool axp2101 = false;
   bool axp_audio_supply = false;
+  bool axp_power_key = false;  // PWR reaches only the AXP2101: read its short press there
   bool cores3 = false;
   LatchPowerConfig latch_power;
   int status_led = -1;
