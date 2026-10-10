@@ -79,9 +79,14 @@ def test_diag_saves_a_report_and_prints_a_summary(console, tmp_path, capsys):
     assert "firmware 0.1.0 on esp32s3-touch-amoled-1.75 (hg-0123456789abcdef)" in shown
     assert "reset reason: brownout, up 42 s" in shown
     assert "parts: display co5300, microphone es7210, speaker es8311, touch yes, key no" in shown
-    assert "I2C: 0x18 0x20 0x34 0x40 0x5a" in shown
+    assert "I2C: 0x18, 0x20, 0x34, 0x40, 0x5a" in shown
     assert "Wi-Fi: joined Home (-61 dBm), 192.168.1.42" in shown
     assert "Hermes: connecting, not paired, last connection ended: connection error" in shown
+
+
+def test_diag_summary_keeps_scan_notes_apart_from_addresses():
+    report = dict(REPORT, i2c=["0x18", "timeout at 0x19", "0x34", "bus stuck at 0x41"])
+    assert "I2C: 0x18, timeout at 0x19, 0x34, bus stuck at 0x41" in cli._diag_summary(report)
 
 
 def test_diag_explains_a_console_without_it(console, capsys):
