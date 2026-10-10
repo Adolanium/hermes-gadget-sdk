@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <mutex>
 #include <string>
@@ -22,6 +23,7 @@
 #include "shared_reply.hpp"
 #include "speaker_pa.hpp"
 #include "tag_scanner.hpp"
+#include "wifi_retry.hpp"
 #include "ws_link.hpp"
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
@@ -34,6 +36,7 @@
 #include "esp_lcd_types.h"
 #include "esp_lcd_touch.h"
 #include "esp_log.h"
+#include "esp_pm.h"
 #include "esp_websocket_client.h"
 #include "esp_http_server.h"
 #include "freertos/semphr.h"
@@ -388,10 +391,19 @@ class AxpPower final : public hg::Power {
   bool enable_audio_supply() { return chip_ && chip_->enable_aldo1_3v3(); }
   std::optional<hg::PowerStatus> read() override { return chip_->read(); }
   bool power_off() override { return chip_->power_off(); }
+  // For boards whose PWR key reaches only the AXP2101 (BoardConfig::axp_power_key).
+  void use_power_key();
+  bool take_key_press() override { return key_ && chip_->take_key_press(); }
+  void use_curves(hg::Curve discharge, hg::Curve charge) {
+    if (chip_ && discharge) chip_->use_curves(discharge, charge);
+  }
+  std::optional<uint16_t> charge_current_ma() { return chip_ ? chip_->charge_current_ma() : std::nullopt; }
+  std::optional<bool> external_power() override { return chip_->vbus_good(); }
 
  private:
   i2c_master_dev_handle_t dev_ = nullptr;
   std::unique_ptr<hg::Axp2101> chip_;
+  bool key_ = false;
 };
 
 class CoreS3Board {
@@ -476,6 +488,10 @@ class Wifi {
   void disconnected();
   void connected(hg::App& app);
   void tick(hg::App& app, uint32_t now);
+  // Retry at once instead of at the next backoff slot (the user is back).
+  void retry_now();
+  // Whether the device runs on its battery: the retry backoff applies only then.
+  std::function<bool()> on_battery;
   std::string start_setup();
   void stop_setup();
   // The temporary network's credentials, for the setup screen's QR code.
@@ -491,7 +507,11 @@ class Wifi {
   bool configured_ = false;
   bool auto_setup_ = false, auto_setup_tried_ = false;
   bool joining_ = false, wait_disconnect_ = false;
-  uint32_t retry_at_ = 0, trial_at_ = 0, setup_until_ = 0, close_at_ = 0;
+  uint32_t trial_at_ = 0, setup_until_ = 0, close_at_ = 0;
+  hg::WifiRetry retry_;
+  esp_pm_lock_handle_t attempt_lock_ = nullptr;  // light sleep would stall an attempt
+  bool attempt_held_ = false;
+  void hold_while_attempting();
   hg::WifiCredentials candidate_{};
   httpd_handle_t http_ = nullptr;
   std::mutex setup_mutex_;

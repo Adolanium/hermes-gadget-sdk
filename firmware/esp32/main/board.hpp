@@ -7,6 +7,8 @@
 
 #include <cstdint>
 
+#include "battery_curve.hpp"
+
 namespace hgp {
 
 // How a parallel panel is wired. An I80 panel uses eight data lines and a write
@@ -194,6 +196,9 @@ struct BoardConfig {
   ExpanderResetConfig expander_reset;
   bool axp2101 = false;
   bool axp_audio_supply = false;
+  bool axp_power_key = false;  // PWR reaches only the AXP2101: read its short press there
+  // The battery's measured discharge and charge curves (drivers/battery_curve.hpp).
+  hg::Curve battery_curve, battery_charge_curve;
   bool cores3 = false;
   LatchPowerConfig latch_power;
   int status_led = -1;
