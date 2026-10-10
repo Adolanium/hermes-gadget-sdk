@@ -99,7 +99,7 @@ To use `deliver="gadget"`, configure the gadget home channel. By default, `auto_
 
 ### Voice round trip
 
-1. **Device:** push-to-talk streams PCM16 at 16 kHz to the hub, which assembles a WAV.
+1. **Device:** push-to-talk streams PCM16 to the hub at the microphone rate the device declares in `hello` (24 kHz on ESP32 boards with codec chips, 16 kHz by default otherwise), and the hub assembles a WAV.
 2. **Adapter:** caches the WAV with `cache_audio_from_bytes_async`, then calls `handle_message(MessageEvent(VOICE, media_urls=[wav]))`.
 3. **Gateway:** `_enrich_message_with_transcription` runs the configured STT provider. The transcript is echoed (device shows "> what you said"), then the agent turn runs.
 4. **Reply audio:**

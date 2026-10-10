@@ -306,7 +306,11 @@ i2c_master_bus_handle_t bus(const I2cBusConfig& cfg);
 // run at one fixed rate (they share the bit clock).
 class CodecAudio {
  public:
-  static constexpr uint32_t kRate = 16000;
+  // 24000: the known-good xiaozhi aipi-lite pipeline is validated at 24 kHz on
+  // this silicon (coeff {3072000,24000}); at 16000 playback ran ~2.3x slow.
+  // Every codec board shares it; the ES8311, ES7210 and AW88298 drivers all
+  // support 24 kHz as CodecAudio::begin() configures them.
+  static constexpr uint32_t kRate = 24000;
   bool begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus);
   esp_codec_dev_handle_t out() const { return out_; }
   esp_codec_dev_handle_t in() const { return in_; }
@@ -350,6 +354,7 @@ class CodecSpeaker final : public hg::AudioOut {
   std::atomic<bool> open_{false};
   std::atomic<bool> draining_{false};
   std::atomic<bool> flush_{false};
+  std::atomic<uint32_t> drop_bytes_{0};  // cumulative whole-frame overflow drops, reported at stream end
 };
 
 // Polls a touchscreen, a key mirrored on an I/O expander and a rotary encoder

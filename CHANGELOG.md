@@ -10,6 +10,7 @@
 
 ### Firmware
 
+- Boards that play through an ES8311 or AW88298 codec run their audio at 24 kHz instead of 16 kHz and buffer 192 KB of speaker audio in PSRAM instead of 48 KB, so they absorb a longer Wi-Fi burst before dropping audio. They play silence into the I2S DMA buffer before muting, so the end of a reply is no longer cut off. Contributed by 0xdfi.
 - A weak or lost Wi-Fi link no longer freezes the device until a hard reset. Closing the WebSocket used esp_websocket_client_close(), which sends its close frame with no time limit and blocked the app task, and with it the screen, touch and Wi-Fi retries, on a dead link. Sends now run on their own task with a 2 s limit, so a slow link no longer stalls the screen either, and a lost connection is noticed even when its event can't be queued. Contributed by Antonio Lourenco (@tozes).
 - A console command that times out no longer leaves the app task writing its reply into freed memory. The request slot is shared by both tasks and freed by whichever finishes last, so a late reply is dropped instead of corrupting the stack. The slot is host-tested.
 - The device refuses an over-the-air image built for another board, by reading the `HGBOARD=` tag as the image streams in, so a wrong image can no longer reach Wi-Fi and Hermes and pass the rollback check. The plugin's own check stays as the first line.

@@ -9,6 +9,7 @@
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/task.h"
 #include "speaker_queue.hpp"
 #include "ws185.hpp"
@@ -17,8 +18,8 @@ namespace hgp {
 namespace {
 
 const char* TAG = "hg.codec";
-constexpr size_t kMicChunk = 320;             // 20 ms at 16 kHz
-constexpr size_t kSpeakerBuffer = 48 * 1024;  // ~1.5 s at 16 kHz; the server paces 0.5 s ahead
+constexpr size_t kMicChunk = 320;             // about 13 ms at 24 kHz
+constexpr size_t kSpeakerBuffer = 192 * 1024;  // absorbs WiFi-burst backlog without dropping; PSRAM, 8 MB free
 constexpr size_t kSpeakerChunk = 512;         // samples per codec write
 
 }  // namespace
@@ -233,15 +234,31 @@ bool CodecSpeaker::begin(uint32_t sample_rate) {
 void CodecSpeaker::write(const int16_t* samples, size_t count) {
   if (!open_) return;
   size_t bytes = count * sizeof(int16_t);
-  // The app task is the only writer, so the room can only grow before the send.
-  size_t fit = hg::whole_sample_bytes(bytes, xStreamBufferSpacesAvailable(buffer_));
-  size_t sent = xStreamBufferSend(buffer_, samples, fit, 0);
-  if (sent < bytes) ESP_LOGW(TAG, "playback buffer full, dropped %u bytes", static_cast<unsigned>(bytes - sent));
+  // Whole-frame drop: a nonblocking xStreamBufferSend can partial-write when
+  // the ring is nearly full, and a partial frame shifts every later sample pair
+  // by one byte => full-scale static. Drop the whole frame instead; never
+  // misaligns. Cumulative drop accounting for stream-end logging.
+  if (xStreamBufferSpacesAvailable(buffer_) < bytes) {
+    drop_bytes_ += bytes;
+    static int64_t last_drop_log = 0;
+    int64_t now = esp_timer_get_time() / 1000;
+    if (now - last_drop_log > 2000) {
+      last_drop_log = now;
+      ESP_LOGW(TAG, "playback buffer full, dropped %u B cumulative (ring avail %u)",
+               static_cast<unsigned>(drop_bytes_.load()),
+               static_cast<unsigned>(xStreamBufferSpacesAvailable(buffer_)));
+    }
+    return;
+  }
+  xStreamBufferSend(buffer_, samples, bytes, 0);
 }
 
 void CodecSpeaker::end() {
-  open_ = false;
+  // Publication order matters: mark draining first. A consumer that observes
+  // open_ == false must already see draining_ == true, or it could mute the amp
+  // with queued audio still unplayed.
   draining_ = true;
+  open_ = false;
 }
 
 void CodecSpeaker::abort() {
@@ -265,8 +282,13 @@ void CodecSpeaker::task(void* arg) {
   int32_t* stereo = self->stereo_;
   auto& pa = self->pa_;
   bool playing = false;
+  int64_t stream_t0 = 0;
+  uint64_t stream_bytes = 0;
   for (;;) {
     if (self->flush_.exchange(false)) {
+      stream_t0 = 0;
+      stream_bytes = 0;
+      self->drop_bytes_ = 0;
       if (pa) {
         // abort() already emptied the queue and turned the amplifier off.
         esp_codec_dev_set_out_mute(self->dev_, true);
@@ -280,10 +302,45 @@ void CodecSpeaker::task(void* arg) {
                     : xStreamBufferReceive(self->buffer_, chunk, sizeof(chunk), pdMS_TO_TICKS(20));
     if (got == 0) {
       if (playing && !self->open_) {
-        // Everything queued has been written out: mute so the amplifier stays quiet.
-        self->draining_ = false;
+        // The ring is empty but the last real audio may still sit in the I2S DMA
+        // ring (esp_codec_dev_write/i2s_channel_write return once queued, not once
+        // played). Push silence exceeding DMA ring depth before muting, else the
+        // final phoneme clips. I2S_CHANNEL_DEFAULT_CONFIG gives 6 DMA descriptors
+        // x 240 frames, in the codec's actual frame width: mono 16-bit = 2880 B
+        // (60 ms at 24 kHz); stereo 32-bit = 11520 B. Silence is written in that
+        // same width, sized to exceed the ring with margin (3 x 1 KB for mono16,
+        // 3 x 4 KB through the stereo conversion for stereo32).
+        int errs = 0, first_rc = 0;
+        if (self->stereo32_) {
+          // Convert silence through the same width path as real audio: 1KB of
+          // int16 mono becomes 4KB of int32 stereo; 3 writes = 12288 B > 11520 B.
+          for (int i = 0; i < 3; i++) {
+            memset(self->stereo_, 0, kSpeakerChunk * 2 * sizeof(int32_t));
+            int rc = esp_codec_dev_write(self->dev_, self->stereo_, kSpeakerChunk * 2 * sizeof(int32_t));
+            if (rc != ESP_CODEC_DEV_OK) { errs++; if (!first_rc) first_rc = rc; }
+          }
+        } else {
+          memset(chunk, 0, sizeof(chunk));  // got == 0, so nothing in it is unplayed
+          for (int i = 0; i < 3; i++) {
+            int rc = esp_codec_dev_write(self->dev_, chunk, sizeof(chunk));
+            if (rc != ESP_CODEC_DEV_OK) { errs++; if (!first_rc) first_rc = rc; }
+          }
+        }
         esp_codec_dev_set_out_mute(self->dev_, true);
+        self->draining_ = false;  // busy() stays true until the tail is played and muted
+        if (errs) ESP_LOGW(TAG, "spk tail drain: %d/3 writes failed (rc of first=%d), tail may clip", errs, first_rc);
         if (pa) pa->disable();
+        int64_t elapsed = stream_t0 ? esp_timer_get_time() / 1000 - stream_t0 : 0;
+        ESP_LOGW(TAG, "spk stream end: %lld B played, %u B dropped, in %lld ms (%.2f B/ms, kRate=%u => %.2f)",
+                 static_cast<long long>(stream_bytes),
+                 static_cast<unsigned>(self->drop_bytes_.exchange(0)),
+                 static_cast<long long>(elapsed),
+                 elapsed > 0 ? static_cast<double>(stream_bytes) / elapsed : 0.0,
+                 static_cast<unsigned>(CodecAudio::kRate),
+                 elapsed > 0 ? static_cast<double>(stream_bytes) / elapsed /
+                     (CodecAudio::kRate * sizeof(int16_t) / 1000.0) : 0.0);
+        stream_t0 = 0;
+        stream_bytes = 0;
         playing = false;
       }
       if (pa) vTaskDelay(pdMS_TO_TICKS(20));
@@ -295,12 +352,16 @@ void CodecSpeaker::task(void* arg) {
     }
     // Drop a chunk taken before an abort() rather than replay it.
     if (pa && !pa->enable(generation)) continue;
+    if (stream_t0 == 0) stream_t0 = esp_timer_get_time() / 1000;  // the stream-end log's clock starts at the first frame played
     if (self->stereo32_) {
       const size_t frames = got / sizeof(int16_t);
       hg::ws185_stereo32(chunk, stereo, frames);
       esp_codec_dev_write(self->dev_, stereo, static_cast<int>(frames * 2 * sizeof(int32_t)));
+      stream_bytes += frames * sizeof(int16_t);  // the stream's own bytes, not the 4x wider I2S frames
     } else {
-      esp_codec_dev_write(self->dev_, chunk, static_cast<int>(got & ~static_cast<size_t>(1)));
+      size_t wr = got & ~static_cast<size_t>(1);
+      esp_codec_dev_write(self->dev_, chunk, static_cast<int>(wr));
+      stream_bytes += wr;
     }
   }
 }

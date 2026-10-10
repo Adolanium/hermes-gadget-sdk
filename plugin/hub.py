@@ -151,12 +151,16 @@ class AudioOut:
     async def _pump(self) -> None:
         loop = asyncio.get_running_loop()
         seq = 0
-        base = loop.time()
+        base = None
         try:
             while True:
                 frame = await self._queue.get()
                 if frame is None:
                     break
+                if base is None:
+                    # Clock starts at the first audio frame, not at pump start:
+                    # TTS time-to-first-audio is not a stall and must not rebase.
+                    base = loop.time()
                 ahead = self.sent_seconds - (loop.time() - base)
                 if ahead < 0:
                     # The producer stalled: playback is caught up, so restart the clock here.
