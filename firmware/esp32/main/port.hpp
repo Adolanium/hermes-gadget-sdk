@@ -152,6 +152,9 @@ class RgbDisplay final : public hg::Display {
   uint16_t* framebuffer() override { return fb_; }
   void flush(uint16_t y0, uint16_t y1) override;
   void set_backlight(uint8_t percent) override;
+  const char* controller_name() const {
+    return cfg_.rgb.controller == RgbController::St7701 ? "st7701-rgb" : "ili6122-rgb";
+  }
 
  private:
   static bool on_color_done(esp_lcd_panel_handle_t panel, const esp_lcd_rgb_panel_event_data_t* edata, void* ctx);

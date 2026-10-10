@@ -1,0 +1,6 @@
+{
+  "title": "Elecrow CrowPanel 5.0-inch HMI",
+  "summary": "800x480 touchscreen with capacitive touch. Text-only: no onboard microphone or speaker. Experimental.",
+  "docs": "docs/hardware.md#elecrow-crowpanel-50-inch-hmi",
+  "ready_made": true
+}
