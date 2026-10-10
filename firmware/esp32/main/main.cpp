@@ -214,7 +214,7 @@ extern "C" void app_main(void) {
   hgp::diag::Parts parts;
   parts.display = hal.display == &g_display ? g_display.controller_name()
                       : hal.display == &g_parallel ? "st7789-i80"
-                      : hal.display == &g_rgb ? "st7701-rgb"
+                      : hal.display == &g_rgb ? g_rgb.controller_name()
                       : hal.display == &g_amoled ? "co5300"
                                                 : "none";
   parts.mic = hal.mic == &g_codec_mic ? (board.codec.mic == hgp::MicCodec::Es8311 ? "es8311" : "es7210")
