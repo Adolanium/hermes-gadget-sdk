@@ -137,9 +137,10 @@ bool RgbDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   rgb_cfg.vsync_gpio_num = static_cast<gpio_num_t>(cfg.rgb.vsync);
   rgb_cfg.hsync_gpio_num = static_cast<gpio_num_t>(cfg.rgb.hsync);
   rgb_cfg.pclk_gpio_num = static_cast<gpio_num_t>(cfg.rgb.pclk);
-  // The ILI6122 has no panel-enable line. Left at zero, disp_gpio_num would
-  // claim GPIO 0, the 5.0-inch's PCLK.
-  if (!st7701) rgb_cfg.disp_gpio_num = GPIO_NUM_NC;
+  // Neither panel has an enable line. Left at zero, disp_gpio_num would claim
+  // GPIO 0: the 2.1-inch's BOOT key, driven high, or the 5.0-inch's PCLK.
+  // Without it the ST7701 driver sends DISPON over the 3-wire IO instead.
+  rgb_cfg.disp_gpio_num = GPIO_NUM_NC;
   for (int i = 0; i < 16; ++i) rgb_cfg.data_gpio_nums[i] = static_cast<gpio_num_t>(cfg.rgb.data[i]);
   rgb_cfg.timings.pclk_hz = cfg.rgb.pclk_hz;
   rgb_cfg.timings.h_res = cfg.width;
@@ -187,8 +188,8 @@ bool RgbDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   ESP_LOGI(TAG, "RGB scanout framebuffer allocated at %p", scanout_fb);
   if (!esp_ok(esp_lcd_panel_reset(panel_), TAG, "esp_lcd_panel_reset")) return false;
   if (!esp_ok(esp_lcd_panel_init(panel_), TAG, "esp_lcd_panel_init")) return false;
-  // Without a disp GPIO (the ILI6122) the RGB panel has no on/off control and
-  // answers ESP_ERR_NOT_SUPPORTED; the panel shows the scanout regardless.
+  // Without a disp GPIO the bare RGB panel (the ILI6122) has no on/off control
+  // and answers ESP_ERR_NOT_SUPPORTED; the panel shows the scanout regardless.
   const esp_err_t on = esp_lcd_panel_disp_on_off(panel_, true);
   if (!(on == ESP_ERR_NOT_SUPPORTED && !st7701) && !esp_ok(on, TAG, "esp_lcd_panel_disp_on_off")) return false;
 
