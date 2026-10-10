@@ -49,6 +49,8 @@ menu "Hermes Gadget"
             bool "AIPI Lite (128x128 ST7789, ES8311 codec, battery)"
         config HG_BOARD_CROWPANEL_21
             bool "Elecrow CrowPanel 2.1-inch HMI (480x480 RGB, rotary, touch)"
+        config HG_BOARD_CROWPANEL_50
+            bool "Elecrow CrowPanel 5.0-inch HMI (800x480 RGB ILI6122, GT911 touch)"
         config HG_BOARD_CUSTOM
             bool "Custom pins (configure below)"
     endchoice

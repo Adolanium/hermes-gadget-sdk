@@ -19,15 +19,36 @@ struct LcdBus {
   int pclk_mhz = 16;
 };
 
-// A 16-bit RGB panel that is scanned out continuously. Its controller takes the
-// init commands over a separate 3-wire SPI, and a PCF8574 switches its power
-// and reset lines (the CrowPanel 2.1).
+// A 16-bit RGB panel that is scanned out continuously. Two bring-up styles
+// exist in the CrowPanel family: the 2.1-inch ST7701 takes its init commands
+// over a separate 3-wire SPI and is powered/reset through a PCF8574 expander,
+// while the 5.0-inch ILI6122 needs no command sequence, expander or enable
+// line. Set `controller` to pick the bring-up; the scanout contract is
+// identical for both.
+enum class RgbController { St7701, Ili6122 };
+
+// RGB scanout timings. Each CrowPanel's datasheet differs, so the values live
+// in the board config rather than being hardcoded in the driver.
+struct RgbTimings {
+  uint16_t hsync_pulse_width = 4, hsync_back_porch = 20, hsync_front_porch = 10;
+  uint16_t vsync_pulse_width = 4, vsync_back_porch = 20, vsync_front_porch = 10;
+  bool hsync_idle_low = false, vsync_idle_low = false;  // vendor polarity: false = idle high
+  bool de_idle_high = false;
+  bool pclk_active_neg = false;
+  bool pclk_idle_high = false;
+};
+
 struct RgbPanelConfig {
   int de = -1, vsync = -1, hsync = -1, pclk = -1;
   int data[16] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
-  int cmd_cs = -1, cmd_sclk = -1, cmd_sda = -1;
-  int i2c_expander = -1;  // PCF8574 address
+  int cmd_cs = -1, cmd_sclk = -1, cmd_sda = -1;  // 3-wire SPI command bus (ST7701)
+  int i2c_expander = -1;  // PCF8574 address; -1 when no expander is fitted
+  // True when data[0..4] carry red (the 2.1's wiring), so flush() swaps red and
+  // blue; false when they carry blue, which is esp_lcd's native RGB565.
+  bool swap_red_blue = true;
   uint32_t pclk_hz = 12000000;
+  RgbController controller = RgbController::St7701;
+  RgbTimings timings{};   // panel scanout timings (per-datasheet)
 };
 
 enum class LcdController { St7789, Box3, CoreS3, St77916 };
@@ -111,6 +132,7 @@ struct TouchConfig {
   bool enabled = false;
   uint8_t addr = 0x5A;
   int rst = -1;
+  int int_gpio = -1;  // touch INT line; -1 when not wired (driver polls instead)
   uint16_t width = 0, height = 0;
   bool mirror_x = false, mirror_y = false;
   int16_t offset_y = 0;  // subtracted from y when the UI starts below the panel's first row

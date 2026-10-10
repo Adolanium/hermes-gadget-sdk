@@ -1,0 +1,15 @@
+# Elecrow CrowPanel 5.0-inch HMI; ESP32-S3-WROOM-1-N4R8, 4 MB flash, 8 MB octal PSRAM.
+# 800x480 RGB ILI6122/ILI5960 display with GT911 capacitive touch. No onboard audio.
+CONFIG_IDF_TARGET="esp32s3"
+# The base file selects 4 MB; this board uses the same 4 MB flash (no override
+# needed). 8 MB octal PSRAM is required for the RGB scanout + app framebuffers.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+# Console over USB-serial-JTAG is not wired on this board; UART0 carries it.
+# CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG is not set
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_HG_BOARD_CROWPANEL_50=y
