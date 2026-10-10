@@ -27,8 +27,10 @@ Secrets (``~/.hermes/.env``): ``GADGET_ACCESS_TOKEN`` (optional shared token).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
+import os
 import re
 import ssl
 import time
@@ -109,6 +111,16 @@ class _Prompt:
 
     def expired(self) -> bool:
         return self.kind == "slash" and time.monotonic() - self.created > SLASH_CONFIRM_TTL_S
+
+
+def spoken_question(question: str, choices: Optional[list]) -> str:
+    """A clarify question as it is read aloud: the question, then its choices by number."""
+    text = (question or "").strip()
+    picks = [str(c).strip() for c in choices or [] if str(c).strip()]
+    if picks:
+        listed = " ".join(f"{i}: {c.rstrip('.')}." for i, c in enumerate(picks, start=1))
+        text = f"{text} The choices are {listed} Say the number or your own answer."
+    return text
 
 
 def transcript_echo(content: str) -> Optional[str]:
@@ -573,6 +585,40 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             await self.send(session.device_id, result)
         else:
             await session.send_notice("That question has expired")
+
+    async def send_clarify(self, chat_id: str, question: str, choices: Optional[list], clarify_id: str,
+                           session_key: str, metadata: Optional[Dict[str, Any]] = None) -> SendResult:
+        """A question from the agent (Hermes's clarify tool). The device shows only yes/no prompts,
+        so the question goes out as Hermes's own text (numbered choices; the next message, spoken
+        or typed, is the answer) and, on a device that speaks replies, is also spoken: otherwise a
+        voice user hears nothing while the agent waits."""
+        result = await super().send_clarify(chat_id=chat_id, question=question, choices=choices,
+                                            clarify_id=clarify_id, session_key=session_key, metadata=metadata)
+        session = self._session(chat_id)
+        if result.success and session is not None and session.paired and self._should_auto_tts_for_chat(chat_id):
+            session.spawn(self._speak(chat_id, spoken_question(question, choices)))
+        return result
+
+    async def _speak(self, chat_id: str, text: str) -> None:
+        """Speak ``text`` on the device with Hermes's configured text-to-speech."""
+        paths: List[str] = []
+        try:
+            from tools.tts_tool import text_to_speech_tool
+
+            raw = await asyncio.to_thread(text_to_speech_tool, text=text)
+            result = json.loads(raw) if raw else {}
+            paths = [str(p) for p in (result.get("file_paths") or [result.get("file_path")]) if p]
+            if not result.get("success") or not paths:
+                logger.warning("[%s] could not speak a question: %s", self.name, result.get("error"))
+                return
+            for path in paths:
+                await self._play_file(chat_id, path)
+        except Exception as exc:  # TTS unavailable or misconfigured: the text still went out
+            logger.warning("[%s] could not speak a question: %s", self.name, exc)
+        finally:
+            for path in paths:
+                with contextlib.suppress(OSError):
+                    os.unlink(path)
 
     async def get_chat_info(self, chat_id: str) -> Dict[str, Any]:
         session = self._session(chat_id)
