@@ -116,6 +116,7 @@ class Ui {
   Display& display_;
   DisplayInfo panel_;
   DisplayInfo info_;
+  uint16_t bg_;  // background colour (see DisplayInfo::emissive)
   int ox_ = 0, oy_ = 0;  // area origin on the panel
   UiLayout layout_;
   uint32_t hash_[4] = {0, 0, 0, 0};
