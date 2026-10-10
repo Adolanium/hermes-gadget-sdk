@@ -16,6 +16,16 @@ bool App::wake_display() {
   return sleeping;
 }
 
+void App::on_power_key() {
+  if (!hal_.display || !hal_.display->info().has_backlight) return;
+  if (display_sleeping_ || display_dimmed_) {
+    wake_display();
+    return;
+  }
+  display_sleeping_ = true;
+  hal_.display->set_backlight(0);
+}
+
 void App::power_tick() {
   if (hal_.power && (!power_read_at_ || now() - power_read_at_ >= 5000)) {
     power_status_ = hal_.power->read();
@@ -23,12 +33,20 @@ void App::power_tick() {
     sensors_dirty_ = true;
     if (settings_open()) update_model();
   }
-  if (!hal_.display || !hal_.display->info().has_backlight || !screen_timeout_ms_) return;
+  constexpr uint32_t kPowerKeyPollMs = 100;
+  if (hal_.power && now() - power_key_polled_at_ >= kPowerKeyPollMs) {
+    power_key_polled_at_ = now();
+    if (hal_.power->take_key_press()) on_power_key();
+  }
+  if (!hal_.display || !hal_.display->info().has_backlight) return;
+  // Without a timeout, only a screen the power key turned off needs watching.
+  if (!screen_timeout_ms_ && !display_sleeping_) return;
   // The settings menu can sleep too; the wake input leaves it on the same item.
   const bool idle = mode_ == Mode::Idle && !speaking() && !talk_held_ && !cancel_held_ &&
                     !prompt_showing() && wifi_setup_text_.empty() && !ota_busy() && ota_ != Ota::Restarting && overlay_ == Overlay::None &&
                     (phase_ == Phase::NoNetwork || (phase_ == Phase::Online && paired_));
   if (!idle) { wake_display(); return; }
+  if (!screen_timeout_ms_) return;
   const uint32_t elapsed = now() - activity_at_;
   if (elapsed >= screen_timeout_ms_ && !display_sleeping_) {
     display_sleeping_ = true;

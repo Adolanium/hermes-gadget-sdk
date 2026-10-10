@@ -184,10 +184,10 @@ Use `esp32s3-touch-amoled-175c` for SKUs 33691/33692, the enclosed model with 32
 | CST9217 touch | I2C 0x5A, reset 2; interrupt 11 unused because input is polled |
 | I2C | SDA 15, SCL 14, 400 kHz |
 | ES8311 speaker / ES7210 microphones | MCLK 16, BCLK 9, WS 45, DOUT 8, DIN 10; amplifier enable 46 |
-| AXP2101 | I2C 0x34; ALDO1 at 3.3 V supplies analog audio |
+| AXP2101 | I2C 0x34; ALDO1 at 3.3 V supplies analog audio; reports PWR short presses |
 | BOOT | GPIO 0, TALK |
 
-Hold the screen or BOOT to talk. Swipe down to cancel. Hold the **SETTINGS** target at the top of the screen for one second to open settings. PWR retains its hardware power function; firmware does not map it to CANCEL on this model. There is no TCA9554 expander. The IMU and RTC are not exposed.
+Hold the screen or BOOT to talk. Swipe down to cancel. Hold the **SETTINGS** target at the top of the screen for one second to open settings. A short press of PWR turns the screen off, and another press, a touch or BOOT turns it back on; Wi-Fi and the connection to Hermes stay up. PWR reaches only the AXP2101 on this model, so the firmware reads its short-press interrupt there; holding PWR keeps the PMIC's own power behavior. There is no TCA9554 expander. The IMU and RTC are not exposed.
 
 The firmware enables ALDO1 for audio while preserving the other rails and charging settings. Battery readings and local power-off use the existing AXP2101 driver. An unavailable ADC or gauge reading remains absent. Use the settings menu for microphone, speaker, display, touch, volume, brightness and power checks.
 

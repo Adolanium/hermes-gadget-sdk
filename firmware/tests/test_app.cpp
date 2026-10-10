@@ -1222,6 +1222,103 @@ TEST("power: idle screen dims, sleeps and consumes the wake input without record
   CHECK_EQ(r.fake.brightness, 100);
 }
 
+namespace {
+// A PMIC whose power key the board can only see as short presses.
+struct KeyPower : hg::Power {
+  int presses = 0;
+  std::optional<hg::PowerStatus> read() override { return hg::PowerStatus{true, 3900, 70, false, false}; }
+  bool power_off() override { return true; }
+  bool take_key_press() override {
+    if (!presses) return false;
+    --presses;
+    return true;
+  }
+};
+}  // namespace
+
+TEST("power: the power key turns the screen off and back on, without a screen timeout") {
+  KeyPower key;
+  Rig r;
+  r.fake.backlight = true;
+  r.hal.power = &key;
+  r.bring_online(true);
+  CHECK_EQ(r.fake.brightness, 100);
+  key.presses = 1;
+  r.advance(100);
+  CHECK_EQ(r.fake.brightness, 0);
+  for (int i = 0; i < 4; ++i) {  // a minute with the server alive
+    r.server(R"({"type":"ping"})");
+    r.advance(15000);
+  }
+  CHECK_EQ(r.fake.brightness, 0);  // stays off: no timeout brings it back
+  key.presses = 1;
+  r.advance(100);
+  CHECK_EQ(r.fake.brightness, 100);
+  for (int i = 0; i < 4; ++i) {
+    r.server(R"({"type":"ping"})");
+    r.advance(15000);
+  }
+  CHECK_EQ(r.fake.brightness, 100);  // and stays on
+}
+
+TEST("power: other input wakes a screen the power key turned off, and only wakes it") {
+  KeyPower key;
+  Rig r;
+  r.fake.backlight = true;
+  r.hal.power = &key;
+  r.bring_online(true);
+  key.presses = 1;
+  r.advance(100);
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(!r.fake.mic_on);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.last("audio.start") == nullptr);
+}
+
+TEST("power: a prompt turns a screen the power key turned off back on") {
+  KeyPower key;
+  Rig r;
+  r.fake.backlight = true;
+  r.hal.power = &key;
+  r.bring_online(true);
+  key.presses = 1;
+  r.advance(100);
+  CHECK_EQ(r.fake.brightness, 0);
+  r.server(R"({"type":"prompt","id":"wake","text":"Continue?"})");
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Prompt);
+}
+
+TEST("power: losing the connection turns a screen the power key turned off back on") {
+  KeyPower key;
+  Rig r;
+  r.fake.backlight = true;
+  r.hal.power = &key;
+  r.bring_online(true);
+  key.presses = 1;
+  r.advance(100);
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_transport_closed("gone");
+  r.advance(100);
+  CHECK_EQ(r.fake.brightness, 100);  // as with Screen timeout: the reconnecting screen shows
+}
+
+TEST("power: the power key brings a dimmed screen back to full brightness") {
+  KeyPower key;
+  Rig r;
+  r.fake.backlight = true;
+  r.hal.power = &key;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  r.advance(15000);
+  CHECK_EQ(r.fake.brightness, 10);
+  key.presses = 1;
+  r.advance(100);
+  CHECK_EQ(r.fake.brightness, 100);
+}
+
 TEST("power: an idle settings menu sleeps on every view; the wake input restores it where it was") {
   Rig r;
   r.fake.backlight = true;
