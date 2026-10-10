@@ -16,6 +16,7 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/task.h"
+#include "i2c_scan.hpp"
 #include "sdkconfig.h"
 
 namespace hgp::diag {
@@ -118,18 +119,19 @@ hg::json::Value wifi() {
 hg::json::Value i2c_scan() {
   hg::json::Value found = hg::json::Value::array();
   if (!g_parts.i2c) return found;
-  for (uint16_t addr = 0x08; addr < 0x78; ++addr) {
-    esp_err_t err = i2c_master_probe(g_parts.i2c, addr, 10);
-    if (err == ESP_ERR_TIMEOUT) {
-      found.push("bus stuck");  // a line held low: every other address would time out too
-      break;
+  struct Ops {
+    i2c_master_bus_handle_t bus;
+    hg::i2c_scan::Probe probe(uint16_t addr) {
+      // One limit covers the wait for the bus and for the transfer. 50 ms as in
+      // the drivers: at the 100 Hz tick, 10 ms is a single tick, which can run
+      // out mid-transfer.
+      esp_err_t err = i2c_master_probe(bus, addr, 50);
+      if (err == ESP_OK) return hg::i2c_scan::Probe::Ack;
+      return err == ESP_ERR_TIMEOUT ? hg::i2c_scan::Probe::Timeout : hg::i2c_scan::Probe::Nack;
     }
-    if (err == ESP_OK) {
-      char buf[8];
-      std::snprintf(buf, sizeof(buf), "0x%02x", addr);
-      found.push(buf);
-    }
-  }
+    void pause() { vTaskDelay(pdMS_TO_TICKS(20)); }
+  } ops{g_parts.i2c};
+  for (const std::string& entry : hg::i2c_scan::scan(ops)) found.push(entry);
   return found;
 }
 
