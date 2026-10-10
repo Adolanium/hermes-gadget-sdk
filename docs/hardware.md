@@ -418,12 +418,11 @@ Panel timings (12 MHz PCLK, 10/4/20 porches) and the ST7701 init table follow th
 
 Board option `crowpanel-5.0`, for Elecrow's 5.0" landscape display (DIS07050H): an ESP32-S3-WROOM-1-N4R8 (8 MB octal PSRAM) with 4 MB flash, an 800×480 ILI6122/ILI5960 panel on a 16-bit RGB bus, and a GT911 capacitive touchscreen. **This board has no microphone or speaker**, so it works as a text gadget: Hermes replies, cards and prompts appear on the screen and typed messages go out through the USB console.
 
-Unlike the CrowPanel 2.1-inch, the ILI6122 needs **no command bring-up**: it is scanned out continuously over the 16-bit RGB bus through the built-in `esp_lcd_rgb` driver, and a plain GPIO (38, the `GPIO_D` header) enables the panel — there is no PCF8574 expander. The `RgbDisplay` port picks this path from `RgbController::Ili6122`.
+Unlike the CrowPanel 2.1-inch, the ILI6122 needs **no command bring-up**: it is scanned out continuously over the 16-bit RGB bus through the built-in `esp_lcd_rgb` driver, with no PCF8574 expander and no panel-enable line. The `RgbDisplay` port picks this path from `RgbController::Ili6122`. GPIO 38 is the user `GPIO_D` header pin, and the firmware leaves it alone.
 
 | Part | Chip | Connection |
 |---|---|---|
 | Display | ILI6122/ILI5960, 16-bit RGB | DE 40, VSYNC 41, HSYNC 39, PCLK 0 at 15 MHz; data 8/3/46/9/1/5/6/7/15/16/4/45/48/47/21/14 (B0..B4, G0..G5, R0..R4); 800×480 |
-| Panel enable | GPIO | GPIO_D on GPIO 38, active-high (driven low before init, then high by the RGB driver) |
 | Backlight | PWM | GPIO 2, active-high |
 | Touch | GT911 @ 0x5D/0x14 | I2C SDA 19, SCL 20; INT not wired, so the driver polls (`TouchController::Box3` managed GT911) |
 
@@ -434,19 +433,19 @@ cd firmware/esp32
 pio run -e crowpanel-5 -t upload -t monitor
 ```
 
-Or with `idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/crowpanel-5.0/sdkconfig.defaults" build`. The USB-C port is the S3's own USB Serial/JTAG, so flashing and the serial console (115200 baud) both use it. On the v3.0 hardware revision the board also carries a PCA9557 GPIO expander (@ 0x18) that gates touch timing; this port polls touch and does not drive that expander.
+Or with `idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/crowpanel-5.0/sdkconfig.defaults" build`. The USB-C port reaches the S3's UART0 through a USB-UART bridge, so flashing and the serial console (115200 baud) both use it. The S3's own USB pins, GPIO 19 and 20, carry the touch I2C instead. On the v3.0 hardware revision the board also carries a PCA9557 GPIO expander (@ 0x18) that gates touch timing; this port polls touch and does not drive that expander.
 
 ### First flash: what to check
 
 This port is written from Elecrow's published factory example ([CrowPanel 5.0 repository](https://github.com/Elecrow-RD/CrowPanel-5.0-HMI-ESP32-Display-800x480) at commit `fd959ac`). On the first flash:
 
 1. **Boot log:** `ILI6122 800x480 RGB panel initialized at 15000000 Hz` and `touch ready`; `parts: display ili6122-rgb, ... touch yes`.
-2. **Screen:** the mascot renders and colours are correct (amber accents, not blue). A red/blue swap means the RGB565 channel order needs flipping in `port_rgb.cpp`.
+2. **Screen:** the mascot renders and colours are correct (amber accents, not blue). A red/blue swap means `b.lcd.rgb.swap_red_blue` in this board's `board.cpp` entry needs flipping.
 3. **Brightness:** cycle 10 → 100 in settings; brightness must rise with the number. The backlight is active-high — do not set `backlight_invert`.
 4. **Touch:** hold the screen and the listening waves appear; a swipe down cancels; hold the title bar one second for settings.
 5. **Text:** `say hello` over the console, or a paired Hermes, should render on the display.
 
-Panel timings (15 MHz PCLK, 8/4/43 and 8/4/12 porches, `pclk_active_neg`) and the pin map follow the factory `crowpanel-esp32-5.0-3.0` Arduino example at commit `fd959ac`; see [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md). This board has **not yet been physically verified** — the port compiles against the vendor's pin map but has not been flashed to a board — see the [hardware validation table](hardware-validation.md).
+Panel timings (15 MHz PCLK, 8/4/43 and 8/4/12 porches, `pclk_active_neg`) and the pin map follow the factory `crowpanel-esp32-5.0-3.0` Arduino example at commit `fd959ac`; see [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md). A boot smoke check passed on a real board: the panel initialization log, the GT911's ID, Wi-Fi and pairing. Rendering, colours, brightness and touch coordinates are not yet verified; see the [hardware validation table](hardware-validation.md).
 
 ## Build and flash
 

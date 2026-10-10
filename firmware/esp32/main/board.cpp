@@ -449,8 +449,8 @@ BoardConfig make() {
   // B0..B4, G0..G5, R0..R4 in the vendor sketch's D0..D15 order.
   const int rgb_data[16] = {8, 3, 46, 9, 1, 5, 6, 7, 15, 16, 4, 45, 48, 47, 21, 14};
   for (int i = 0; i < 16; ++i) b.lcd.rgb.data[i] = rgb_data[i];
-  b.lcd.rgb.disp_gpio = 38;  // GPIO_D panel-enable line; no I2C expander
-  b.lcd.rgb.i2c_expander = -1;
+  b.lcd.rgb.swap_red_blue = false;  // blue on data[0..4] is native RGB565
+  b.lcd.rgb.i2c_expander = -1;  // no PCF8574; GPIO 38 is the user GPIO_D header pin, not a panel enable
   b.lcd.rgb.pclk_hz = 15000000;
   // Scanout timings from the vendor LGFX config.
   b.lcd.rgb.timings.hsync_pulse_width = 4;

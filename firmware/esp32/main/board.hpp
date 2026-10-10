@@ -22,9 +22,9 @@ struct LcdBus {
 // A 16-bit RGB panel that is scanned out continuously. Two bring-up styles
 // exist in the CrowPanel family: the 2.1-inch ST7701 takes its init commands
 // over a separate 3-wire SPI and is powered/reset through a PCF8574 expander,
-// while the 5.0-inch ILI6122 needs no command sequence and is enabled by a
-// plain GPIO. Set `rgb_controller` to pick the bring-up; the scanout contract
-// is identical for both.
+// while the 5.0-inch ILI6122 needs no command sequence, expander or enable
+// line. Set `controller` to pick the bring-up; the scanout contract is
+// identical for both.
 enum class RgbController { St7701, Ili6122 };
 
 // RGB scanout timings. Each CrowPanel's datasheet differs, so the values live
@@ -43,7 +43,9 @@ struct RgbPanelConfig {
   int data[16] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
   int cmd_cs = -1, cmd_sclk = -1, cmd_sda = -1;  // 3-wire SPI command bus (ST7701)
   int i2c_expander = -1;  // PCF8574 address; -1 when no expander is fitted
-  int disp_gpio = -1;     // plain-GPIO panel-enable line when no expander powers it (ILI6122)
+  // True when data[0..4] carry red (the 2.1's wiring), so flush() swaps red and
+  // blue; false when they carry blue, which is esp_lcd's native RGB565.
+  bool swap_red_blue = true;
   uint32_t pclk_hz = 12000000;
   RgbController controller = RgbController::St7701;
   RgbTimings timings{};   // panel scanout timings (per-datasheet)

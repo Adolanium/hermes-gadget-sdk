@@ -1,5 +1,5 @@
 // Elecrow CrowPanel RGB display bring-up (CrowPanel 2.1-inch ST7701 over a
-// PCF8574 expander, and 5.0-inch ILI6122 on a plain GPIO enable). RGB wiring,
+// PCF8574 expander, and the 5.0-inch ILI6122, which needs neither). RGB wiring,
 // timings and power sequencing follow Elecrow's official Arduino examples.
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h
 
@@ -25,8 +25,9 @@ const char* TAG = "hg.lcd.rgb";
 constexpr ledc_channel_t kBacklightChannel = LEDC_CHANNEL_1;
 uint8_t expander_output = 0xff;
 
-// The panel data lanes are electrically arranged in BGR order while the SDK
-// canvas emits native RGB565. Match the vendor sketch's explicit field swap.
+// On the 2.1 the panel data lanes are electrically arranged in BGR order while
+// the SDK canvas emits native RGB565. Match the vendor sketch's explicit field
+// swap. Boards wired in native order clear RgbPanelConfig::swap_red_blue.
 uint16_t swap_rgb565_red_blue(uint16_t pixel) {
   return static_cast<uint16_t>((pixel & 0x07e0u) | ((pixel & 0x001fu) << 11) | ((pixel & 0xf800u) >> 11));
 }
@@ -53,15 +54,10 @@ bool RgbDisplay::on_color_done(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_e
 bool RgbDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   cfg_ = cfg;
   const bool st7701 = cfg.rgb.controller == RgbController::St7701;
-  // The ST7701 powers and resets through a PCF8574 expander; the ILI6122 is
-  // enabled by a plain GPIO. Exactly one must be configured.
-  const bool has_expander = cfg.rgb.i2c_expander >= 0;
-  const bool has_disp_gpio = cfg.rgb.disp_gpio >= 0;
-  if (has_expander == has_disp_gpio) return false;
-  if (st7701 && !has_expander) return false;  // ST7701 bring-up needs the expander
-  if (!st7701 && !has_disp_gpio) return false;
-
-  if (has_expander) {
+  // The ST7701 powers and resets through a PCF8574 expander; the ILI6122 needs
+  // no power, reset or enable line.
+  if (st7701) {
+    if (!i2c_bus || cfg.rgb.i2c_expander < 0) return false;
     i2c_device_config_t expander_cfg = {};
     expander_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
     expander_cfg.device_address = cfg.rgb.i2c_expander;
@@ -88,14 +84,6 @@ bool RgbDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
     vTaskDelay(pdMS_TO_TICKS(120));
     // Release every unused PCF8574 line to its pulled-up input state.
     if (!expander_set(expander_, 0xff, true)) return false;
-  } else {
-    // ILI6122: the vendor sketch drives the panel-enable line low, then lets the
-    // RGB panel object pull it high during init (disp_active_low = 0).
-    gpio_config_t disp = {};
-    disp.pin_bit_mask = 1ULL << cfg.rgb.disp_gpio;
-    disp.mode = GPIO_MODE_OUTPUT;
-    if (gpio_config(&disp) != ESP_OK) return false;
-    gpio_set_level(static_cast<gpio_num_t>(cfg.rgb.disp_gpio), 0);
   }
 
   fb_ = static_cast<uint16_t*>(heap_caps_malloc(
@@ -149,12 +137,9 @@ bool RgbDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   rgb_cfg.vsync_gpio_num = static_cast<gpio_num_t>(cfg.rgb.vsync);
   rgb_cfg.hsync_gpio_num = static_cast<gpio_num_t>(cfg.rgb.hsync);
   rgb_cfg.pclk_gpio_num = static_cast<gpio_num_t>(cfg.rgb.pclk);
-  if (!st7701) {
-    // The ILI6122 uses disp_gpio_num as the RGB peripheral's panel-enable output
-    // so esp_lcd_panel_disp_on_off drives the line that was pulled low above.
-    rgb_cfg.disp_gpio_num = static_cast<gpio_num_t>(cfg.rgb.disp_gpio);
-    rgb_cfg.flags.disp_active_low = 0;
-  }
+  // The ILI6122 has no panel-enable line. Left at zero, disp_gpio_num would
+  // claim GPIO 0, the 5.0-inch's PCLK.
+  if (!st7701) rgb_cfg.disp_gpio_num = GPIO_NUM_NC;
   for (int i = 0; i < 16; ++i) rgb_cfg.data_gpio_nums[i] = static_cast<gpio_num_t>(cfg.rgb.data[i]);
   rgb_cfg.timings.pclk_hz = cfg.rgb.pclk_hz;
   rgb_cfg.timings.h_res = cfg.width;
@@ -191,7 +176,7 @@ bool RgbDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
     if (!esp_ok(esp_lcd_new_panel_st7701(io_, &panel_cfg, &panel_), TAG, "esp_lcd_new_panel_st7701")) return false;
   } else {
     // The ILI6122/ILI5960 needs no command bring-up: a bare RGB panel driven by
-    // esp_lcd_new_rgb_panel, which owns the disp_gpio enable line.
+    // esp_lcd_new_rgb_panel.
     if (!esp_ok(esp_lcd_new_rgb_panel(&rgb_cfg, &panel_), TAG, "esp_lcd_new_rgb_panel")) return false;
   }
   esp_lcd_rgb_panel_event_callbacks_t callbacks = {};
@@ -202,7 +187,10 @@ bool RgbDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   ESP_LOGI(TAG, "RGB scanout framebuffer allocated at %p", scanout_fb);
   if (!esp_ok(esp_lcd_panel_reset(panel_), TAG, "esp_lcd_panel_reset")) return false;
   if (!esp_ok(esp_lcd_panel_init(panel_), TAG, "esp_lcd_panel_init")) return false;
-  if (!esp_ok(esp_lcd_panel_disp_on_off(panel_, true), TAG, "esp_lcd_panel_disp_on_off")) return false;
+  // Without a disp GPIO (the ILI6122) the RGB panel has no on/off control and
+  // answers ESP_ERR_NOT_SUPPORTED; the panel shows the scanout regardless.
+  const esp_err_t on = esp_lcd_panel_disp_on_off(panel_, true);
+  if (!(on == ESP_ERR_NOT_SUPPORTED && !st7701) && !esp_ok(on, TAG, "esp_lcd_panel_disp_on_off")) return false;
 
   ledc_timer_config_t timer = {};
   timer.speed_mode = LEDC_LOW_SPEED_MODE;
@@ -241,6 +229,10 @@ void RgbDisplay::flush(uint16_t y0, uint16_t y1) {
   for (uint16_t row = y0; row < y1; ++row) {
     const size_t src = static_cast<size_t>(row) * cfg_.width;
     const size_t dst = static_cast<size_t>(row - y0) * cfg_.width;
+    if (!cfg_.rgb.swap_red_blue) {
+      std::memcpy(packed + dst, fb_ + src, cfg_.width * sizeof(uint16_t));
+      continue;
+    }
     for (uint16_t col = 0; col < cfg_.width; ++col) {
       const uint16_t pixel = fb_[src + col];
       packed[dst + col] = swap_rgb565_red_blue(pixel);
