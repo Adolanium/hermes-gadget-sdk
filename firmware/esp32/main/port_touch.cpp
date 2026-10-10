@@ -19,6 +19,7 @@ namespace {
 
 const char* TAG = "hg.touch";
 constexpr uint32_t kPollMs = 20;
+constexpr uint32_t kDozePollMs = 50;
 constexpr uint8_t kTca9554Input = 0x00;
 constexpr uint8_t kCstAck = 0xAB;
 
@@ -232,7 +233,9 @@ void TouchInput::task(void* arg) {
       EncoderSample e{static_cast<int8_t>(direction)};
       events::post(EventType::Encoder, &e, sizeof(e));
     }
-    vTaskDelay(pdMS_TO_TICKS(kPollMs));
+    // Dozing (screen off, on battery), poll less often so the chip can light-sleep
+    // between polls; a touch still wakes the screen within about 50 ms.
+    vTaskDelay(pdMS_TO_TICKS(EspSystem::dozing_now() ? kDozePollMs : kPollMs));
   }
 }
 
