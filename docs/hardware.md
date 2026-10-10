@@ -189,7 +189,7 @@ Use `esp32s3-touch-amoled-175c` for SKUs 33691/33692, the enclosed model with 32
 
 Hold the screen or BOOT to talk. Swipe down to cancel. Hold the **SETTINGS** target at the top of the screen for one second to open settings. PWR retains its hardware power function; firmware does not map it to CANCEL on this model. There is no TCA9554 expander. The IMU and RTC are not exposed.
 
-The firmware enables ALDO1 for audio while preserving the other rails and charging settings. Battery readings and local power-off use the existing AXP2101 driver. An unavailable ADC or gauge reading remains absent. Use the settings menu for microphone, speaker, display, touch, volume, brightness and power checks.
+The firmware enables ALDO1 for audio while preserving the other rails and charging settings. To save battery, the amplifier (GPIO 46) is powered only while sound plays, and the CPU drops from 240 to 80 MHz when idle (ESP-IDF power management, without light sleep, so Wi-Fi stays connected). Battery readings and local power-off use the existing AXP2101 driver. An unavailable ADC or gauge reading remains absent. Use the settings menu for microphone, speaker, display, touch, volume, brightness and power checks.
 
 Build and flash over the board's USB-C data port:
 

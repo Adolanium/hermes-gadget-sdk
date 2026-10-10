@@ -7,6 +7,7 @@
 #include "driver/gpio.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_pm.h"
 #include "esp_psram.h"
 #include "hg/touch.hpp"
 #include "nvs_flash.h"
@@ -169,6 +170,16 @@ extern "C" void app_main(void) {
                   "not start without it (see the board's requirements in docs/hardware.md)",
              kPsramMode);
   }
+#endif
+#if CONFIG_PM_ENABLE
+  // Boards that enable power management let the CPU drop to 80 MHz when idle;
+  // drivers hold it up while they work. No light sleep: the display, touch and
+  // audio paths expect their clocks to keep running.
+  esp_pm_config_t pm = {};
+  pm.max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ;
+  pm.min_freq_mhz = 80;
+  pm.light_sleep_enable = false;
+  if (esp_pm_configure(&pm) != ESP_OK) ESP_LOGW(TAG, "power management unavailable; the CPU stays at full speed");
 #endif
   g_updater.expect_board(board.name);
   g_updater.start();  // a new firmware on probation starts its clock now
