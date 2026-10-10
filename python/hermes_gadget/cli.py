@@ -245,7 +245,7 @@ def _diag_summary(report: dict) -> list[str]:
         out.append("parts: " + ", ".join(
             f"{k} {'yes' if v is True else 'no' if v is False else v}" for k, v in parts.items()))
     if isinstance(report.get("i2c"), list):
-        out.append("I2C: " + (" ".join(report["i2c"]) or "nothing answered"))
+        out.append("I2C: " + (", ".join(report["i2c"]) or "nothing answered"))
     wifi = report.get("wifi")
     if isinstance(wifi, dict):
         out.append(f"Wi-Fi: joined {wifi.get('ssid')} ({wifi.get('rssi')} dBm), {wifi.get('ip', 'no address')}"
