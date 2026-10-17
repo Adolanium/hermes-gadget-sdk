@@ -278,6 +278,7 @@ BoardConfig make() {
   b.lcd.width = b.lcd.height = 360;
   b.lcd.swap_xy = b.lcd.mirror_x = b.lcd.mirror_y = false;
   b.lcd.round = true;
+  b.lcd.font_scale = 2;  // the 360x360 round glass picks scale 1 automatically; double it for readability
   b.lcd.sclk = 13;
   b.lcd.mosi = 15;
   b.lcd.d1 = 16;

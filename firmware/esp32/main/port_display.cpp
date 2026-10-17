@@ -239,6 +239,7 @@ hg::DisplayInfo SpiDisplay::info() const {
   di.swap_bytes = true;  // the panel wants big-endian RGB565
   di.has_backlight = cfg_.backlight >= 0 || static_cast<bool>(board_backlight);
   di.round = cfg_.round;
+  di.font_scale = cfg_.font_scale;
   return di;
 }
 

@@ -101,9 +101,14 @@ void I2sMic::task(void* arg) {
     size_t got = 0;
     if (self->pdm_) {
       // PDM decimation yields 16-bit samples straight out of the driver.
+      // The onboard MEMS runs quiet: ~x4 digital gain puts speech in a
+      // comfortable range for the server-side VAD/STT.
       i2s_channel_read(self->rx_, pcm, sizeof(pcm), &got, pdMS_TO_TICKS(100));
       if (got == 0) continue;
       size_t n = got / sizeof(int16_t);
+      for (size_t i = 0; i < n; ++i) {
+        pcm[i] = static_cast<int16_t>(std::max<int32_t>(-32768, std::min<int32_t>(32767, pcm[i] * 4)));
+      }
       if (self->capturing_) events::post(EventType::Mic, pcm, n * sizeof(int16_t));
       continue;
     }
