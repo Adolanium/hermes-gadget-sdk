@@ -171,6 +171,9 @@ struct ButtonConfig {
 // A quadrature rotary encoder on two GPIOs. Each detent is an Up or Down press.
 struct EncoderConfig {
   int a = -1, b = -1;  // -1 = absent
+  // Mouse-wheel style encoder: one low pulse per detent on exactly one channel,
+  // and the channel picks the direction. False = classic quadrature.
+  bool pulse_per_detent = false;
 };
 
 // A battery behind a resistive divider, with a latch that keeps it powered.

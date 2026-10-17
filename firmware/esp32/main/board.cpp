@@ -296,7 +296,7 @@ BoardConfig make() {
   b.touch.rst = 10;
   b.touch.int_gpio = 9;
   b.touch.width = b.touch.height = 360;
-  b.encoder = {8, 7};
+  b.encoder = {8, 7, true};  // knob ring: one pulse per detent, channel = direction
   b.buttons = {0, -1, -1, -1};  // BOOT also works as TALK
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";
