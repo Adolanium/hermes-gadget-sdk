@@ -58,7 +58,7 @@ Board option `esp32s3-lcd-154`, for Waveshare's all-in-one 1.54" board (SKUs 338
 
 The PWR key remains part of the power circuit. Firmware asserts GPIO 2 at startup to keep the battery path enabled. The TF card, QMI8658 and touchscreen are unused.
 
-The [device settings menu](using-gadget.md#device-settings-and-hardware-checks) shows calibrated battery-node voltage and the charging signal. GPIO 1 samples the R27/R32 divider, whose ratio is three. GPIO 3 reads the active-low charging signal. This board has no fuel gauge, battery presence detector or USB-status input, so those readings are omitted. Voltage is unavailable if the ESP32's ADC calibration cannot start. An unplugged battery can leave voltage on this node while USB powers the charger; voltage alone does not prove a battery is attached.
+The [device settings menu](using-gadget.md#device-settings-and-hardware-checks) shows calibrated battery-node voltage and the charging signal. GPIO 1 samples the R27/R32 divider, whose ratio is three. GPIO 3 reads the active-low charging signal. This board has no fuel gauge, battery presence detector or USB-status input, so those readings are omitted. External power is reported while CHG_STAT reads charging or a USB host is connected to the USB-C port (`latch_power.usb_external_power`), and battery otherwise, so Wi-Fi modem sleep applies on battery; a USB charger without data that has finished charging counts as battery. Voltage is unavailable if the ESP32's ADC calibration cannot start. An unplugged battery can leave voltage on this node while USB powers the charger; voltage alone does not prove a battery is attached.
 
 After confirming a compatible single-cell 3.7 V Li-ion battery is fitted, opt into a rough display-only percentage with `set battery_estimate liion`, then `set battery_display percentage`. See [battery indicator settings and limitations](using-gadget.md#device-settings-and-hardware-checks). It is off by default, stays visible while charging, and does not change raw gateway telemetry or establish charge completion. Do not enable it merely because this node has voltage; USB can energize the node without a battery. Simulator checks and firmware compilation do not calibrate or physically verify this estimate.
 
@@ -480,12 +480,16 @@ Writing that file back at `0x0` restores the original firmware.
 | Display | ST7789, SPI | MOSI 2, SCLK 4, CS 5, DC 47, RST 38; colors inverted; backlight GPIO 42, active low |
 | Speaker DAC + microphone ADC | ES8311 | I2C 0x18 on SDA 15, SCL 14; I2S MCLK 16, BCLK 9, WS 45, DOUT 8, DIN 10; amplifier enable 46 |
 | Touch (touch version) | CST816D | I2C 0x15 on its own bus, SDA 11, SCL 7; RST 6, INT 12 |
-| Power | | GPIO 3 latches the battery path on; charge signal on GPIO 41 (high while charging); battery divider on GPIO 1 (ADC1 channel 0) |
+| Power | | GPIO 3 latches the battery path on; charge signal on GPIO 41 (high while charging); battery divider by two on GPIO 1 (ADC1 channel 0) |
 | Keys | | BOOT GPIO 0 (TALK) |
 
 The touchscreen has an I2C bus of its own, so the profile sets `touch.bus` and the firmware opens it on the second I2C controller. Without touch there is no CANCEL input: BOOT is the only key. Hold the screen or BOOT to talk, and swipe down to cancel.
 
-The battery level and charging state aren't reported yet: the divider ratio on GPIO 1 hasn't been measured, and the charge signal is active high where the latch driver expects active low. Upstream also writes `0xBB 0x38` (VCOM) to the panel; this profile keeps the ST7789 default.
+The settings menu's **Battery and power** page shows the calibrated battery voltage and the charging signal. The divider ratio of two is inferred from upstream's battery table (raw 1980 to 2480 at 12 dB, about 3.1 to 4.0 V at the cell), not measured with a meter. The charge signal reads high while charging (`latch_power.charging_active_high`). This board has no fuel gauge; a percentage needs the opt-in estimate described under [device settings](using-gadget.md#device-settings-and-hardware-checks).
+
+The board reports external power while the charging signal is high or a USB host is connected to the USB-C port (`latch_power.usb_external_power`), and battery otherwise, so Wi-Fi modem sleep applies on battery. A USB charger without data that has finished charging counts as battery.
+
+Upstream also writes `0xBB 0x38` (VCOM) to the panel; this profile keeps the ST7789 default.
 
 **Build and flash it** with PlatformIO:
 
@@ -498,13 +502,13 @@ The USB-C port is the S3's own USB Serial/JTAG, used for flashing and the serial
 
 ### First flash: what to check
 
-1. **Boot log:** `battery latch enabled; no battery voltage reading` and `codecs: speaker ready, microphones ready (es8311 analog)`. The `hg.diag` parts line should read `display st7789, microphone es8311, speaker es8311`, with touch ready on the touch version.
+1. **Boot log:** `battery latch enabled; calibrated voltage available` and `codecs: speaker ready, microphones ready (es8311 analog)`. The `hg.diag` parts line should read `display st7789, microphone es8311, speaker es8311`, with touch ready on the touch version.
 2. **Screen:** the mascot is upright and not mirrored, and the colors are right (amber accents, not blue). Swapped red and blue means `lcd.bgr` is wrong; a negative-looking image means `lcd.invert` is.
 3. **Brightness:** the settings menu's brightness steps dim the screen, and 100 percent is the brightest. Reversed steps mean `lcd.backlight_invert` is wrong.
 4. **Touch:** holding the screen records, a swipe down cancels, and taps land where you touch.
 5. **Microphone:** hold BOOT and speak; the waves move with your voice and Hermes's transcript is right.
 6. **Speaker:** replies are clear and loud enough (`set volume 80`).
-7. **Power:** unplug USB with the battery in, and the device stays on. **Power off** in settings turns it off.
+7. **Power:** unplug USB with the battery in, and the device stays on. **Battery and power** then shows the voltage and "Not charging", and `diag` reports `"external_power":false`; plugged into a computer it reports charging and external power. **Power off** in settings turns it off.
 
 The pin map follows xiaozhi-esp32's `spotpear/sp-esp32-s3-1.54-muma` board at commit `d91d682`; see [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
 

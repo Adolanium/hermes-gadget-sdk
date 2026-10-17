@@ -348,6 +348,8 @@ BoardConfig make() {
   // R27/R32 divide VBAT by three. BAT_EN is high to keep battery power on;
   // CHG_STAT is low while charging. PWR remains part of the power circuit.
   b.latch_power = {true, 1, 2, 3};
+  // No USB-status input: report external power from CHG_STAT or a USB host.
+  b.latch_power.usb_external_power = true;
   b.buttons = {0, 4, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "PLUS";
@@ -538,10 +540,14 @@ BoardConfig make() {
   b.touch.bus = {11, 7, 400000};
   b.touch.rst = 6;
   b.touch.width = b.touch.height = 240;
-  // GPIO3 high keeps the battery path on; upstream lowers it to shut down. The
-  // battery divider on GPIO1 and the GPIO41 charge signal (active high, where
-  // LatchPower expects active low) are not calibrated yet, so neither is read.
-  b.latch_power = {true, -1, 3, -1};
+  // GPIO3 high keeps the battery path on; upstream lowers it to shut down.
+  // GPIO1 reads the battery through a divider by two (upstream's 1980..2480 raw
+  // range at 12 dB is about 3.1..4.0 V at the cell), and GPIO41 reads high
+  // while charging.
+  b.latch_power = {true, 1, 3, 41};
+  b.latch_power.mv_ratio = 2;
+  b.latch_power.charging_active_high = true;
+  b.latch_power.usb_external_power = true;
   b.buttons = {0, -1, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";

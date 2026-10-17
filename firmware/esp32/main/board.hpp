@@ -185,6 +185,11 @@ struct LatchPowerConfig {
   int mv_ratio = 3;
   uint16_t max_battery_mv = 4998;
   bool power_off_supported = true;
+  bool charging_active_high = false;  // the charging signal reads high while charging
+  // Report external power from the charging signal or a USB host on the S3's own
+  // USB port, so battery-only savings (Wi-Fi modem sleep) can apply. A charger
+  // without data that has finished charging then counts as battery.
+  bool usb_external_power = false;
 };
 
 struct BoardConfig {

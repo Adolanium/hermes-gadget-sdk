@@ -222,6 +222,8 @@ extern "C" void app_main(void) {
   hal.transport = &g_transport;
   hal.storage = &g_storage;
   if (latch_power) hal.power = &g_latch_power;
+  if (latch_power && board.latch_power.usb_external_power)
+    g_wifi.on_battery = [] { return g_latch_power.external_power() == std::optional<bool>(false); };
   if (g_updater.capacity()) hal.updater = &g_updater;
   i2c_master_bus_handle_t i2c_bus = hgp::i2c::bus(board.i2c);
   const bool peripherals_ready = (!board.cores3 || g_cores3.begin(i2c_bus)) &&

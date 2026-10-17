@@ -501,8 +501,10 @@ class LatchPower final : public hg::Power {
   std::optional<hg::PowerStatus> read() override;
   bool can_power_off() const override { return cfg_.power_off_supported; }
   bool power_off() override;
+  std::optional<bool> external_power() override;
 
  private:
+  bool charging_signal() const;
   LatchPowerConfig cfg_{};
   adc_oneshot_unit_handle_t adc_ = nullptr;
   adc_cali_handle_t calibration_ = nullptr;
