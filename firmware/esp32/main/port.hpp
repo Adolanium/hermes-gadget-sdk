@@ -234,6 +234,7 @@ class I2sMic final : public hg::AudioIn {
   static void task(void* arg);
   i2s_chan_handle_t rx_ = nullptr;
   uint32_t rate_ = 16000;
+  bool pdm_ = false;  // PDM capture yields 16-bit samples; I2S yields 32-bit
   std::atomic<bool> capturing_{false};
 };
 
@@ -446,10 +447,13 @@ class TouchInput {
   bool begin_box_touch(i2c_master_bus_handle_t bus);
   void gate_on_int();
   static void on_int(void* arg);
+  static void on_encoder_edge(void* arg);  // IRAM: steps the quadrature decoder per edge
+  static void on_encoder_a_edge(void* arg);  // IRAM: pulse-per-detent channel A
+  static void on_encoder_b_edge(void* arg);  // IRAM: pulse-per-detent channel B
+  void IRAM_ATTR encoder_pulse(int8_t channel);  // +1 = channel A, -1 = channel B; direction maps at post
   bool may_read(bool was_touching);
   void wait(uint32_t ms);
   bool read_key(bool& pressed);
-  bool sample_encoder(int& direction);
   TouchConfig touch_{};
   ExpanderKeyConfig key_{};
   i2c_master_dev_handle_t touch_dev_ = nullptr;
@@ -460,8 +464,13 @@ class TouchInput {
   void* task_ = nullptr;                  // the touch task, woken by an edge
   gpio_num_t encoder_a_ = GPIO_NUM_NC;
   gpio_num_t encoder_b_ = GPIO_NUM_NC;
-  uint8_t encoder_state_ = 0;
-  int8_t encoder_accumulator_ = 0;
+  volatile uint8_t encoder_state_ = 0;      // last A/B sample (ISR-written)
+  volatile int8_t encoder_accumulator_ = 0;  // quadrature steps toward the next detent (ISR-written)
+  std::atomic<int8_t> encoder_pending_{0};   // whole detents waiting for the task to post
+  bool encoder_pulse_per_detent_ = false;    // knob-ring encoder: channel = direction
+  volatile int8_t encoder_first_ = 0;        // leading channel of the current detent (0 = idle)
+  volatile int64_t encoder_pair_deadline_us_ = 0;  // solo-pulse timeout (task checks it)
+  volatile int64_t last_edge_us_ = INT64_MIN;  // per-edge debounce (ISR-written)
 };
 
 class AxpPower final : public hg::Power {

@@ -13,6 +13,7 @@
 #include "esp_lcd_panel_st7789.h"
 #include "esp_log.h"
 #include "panel_box3.hpp"
+#include "panel_sh8601.hpp"
 #include "panel_cores3.hpp"
 #include "panel_ws185.hpp"
 #include "freertos/task.h"
@@ -36,7 +37,8 @@ bool SpiDisplay::on_trans_done(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event
 
 bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   cfg_ = cfg;
-  const bool qspi = cfg.controller == LcdController::St77916;
+  const bool qspi = cfg.controller == LcdController::St77916 || cfg.controller == LcdController::Sh8601;
+  const bool st77916 = cfg.controller == LcdController::St77916;
   bool ili9341 = false;
   bool cores3_e = false;
   if (cfg.controller == LcdController::Box3) {
@@ -49,7 +51,8 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
       ili9341 = true;
     }
   }
-  controller_name_ = qspi ? "st77916" : ili9341 ? "ili9342" : "st7789";
+  controller_name_ = cfg.controller == LcdController::Sh8601 ? "sh8601"
+                     : qspi ? "st77916" : ili9341 ? "ili9342" : "st7789";
   if (cfg.controller == LcdController::CoreS3) {
     if (!i2c_bus) return false;
     i2c_device_config_t device = {};
@@ -126,7 +129,18 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   io_cfg.on_color_trans_done = &SpiDisplay::on_trans_done;
   io_cfg.user_ctx = this;
   uint8_t panel_id[4] = {};
-  if (qspi) {
+  if (st77916) {
+    if (cfg.rst >= 0) {
+      // Boards without an I/O expander leave the panel reset line floating at
+      // boot; hold it deasserted or the ID read below returns zeros.
+      const gpio_num_t rst_gpio = static_cast<gpio_num_t>(cfg.rst);
+      gpio_config_t io = {};
+      io.pin_bit_mask = 1ULL << rst_gpio;
+      io.mode = GPIO_MODE_OUTPUT;
+      gpio_config(&io);
+      gpio_set_level(rst_gpio, cfg.reset_active_high ? 0 : 1);
+      vTaskDelay(pdMS_TO_TICKS(20));
+    }
     // As in the factory demo, read the panel ID (command 0x04) at 3 MHz. It
     // selects one of the two vendor initialization tables below.
     const uint32_t full_speed = io_cfg.pclk_hz;
@@ -154,12 +168,21 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   st77916_vendor_config_t st_vendor = {};
   if (qspi) {
     const bool newer = panel_id[1] == 0x02;
+    if (cfg.controller == LcdController::Sh8601) {
+      sh8601_vendor_config_t sh_vendor = {};
+      sh_vendor.flags.use_qspi_interface = 1;
+      sh_vendor.init_cmds = kSh8601PanelInit;
+      sh_vendor.init_cmds_size = sizeof(kSh8601PanelInit) / sizeof(kSh8601PanelInit[0]);
+      panel_cfg.vendor_config = &sh_vendor;
+      if (!esp_ok(esp_lcd_new_panel_sh8601(io_, &panel_cfg, &panel_), TAG, "esp_lcd_new_panel_sh8601")) return false;
+    } else {
     st_vendor.flags.use_qspi_interface = 1;
     st_vendor.init_cmds = newer ? kWs185PanelNew : kWs185PanelDefault;
     st_vendor.init_cmds_size = newer ? sizeof(kWs185PanelNew) / sizeof(kWs185PanelNew[0]) :
                                      sizeof(kWs185PanelDefault) / sizeof(kWs185PanelDefault[0]);
     panel_cfg.vendor_config = &st_vendor;
     if (!esp_ok(esp_lcd_new_panel_st77916(io_, &panel_cfg, &panel_), TAG, "esp_lcd_new_panel_st77916")) return false;
+    }
   } else if (ili9341) {
     if (cfg.controller == LcdController::Box3) {
       vendor.init_cmds = kBox3PanelInit;
@@ -177,8 +200,12 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   if (!esp_ok(esp_lcd_panel_reset(panel_), TAG, "esp_lcd_panel_reset")) return false;
   if (!esp_ok(esp_lcd_panel_init(panel_), TAG, "esp_lcd_panel_init")) return false;
   if (!esp_ok(esp_lcd_panel_invert_color(panel_, cfg.invert), TAG, "esp_lcd_panel_invert_color")) return false;
-  if (!esp_ok(esp_lcd_panel_swap_xy(panel_, cfg.swap_xy), TAG, "esp_lcd_panel_swap_xy")) return false;
-  if (!esp_ok(esp_lcd_panel_mirror(panel_, cfg.mirror_x, cfg.mirror_y), TAG, "esp_lcd_panel_mirror")) return false;
+  if (cfg.controller != LcdController::Sh8601) {
+    // The SH8601 component rejects even no-op swap_xy/mirror calls (it drives
+    // orientation through its own init sequence), so skip them for that panel.
+    if (!esp_ok(esp_lcd_panel_swap_xy(panel_, cfg.swap_xy), TAG, "esp_lcd_panel_swap_xy")) return false;
+    if (!esp_ok(esp_lcd_panel_mirror(panel_, cfg.mirror_x, cfg.mirror_y), TAG, "esp_lcd_panel_mirror")) return false;
+  }
   if (!esp_ok(esp_lcd_panel_set_gap(panel_, cfg.gap_x, cfg.gap_y), TAG, "esp_lcd_panel_set_gap")) return false;
   if (!esp_ok(esp_lcd_panel_disp_on_off(panel_, true), TAG, "esp_lcd_panel_disp_on_off")) return false;
 
@@ -212,6 +239,7 @@ hg::DisplayInfo SpiDisplay::info() const {
   di.swap_bytes = true;  // the panel wants big-endian RGB565
   di.has_backlight = cfg_.backlight >= 0 || static_cast<bool>(board_backlight);
   di.round = cfg_.round;
+  di.font_scale = cfg_.font_scale;
   return di;
 }
 

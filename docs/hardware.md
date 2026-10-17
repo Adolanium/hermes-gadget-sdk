@@ -120,6 +120,36 @@ Record the results with the [hardware checklist](hardware-validation.md#record-a
 
 References: [Waveshare V2 documentation](https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.85C), [V2 schematic](https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-1.85C/ESP32-S3-Touch-LCD-1.85C_V2.pdf) and the [factory demo at 8ead4a96](https://github.com/waveshareteam/ESP32-S3-Touch-LCD-1.85C/tree/8ead4a96bf3a278fc4ebd8ef4768657e17fa2880). The demo numbers the expander pins from one (EXIO1 is P0). The LCD initialization tables and their licenses are listed in [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
 
+## Waveshare ESP32-S3-Knob-Touch-LCD-1.8
+
+Use `esp32s3-knob-touch-lcd-1.8` for the knob board: an ESP32-S3R8 with 16 MB flash and 8 MB octal PSRAM, a round 360×360 SH8601 LCD over QSPI (the same panel the factory EmbeddedWizard demo drives, despite Waveshare listing an ST77916-style panel family for the 1.85C V2), CST816S touch, one I2S MEMS microphone, a rotary encoder around the screen, a DRV2605 haptic driver and a Li-ion battery with charging management.
+
+**This port is text-only.** The board's PCM5100A DAC and headphone jack hang off the board's secondary ESP32 (the one that also ships the factory Bluetooth audio firmware), not the S3, so replies are shown on the screen and never spoken. The clone Guition JC3636K518 uses the same hardware and should work the same way. This port is experimental; display, touch and microphone were verified on hardware (360×360 round, hold-to-talk).
+
+| Part | Connection |
+|---|---|
+| SH8601 LCD, QSPI | CS 14, clock 13, D0–D3 15/16/17/18, reset 21, backlight 47 (LEDC) |
+| CST816S touch | I2C 0x15, INT 9, reset 10 |
+| I2C | SDA 11, SCL 12, 400 kHz |
+| I2S MEMS microphone | BCLK 42, WS 45, DIN 46 |
+| Rotary encoder | A 8, B 7 (each detent scrolls; the knob's push button is not wired) |
+| BOOT | GPIO 0, TALK |
+
+Hold the screen to talk, release to send, swipe down to cancel. The IMU, RTC, TF card, haptic driver and battery ADC are not used.
+
+```bash
+cd firmware/esp32
+pio run -e esp32s3-knob-touch-lcd-18 -t upload -t monitor
+```
+
+For ESP-IDF, use `SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp32s3-knob-touch-lcd-1.8/sdkconfig.defaults"` with a separate build directory and sdkconfig. The USB-C port handles flashing and the serial console (115200 baud); flipping the cable flashes the other MCU. The `sim-360x360-knob` simulator board has the same screen and audio capabilities.
+
+### First flash: what to check
+
+- The panel logs `sh8601 360x360 ready`. The knob ships an SH8601 glass; if a future unit logs an ST77916 panel ID instead, it has a different panel and needs the ST77916 bring-up table.
+- The encoder scrolls the reply list; each detent is one step.
+- The microphone captures on a hold: check the VU feedback on screen, and that released audio is recognized.
+
 ## ESP32-S3-BOX-3
 
 Use `esp32-s3-box-3` for Espressif's BOX-3 with 16 MB flash and 16 MB octal PSRAM. The original BOX and BOX-Lite need different profiles. This port is experimental, with no physical report recorded.

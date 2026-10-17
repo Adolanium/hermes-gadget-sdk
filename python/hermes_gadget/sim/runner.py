@@ -50,6 +50,10 @@ BOARDS = {
     "sim-240x240": Board("sim-240x240", 240, 240, scroll_buttons=False),
     # Waveshare 1.85C V2: round LCD and touch, no scroll buttons.
     "sim-360x360-round": Board("sim-360x360-round", 360, 360, scroll_buttons=False, round=True, touch=True),
+    # Waveshare ESP32-S3-Knob-Touch-LCD-1.8: same round glass as the 1.85C V2,
+    # with an encoder for scrolling but no speaker (the DAC is on the 2nd MCU).
+    "sim-360x360-knob": Board("sim-360x360-knob", 360, 360, speaker=False, scroll_buttons=False,
+                              round=True, touch=True),
     # A 1.75" round 466x466 AMOLED touch board (e.g. ESP32-S3-Touch-AMOLED-1.75): no scroll buttons.
     "sim-466x466-round": Board("sim-466x466-round", 466, 466, scroll_buttons=False, round=True, touch=True),
     # A 1.8" rectangular 368x448 AMOLED touch board (e.g. ESP32-S3-Touch-AMOLED-1.8): no scroll buttons.

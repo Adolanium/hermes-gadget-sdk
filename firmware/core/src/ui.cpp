@@ -152,6 +152,9 @@ Ui::Ui(Display& display)
   }
   int w = info_.width, h = info_.height;
   int s = std::max(1, std::min(4, std::min(w / 160, h / 120)));
+  // A board can ask for larger text (font_scale multiplies the automatic pick);
+  // clamp to the same 1..4 range every layout below assumes.
+  s = std::min(4, s * std::max<uint8_t>(1, panel_.font_scale));
   layout_.scale = s;
   const int bar_h = Canvas::line_height(s) + 2 * s;
   // A round panel's top band holds the link dot and one line of the settings
