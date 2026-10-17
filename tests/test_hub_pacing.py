@@ -87,3 +87,45 @@ def test_a_reply_never_bursts_past_the_lead(monkeypatch, stall_s):
         for i, (t, _) in enumerate(run_frames):
             due = t0 + i * hubmod.AUDIO_FRAME_MS / 1000
             assert t >= due - hubmod.PLAYBACK_LEAD_S - 1e-6, f"frame {i} sent {due - t:.3f}s early"
+
+
+@pytest.mark.parametrize("ttfa_s", [0.5, 3.0])
+def test_time_to_first_audio_never_distorts_pacing(monkeypatch, ttfa_s):
+    """Q3-1 (Opus sign-off): the clock starts at the first audio frame, so a long
+    time-to-first-audio (TTF) — below or above the stall threshold — must not cause
+    a catch-up burst at the start of the stream."""
+    clock = VirtualClock()
+    real_sleep = asyncio.sleep
+
+    async def fake_sleep(seconds, *args):
+        if seconds <= 0:
+            await real_sleep(0)
+            return
+        clock.now += seconds
+        await real_sleep(0)
+
+    monkeypatch.setattr(hubmod.asyncio, "sleep", fake_sleep)
+
+    async def run():
+        loop = asyncio.get_running_loop()
+        monkeypatch.setattr(loop, "time", lambda: clock.now)
+        session = RecordingSession(clock)
+        out = hubmod.AudioOut(session, stream=7, src_rate=RATE)
+        await out.start()
+        clock.now += ttfa_s                # the TTS producer takes ttfa_s to emit the first audio
+        out.write(b"\x00" * (FRAME_BYTES * 25))   # a one-second clause arrives at once
+        out.finish()
+        await asyncio.wait_for(out.done.wait(), 5)
+        return session
+
+    session = asyncio.run(run())
+    assert session.events == ["audio.start", "audio.end"]
+    assert len(session.sent) == 25 and all(n == FRAME_BYTES + protocol.BINARY_HEADER for _, n in session.sent)
+    per_instant = Counter(t for t, _ in session.sent)
+    biggest = max(per_instant.values())
+    assert biggest <= LEAD_FRAMES + 1, f"{biggest} frames burst at one instant after a {ttfa_s}s time-to-first-audio"
+    # All 25 frames go out paced from the first frame's send time, regardless of the TTF delay.
+    t0 = session.sent[0][0]
+    for i, (t, _) in enumerate(session.sent):
+        due = t0 + i * hubmod.AUDIO_FRAME_MS / 1000
+        assert t >= due - hubmod.PLAYBACK_LEAD_S - 1e-6, f"frame {i} sent {due - t:.3f}s early"
