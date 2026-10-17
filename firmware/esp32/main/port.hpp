@@ -229,6 +229,7 @@ class I2sMic final : public hg::AudioIn {
   static void task(void* arg);
   i2s_chan_handle_t rx_ = nullptr;
   uint32_t rate_ = 16000;
+  bool pdm_ = false;  // PDM capture yields 16-bit samples; I2S yields 32-bit
   std::atomic<bool> capturing_{false};
 };
 

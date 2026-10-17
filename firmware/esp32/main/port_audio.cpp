@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "driver/i2s_std.h"
+#include "driver/i2s_pdm.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -45,14 +46,29 @@ void log_underruns(const char* tag, const hg::SpeakerUnderruns::Totals& t) {
 // Microphone
 
 bool I2sMic::begin(const I2sMicConfig& cfg) {
-  i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
+  // The PDM2PCM converter only exists on I2S0 (ESP32-S3); plain I2S stays on I2S1,
+  // which leaves I2S0 free for the speaker on boards that have one.
+  i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(cfg.pdm ? I2S_NUM_0 : I2S_NUM_1, I2S_ROLE_MASTER);
   if (i2s_new_channel(&chan, nullptr, &rx_) != ESP_OK) return false;
-  // INMP441 outputs 24-bit samples in a 32-bit left slot.
-  i2s_std_config_t std_cfg = std_config(rate_, I2S_DATA_BIT_WIDTH_32BIT, cfg.sck, cfg.ws, -1, cfg.sd);
-  std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_LEFT;
-  if (i2s_channel_init_std_mode(rx_, &std_cfg) != ESP_OK) return false;
+  if (cfg.pdm) {
+    // PDM mic (e.g. Waveshare Knob-Touch-LCD-1.8): sck = PDM clock, sd = data.
+    i2s_pdm_rx_config_t pdm_cfg = {
+        .clk_cfg = I2S_PDM_RX_CLK_DEFAULT_CONFIG(rate_),
+        .slot_cfg = I2S_PDM_RX_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
+        .gpio_cfg = {.clk = static_cast<gpio_num_t>(cfg.sck),
+                     .din = static_cast<gpio_num_t>(cfg.sd),
+                     .invert_flags = {.clk_inv = false}},
+    };
+    if (i2s_channel_init_pdm_rx_mode(rx_, &pdm_cfg) != ESP_OK) return false;
+    pdm_ = true;
+  } else {
+    // INMP441 outputs 24-bit samples in a 32-bit left slot.
+    i2s_std_config_t std_cfg = std_config(rate_, I2S_DATA_BIT_WIDTH_32BIT, cfg.sck, cfg.ws, -1, cfg.sd);
+    std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_LEFT;
+    if (i2s_channel_init_std_mode(rx_, &std_cfg) != ESP_OK) return false;
+  }
   xTaskCreate(&I2sMic::task, "hg-mic", 4096, this, 6, nullptr);
-  ESP_LOGI(TAG, "microphone ready");
+  ESP_LOGI(TAG, "microphone ready (%s)", pdm_ ? "pdm" : "i2s");
   return true;
 }
 
@@ -76,7 +92,6 @@ void I2sMic::stop() {
 
 void I2sMic::task(void* arg) {
   auto* self = static_cast<I2sMic*>(arg);
-  int32_t raw[kMicChunk];
   int16_t pcm[kMicChunk];
   for (;;) {
     if (!self->capturing_) {
@@ -84,6 +99,15 @@ void I2sMic::task(void* arg) {
       continue;
     }
     size_t got = 0;
+    if (self->pdm_) {
+      // PDM decimation yields 16-bit samples straight out of the driver.
+      i2s_channel_read(self->rx_, pcm, sizeof(pcm), &got, pdMS_TO_TICKS(100));
+      if (got == 0) continue;
+      size_t n = got / sizeof(int16_t);
+      if (self->capturing_) events::post(EventType::Mic, pcm, n * sizeof(int16_t));
+      continue;
+    }
+    int32_t raw[kMicChunk];
     // A read that spans DMA buffers can return ESP_ERR_TIMEOUT with part of the data in `got`
     // (seen on ESP-IDF 6.0.1): keep what arrived instead of dropping the whole read.
     i2s_channel_read(self->rx_, raw, sizeof(raw), &got, pdMS_TO_TICKS(100));

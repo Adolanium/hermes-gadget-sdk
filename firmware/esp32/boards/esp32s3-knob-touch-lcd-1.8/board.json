@@ -1,0 +1,6 @@
+{
+  "title": "Waveshare ESP32-S3-Knob-Touch-LCD-1.8 (experimental)",
+  "summary": "Round 360×360 LCD with rotary knob, touch and microphone; replies are text only — the DAC sits on the board's second MCU.",
+  "docs": "docs/hardware.md#waveshare-esp32-s3-knob-touch-lcd-18",
+  "ready_made": true
+}

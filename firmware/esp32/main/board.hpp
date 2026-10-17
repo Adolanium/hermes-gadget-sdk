@@ -53,7 +53,7 @@ struct RgbPanelConfig {
   RgbTimings timings{};   // panel scanout timings (per-datasheet)
 };
 
-enum class LcdController { St7789, Box3, CoreS3, St77916 };
+enum class LcdController { St7789, Box3, CoreS3, St77916, Sh8601 };
 
 struct LcdConfig {
   bool enabled = false;
@@ -75,6 +75,7 @@ struct LcdConfig {
 struct I2sMicConfig {
   bool enabled = false;
   int sck = -1, ws = -1, sd = -1;
+  bool pdm = false;  // PDM mic: sck carries the PDM clock, sd the data; ws unused
 };
 
 struct I2sSpeakerConfig {

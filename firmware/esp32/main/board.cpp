@@ -26,6 +26,8 @@ namespace {
 #define HG_BOARD_NAME "m5stack-cores3"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_185C_V2
 #define HG_BOARD_NAME "waveshare-esp32-s3-touch-lcd-1.85c-v2"
+#elif CONFIG_HG_BOARD_WS_KNOB_LCD_18
+#define HG_BOARD_NAME "waveshare-esp32s3-knob-touch-lcd-1.8"
 #elif CONFIG_HG_BOARD_T_DISPLAY_S3
 #define HG_BOARD_NAME "tdisplay-s3"
 #elif CONFIG_HG_BOARD_CROWPANEL_21
@@ -257,6 +259,44 @@ BoardConfig make() {
   b.touch.addr = 0x15;
   b.touch.width = b.touch.height = 360;
   b.buttons = {0, -1, -1, -1};
+  b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
+  return b;
+}
+#elif CONFIG_HG_BOARD_WS_KNOB_LCD_18
+// Waveshare ESP32-S3-Knob-Touch-LCD-1.8: round 360x360 LCD (ST77916, QSPI,
+// the same panel family as the 1.85C V2), CST816S touch, one I2S MEMS
+// microphone, rotary encoder, battery + DRV2605 haptics. The PCM5100A DAC
+// hangs off the board's secondary ESP32, so this port is display + microphone
+// only: replies are shown as text, never spoken. Pins: Waveshare wiki
+// schematic and the community ESPHome configs (nkinnan, patrick3399, KrX3D).
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.lcd.enabled = true;
+  b.lcd.controller = LcdController::Sh8601;  // the 1.8" round glass is SH8601, not ST77916
+  b.lcd.width = b.lcd.height = 360;
+  b.lcd.swap_xy = b.lcd.mirror_x = b.lcd.mirror_y = false;
+  b.lcd.round = true;
+  b.lcd.sclk = 13;
+  b.lcd.mosi = 15;
+  b.lcd.d1 = 16;
+  b.lcd.d2 = 17;
+  b.lcd.d3 = 18;
+  b.lcd.cs = 14;
+  b.lcd.rst = 21;
+  b.lcd.backlight = 47;
+  b.lcd.spi_mhz = 80;
+  b.i2c = {11, 12, 400000};
+  b.mic = {true, 45, -1, 46, true};  // PDM mic: CLK 45, DATA 46 (sck=45 sd=46, ws unused)
+  b.touch.enabled = true;
+  b.touch.controller = TouchController::Cst816;
+  b.touch.addr = 0x15;
+  b.touch.rst = 10;
+  b.touch.int_gpio = 9;
+  b.touch.width = b.touch.height = 360;
+  b.encoder = {8, 7};
+  b.buttons = {0, -1, -1, -1};  // BOOT also works as TALK
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";
   return b;
