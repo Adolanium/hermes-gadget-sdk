@@ -6,11 +6,22 @@ connections; this module is the meeting point and imports nothing from Hermes.
 
 from __future__ import annotations
 
+import sys
 import threading
+import types
 from typing import Any
 
-_lock = threading.Lock()
-_adapters: dict[str, Any] = {}
+# Hermes imports a directory plugin once per profile scope (``hermes_plugins.gadget``, then
+# ``hermes_plugins.gadget__home_<digest>``), so module globals would give each profile its own
+# empty registry. A profile routed to the default profile's gadgets (gateway.profile_routes)
+# must still find the adapter: keep one registry per process, shared by every copy.
+_SHARED = "hermes_gadget_runtime_registry"
+_fresh = types.ModuleType(_SHARED)
+_fresh.lock = threading.Lock()
+_fresh.adapters = {}
+_registry = sys.modules.setdefault(_SHARED, _fresh)  # atomic: two copies importing at once share one
+_lock: threading.Lock = _registry.lock
+_adapters: dict[str, Any] = _registry.adapters
 
 
 def register(profile: str, adapter: Any) -> None:
