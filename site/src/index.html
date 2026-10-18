@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Hermes Gadget · Your agent, within reach</title>
   <meta name="description" content="A small device for your own Hermes Agent. Hold a button, ask a question, and hear the answer. Set up a board or try the desktop simulator.">
-  <meta name="theme-color" content="#10151c">
+  <meta name="theme-color" content="#04003a">
   <meta property="og:title" content="Hermes Gadget">
   <meta property="og:description" content="Give your Hermes a place on your desk. Set up a board or try the desktop simulator.">
   <meta property="og:image" content="https://adolanium.github.io/hermes-gadget-sdk/img/logo.png">
@@ -30,9 +30,14 @@
         <p class="hint">Open source · ESP32-S3 · Raspberry Pi · Desktop simulator</p>
       </div>
       <figure class="stage">
-        <div class="device-shell"><img src="img/screen-ready.png" width="466" height="466" alt="The simulator's round display, ready for a question"></div>
-        <div class="device-stand" aria-hidden="true"></div>
-        <figcaption>Simulator screen in an illustrative enclosure.<br>Hold to talk. Release to send.</figcaption>
+        <div class="stage-window">
+          <div class="stage-bar" aria-hidden="true"><span>hermes://gadget</span><span><i></i><i></i><i></i></span></div>
+          <div class="stage-body">
+            <div class="device-shell"><img src="img/screen-ready.png" width="466" height="466" alt="The simulator's round display, ready for a question"></div>
+            <div class="device-stand" aria-hidden="true"></div>
+          </div>
+          <figcaption>Simulator screen in an illustrative enclosure.<br>Hold to talk. Release to send.</figcaption>
+        </div>
       </figure>
     </section>
     <section aria-labelledby="paths-title">
@@ -44,6 +49,7 @@
         <a class="path" href="docs/development.html"><span class="number">04 / I WANT TO BUILD</span><h3>Make something yours</h3><p>Add a board, connect a sensor, or give your gadget a new face.</p><span class="link">Explore the SDK →</span></a>
       </div>
     </section>
+    <figure class="art-band"><img src="img/banner.webp" width="1200" height="600" alt="A dithered marble bust of Hermes listening to a small handheld gadget on a stone plinth" loading="lazy" decoding="async"></figure>
     <section class="site-band" aria-label="What your gadget can do">
       <div><h3>Talk naturally</h3><p>Your Hermes handles speech and replies. <a href="docs/connect-hermes.html#4-enable-speech">Set up speech recognition and a voice.</a></p></div>
       <div><h3>Give your agent a way to act</h3><p>Show a card, read a sensor, or control an LED. <a href="docs/porting.html">Build with device actions.</a></p></div>

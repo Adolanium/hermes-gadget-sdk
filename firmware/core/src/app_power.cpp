@@ -1,8 +1,23 @@
 #include "hg/app.hpp"
+#include "hg/battery.hpp"
 
 #include <algorithm>
 
 namespace hg {
+
+bool App::battery_is_estimated() const {
+  if (!power_status_ || power_status_->battery_present == false) return false;
+  const auto& p = *power_status_;
+  return !p.battery_percent && battery_estimate_enabled_ && p.battery_mv &&
+         *p.battery_mv >= 2000 && *p.battery_mv <= 4500;
+}
+
+std::optional<uint8_t> App::display_battery_percent() const {
+  if (!power_status_ || power_status_->battery_present == false) return std::nullopt;
+  if (power_status_->battery_percent) return power_status_->battery_percent;
+  if (battery_is_estimated()) return estimate_liion_percent(*power_status_->battery_mv);
+  return std::nullopt;
+}
 
 bool App::wake_display() {
   activity_at_ = now();

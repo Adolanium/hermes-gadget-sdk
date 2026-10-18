@@ -22,7 +22,7 @@ extern "C" {
 #define HGSIM_API __attribute__((visibility("default")))
 #endif
 
-#define HGSIM_ABI_VERSION 5
+#define HGSIM_ABI_VERSION 6
 
 typedef struct hgsim hgsim;
 
@@ -86,6 +86,7 @@ typedef struct hgsim_config {
   int touch; /* the screen is the main input (see hg::TouchGestures) */
   size_t update_capacity; /* bytes the update slot holds; 0 = no over-the-air updates */
   int update_pending;     /* this boot runs an installed update that isn't confirmed yet */
+  int has_power;         /* explicitly supplied simulated power readings */
 } hgsim_config;
 
 /* Action handler: fill `result_json` (a JSON object) and return 1, or write an
@@ -113,6 +114,11 @@ HGSIM_API void hgsim_touch(hgsim* sim, int touching, int x, int y);
 HGSIM_API void hgsim_mic_samples(hgsim* sim, const int16_t* samples, size_t count);
 HGSIM_API void hgsim_submit_text(hgsim* sim, const char* text);
 HGSIM_API void hgsim_set_sensor(hgsim* sim, const char* name, double value);
+/* Full replacement; available is 0/1. Optional fields use -1 for unknown:
+ * booleans -1/0/1, millivolts -1 or 0..65535, percentage -1 or 0..100.
+ * Returns 0 without mutation for invalid input, NULL, or no configured power device. */
+HGSIM_API int hgsim_set_power(hgsim* sim, int available, int battery_present, int battery_mv,
+                             int battery_percent, int charging, int external_power);
 HGSIM_API void hgsim_emit_event(hgsim* sim, const char* name, const char* data_json, int notify_agent);
 
 /* Serial-console command; returns the response length (written into out). */

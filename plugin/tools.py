@@ -36,7 +36,8 @@ DEVICES_SCHEMA = {
 DISPLAY_SCHEMA = {
     "name": "gadget_display",
     "description": "Show a short card (title and text) on a gadget's screen, e.g. a timer, list or note. "
-                   "Screens are small: keep text brief and plain (no Markdown).",
+                   "Screens are small: keep text brief and plain (no Markdown). While the screen is off "
+                   "the card waits and appears when it lights up.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -146,10 +147,14 @@ def gadget_display(args: dict, **_kw) -> str:
     except (TypeError, ValueError):
         seconds = 20
     try:
-        _run(adapter, session.show_card(title, text, seconds))
+        shown = _run(adapter, session.show_card(title, text, seconds))
     except Exception as exc:
         return _error(f"could not reach {session.name}: {exc}")
-    return json.dumps({"success": True, "device": session.name, "shown_for_s": seconds or "until dismissed"})
+    result = {"success": True, "device": session.name, "shown_for_s": seconds or "until dismissed"}
+    if shown is False:
+        result["held"] = ("the screen is off; the card is shown when it lights up, "
+                          "for what is left of its time, unless a newer card or image replaces it")
+    return json.dumps(result)
 
 
 def gadget_action(args: dict, **_kw) -> str:

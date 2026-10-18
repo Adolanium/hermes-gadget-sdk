@@ -1,0 +1,6 @@
+{
+  "title": "Spotpear ESP32-S3-1.54 muma",
+  "summary": "Experimental. 1.54\" 240x240 screen, touch, a microphone and an onboard speaker.",
+  "docs": "docs/hardware.md#spotpear-esp32-s3-154-muma",
+  "ready_made": true
+}

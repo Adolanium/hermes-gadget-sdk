@@ -13,6 +13,7 @@ import asyncio
 import base64
 import json
 import logging
+import math
 import secrets
 import time
 import uuid
@@ -89,6 +90,20 @@ class _Upload:
     next_seq: int = 0
     gaps: int = 0
     truncated: bool = False
+
+
+@dataclass
+class _Held:
+    """Screen updates held back while a device's screen is dark (docs/protocol.md#screen-sleep).
+
+    Only the latest of each is kept: one status phrase, one dashboard, and one card
+    or image (the newer replaces the older, as it would on screen).
+    """
+    status: str | None = None
+    dashboard: dict | None = None
+    view: tuple | None = None  # ("card", title, body) or ("image", width, height, rgb565)
+    ttl_s: float = 0
+    held_at: float = 0.0
 
 
 class AudioOut:
@@ -197,6 +212,9 @@ class DeviceSession:
         sensors = hello.get("sensors")
         self.sensors: dict = dict(sensors) if isinstance(sensors, dict) else {}
         self.sensors_at: float = time.time() if self.sensors else 0.0
+        # The device reports this in hello and in state when it changes; firmware that
+        # doesn't counts as always lit, so nothing is held back for it.
+        self.display_sleeping: bool = hello.get("display_sleeping") is True
         self.paired = False
         self.connected_at = time.time()
         self.last_rx = time.monotonic()
@@ -208,6 +226,7 @@ class DeviceSession:
         self._pending: dict[str, asyncio.Future] = {}
         self._tasks: set[asyncio.Task] = set()
         self._ota_inbox: asyncio.Queue | None = None  # the device's ota.* replies, while an update runs
+        self._dashboard_sent: dict | None = None  # the last dashboard this connection delivered
 
     # -- capabilities -----------------------------------------------------------
 
@@ -237,6 +256,13 @@ class DeviceSession:
         w, h = int(img.get("width") or 0), int(img.get("height") or 0)
         return (w, h) if w > 0 and h > 0 else None
 
+    @property
+    def dashboard_version(self) -> int:
+        """The dashboard layout the device draws (``caps.dashboard.v``), or 0 when it has none."""
+        dash = self.caps.get("dashboard")
+        v = dash.get("v") if isinstance(dash, dict) else None
+        return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else 0
+
     def action_names(self) -> list[str]:
         return [a["name"] for a in self.actions]
 
@@ -260,8 +286,16 @@ class DeviceSession:
     async def send_transcript(self, text: str) -> None:
         await self.send_json(protocol.message("transcript", text=text))
 
-    async def send_status(self, text: str) -> None:
+    async def send_status(self, text: str) -> bool:
+        """Show the working-state phrase. False when it is held until the screen lights up."""
+        if self.display_sleeping:
+            self.hub._hold(self.device_id).status = text
+            return False
+        held = self.hub._held.get(self.device_id)
+        if held:
+            held.status = None
         await self.send_json(protocol.message("status", text=text))
+        return True
 
     async def send_notice(self, text: str, ttl_s: float = 8) -> None:
         await self.send_json(protocol.message("notice", text=text, ttl_s=ttl_s))
@@ -270,6 +304,9 @@ class DeviceSession:
         await self.send_json(protocol.message("turn.start", turn=turn))
 
     async def turn_end(self, turn: str, outcome: str = "success") -> None:
+        held = self.hub._held.get(self.device_id)
+        if held:
+            held.status = None  # the phrase was about this turn
         await self.send_json(protocol.message("turn.end", turn=turn, outcome=outcome))
 
     async def send_pairing(self, code: str, command: str) -> None:
@@ -290,10 +327,17 @@ class DeviceSession:
     async def close_prompt(self, prompt_id: str) -> None:
         await self.send_json(protocol.message("prompt.close", id=prompt_id))
 
-    async def show_card(self, title: str, body: str, ttl_s: float = 15) -> None:
+    async def show_card(self, title: str, body: str, ttl_s: float = 15) -> bool:
+        """Show a card. False when it is held until the screen lights up."""
+        if self._hold_view(("card", title, body), ttl_s):
+            return False
         await self.send_json(protocol.message("display", title=title, body=body, ttl_s=ttl_s))
+        return True
 
-    async def show_image(self, width: int, height: int, rgb565: bytes, ttl_s: float = 30) -> None:
+    async def show_image(self, width: int, height: int, rgb565: bytes, ttl_s: float = 30) -> bool:
+        """Show an image. False when it is held until the screen lights up."""
+        if self._hold_view(("image", width, height, rgb565), ttl_s):
+            return False
         stream = self._next_stream()
         await self.send_json(protocol.message(
             "image.start", stream=stream, width=width, height=height, format="rgb565", ttl_s=ttl_s))
@@ -301,6 +345,55 @@ class DeviceSession:
             await self.send_binary(protocol.binary(
                 protocol.CHANNEL_IMAGE, stream, seq, rgb565[off: off + IMAGE_CHUNK_BYTES]))
         await self.send_json(protocol.message("image.end", stream=stream))
+        return True
+
+    async def send_dashboard(self, dashboard: dict) -> bool:
+        """Send a dashboard snapshot if it differs from the last one delivered. False when it
+        wasn't sent: unchanged, or held until the screen lights up (only the latest is kept)."""
+        if self.display_sleeping:
+            self.hub._hold(self.device_id).dashboard = dashboard
+            return False
+        held = self.hub._held.get(self.device_id)
+        if held:
+            held.dashboard = None  # this one is newer
+        if dashboard == self._dashboard_sent:
+            return False
+        self._dashboard_sent = dashboard
+        await self.send_json(dashboard)
+        return True
+
+    def _hold_view(self, view: tuple, ttl_s: float) -> bool:
+        if not self.display_sleeping:
+            held = self.hub._held.get(self.device_id)
+            if held:
+                held.view = None  # this one replaces it
+            return False
+        held = self.hub._hold(self.device_id)
+        held.view, held.ttl_s, held.held_at = view, ttl_s, time.monotonic()
+        return True
+
+    async def screen_woke(self) -> None:
+        """Send what was held back while the screen was dark: the latest of each."""
+        held = self.hub._held.pop(self.device_id, None)
+        if held is None:
+            return
+        if held.status is not None:
+            await self.send_status(held.status)
+        if held.dashboard is not None:
+            await self.send_dashboard(held.dashboard)
+        if held.view is None:
+            return
+        ttl_s = held.ttl_s
+        if ttl_s and ttl_s > 0:
+            # A card or image only lasts so long; what is left of that counts from when it was sent.
+            left = ttl_s - (time.monotonic() - held.held_at)
+            if left <= 0:
+                return
+            ttl_s = math.ceil(left)
+        if held.view[0] == "card":
+            await self.show_card(held.view[1], held.view[2], ttl_s)
+        else:
+            await self.show_image(held.view[1], held.view[2], held.view[3], ttl_s)
 
     def _next_stream(self) -> int:
         self._stream_counter = self._stream_counter % 250 + 1
@@ -406,6 +499,7 @@ class DeviceSession:
             ],
             "sensors": self.sensors,
             "sensors_age_s": int(time.time() - self.sensors_at) if self.sensors_at else None,
+            "display_sleeping": self.display_sleeping,
         }
 
     def prompt_context(self) -> str:
@@ -449,6 +543,11 @@ class DeviceHub:
         self.loop: asyncio.AbstractEventLoop | None = None
         self._server = None
         self._tasks: set[asyncio.Task] = set()  # DeviceSession.spawn, including devices already gone
+        # Held back while a screen is dark, by device id: kept across reconnects.
+        self._held: dict[str, _Held] = {}
+
+    def _hold(self, device_id: str) -> _Held:
+        return self._held.setdefault(device_id, _Held())
 
     # -- lifecycle -------------------------------------------------------------------
 
@@ -602,6 +701,8 @@ class DeviceHub:
                 heartbeat_s=self.heartbeat_s, server="hermes", proto=protocol.VERSION))
             log.info("device %s (%s) online, paired=%s", session.device_id, session.name, session.paired)
             await self.delegate.on_ready(session)
+            if not session.display_sleeping:
+                session.spawn(session.screen_woke())  # lit again after a reconnect
             heartbeat = asyncio.create_task(self._heartbeat(session))
 
             async for raw in ws:
@@ -729,6 +830,13 @@ class DeviceHub:
             fut.set_exception(ActionError(str(msg.get("error") or "action failed")))
 
     async def _h_state(self, session: DeviceSession, msg: dict) -> None:
+        sleeping = msg.get("display_sleeping")
+        if isinstance(sleeping, bool) and sleeping != session.display_sleeping:
+            session.display_sleeping = sleeping
+            log.debug("[%s] screen %s", session.device_id, "dark" if sleeping else "lit")
+            if not sleeping:
+                # Off the receive loop: a held image takes a while to send.
+                session.spawn(session.screen_woke())
         sensors = msg.get("sensors")
         if isinstance(sensors, dict):
             session.sensors.update(sensors)

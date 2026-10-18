@@ -9,6 +9,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 namespace hgp {
 namespace {
@@ -34,6 +35,8 @@ struct EspOps {
   }
   void destroy(void* c) { esp_websocket_client_destroy(h(c)); }
 };
+
+uint32_t now_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
 
 uint32_t generation_of(const esp_websocket_event_data_t* d) {
   return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(d->user_context));
@@ -61,7 +64,7 @@ void WsTransport::connect(const std::string& url, const std::string& subprotocol
   cfg.buffer_size = kBufferSize;
   cfg.task_stack = 6144;
   cfg.disable_auto_reconnect = true;  // hg::App owns retry and backoff
-  cfg.network_timeout_ms = 10000;
+  cfg.network_timeout_ms = hg::ws::kNetworkTimeoutMs;
   cfg.ping_interval_sec = 0;          // the protocol has its own heartbeat
   // Every event names the connection it belongs to: a client still being torn
   // down on the send task must not be mistaken for the current one.
@@ -85,8 +88,15 @@ void WsTransport::close() {
   // on a dead link that can take seconds, and the app task must not wait.
   TxItem item{client_, 0, hg::ws::kClose, nullptr, 0};
   client_ = nullptr;
-  xQueueSend(tx_, &item, portMAX_DELAY);  // the reserved slots keep room for this
+  // The reserved slots keep room for this. If even they are full, the send task
+  // is stuck: the client is left behind and stuck() asks for a restart.
+  if (xQueueSend(tx_, &item, pdMS_TO_TICKS(hg::ws::kHandoffTimeoutMs)) != pdTRUE) {
+    ESP_LOGE(TAG, "the send task took no close for %u ms", static_cast<unsigned>(hg::ws::kHandoffTimeoutMs));
+    handoff_failed_ = true;
+  }
 }
+
+bool WsTransport::stuck() const { return handoff_failed_ || watch_.stuck(now_ms()); }
 
 bool WsTransport::enqueue(uint8_t opcode, const void* data, size_t len) {
   if (!client_ || !esp_websocket_client_is_connected(client_)) return false;
@@ -113,7 +123,9 @@ void WsTransport::tx_task(void* arg) {
   TxItem item;
   for (;;) {
     if (xQueueReceive(self->tx_, &item, portMAX_DELAY) != pdTRUE) continue;
+    self->watch_.begin(now_ms());
     if (hg::ws::process(item, self->gens_.current(), ops) == hg::ws::Outcome::Failed) ESP_LOGW(TAG, "send failed");
+    self->watch_.end();
     free(const_cast<uint8_t*>(item.data));
   }
 }

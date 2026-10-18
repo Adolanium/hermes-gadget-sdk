@@ -1,16 +1,8 @@
 #include "axp2101.hpp"
 
-namespace hg {
+#include "hg/battery.hpp"
 
-// Battery percent from voltage for when the fuel gauge reports an invalid
-// value. This board never initializes the gauge, so it can read 0 on a full
-// battery; the voltage (0x34/0x35) is the honest signal. Linear Li-ion map.
-static uint8_t millivolts_to_percent(uint16_t mv) {
-  constexpr uint16_t kEmptyMv = 3300, kFullMv = 4200;
-  if (mv <= kEmptyMv) return 0;
-  if (mv >= kFullMv) return 100;
-  return static_cast<uint8_t>(static_cast<uint32_t>(mv - kEmptyMv) * 100U / (kFullMv - kEmptyMv));
-}
+namespace hg {
 
 std::optional<PowerStatus> Axp2101::read() {
   uint8_t status[2], enable = 0, adc = 0;
@@ -45,7 +37,7 @@ std::optional<PowerStatus> Axp2101::read() {
       if (gauge)
         out.battery_percent = gauge;
       else if (out.battery_mv)
-        out.battery_percent = millivolts_to_percent(*out.battery_mv);
+        out.battery_percent = estimate_liion_percent(*out.battery_mv);
     }
   }
   return out;

@@ -28,11 +28,11 @@ constexpr size_t kSpeakerChunk = 512;         // samples per codec write
 // I2C
 
 namespace i2c {
-i2c_master_bus_handle_t bus(const I2cBusConfig& cfg) {
-  static i2c_master_bus_handle_t handle = nullptr;
+namespace {
+i2c_master_bus_handle_t open(const I2cBusConfig& cfg, i2c_port_num_t port, i2c_master_bus_handle_t& handle) {
   if (handle || cfg.sda < 0 || cfg.scl < 0) return handle;
   i2c_master_bus_config_t bus_cfg = {};
-  bus_cfg.i2c_port = I2C_NUM_0;
+  bus_cfg.i2c_port = port;
   bus_cfg.sda_io_num = static_cast<gpio_num_t>(cfg.sda);
   bus_cfg.scl_io_num = static_cast<gpio_num_t>(cfg.scl);
   bus_cfg.clk_source = I2C_CLK_SRC_DEFAULT;
@@ -43,6 +43,17 @@ i2c_master_bus_handle_t bus(const I2cBusConfig& cfg) {
     handle = nullptr;
   }
   return handle;
+}
+}  // namespace
+
+i2c_master_bus_handle_t bus(const I2cBusConfig& cfg) {
+  static i2c_master_bus_handle_t handle = nullptr;
+  return open(cfg, I2C_NUM_0, handle);
+}
+
+i2c_master_bus_handle_t touch_bus(const I2cBusConfig& cfg) {
+  static i2c_master_bus_handle_t handle = nullptr;
+  return open(cfg, I2C_NUM_1, handle);
 }
 }  // namespace i2c
 

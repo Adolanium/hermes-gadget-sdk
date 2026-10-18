@@ -24,6 +24,7 @@
 #include "speaker_pa.hpp"
 #include "speaker_underruns.hpp"
 #include "tag_scanner.hpp"
+#include "wifi_fast.hpp"
 #include "wifi_pick.hpp"
 #include "wifi_power.hpp"
 #include "wifi_retry.hpp"
@@ -154,6 +155,9 @@ class WsTransport final : public hg::Transport {
   // True once if the current connection was lost. Backs up the WsClosed event,
   // which the client may post from the app task itself while the queue is full.
   bool take_lost() { return gens_.take_lost(); }
+  // True when the send task has been stuck on one item for hg::ws::kStuckMs, or
+  // couldn't take a client to close: the transport can't recover without a restart.
+  bool stuck() const;
 
  private:
   static void on_event(void* arg, const char* base, int32_t id, void* data);
@@ -164,6 +168,8 @@ class WsTransport final : public hg::Transport {
   esp_websocket_client_handle_t client_ = nullptr;
   QueueHandle_t tx_ = nullptr;
   hg::ws::Generations gens_;
+  hg::ws::TxWatch watch_;
+  std::atomic<bool> handoff_failed_{false};
   std::string url_, subprotocol_;
   // Fragment reassembly, WebSocket task only: an old client's task can still be
   // delivering a frame after close(), so connect() leaves this alone. Each
@@ -348,6 +354,8 @@ bool tca9554_reset(i2c_master_bus_handle_t bus, const ExpanderResetConfig& reset
 namespace i2c {
 // The board's shared I2C master bus (created on first use).
 i2c_master_bus_handle_t bus(const I2cBusConfig& cfg);
+// A second bus on the other I2C controller, for a touch controller wired apart.
+i2c_master_bus_handle_t touch_bus(const I2cBusConfig& cfg);
 }
 
 // ES8311 + ES7210 on one duplex I2S bus through esp_codec_dev. Both directions
@@ -589,13 +597,19 @@ class Wifi {
   static void on_event(void* arg, const char* base, int32_t id, void* data);
   static esp_err_t setup_http(httpd_req_t* request);
   void join(const std::string& ssid, const std::string& password);
-  bool configure(const std::string& ssid, const std::string& password);
+  // With `aim`, the station joins that access point on its channel without scanning.
+  bool configure(const std::string& ssid, const std::string& password, const hg::WifiFastAp* aim = nullptr);
   void attempt(uint32_t now);
+  void remember_ap();
+  void forget_unsaved_ap();
   void setup_status(std::string status);
   NvsStorage* storage_ = nullptr;
   bool configured_ = false;
   hg::WifiNetworks networks_;
   hg::WifiPick pick_;
+  hg::WifiFastJoin fast_;
+  bool aimed_ = false;      // the station config names one access point (fast_)
+  bool static_ip_ = false;  // DHCP stopped for a reused lease (CONFIG_HG_WIFI_REUSE_IP)
   std::string ssid_, password_;  // what the station is configured for
   bool link_up_ = false, scanning_ = false;
   bool auto_setup_ = false, auto_setup_tried_ = false;

@@ -30,6 +30,8 @@ constexpr uint8_t kPromptLines = 4;           // ...and on a question (the rende
 constexpr uint32_t kFrameMs = 100;
 constexpr uint32_t kSensorIntervalMs = 2000;
 constexpr uint32_t kDefaultCardMs = 15000;
+constexpr int kDashboardVersion = 1;    // the dashboard message this firmware draws
+constexpr size_t kDashMaxEach = 12;     // sessions, and tiles, kept from one dashboard message
 constexpr size_t kMicChunkSamples = 640;  // 40 ms at 16 kHz per binary frame
 constexpr size_t kOtaAckBytes = 16 * 1024;  // a firmware update acknowledges every 16 KB written
 constexpr uint32_t kOtaIdleMs = 30000;      // ...and is abandoned when no data comes for this long
@@ -37,7 +39,12 @@ constexpr uint32_t kOtaRestartMs = 1000;    // time for ota.done to leave before
 constexpr uint32_t kBackoffMs[] = {1000, 2000, 4000, 8000, 15000, 30000};
 constexpr size_t kBackoffSteps = sizeof(kBackoffMs) / sizeof(kBackoffMs[0]);
 
-const char* const kSettingKeys[] = {"name", "server", "token", "talk_mode", "volume", "brightness", "screen_timeout", "battery_display", "wifi_ssid", "wifi_pass"};
+const char* const kSettingKeys[] = {"name", "server", "token", "talk_mode", "volume", "brightness", "screen_timeout", "battery_display", "battery_estimate", "wifi_ssid", "wifi_pass"};
+
+// NVS limits storage keys to 15 characters; keep the public setting name unchanged.
+std::string_view setting_storage_key(std::string_view key) {
+  return key == "battery_estimate" ? std::string_view("batt_estimate") : key;
+}
 
 bool is_secret(std::string_view key) { return key == "token" || key == "wifi_pass"; }
 
@@ -79,7 +86,7 @@ const App::Route App::kRoutes[] = {
     {"transcript", &App::h_transcript},   {"prompt", &App::h_prompt},
     {"prompt.close", &App::h_prompt_close}, {"ota.offer", &App::h_ota_offer},
     {"ota.begin", &App::h_ota_begin},     {"ota.end", &App::h_ota_end},
-    {"ota.abort", &App::h_ota_abort},
+    {"ota.abort", &App::h_ota_abort},     {"dashboard", &App::h_dashboard},
 };
 
 App::App(Hal& hal, DeviceProfile profile) : hal_(hal), profile_(std::move(profile)) {}
@@ -90,7 +97,7 @@ void App::log(LogLevel level, std::string_view msg) {
 
 std::string App::setting(std::string_view key, std::string_view fallback) const {
   if (hal_.storage) {
-    if (auto v = hal_.storage->get(key)) return *v;
+    if (auto v = hal_.storage->get(setting_storage_key(key))) return *v;
   }
   return std::string(fallback);
 }
@@ -110,6 +117,7 @@ void App::load_settings() {
   battery_display_ = indicator == "icon" ? BatteryIndicator::Icon
                        : indicator == "percentage" ? BatteryIndicator::Percentage
                        : indicator == "both" ? BatteryIndicator::Both : BatteryIndicator::Off;
+  battery_estimate_enabled_ = setting("battery_estimate", "off") == "liion";
   activity_at_ = now();
   display_dimmed_ = display_sleeping_ = false;
 }
@@ -267,6 +275,9 @@ void App::drop_session(std::string_view reason) {
   mode_ = Mode::Idle;
   overlay_ = Overlay::None;
   image_stream_ = -1;
+  // What the dashboard showed is stale now; the next connection sends it afresh.
+  dashboard_ready_ = false;
+  dash_rows_.clear();
   clear_prompt();
   transport_active_ = false;
   schedule_reconnect();
@@ -332,6 +343,11 @@ void App::send_hello() {
   if (profile_.has_scroll_buttons) inputs.push("up").push("down");
   caps.set("inputs", inputs);
   caps.set("talk_mode", talk_mode_ == TalkMode::Tap ? "tap" : "hold");
+  if (ui_ && can_open_dashboard()) {
+    json::Value dash = json::Value::object();
+    dash.set("v", kDashboardVersion).set("rows", ui_->dash_rows());
+    caps.set("dashboard", dash);
+  }
   if (hal_.updater) {
     json::Value ota = json::Value::object();
     ota.set("max_size", hal_.updater->capacity());
@@ -357,8 +373,10 @@ void App::send_hello() {
       .set("actions", acts)
       .set("sensors", sensors);
   if (!access_token_.empty()) hello.set("token", access_token_);
+  if (display_sleeping_) hello.set("display_sleeping", true);
   send(hello);
   sensors_dirty_ = false;
+  display_sleep_sent_ = display_sleeping_;
 }
 
 void App::on_transport_text(std::string_view text) {
@@ -609,6 +627,44 @@ void App::h_display(const json::Value& m) {
   overlay_until_ = ttl <= 0 ? 0 : now() + static_cast<uint32_t>(ttl * 1000);
 }
 
+// A full snapshot: it replaces what the dashboard showed. Unlike a card it doesn't
+// light the screen; the user opens the dashboard to look.
+void App::h_dashboard(const json::Value& m) {
+  if (m["v"].as_int(kDashboardVersion) != kDashboardVersion) return;  // a layout this firmware can't draw
+  auto tone = [](std::string_view state) {
+    if (state == "busy") return DashRow::Tone::Busy;
+    if (state == "waiting") return DashRow::Tone::Waiting;
+    if (state == "ok") return DashRow::Tone::Good;
+    if (state == "warn") return DashRow::Tone::Warn;
+    if (state == "bad") return DashRow::Tone::Bad;
+    return DashRow::Tone::Dim;
+  };
+  std::vector<DashRow> rows;
+  int busy = 0, waiting = 0;
+  const json::Value& sessions = m["sessions"];
+  rows.push_back({"Hermes sessions", "", DashRow::Tone::Dim, true});
+  for (size_t i = 0; i < sessions.size() && i < kDashMaxEach; ++i) {
+    const json::Value& s = sessions[i];
+    const std::string state(s["state"].str_or("idle"));
+    busy += state == "busy";
+    waiting += state == "waiting";
+    rows.push_back({s["label"].as_string(), state == "waiting" ? "approval" : state, tone(state), false});
+  }
+  if (rows.size() == 1) rows.push_back({"No sessions", "", DashRow::Tone::Dim, false});
+  const json::Value& tiles = m["tiles"];
+  if (tiles.size()) rows.push_back({"Status", "", DashRow::Tone::Dim, true});
+  for (size_t i = 0; i < tiles.size() && i < kDashMaxEach; ++i) {
+    const json::Value& t = tiles[i];
+    rows.push_back({t["label"].as_string(), t["value"].as_string(), tone(t["state"].str_or("")), false});
+  }
+  dash_rows_ = std::move(rows);
+  dash_headline_ = waiting ? std::to_string(waiting) + " waiting"
+                   : busy  ? std::to_string(busy) + " busy"
+                           : "All idle";
+  dashboard_ready_ = true;
+  if (ui_) dash_scroll_ = std::min(dash_scroll_, std::max(0, static_cast<int>(dash_rows_.size()) - ui_->dash_rows()));
+}
+
 void App::h_image_start(const json::Value& m) {
   close_setup_screens();
   wake_display();
@@ -813,6 +869,12 @@ void App::on_button(Button button, bool pressed) {
       } else if (mode_ == Mode::Listening) cancel_listening("cancelled");
       else if (overlay_ != Overlay::None) dismiss_overlay();
       else if (mode_ == Mode::Thinking || mode_ == Mode::Responding) cancel_turn();
+      else if (dashboard_ready_ && paired_) {
+        overlay_ = Overlay::Dashboard;
+        overlay_until_ = 0;
+        dash_scroll_ = 0;
+        page_at_ = now() + page_dwell_ms();
+      }
       if (hint_flash_.rfind("New session in", 0) == 0) hint_flash_until_ = now();
       break;
     case Button::Up:
@@ -982,6 +1044,12 @@ void App::submit_text(std::string_view text) {
 }
 
 void App::scroll_body(int delta) {
+  if (overlay_ == Overlay::Dashboard) {
+    if (!ui_) return;
+    const int max_first = std::max(0, static_cast<int>(dash_rows_.size()) - ui_->dash_rows());
+    dash_scroll_ = std::max(0, std::min(max_first, dash_scroll_ + delta));
+    return;
+  }
   const bool card = overlay_ == Overlay::Card;
   const std::string& body = card ? card_body_ : reply_;
   if (body.empty() || !ui_) return;
@@ -1000,6 +1068,13 @@ uint32_t App::page_dwell_ms() const {
 bool App::turn_page() {
   // Only text screens that are read from the top page; a streaming reply stays pinned to its end.
   if (!ui_ || model_.hero) return false;
+  if (model_.screen == Screen::Dashboard) {
+    // A dashboard longer than the screen cycles through its pages, back to the top.
+    const int rows = ui_->dash_rows(), total = static_cast<int>(dash_rows_.size());
+    if (total <= rows) return false;
+    dash_scroll_ = dash_scroll_ >= total - rows ? 0 : std::min(total - rows, dash_scroll_ + std::max(1, rows - 1));
+    return true;
+  }
   int* pos = nullptr;
   const std::string* body = nullptr;
   if (model_.screen == Screen::Card) {
@@ -1075,6 +1150,16 @@ void App::flush_sensors() {
   send(msg);
   sensors_dirty_ = false;
   sensors_sent_ = now();
+}
+
+void App::flush_display_state() {
+  // Not rate limited: Hermes holds back screen updates while it is dark and sends
+  // the latest as soon as it lights up.
+  if (phase_ != Phase::Online || display_sleeping_ == display_sleep_sent_) return;
+  json::Value msg = proto::message("state");
+  msg.set("display_sleeping", display_sleeping_);
+  send(msg);
+  display_sleep_sent_ = display_sleeping_;
 }
 
 void App::emit_event(std::string_view name, json::Value data, bool notify_agent) {
@@ -1350,6 +1435,7 @@ void App::tick() {
   }
 
   flush_sensors();
+  flush_display_state();
 
   if (t - frame_at_ >= kFrameMs) {
     frame_at_ = t;
@@ -1367,6 +1453,7 @@ void App::update_model() {
   m.yes.clear();
   m.no.clear();
   m.qr = nullptr;
+  m.dash.clear();
   m.hero = false;
   m.caption_lines = 1;
   m.scroll = scroll_;
@@ -1378,11 +1465,13 @@ void App::update_model() {
   m.battery_charging = m.battery_low = false;
   m.battery_icon = battery_display_ != BatteryIndicator::Percentage;
   m.battery_text = battery_display_ != BatteryIndicator::Icon;
-  if (battery_display_ != BatteryIndicator::Off && battery_readable()) {
-    const auto& p = *power_status_;
-    m.battery = static_cast<int8_t>(std::min<int>(*p.battery_percent, 100));
-    m.battery_charging = p.charging == true;
-    m.battery_low = *p.battery_percent <= 10 && p.external_power == false;
+  if (battery_display_ != BatteryIndicator::Off) {
+    if (const auto percent = display_battery_percent()) {
+      const auto& p = *power_status_;
+      m.battery = static_cast<int8_t>(std::min<int>(*percent, 100));
+      m.battery_charging = p.charging == true;
+      m.battery_low = *percent <= 10 && p.external_power == false;
+    }
   }
 
   switch (phase_) {
@@ -1511,6 +1600,12 @@ void App::update_model() {
     m.screen = Screen::Image;
     m.headline = "Image";
     m.hint = profile_.cancel_label + " to close";
+  } else if (overlay_ == Overlay::Dashboard) {
+    m.screen = Screen::Dashboard;
+    m.headline = dash_headline_;
+    m.dash = dash_rows_;
+    m.scroll = dash_scroll_;
+    m.hint = profile_.touch_screen ? "Swipe down to close" : profile_.cancel_label + " to close";
   } else if (overlay_ == Overlay::Card) {
     m.screen = Screen::Card;
     m.headline = card_title_.empty() ? "Hermes" : card_title_;
@@ -1554,6 +1649,8 @@ void App::update_model() {
     if (m.hero) {
       m.headline = "Hi, I'm Hermes";
       m.detail = reply_.empty() || !profile_.has_scroll_buttons ? "Ask me anything" : "UP shows my last reply";
+      if (dashboard_ready_ && can_open_dashboard() && reply_.empty())
+        m.detail = profile_.touch_screen ? "Swipe down for sessions" : profile_.cancel_label + " shows sessions";
     }
   }
   bool keeps_detail = m.screen == Screen::Pairing || m.screen == Screen::Boot || m.screen == Screen::Prompt;
@@ -1691,9 +1788,11 @@ std::string App::console(std::string_view raw) {
     if (key == "battery_display" && !value.empty() && value != "icon" && value != "percentage" && value != "both" &&
         value != "off")
       return "@error battery_display must be icon, percentage, both or off";
+    if (key == "battery_estimate" && !value.empty() && value != "off" && value != "liion")
+      return "@error battery_estimate must be off or liion";
     if (!hal_.storage) return "@error no storage";
-    if (value.empty()) hal_.storage->erase(key);
-    else if (!hal_.storage->set(key, value)) return "@error could not save " + key;
+    if (value.empty()) hal_.storage->erase(setting_storage_key(key));
+    else if (!hal_.storage->set(setting_storage_key(key), value)) return "@error could not save " + key;
     load_settings();
     if (key == "wifi_ssid" || key == "wifi_pass") {
       // These keys hold the first saved network: bring the list in line.
@@ -1758,9 +1857,10 @@ std::string App::console(std::string_view raw) {
     if (!hal_.storage) return "@error no storage";
     hal_.storage->erase("device_key");
     if (cmd == "factory-reset") {
-      for (const char* k : kSettingKeys) hal_.storage->erase(k);
+      for (const char* k : kSettingKeys) hal_.storage->erase(setting_storage_key(k));
       for (const auto& k : profile_.extra_settings) hal_.storage->erase(k);
       hal_.storage->erase("wifi_nets");
+      hal_.storage->erase("wifi_fast");  // where the last access point was (drivers/wifi_fast.hpp)
       if (on_phone_forget) on_phone_forget();
     }
     return "@ok " + cmd + " (restart the device to apply)";

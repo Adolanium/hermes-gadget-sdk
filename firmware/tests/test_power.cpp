@@ -4,6 +4,17 @@
 #include "axp2101.hpp"
 #include "cores3.hpp"
 #include "check.hpp"
+#include "hg/battery.hpp"
+
+TEST("battery estimate: the shared single-cell map clamps endpoints and floors intermediate levels") {
+  struct Sample { uint16_t mv; uint8_t percent; };
+  for (const Sample& sample : {Sample{0, 0}, Sample{2000, 0}, Sample{3299, 0}, Sample{3300, 0},
+                               Sample{3308, 0}, Sample{3309, 1}, Sample{3549, 27}, Sample{3750, 50},
+                               Sample{4000, 77}, Sample{4199, 99}, Sample{4200, 100},
+                               Sample{4500, 100}, Sample{65535, 100}}) {
+    CHECK_EQ(hg::estimate_liion_percent(sample.mv), sample.percent);
+  }
+}
 
 TEST("AXP2101: battery, USB and charging readings never alter power configuration") {
   std::array<uint8_t, 256> regs{};

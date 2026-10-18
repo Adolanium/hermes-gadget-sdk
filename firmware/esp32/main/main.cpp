@@ -9,6 +9,8 @@
 #include "esp_log.h"
 #include "esp_pm.h"
 #include "esp_psram.h"
+#include "esp_system.h"
+#include "freertos/task.h"
 #include "hg/touch.hpp"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
@@ -97,6 +99,22 @@ void add_status_led(hg::App& app, int gpio) {
   app.add_action(std::move(led));
 }
 
+// Supplies switched straight from a GPIO go on before anything talks to the
+// parts behind them.
+void power_rails_on(const hgp::BoardConfig& b) {
+  bool any = false;
+  for (const hgp::PowerRail& rail : b.power_rails) {
+    if (rail.gpio < 0) continue;
+    const auto pin = static_cast<gpio_num_t>(rail.gpio);
+    gpio_reset_pin(pin);
+    gpio_set_direction(pin, GPIO_MODE_OUTPUT);
+    gpio_set_level(pin, rail.on_level ? 1 : 0);
+    any = true;
+  }
+  // One tick more than the rounded-down count, so the wait is never shorter at 100 Hz.
+  if (any && b.power_rails_settle_ms) vTaskDelay(pdMS_TO_TICKS(b.power_rails_settle_ms) + 1);
+}
+
 // Light sleep disables every GPIO it doesn't know about; these must keep their
 // level so the panel, touch controller, amplifier and buses survive a doze.
 void keep_pins_through_sleep(const hgp::BoardConfig& b) {
@@ -104,6 +122,8 @@ void keep_pins_through_sleep(const hgp::BoardConfig& b) {
                       b.amoled.rst, b.touch.rst, b.codec.pa, b.i2c.sda, b.i2c.scl};
   for (int pin : pins)
     if (pin >= 0) gpio_sleep_sel_dis(static_cast<gpio_num_t>(pin));
+  for (const hgp::PowerRail& rail : b.power_rails)
+    if (rail.gpio >= 0) gpio_sleep_sel_dis(static_cast<gpio_num_t>(rail.gpio));
 }
 
 void dispatch(hg::App& app, hgp::Event& ev) {
@@ -184,6 +204,7 @@ extern "C" void app_main(void) {
   hgp::events::init();
   ESP_ERROR_CHECK(g_storage.begin() ? ESP_OK : ESP_FAIL);
   const hgp::BoardConfig& board = hgp::board_config();
+  power_rails_on(board);
   const bool latch_power = board.latch_power.enabled && g_latch_power.begin(board.latch_power);
   const char* version = esp_app_get_description()->version;
   ESP_LOGI(TAG, "Hermes Gadget %s on %s", version, board.name);
@@ -257,7 +278,8 @@ extern "C" void app_main(void) {
   }
   g_buttons.begin(board.buttons);
   const bool touch = peripherals_ready && (board.touch.enabled || board.pwr_key.enabled || board.encoder.a >= 0) &&
-                     g_touch.begin(board.touch, board.pwr_key, board.encoder, i2c_bus);
+                     g_touch.begin(board.touch, board.pwr_key, board.encoder,
+                                   board.touch.bus.sda >= 0 ? hgp::i2c::touch_bus(board.touch.bus) : i2c_bus);
 
   hgp::diag::Parts parts;
   parts.display = hal.display == &g_display ? g_display.controller_name()
@@ -344,6 +366,12 @@ extern "C" void app_main(void) {
     }
     // A loss whose WsClosed event was dropped; harmless if it was delivered too.
     if (g_transport.take_lost()) app.on_transport_closed("disconnected");
+    // Waiting would leave the device answering nothing until someone resets it.
+    if (g_transport.stuck()) {
+      ESP_LOGE(TAG, "the WebSocket send task is stuck; restarting");
+      vTaskDelay(pdMS_TO_TICKS(100));  // let the log line out
+      esp_restart();
+    }
     g_buttons.poll(app);
     g_wifi.tick(app, g_system.now_ms());
     if (g_gestures) g_gestures->tick(g_system.now_ms());

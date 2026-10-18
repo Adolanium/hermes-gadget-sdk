@@ -1767,6 +1767,305 @@ TEST("display: an emissive panel leaves its background unlit; a backlit one keep
   }
 }
 
+namespace {
+struct EstimatePower : hg::Power {
+  std::optional<hg::PowerStatus> status =
+      hg::PowerStatus{std::nullopt, 3750, std::nullopt, false, std::nullopt};
+  int reads = 0;
+  std::optional<hg::PowerStatus> read() override { ++reads; return status; }
+  bool power_off() override { return false; }
+};
+}  // namespace
+
+TEST("battery estimate: voltage requires opt-in and selecting percentage produces text only") {
+  EstimatePower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.app.begin();
+  r.app.tick();
+  CHECK_EQ(int(r.app.model().battery), -1);
+  CHECK(r.fake.kv.find("batt_estimate") == r.fake.kv.end());
+  CHECK_EQ(r.app.console("set battery_display percentage"), std::string("@ok battery_display"));
+  CHECK_EQ(int(r.app.model().battery), -1);
+  r.app.set_sensor("battery_pct", 87);  // demo telemetry is not the header power source
+  r.advance(100);
+  CHECK_EQ(int(r.app.model().battery), -1);
+  const int reads = battery.reads;
+  CHECK_EQ(r.app.console("set battery_estimate liion"), std::string("@ok battery_estimate"));
+  CHECK_EQ(int(r.app.model().battery), 50);
+  CHECK(!r.app.model().battery_icon);
+  CHECK(r.app.model().battery_text);
+  CHECK(!r.app.model().battery_low);  // unknown external power is not inferred to be battery-only
+  CHECK_EQ(battery.reads, reads);  // activation uses the existing raw snapshot
+  CHECK_EQ(r.fake.kv["battery_display"], std::string("percentage"));
+  CHECK_EQ(r.fake.kv["batt_estimate"], std::string("liion"));
+}
+
+TEST("battery estimate: plausible limits, missing inputs and explicit absence control visibility") {
+  EstimatePower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.app.begin();
+  r.app.tick();
+  r.app.console("set battery_display percentage");
+  r.app.console("set battery_estimate liion");
+  struct Sample { std::optional<hg::PowerStatus> status; int percent; };
+  for (const Sample& sample : {
+           Sample{hg::PowerStatus{std::nullopt, 2000, std::nullopt, false, std::nullopt}, 0},
+           Sample{hg::PowerStatus{std::nullopt, 3300, std::nullopt, false, std::nullopt}, 0},
+           Sample{hg::PowerStatus{true, 4200, std::nullopt, false, std::nullopt}, 100},
+           Sample{hg::PowerStatus{true, 4500, std::nullopt, false, std::nullopt}, 100},
+           Sample{hg::PowerStatus{true, 1999, std::nullopt, false, false}, -1},
+           Sample{hg::PowerStatus{true, 4501, std::nullopt, false, false}, -1},
+           Sample{hg::PowerStatus{true, std::nullopt, std::nullopt, false, false}, -1},
+           Sample{hg::PowerStatus{false, 3750, std::nullopt, false, true}, -1},
+           Sample{hg::PowerStatus{false, 3750, 65, false, true}, -1},
+           Sample{hg::PowerStatus{std::nullopt, 3750, std::nullopt, false, std::nullopt}, 50},
+           Sample{std::nullopt, -1}}) {
+    battery.status = sample.status;
+    r.advance(5000);
+    CHECK_EQ(int(r.app.model().battery), sample.percent);
+    CHECK(!r.app.model().battery_charging);
+    CHECK(!r.app.model().battery_low);
+  }
+}
+
+TEST("battery estimate: voltage and charging change at normal five-second polls and failure clears them") {
+  EstimatePower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.app.begin();
+  r.app.tick();  // establishes the first poll at the current fake time
+  r.app.console("set battery_display percentage");
+  r.app.console("set battery_estimate liion");
+  CHECK_EQ(int(r.app.model().battery), 50);
+  CHECK_EQ(battery.reads, 1);
+  battery.status = hg::PowerStatus{std::nullopt, 4200, std::nullopt, true, std::nullopt};
+  r.advance(4990);
+  CHECK_EQ(battery.reads, 1);
+  CHECK_EQ(int(r.app.model().battery), 50);
+  CHECK(!r.app.model().battery_charging);
+  r.advance(10);
+  CHECK_EQ(battery.reads, 2);
+  CHECK_EQ(int(r.app.model().battery), 100);
+  CHECK(r.app.model().battery_charging);  // the endpoint does not mean charging has finished
+  battery.status = hg::PowerStatus{std::nullopt, 3300, std::nullopt, false, std::nullopt};
+  r.advance(5000);
+  CHECK_EQ(int(r.app.model().battery), 0);
+  CHECK(!r.app.model().battery_charging);
+  CHECK(!r.app.model().battery_low);
+  battery.status->external_power = false;
+  r.advance(5000);
+  CHECK(r.app.model().battery_low);
+  battery.status->external_power = true;
+  r.advance(5000);
+  CHECK(!r.app.model().battery_low);
+  battery.status.reset();
+  r.advance(4990);
+  CHECK_EQ(int(r.app.model().battery), 0);
+  r.advance(10);
+  CHECK_EQ(int(r.app.model().battery), -1);
+  CHECK(!r.app.model().battery_charging);
+  CHECK(!r.app.model().battery_low);
+}
+
+TEST("battery estimate: native percentages including zero take precedence without requiring voltage") {
+  EstimatePower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.app.begin();
+  r.app.tick();
+  r.app.console("set battery_display percentage");
+  r.app.console("set battery_estimate liion");
+  for (uint8_t percent : {uint8_t(0), uint8_t(9), uint8_t(100)}) {
+    battery.status = hg::PowerStatus{std::nullopt, 3750, percent, true, std::nullopt};
+    r.advance(5000);
+    CHECK_EQ(int(r.app.model().battery), int(percent));
+    CHECK(r.app.model().battery_charging);
+    battery.status->battery_mv.reset();
+    r.advance(5000);
+    CHECK_EQ(int(r.app.model().battery), int(percent));
+  }
+  const int reads = battery.reads;
+  CHECK_EQ(r.app.console("set battery_estimate off"), std::string("@ok battery_estimate"));
+  CHECK_EQ(int(r.app.model().battery), 100);
+  CHECK_EQ(r.app.console("set battery_estimate"), std::string("@ok battery_estimate"));
+  CHECK_EQ(int(r.app.model().battery), 100);
+  CHECK_EQ(battery.reads, reads);
+}
+
+TEST("battery estimate: disabling and clearing hide only the derived value immediately") {
+  EstimatePower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.app.begin();
+  r.app.tick();
+  r.app.console("set battery_display percentage");
+  r.app.console("set battery_estimate liion");
+  const int reads = battery.reads;
+  CHECK_EQ(int(r.app.model().battery), 50);
+  CHECK_EQ(r.app.console("set battery_estimate off"), std::string("@ok battery_estimate"));
+  CHECK_EQ(int(r.app.model().battery), -1);
+  CHECK_EQ(r.fake.kv["batt_estimate"], std::string("off"));
+  r.app.console("set battery_estimate liion");
+  CHECK_EQ(int(r.app.model().battery), 50);
+  CHECK_EQ(r.app.console("set battery_estimate"), std::string("@ok battery_estimate"));
+  CHECK_EQ(int(r.app.model().battery), -1);
+  CHECK(r.fake.kv.find("batt_estimate") == r.fake.kv.end());
+  r.app.console("set battery_estimate liion");
+  CHECK_EQ(int(r.app.model().battery), 50);
+  r.app.console("set battery_display off");
+  CHECK_EQ(int(r.app.model().battery), -1);
+  CHECK_EQ(r.fake.kv["batt_estimate"], std::string("liion"));
+  CHECK_EQ(battery.reads, reads);
+}
+
+TEST("battery estimate: both settings survive a fresh App and factory reset removes the opt-in") {
+  EstimatePower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.app.begin();
+  r.app.tick();
+  r.app.console("set battery_estimate liion");
+  CHECK_EQ(int(r.app.model().battery), -1);  // estimation alone does not turn on the indicator
+  r.app.console("set battery_display percentage");
+  CHECK_EQ(int(r.app.model().battery), 50);
+  Rig reboot;
+  reboot.fake.kv = r.fake.kv;
+  reboot.hal.power = &battery;
+  reboot.app.begin();
+  reboot.app.tick();
+  CHECK_EQ(int(reboot.app.model().battery), 50);
+  CHECK(!reboot.app.model().battery_icon && reboot.app.model().battery_text);
+  CHECK(reboot.app.console("help").find("battery_estimate") != std::string::npos);
+  Value setting;
+  const std::string response = reboot.app.console("get battery_estimate");
+  CHECK(response.rfind("@value ", 0) == 0);
+  CHECK(hg::json::parse(response.substr(7), setting));
+  CHECK_EQ(setting["value"].as_string(), std::string("liion"));
+  reboot.app.console("factory-reset");
+  CHECK(reboot.fake.kv.find("batt_estimate") == reboot.fake.kv.end());
+  CHECK(reboot.fake.kv.find("battery_display") == reboot.fake.kv.end());
+  Rig reset;
+  reset.fake.kv = reboot.fake.kv;
+  reset.hal.power = &battery;
+  reset.app.begin();
+  reset.app.tick();
+  reset.app.console("set battery_display percentage");
+  CHECK_EQ(int(reset.app.model().battery), -1);
+}
+
+TEST("battery estimate: invalid saved values and rejected writes never activate it") {
+  for (const std::string saved : {"", "off", "unknown", "LIION"}) {
+    EstimatePower battery;
+    Rig r;
+    r.hal.power = &battery;
+    r.fake.kv["battery_display"] = "percentage";
+    r.fake.kv["batt_estimate"] = saved;
+    r.app.begin();
+    r.app.tick();
+    CHECK_EQ(int(r.app.model().battery), -1);
+  }
+  EstimatePower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.app.begin();
+  r.app.tick();
+  r.app.console("set battery_display percentage");
+  for (const char* value : {"on", "LIION", "true", "liion extra"}) {
+    CHECK_EQ(r.app.console(std::string("set battery_estimate ") + value),
+             std::string("@error battery_estimate must be off or liion"));
+    CHECK_EQ(int(r.app.model().battery), -1);
+    CHECK(r.fake.kv.find("batt_estimate") == r.fake.kv.end());
+  }
+  r.fake.storage_full = true;
+  CHECK_EQ(r.app.console("set battery_estimate liion"), std::string("@error could not save battery_estimate"));
+  CHECK_EQ(int(r.app.model().battery), -1);
+  CHECK(r.fake.kv.find("batt_estimate") == r.fake.kv.end());
+  r.fake.storage_full = false;
+  r.app.console("set battery_estimate liion");
+  CHECK_EQ(int(r.app.model().battery), 50);
+  CHECK_EQ(r.app.console("set battery_estimate unknown"), std::string("@error battery_estimate must be off or liion"));
+  CHECK_EQ(int(r.app.model().battery), 50);
+  r.fake.storage_full = true;
+  CHECK_EQ(r.app.console("set battery_estimate off"), std::string("@error could not save battery_estimate"));
+  CHECK_EQ(int(r.app.model().battery), 50);
+  CHECK_EQ(r.fake.kv["batt_estimate"], std::string("liion"));
+}
+
+TEST("battery estimate: Power-page selection uses the display value and changes only indicator style") {
+  EstimatePower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.bring_online(true);
+  r.app.console("set battery_estimate liion");
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 8; ++i) r.app.console("cancel");
+  r.app.console("talk"); r.app.console("release");
+  CHECK_EQ(r.fake.kv["battery_display"], std::string("icon"));
+  CHECK_EQ(int(r.app.model().battery), 50);
+  CHECK(r.app.model().battery_icon && !r.app.model().battery_text);
+  r.app.console("talk"); r.app.console("release");
+  CHECK_EQ(r.fake.kv["battery_display"], std::string("percentage"));
+  CHECK(!r.app.model().battery_icon && r.app.model().battery_text);
+  CHECK_EQ(r.fake.kv["batt_estimate"], std::string("liion"));
+}
+
+TEST("battery estimate: raw status and gateway telemetry remain unestimated, including unavailable transitions") {
+  EstimatePower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.bring_online(true);
+  r.app.console("set battery_display percentage");
+  r.app.console("set battery_estimate liion");
+  r.advance(5000);
+  CHECK_EQ(int(r.app.model().battery), 50);
+  Value status;
+  CHECK(hg::json::parse(r.app.status_json(), status));
+  CHECK(status["power"]["available"].as_bool());
+  CHECK_EQ(status["power"]["battery_mv"].as_int(), int64_t(3750));
+  CHECK(status["power"]["battery_percent"].is_null());
+  CHECK(status["power"]["battery_present"].is_null());
+  CHECK(status["power"]["external_power"].is_null());
+  CHECK(status["power"]["charging"].is_bool() && !status["power"]["charging"].as_bool());
+  const Value* state = r.fake.last("state");
+  CHECK(state != nullptr);
+  if (!state) return;
+  CHECK_EQ((*state)["sensors"]["power_available"].as_int(), int64_t(1));
+  CHECK_EQ((*state)["sensors"]["battery_mv"].as_int(), int64_t(3750));
+  CHECK((*state)["sensors"]["battery_percent"].is_null());
+  CHECK((*state)["sensors"]["battery_present"].is_null());
+  CHECK((*state)["sensors"]["external_power"].is_null());
+  CHECK_EQ((*state)["sensors"]["charging"].as_int(), int64_t(0));
+  const std::string ready_detail = r.app.model().detail;
+  battery.status = hg::PowerStatus{std::nullopt, 3300, std::nullopt, false, false};
+  r.advance(5000);
+  CHECK_EQ(int(r.app.model().battery), 0);
+  CHECK(r.app.model().battery_low);
+  CHECK_EQ(r.app.model().detail, ready_detail);  // a display estimate does not create a battery alarm
+  battery.status = hg::PowerStatus{true, 4200, 0, true, true};
+  r.advance(5000);
+  CHECK_EQ(int(r.app.model().battery), 0);
+  CHECK(hg::json::parse(r.app.status_json(), status));
+  CHECK(status["power"]["battery_percent"].is_number());
+  CHECK_EQ(status["power"]["battery_percent"].as_int(), int64_t(0));
+  state = r.fake.last("state");
+  CHECK(state && (*state)["sensors"]["battery_percent"].is_number());
+  CHECK(state && (*state)["sensors"]["battery_percent"].as_int() == 0);
+  battery.status.reset();
+  r.advance(5000);
+  CHECK_EQ(int(r.app.model().battery), -1);
+  CHECK(hg::json::parse(r.app.status_json(), status));
+  CHECK(!status["power"]["available"].as_bool());
+  CHECK(status["power"]["battery_mv"].is_null());
+  CHECK(status["power"]["battery_percent"].is_null());
+  state = r.fake.last("state");
+  CHECK(state && (*state)["sensors"]["power_available"].is_number());
+  CHECK(state && (*state)["sensors"]["power_available"].as_int() == 0);
+  CHECK(state && (*state)["sensors"]["battery_mv"].is_null());
+  CHECK(state && (*state)["sensors"]["battery_percent"].is_null());
+}
+
 TEST("battery indicator: off by default, follows readings once chosen, and each select picks the next style") {
   struct Battery : hg::Power {
     hg::PowerStatus status{true, 3850, 65, false, false};
@@ -2333,4 +2632,196 @@ TEST("phone: the pairing screen stays lit through the screen timeout") {
   CHECK_EQ(r.fake.brightness, 0);
   r.app.on_phone_passkey(123456);
   CHECK_EQ(r.fake.brightness, 0);
+}
+
+namespace {
+// The last state message about the screen (sensor readings also travel as state).
+const Value* last_screen_state(const FakeHal& fake) {
+  for (auto it = fake.sent.rbegin(); it != fake.sent.rend(); ++it)
+    if ((*it)["type"].as_string() == "state" && (*it)["display_sleeping"].is_bool()) return &*it;
+  return nullptr;
+}
+}  // namespace
+
+TEST("power: Hermes is told at once when the screen goes dark and lights up") {
+  KeyPower key;
+  Rig r;
+  r.fake.backlight = true;
+  r.hal.power = &key;
+  r.bring_online(true);
+  CHECK(!(*r.fake.last("hello"))["display_sleeping"].as_bool());  // omitted while lit
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  r.fake.sent.clear();
+  r.advance(29000);
+  CHECK(last_screen_state(r.fake) == nullptr);  // dimmed is still lit
+  r.advance(1100);
+  CHECK_EQ(r.fake.brightness, 0);
+  const Value* dark = last_screen_state(r.fake);
+  CHECK(dark && (*dark)["display_sleeping"].as_bool());
+  r.fake.sent.clear();
+  r.advance(5000);
+  CHECK(last_screen_state(r.fake) == nullptr);  // only changes are sent
+  key.presses = 1;
+  r.advance(100);
+  const Value* lit = last_screen_state(r.fake);
+  CHECK(lit && (*lit)["display_sleeping"].is_bool() && !(*lit)["display_sleeping"].as_bool());
+}
+
+TEST("power: a device that reconnects in the dark says so in its hello") {
+  KeyPower key;
+  Rig r;
+  r.fake.backlight = true;
+  r.hal.power = &key;
+  r.bring_online(true);
+  key.presses = 1;
+  r.advance(100);
+  r.app.on_transport_closed("gone");
+  r.fake.sent.clear();
+  r.advance(5000);
+  r.app.on_transport_open();
+  const Value* hello = r.fake.last("hello");
+  CHECK(hello && (*hello)["display_sleeping"].as_bool());
+  r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":true})");
+  r.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":true})");
+  r.advance(100);
+  CHECK(last_screen_state(r.fake) == nullptr);  // the hello already said it
+}
+
+namespace {
+const char* kDashboard =
+    R"({"type":"dashboard","v":1,"sessions":[{"label":"telegram 3f2a","state":"busy"},)"
+    R"({"label":"gadget 91c0","state":"waiting"},{"label":"cli 77de","state":"idle"}],)"
+    R"("tiles":[{"label":"NAS","value":"up","state":"ok"},{"label":"Backups","value":"2 days","state":"warn"}]})";
+
+void tap_cancel(Rig& r) {
+  r.app.on_button(hg::Button::Cancel, true);
+  r.advance(50);
+  r.app.on_button(hg::Button::Cancel, false);
+}
+
+size_t count_pixels(const FakeHal& fake, uint16_t color) {
+  size_t n = 0;
+  for (uint16_t px : fake.fb) n += px == color;
+  return n;
+}
+}  // namespace
+
+TEST("dashboard: the hello offers it, versioned, with the rows that fit") {
+  Rig r;
+  r.bring_online(true);
+  const Value* hello = r.fake.last("hello");
+  CHECK(hello && (*hello)["caps"]["dashboard"].is_object());
+  if (!hello) return;
+  CHECK_EQ((*hello)["caps"]["dashboard"]["v"].as_int(), int64_t(1));
+  CHECK((*hello)["caps"]["dashboard"]["rows"].as_int() >= 4);
+
+  hg::DeviceProfile talk_only = Rig::profile("ws://hermes.local:8765/gadget");
+  talk_only.has_cancel_button = false;  // nothing could open it
+  Rig t(talk_only);
+  t.bring_online(true);
+  CHECK(!(*t.fake.last("hello"))["caps"]["dashboard"].is_object());
+}
+
+TEST("dashboard: arrives quietly, opens with CANCEL on the idle screen and closes with it") {
+  Rig r;
+  r.bring_online(true);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  tap_cancel(r);
+  CHECK(r.app.screen() == hg::Screen::Ready);  // nothing to show yet
+  r.server(kDashboard);
+  CHECK(r.app.screen() == hg::Screen::Ready);  // a snapshot doesn't take the screen
+  CHECK_EQ(r.app.model().detail, std::string("CANCEL shows sessions"));
+  tap_cancel(r);
+  CHECK(r.app.screen() == hg::Screen::Dashboard);
+  const auto& rows = r.app.model().dash;
+  CHECK_EQ(rows.size(), size_t(7));  // heading, 3 sessions, heading, 2 tiles
+  if (rows.size() != 7) return;
+  CHECK(rows[0].heading);
+  CHECK_EQ(rows[1].label, std::string("telegram 3f2a"));
+  CHECK(rows[1].value == "busy" && rows[1].tone == hg::DashRow::Tone::Busy);
+  CHECK(rows[2].value == "approval" && rows[2].tone == hg::DashRow::Tone::Waiting);
+  CHECK(rows[3].value == "idle" && rows[3].tone == hg::DashRow::Tone::Dim);
+  CHECK(rows[4].heading);
+  CHECK(rows[5].value == "up" && rows[5].tone == hg::DashRow::Tone::Good);
+  CHECK(rows[6].tone == hg::DashRow::Tone::Warn);
+  CHECK_EQ(r.app.model().headline, std::string("1 waiting"));
+  CHECK_EQ(r.app.model().hint, std::string("CANCEL to close"));
+
+  // A newer snapshot replaces it while it is open.
+  r.server(R"({"type":"dashboard","v":1,"sessions":[{"label":"cli 77de","state":"idle"}]})");
+  CHECK(r.app.screen() == hg::Screen::Dashboard);
+  CHECK_EQ(r.app.model().dash.size(), size_t(2));
+  CHECK_EQ(r.app.model().headline, std::string("All idle"));
+  r.server(R"({"type":"dashboard","v":2,"sessions":[]})");  // a layout this firmware doesn't know
+  CHECK_EQ(r.app.model().dash.size(), size_t(2));
+
+  tap_cancel(r);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+}
+
+TEST("dashboard: talking or a question takes over; a lost connection forgets it") {
+  Rig r;
+  r.bring_online(true);
+  r.server(kDashboard);
+  tap_cancel(r);
+  CHECK(r.app.screen() == hg::Screen::Dashboard);
+  r.server(R"({"type":"prompt","id":"q1","title":"Allow?","text":"ls"})");
+  CHECK(r.app.screen() == hg::Screen::Prompt);
+  r.server(R"({"type":"prompt.close","id":"q1"})");
+  CHECK(r.app.screen() == hg::Screen::Dashboard);
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK(r.app.screen() == hg::Screen::Listening);
+  r.advance(50);
+  r.app.on_button(hg::Button::Talk, false);  // too short: discarded
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  r.advance(3000);
+
+  tap_cancel(r);
+  CHECK(r.app.screen() == hg::Screen::Dashboard);
+  r.app.on_transport_closed("gone");
+  CHECK(r.app.screen() == hg::Screen::Connecting);
+  r.advance(3000);
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":true})");
+  r.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":true})");
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.app.model().detail, std::string("Ask me anything"));
+  tap_cancel(r);
+  CHECK(r.app.screen() == hg::Screen::Ready);  // nothing until Hermes sends it again
+}
+
+TEST("dashboard: a session's state shows in its colour, and long lists page") {
+  Rig r;
+  r.bring_online(true);
+  const uint16_t blue = hg::rgb565(90, 169, 242);
+  r.server(R"({"type":"dashboard","v":1,"sessions":[{"label":"telegram","state":"idle"}]})");
+  tap_cancel(r);
+  CHECK(r.app.screen() == hg::Screen::Dashboard);
+  const size_t idle_blue = count_pixels(r.fake, blue);
+  r.server(R"({"type":"dashboard","v":1,"sessions":[{"label":"telegram","state":"busy"}]})");
+  CHECK(count_pixels(r.fake, blue) > idle_blue);  // the busy dot and its word
+
+  std::string many = R"({"type":"dashboard","v":1,"sessions":[)";
+  for (int i = 0; i < 12; ++i) many += std::string(i ? "," : "") + R"({"label":"s)" + std::to_string(i) + R"(","state":"idle"})";
+  many += "]}";
+  r.server(many);
+  CHECK_EQ(r.app.model().scroll, 0);
+  r.advance(12000);
+  CHECK(r.app.model().scroll > 0);  // pages itself
+  for (int i = 0; i < 6 && r.app.model().scroll != 0; ++i) r.advance(12000);
+  CHECK_EQ(r.app.model().scroll, 0);  // ...and starts over at the top
+  r.app.on_button(hg::Button::Down, true);
+  r.app.on_button(hg::Button::Down, false);
+  CHECK_EQ(r.app.model().scroll, 1);
+}
+
+TEST("dashboard: touch boards open it with a swipe down") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  r.server(kDashboard);
+  CHECK_EQ(r.app.model().detail, std::string("Swipe down for sessions"));
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Cancel, false);
+  CHECK(r.app.screen() == hg::Screen::Dashboard);
+  CHECK_EQ(r.app.model().hint, std::string("Swipe down to close"));
 }

@@ -149,8 +149,19 @@ HELP = """commands:
   ask <title> | <question>     ask a yes/no question (TALK = yes, CANCEL = no)
   action <name> [json-args]    invoke a device action, e.g. action led.set {"color":"red"}
   image <path>                 send an image (needs Pillow)
+  dashboard [json]             send a dashboard (sample sessions and tiles without json);
+                               CANCEL on the idle screen opens it
   update <path>                install a firmware image (firmware.bin) over the air
   quit"""
+
+
+# What `dashboard` sends without arguments: a few sessions in each state and two tiles.
+SAMPLE_DASHBOARD = {
+    "sessions": [{"label": "telegram 3f2a", "state": "waiting"}, {"label": "gadget 91c0", "state": "busy"},
+                 {"label": "cli 77de", "state": "idle"}],
+    "tiles": [{"label": "NAS", "value": "up", "state": "ok"},
+              {"label": "Backups", "value": "2 days", "state": "warn"}],
+}
 
 
 async def _update(session: DeviceSession, path: str) -> None:
@@ -231,6 +242,15 @@ async def _console(hub: DeviceHub, brain: EchoBrain, stop: asyncio.Event) -> Non
                     if box:
                         img = imaging.to_rgb565(rest.strip(), *box)
                         await s.show_image(img.width, img.height, img.rgb565)
+            elif cmd == "dashboard":
+                from hermes_gadget_plugin import dashboard
+
+                given = json.loads(rest) if rest.strip() else SAMPLE_DASHBOARD
+                for s in sessions:
+                    if s.dashboard_version:
+                        await s.send_dashboard(dashboard.message(
+                            given.get("sessions") or [], given.get("tiles") or [], charset=s.charset,
+                            cols=s.display.get("text_cols")))
             elif cmd == "update":
                 for s in sessions:
                     s.spawn(_update(s, rest.strip()))

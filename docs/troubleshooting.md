@@ -13,7 +13,10 @@
 
 | Symptom | What to check |
 |---|---|
+| `hermes plugins install` is blocked with a "dangerous" verdict | Install from the `plugin` directory: use the command in [Connect Hermes](connect-hermes.md#1-install-the-plugin). The repository root is not a plugin, and its scan includes the Raspberry Pi installer |
 | Device stays on Connecting | Use the URL from `hermes gadget info`. Keep the gateway running and allow its port through the host firewall. A board cannot use `127.0.0.1` to reach another computer |
+| Device stops answering after Hermes, its proxy or a tunnel restarts | Firmware 0.2.0 could stop for good when the server dropped the WebSocket; its log fills with `event queue full; dropping event 6`. Update the firmware. Newer firmware reconnects by itself, and restarts if its WebSocket send task gets stuck (`the WebSocket send task is stuck; restarting` in the log). If it still stops, [save a board report](#save-a-board-report) |
+| `No matching trusted root certificate found` in the log for a `wss://` address | The server's certificate chain does not reach a root certificate the firmware trusts. List the chain with `openssl s_client -connect <host>:443 -servername <host> -showcerts`. Firmware 0.2.0 rejected Cloudflare tunnels (`*.trycloudflare.com`); update the firmware. See [remote access](tailscale-funnel.md#security-and-troubleshooting) |
 | Board cannot join Wi-Fi | Check the password and use a 2.4 GHz network |
 | Screen stays dark but the USB console answers | The display failed to start and the gadget runs without it. The boot log names the call that failed (`... failed: ESP_ERR_...`); check the wiring, the panel revision and the board profile |
 | "No pairing code yet" | An allowlist may reject unknown senders. Keep `platforms.gadget.extra.unauthorized_dm_behavior: pair`, or add the device ID to `GADGET_ALLOWED_USERS`. Check `hermes pairing list` |

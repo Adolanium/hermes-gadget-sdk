@@ -190,6 +190,189 @@ def test_sensor_state_reaches_the_hub(devserver, make_sim):
     assert sim.wait_for(lambda: next(iter(hub.sessions.values())).sensors.get("temperature_c") == 30.5, timeout=5)
 
 
+_POWER_FIELDS = ("battery_present", "battery_mv", "battery_percent", "charging", "external_power")
+
+
+def _wait_power(sim, hub, reading):
+    """Observe a normal HAL poll and its raw telemetry delivery, within one deadline."""
+    expected = {"available": reading is not None}
+    if reading is not None:
+        expected.update({key: value for key, value in reading.items() if value is not None})
+    sensors = {"power_available": int(reading is not None)}
+    for key in _POWER_FIELDS:
+        value = expected.get(key)
+        sensors[key] = int(value) if type(value) is bool else value
+
+    def delivered():
+        session = hub.sessions.get(sim.status()["device_id"])
+        return (sim.status().get("power") == expected and session is not None
+                and all(session.sensors.get(key) == value for key, value in sensors.items()))
+
+    assert sim.wait_for(delivered, timeout=9.8), (sim.status(), sensors)
+    # Status and sensor delivery can precede the next normal 100 ms UI frame.
+    sim.run_for(0.12)
+
+
+def _power_header(sim):
+    # The 240x240 profile's first ten rows contain the title, battery and link
+    # glyphs, but not the animated ready-screen content below the top bar.
+    return sim.rgb888(0, 10)
+
+
+def _power_sim(make_sim, url, **kwargs):
+    sim = make_sim(url, board="sim-240x240", name="Waveshare 1.54", **kwargs)
+    assert sim.wait_screen("ready", timeout=10)
+    sim.console("set battery_display percentage")
+    return sim
+
+
+def test_voltage_estimate_is_opt_in_display_only_and_clears(devserver, make_sim):
+    hub, _brain, url = devserver()
+    sim = _power_sim(make_sim, url)
+    _wait_power(sim, hub, None)
+    hidden = _power_header(sim)
+    voltage = {"battery_mv": 3750, "charging": False}
+    sim.set_power(voltage)
+    _wait_power(sim, hub, voltage)
+    assert _power_header(sim) == hidden
+    sim.set_sensor("battery_pct", 87)
+    sim.run_for(0.1)
+    assert _power_header(sim) == hidden
+
+    sim.console("set battery_estimate liion")
+    sim.run_for(0.05)
+    estimated = _power_header(sim)
+    assert estimated != hidden
+    assert "battery_percent" not in sim.status()["power"]
+    assert hub.sessions[sim.status()["device_id"]].sensors.get("battery_percent") is None
+
+    direct = {**voltage, "battery_percent": 50}
+    sim.set_power(direct)
+    _wait_power(sim, hub, direct)
+    assert _power_header(sim) == estimated
+    sim.set_power(voltage)
+    _wait_power(sim, hub, voltage)
+    sim.console("set battery_estimate off")
+    sim.run_for(0.05)
+    assert _power_header(sim) == hidden
+    sim.console("set battery_estimate liion")
+    sim.run_for(0.05)
+    assert _power_header(sim) == estimated
+    sim.console("set battery_estimate")
+    sim.run_for(0.05)
+    assert _power_header(sim) == hidden
+    sim.console("set battery_estimate liion")
+    sim.set_power(None)
+    _wait_power(sim, hub, None)
+    assert _power_header(sim) == hidden
+
+
+@pytest.mark.parametrize("reading,percent", [
+    ({"battery_mv": 3300}, 0),
+    ({"battery_mv": 4200}, 100),
+    ({"battery_mv": 2000}, 0),
+    ({"battery_mv": 4500}, 100),
+    ({"battery_mv": 1999}, None),
+    ({"battery_mv": 4501}, None),
+    ({}, None),
+    ({"battery_mv": None}, None),
+    ({"battery_mv": 3750, "battery_present": False}, None),
+    ({"battery_mv": 3750, "battery_present": None}, 50),
+    ({"battery_mv": 3750, "battery_present": True}, 50),
+    ({"battery_mv": 3750, "charging": True}, 50),
+    ({"battery_mv": 3750, "battery_percent": 0}, 0),
+    ({"battery_mv": 3750, "battery_percent": 100}, 100),
+])
+def test_power_boundaries_and_native_precedence(devserver, make_sim, reading, percent):
+    hub, _brain, url = devserver()
+    sim = _power_sim(make_sim, url)
+    _wait_power(sim, hub, None)
+    hidden = _power_header(sim)
+    sim.console("set battery_estimate liion")
+    sim.set_power(reading)
+    _wait_power(sim, hub, reading)
+    actual = _power_header(sim)
+    if percent is None:
+        assert actual == hidden
+    else:
+        assert actual != hidden
+        reference = {**reading, "battery_percent": percent}
+        sim.set_power(reference)
+        _wait_power(sim, hub, reference)
+        assert _power_header(sim) == actual
+    # Full replacements must not leave the prior percentage, voltage or flags.
+    sim.set_power({})
+    _wait_power(sim, hub, {})
+    assert _power_header(sim) == hidden
+
+
+def test_power_validation_is_atomic_in_host_native_and_abi(devserver, make_sim):
+    hub, _brain, url = devserver()
+    sim = _power_sim(make_sim, url)
+    original = {"battery_present": True, "battery_mv": 3750, "battery_percent": 50,
+                "charging": False, "external_power": True}
+    sim.set_power(original)
+    original["battery_mv"] = 4200
+    expected = {**original, "battery_mv": 3750}
+    assert sim.power_status == expected  # Caller mutation cannot change the fixture.
+    _wait_power(sim, hub, expected)
+    header = _power_header(sim)
+    invalid = [
+        [], "null", 0, True, {"unknown": 1}, {"battery_present": 1},
+        {"charging": "yes"}, {"external_power": 0}, {"battery_mv": True},
+        {"battery_mv": 3750.0}, {"battery_mv": "3750"}, {"battery_mv": -1},
+        {"battery_mv": 65536}, {"battery_percent": False},
+        {"battery_percent": 50.0}, {"battery_percent": -1}, {"battery_percent": 101},
+        {"battery_mv": 4200, "charging": 1},
+    ]
+    for setter in (sim.set_power, sim.device.set_power):
+        for reading in invalid:
+            with pytest.raises(ValueError):
+                setter(reading)
+            assert sim.power_status == expected
+    lib = sim.device._lib
+    handle = sim.device._handle
+    valid = (1, 1, 3750, 50, 0, 1)
+    for index, bad in [(0, -1), (0, 2), (1, 2), (2, -2), (2, 65536),
+                       (3, -2), (3, 101), (4, 2), (5, 2)]:
+        args = list(valid)
+        args[index] = bad
+        assert lib.hgsim_set_power(handle, *args) == 0
+    assert lib.hgsim_set_power(None, *valid) == 0
+    # Even a clear request validates all fields before discarding the reading.
+    assert lib.hgsim_set_power(handle, 0, 1, 3750, 101, 0, 1) == 0
+    sim.run_for(5.2)
+    _wait_power(sim, hub, expected)
+    assert _power_header(sim) == header
+    # ABI endpoints and explicit unknowns are accepted, not confused with rejection.
+    for reading in ({"battery_mv": 0, "battery_percent": 0},
+                    {"battery_mv": 65535, "battery_percent": 100},
+                    {key: None for key in _POWER_FIELDS}):
+        sim.set_power(reading)
+        _wait_power(sim, hub, reading)
+
+
+def test_power_settings_survive_restart_but_fixture_does_not(devserver, make_sim):
+    hub, _brain, url = devserver()
+    sim = _power_sim(make_sim, url, state="power-persistence")
+    sim.console("set battery_estimate liion")
+    reading = {"battery_mv": 3750}
+    sim.set_power(reading)
+    _wait_power(sim, hub, reading)
+    estimated = _power_header(sim)
+    sim.close()
+    # Do not reapply either console setting on the new production App.
+    restarted = make_sim(url, board="sim-240x240", name="Waveshare 1.54",
+                         state="power-persistence")
+    assert restarted.wait_screen("ready", timeout=10)
+    assert restarted.power_status is None
+    _wait_power(restarted, hub, None)
+    assert _power_header(restarted) != estimated
+    restarted.set_power(reading)
+    _wait_power(restarted, hub, reading)
+    assert _power_header(restarted) == estimated
+
+
 def test_device_reconnects_after_server_restart(loop_thread, devserver, make_sim):
     hub, _brain, url = devserver()
     sim = make_sim(url)
@@ -253,14 +436,15 @@ def test_holding_cancel_starts_a_new_session(devserver, make_sim):
                         timeout=5)
 
 
-@pytest.mark.parametrize("board", ["sim-466x466-round", "sim-360x360-round"])
-def test_round_touch_board_talks_with_the_screen(devserver, make_sim, board):
+@pytest.mark.parametrize("board, centre", [("sim-466x466-round", 233), ("sim-360x360-round", 180),
+                                           ("sim-240x240-round", 120)])
+def test_round_touch_board_talks_with_the_screen(devserver, make_sim, board, centre):
     hub, _brain, url = devserver()
     sim = make_sim(url, board=board)
     assert sim.wait_screen("ready", timeout=10)
     hello = next(m for m in sim.sent if m["type"] == "hello")
     assert hello["caps"]["display"]["shape"] == "round" and "touch" in hello["caps"]["inputs"]
-    sim.touch(True, 233, 233)
+    sim.touch(True, centre, centre)
     assert sim.wait_screen("listening", timeout=2)
     sim.run_for(0.6)
     sim.touch(False)
@@ -335,3 +519,35 @@ def test_a_new_firmware_is_kept_once_it_reaches_hermes(devserver, make_sim):
     sim = make_sim(url, update_pending=True)
     assert sim.wait_screen("ready", timeout=10)
     assert sim.update_confirmed
+
+
+@pytest.mark.parametrize("board", ["sim-320x240", "sim-240x135", "sim-466x466-round"])
+def test_the_dashboard_opens_from_the_idle_screen(loop_thread, devserver, make_sim, board, tmp_path):
+    from hermes_gadget.devserver import SAMPLE_DASHBOARD
+    from hermes_gadget_plugin import dashboard
+
+    hub, _brain, url = devserver()
+    sim = make_sim(url, board=board)
+    assert sim.wait_screen("ready", timeout=10)
+    session = next(iter(hub.sessions.values()))
+    assert session.dashboard_version == 1
+    msg = dashboard.message(SAMPLE_DASHBOARD["sessions"], SAMPLE_DASHBOARD["tiles"],
+                            cols=session.display.get("text_cols"))
+    assert loop_thread.run(session.send_dashboard(msg))
+    assert sim.wait_for(lambda: sim.last_received("dashboard") is not None, timeout=5)
+    assert sim.status()["screen"] == "ready"  # it waits to be opened
+    if sim.board.touch:
+        sim.touch(True, sim.board.width // 2, sim.board.height // 3)
+        for dy in range(0, 120, 20):
+            sim.touch(True, sim.board.width // 2, sim.board.height // 3 + dy)
+            sim.run_for(0.02)
+        sim.touch(False)
+    else:
+        sim.tap("cancel")
+    assert sim.wait_screen("dashboard", timeout=5)
+    sim.run_for(0.2)
+    rgb = sim.rgb888()
+    pixels = {rgb[i:i + 3] for i in range(0, len(rgb), 3)}
+    assert any(p[0] < 120 and 140 < p[1] < 200 and p[2] > 200 for p in pixels)  # the busy session's blue
+    assert any(p[0] > 200 and 150 < p[1] < 200 and p[2] < 90 for p in pixels)  # the waiting one's amber
+    sim.screenshot(tmp_path / f"dashboard-{board}.png")

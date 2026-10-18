@@ -192,3 +192,110 @@ def test_focus_changes_release_talk_and_typing_does_not_record(window, devserver
     assert [m["type"] for m in window.sim.sent if m["type"].startswith("audio.")] == ["audio.start", "audio.cancel"]
     window._key("talk", True)
     assert window.sim.mic.active is False
+
+
+@requires_sim
+def test_power_controls_use_real_hal_and_reset_only_fixture_on_board_change(window, devserver, monkeypatch):
+    _, _, url = devserver()
+    monkeypatch.setattr(window.root, "winfo_screenheight", lambda: 768)
+    monkeypatch.setattr(window.root, "winfo_screenwidth", lambda: 1024)
+    assert window._apply_settings(url, "sim-240x240", False, False)
+    window.sim.set_network(True)
+    drive(window, lambda: window.sim.status()["screen"] == "ready")
+    window.developer_toggle.invoke()
+    window.root.update()
+
+    def console(command):
+        window.console_entry.delete(0, "end")
+        window.console_entry.insert(0, command)
+        window.console_entry.focus_force()
+        window.root.update()
+        window.console_entry.event_generate("<Return>")
+        window.root.update()
+
+    def enter(key, value):
+        entry = window.power_entries[key]
+        entry.delete(0, "end")
+        entry.insert(0, value)
+
+    def header():
+        return window.sim.rgb888(0, 22)
+
+    def power():
+        return window.sim.status()["power"]
+
+    assert window.sim.power_status is None
+    assert not window.power_available_var.get()
+    assert all(not entry.get() for entry in window.power_entries.values())
+    assert all(choice.get() == "Unknown" and str(choice.cget("state")) == "readonly"
+               for choice in window.power_choices.values())
+    for widget in (window.power_apply, window.power_result, window.console_entry):
+        assert widget.winfo_ismapped()
+        assert widget.winfo_rooty() >= window.root.winfo_rooty()
+        assert widget.winfo_rooty() + widget.winfo_height() <= (
+            window.developer_toggle.winfo_rooty())
+    assert window.root.winfo_width() < 1024
+    assert window.root.winfo_height() < 768
+
+    console("set battery_estimate liion")
+    console("set battery_display percentage")
+    empty_header = header()
+    window.power_available.invoke()
+    enter("battery_percent", "50")
+    # Editing a fixture and toggling availability do not send a reading.
+    assert window.sim.power_status is None
+    window.power_apply.invoke()
+    assert window.power_result_var.get() == "Applied; device polls within 5 seconds."
+    drive(window, lambda: power().get("battery_percent") == 50 and header() != empty_header)
+    reference = header()
+    assert reference != empty_header
+
+    enter("battery_percent", "")
+    enter("battery_mv", "3750")
+    window.power_choices["charging"].set("No")
+    window.power_apply.invoke()
+    drive(window, lambda: power().get("battery_mv") == 3750 and "battery_percent" not in power()
+          and header() == reference)
+    assert header() == reference
+    assert power() == {"available": True, "battery_mv": 3750, "charging": False}
+    applied = window.sim.power_status.copy()
+    for key, text in (("battery_mv", "3.75"), ("battery_mv", "65536"),
+                      ("battery_percent", "101")):
+        enter(key, text)
+        window.power_apply.invoke()
+        assert window.power_result_var.get() != "Applied; device polls within 5 seconds."
+        assert window.sim.power_status == applied
+        assert header() == reference
+        enter(key, "3750" if key == "battery_mv" else "")
+
+    window.power_available.invoke()
+    assert window.sim.power_status == applied
+    window.power_apply.invoke()
+    assert window.sim.power_status is None
+    drive(window, lambda: power() == {"available": False} and header() == empty_header)
+    assert header() == empty_header
+    assert window.power_entries["battery_mv"].get() == "3750"
+    window.power_available.invoke()
+    assert window.sim.power_status is None
+    window.power_apply.invoke()
+    drive(window, lambda: power().get("battery_mv") == 3750 and header() == reference)
+    assert header() == reference
+
+    # Both firmware opt-ins survive a real new instance; the input fixture does not.
+    assert window._apply_settings(url, "sim-320x240", False, False)
+    assert window.sim.power_status is None
+    assert window._apply_settings(url, "sim-240x240", False, False)
+    window.sim.set_network(True)
+    drive(window, lambda: window.sim.status()["screen"] == "ready")
+    assert window.sim.power_status is None
+    assert not window.power_available_var.get()
+    assert all(not entry.get() for entry in window.power_entries.values())
+    assert power() == {"available": False}
+    assert header() == empty_header
+    window.developer_toggle.invoke()
+    window.power_available.invoke()
+    enter("battery_mv", "3750")
+    window.power_choices["charging"].set("No")
+    window.power_apply.invoke()
+    drive(window, lambda: power().get("battery_mv") == 3750 and header() == reference)
+    assert header() == reference

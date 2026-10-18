@@ -92,6 +92,29 @@ constexpr InitCommand kInit410[] = {
     {0x29, {}, 0, 0},    // display on
 };
 
+// Panel bring-up for the 480x480 2.16" development board (CO5300, QSPI),
+// following Waveshare's esp32_s3_touch_amoled_2_16 BSP (v2.0.1): the vendor
+// page, RGB565, tearing, brightness, the full 480x480 window at no column
+// offset (0x0000..0x01DF both axes) and MADCTL 0xA0. This is a square panel,
+// so there are no round margins to blank.
+constexpr InitCommand kInit480[] = {
+    {0x11, {}, 0, 600},  // sleep out first (per the BSP table order)
+    {0xFE, {0x20}, 1, 0},
+    {0x19, {0x10}, 1, 0},
+    {0x1C, {0xA0}, 1, 0},
+    {0xFE, {0x00}, 1, 0},
+    {0xC4, {0x80}, 1, 0},
+    {0x3A, {0x55}, 1, 0},  // 16 bits per pixel
+    {0x35, {0x00}, 1, 0},  // tearing effect line on
+    {0x53, {0x20}, 1, 0},  // brightness control on
+    {0x51, {0xFF}, 1, 0},  // brightness
+    {0x63, {0xFF}, 1, 0},
+    {0x2A, {0x00, 0x00, 0x01, 0xDF}, 4, 0},  // full 480-wide window
+    {0x2B, {0x00, 0x00, 0x01, 0xDF}, 4, 0},  // full 480-tall window
+    {0x36, {0xA0}, 1, 0},  // memory access control
+    {0x29, {}, 0, 600},    // display on
+};
+
 }  // namespace
 
 bool AmoledDisplay::on_trans_done(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_t*, void* ctx) {
@@ -162,6 +185,9 @@ bool AmoledDisplay::begin(const AmoledConfig& cfg) {
   } else if (cfg.panel == AmoledPanel::Co5300_410) {
     init = kInit410;
     init_len = sizeof(kInit410) / sizeof(kInit410[0]);
+  } else if (cfg.panel == AmoledPanel::Co5300_480) {
+    init = kInit480;
+    init_len = sizeof(kInit480) / sizeof(kInit480[0]);
   }
   for (size_t i = 0; i < init_len; ++i) {
     command(init[i].cmd, init[i].data, init[i].len);

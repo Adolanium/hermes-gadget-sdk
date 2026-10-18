@@ -1,33 +1,37 @@
-/* Product introduction. The installer shares the base colours and controls. */
-body { color-scheme:dark; background:#10151c; color:#f4f2ec; --text:#f4f2ec; --muted:#aab7c3; --accent:#efb451; --accent-strong:#efb451; --accent-ink:#242019; --border:#303842; --border-strong:#48515c; --surface:#171e27; --surface-2:#202936; }
+/* Product introduction. Colours, type and controls come from styles.css. */
 .button { text-decoration:none; }
 .wrap { max-width:1200px; width:calc(100% - 72px); }
 .topbar { position:static; background:transparent; }
 .topbar-inner { height:88px; }
 .hero { grid-template-columns:1.15fr 1fr; padding:78px 0 65px; gap:50px; }
-.hero h1 { font:clamp(42px,4.5vw,64px)/1.08 Georgia,serif; letter-spacing:-2px; margin-bottom:28px; }
-.hero .lead { font-size:18px; line-height:1.7; max-width:500px; }
+.hero h1 { font:normal clamp(42px,5vw,72px)/1.04 var(--serif); letter-spacing:-.03em; margin-bottom:28px; }
+.hero .lead { font-size:15px; line-height:1.75; max-width:500px; }
 .hero .actions { margin-top:30px; }
 .hero .hint { margin-top:18px; }
 .stage { margin:0; display:flex; flex-direction:column; align-items:center; position:relative; padding:20px 0; }
-.device-shell { width:min(350px,100%); aspect-ratio:1; padding:12px; border-radius:50%; border:1px solid #78808a; background:linear-gradient(135deg,#66717a,#222930 25%,#11161c 70%,#55606a); box-shadow:0 24px 40px #0006; }
+.stage-window { width:min(430px,100%); border:1px solid var(--border-strong); background:var(--bg); box-shadow:var(--shadow); }
+.stage-bar { display:flex; justify-content:space-between; align-items:center; padding:6px 10px; border-bottom:1px solid var(--border-strong); background:var(--surface); font-size:11px; letter-spacing:.08em; color:var(--muted); }
+.stage-bar i { display:inline-block; width:9px; height:9px; margin-left:5px; border:1px solid var(--border-strong); }
+.stage-body { display:flex; flex-direction:column; align-items:center; padding:34px 20px 0; background:repeating-linear-gradient(0deg,rgba(201,200,255,.04) 0 1px,transparent 1px 4px); }
+.device-shell { width:min(300px,100%); aspect-ratio:1; padding:12px; border-radius:50%; border:1px solid var(--border-strong); background:radial-gradient(circle at 30% 25%,#3b35a8,#120d6e 45%,#04003a 80%); box-shadow:10px 10px 0 rgba(201,200,255,.08); }
 .device-shell img { width:100%; height:100%; border-radius:50%; display:block; image-rendering:pixelated; }
-.device-stand { width:124px; height:36px; background:linear-gradient(90deg,#232b34,#333c46,#232b34); border-radius:0 0 30% 30%; }
-.stage figcaption { color:#aab7c3; font-size:12px; margin-top:24px; text-align:center; }
+.device-stand { width:124px; height:30px; background:var(--surface-2); border:1px solid var(--border-strong); border-top:0; }
+.stage figcaption { color:var(--muted); font-size:12px; margin:0; padding:18px 12px 20px; text-align:center; }
 .paths-head { display:flex; justify-content:space-between; align-items:center; gap:24px; margin-bottom:20px; }
-.paths-head h2 { font-size:26px; font-weight:500; letter-spacing:-.5px; margin:0; }
-.path-grid { display:grid; grid-template-columns:repeat(2,1fr); border:1px solid var(--border); border-radius:11px; overflow:hidden; }
-.path { display:block; padding:27px; background:#161d26; text-decoration:none; color:var(--text); }
-.path:nth-child(even) { border-left:1px solid var(--border); }
-.path:nth-child(n+3) { border-top:1px solid var(--border); }
-.path:hover { background:#202936; }
-.path .number { font:11px/1.5 ui-monospace,Consolas,monospace; color:var(--accent); }
-.path h3 { margin:12px 0 8px; font-size:19px; }
+.paths-head h2 { font:normal 34px/1.1 var(--serif); letter-spacing:-.02em; margin:0; }
+.path-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:22px; }
+.path { display:block; padding:24px 26px 26px; background:var(--bg); border:1px solid var(--border-strong); text-decoration:none; color:var(--text); transition:transform .18s ease-out, box-shadow .18s ease-out; }
+.path:hover, .path:focus-visible { color:var(--text); transform:translate(-3px,-3px); box-shadow:6px 6px 0 rgba(201,200,255,.14); }
+.path .number { display:block; margin:-24px -26px 18px; padding:6px 12px; border-bottom:1px solid var(--border-strong); background:var(--surface); font:11px/1.5 var(--mono); letter-spacing:.08em; color:var(--muted); }
+.path h3 { margin:12px 0 8px; font:normal 26px/1.15 var(--serif); letter-spacing:-.02em; }
 .path p { font-size:14px; color:var(--muted); margin:0 0 18px; }
-.path .link { color:var(--accent); font-size:14px; }
-.site-band { display:grid; grid-template-columns:repeat(3,1fr); gap:36px; padding:40px 0; }
-.site-band h3 { margin:0 0 8px; font-size:16px; }
+.path .link { color:var(--accent); font-size:12px; letter-spacing:.08em; text-transform:uppercase; }
+.art-band { margin:64px 0 0; border:1px solid var(--border-strong); background:var(--bg); box-shadow:var(--shadow); }
+.art-band img { display:block; width:100%; height:auto; aspect-ratio:2/1; object-fit:cover; }
+.site-band { display:grid; grid-template-columns:repeat(3,1fr); gap:36px; padding:48px 0 40px; }
+.site-band h3 { margin:0 0 8px; font:normal 22px/1.2 var(--serif); }
 .site-band p { color:var(--muted); font-size:14px; margin:0; }
 .site-band a { color:var(--accent); }
 .footer { background:transparent; }
-@media(max-width:800px) { .wrap { width:calc(100% - 40px); } .topbar-inner { height:auto; min-height:76px; flex-wrap:wrap; gap:12px; padding:16px 0; } .topbar nav { gap:20px; } .hero { grid-template-columns:1fr; padding:40px 0; gap:20px; } .hero h1 { font-size:42px; } .hero .lead { font-size:16px; } .device-shell { width:280px; } .paths-head { display:block; } .path-grid,.site-band { grid-template-columns:1fr; } .path + .path { border-left:0; border-top:1px solid var(--border); } .site-band { gap:24px; } }
+@media(max-width:800px) { .wrap { width:calc(100% - 40px); } .topbar-inner { height:auto; min-height:76px; flex-wrap:wrap; gap:12px; padding:16px 0; } .topbar nav { gap:20px; } .hero { grid-template-columns:1fr; padding:40px 0; gap:20px; } .hero h1 { font-size:42px; } .hero .lead { font-size:16px; } .device-shell { width:240px; } .paths-head { display:block; } .path-grid,.site-band { grid-template-columns:1fr; } .path + .path { border-left:0; border-top:1px solid var(--border); } .site-band { gap:24px; } }
+@media(prefers-reduced-motion:reduce) { .path:hover, .path:focus-visible { transform:none; } }

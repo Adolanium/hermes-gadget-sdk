@@ -184,3 +184,49 @@ TEST("ws: every network wait has a limit of a few seconds at most") {
   CHECK(hg::ws::kSendTimeoutMs > 0 && hg::ws::kSendTimeoutMs <= 5000);
   CHECK(hg::ws::kCloseTimeoutMs > 0 && hg::ws::kCloseTimeoutMs <= 5000);
 }
+
+// --- A stuck send task ends in a restart, not a wedge (#136) -----------------
+
+TEST("ws: an idle send task is never stuck") {
+  hg::ws::TxWatch w;
+  CHECK(!w.stuck(0));
+  CHECK(!w.stuck(10 * hg::ws::kStuckMs));
+}
+
+TEST("ws: a send task within the limit is not stuck") {
+  hg::ws::TxWatch w;
+  w.begin(1000);
+  CHECK(!w.stuck(1000));
+  CHECK(!w.stuck(1000 + hg::ws::kStuckMs));
+}
+
+TEST("ws: a send task on one item past the limit is stuck") {
+  hg::ws::TxWatch w;
+  w.begin(1000);
+  CHECK(w.stuck(1001 + hg::ws::kStuckMs));
+}
+
+TEST("ws: finishing the item clears it, and each item gets its own limit") {
+  hg::ws::TxWatch w;
+  w.begin(1000);
+  w.end();
+  CHECK(!w.stuck(1001 + hg::ws::kStuckMs));
+  w.begin(1000 + 2 * hg::ws::kStuckMs);
+  CHECK(!w.stuck(1000 + 2 * hg::ws::kStuckMs + 5));
+}
+
+TEST("ws: the stuck limit holds across the millisecond clock wrapping") {
+  hg::ws::TxWatch w;
+  w.begin(0xFFFFFF00u);
+  CHECK(!w.stuck(0x00000100u));
+  CHECK(w.stuck(0xFFFFFF00u + hg::ws::kStuckMs + 1));
+}
+
+TEST("ws: no item that ends by itself is taken for stuck") {
+  // A send waits for the client's lock, then writes; a close sends its frame the
+  // same way, then waits for the client's task, which ends within the network timeout.
+  constexpr uint32_t send = 2 * hg::ws::kSendTimeoutMs;
+  constexpr uint32_t close = 2 * hg::ws::kCloseTimeoutMs + hg::ws::kNetworkTimeoutMs;
+  CHECK(hg::ws::kStuckMs >= 2 * send);
+  CHECK(hg::ws::kStuckMs >= 2 * close);
+}

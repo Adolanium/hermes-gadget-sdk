@@ -1,0 +1,6 @@
+{
+  "title": "Spotpear ESP32-S3-1.28-BOX",
+  "summary": "Experimental. Round 1.28\" 240x240 screen, touch, a microphone, a speaker and a battery.",
+  "docs": "docs/hardware.md#spotpear-esp32-s3-128-box",
+  "ready_made": true
+}

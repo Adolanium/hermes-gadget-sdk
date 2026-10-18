@@ -17,10 +17,12 @@
 namespace hgp {
 namespace {
 uint32_t now_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
+esp_netif_t* station() { return esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"); }
 }
 
 void Wifi::begin(NvsStorage& storage) {
   storage_ = &storage;
+  fast_.load(storage.get(hg::WifiFastJoin::kStorageKey));
   ESP_ERROR_CHECK(esp_netif_init());
   ESP_ERROR_CHECK(esp_event_loop_create_default());
   esp_netif_create_default_wifi_sta();
@@ -50,16 +52,76 @@ void Wifi::retry_now() {
   retry_.retry_now(now_ms());
 }
 
-bool Wifi::configure(const std::string& ssid, const std::string& password) {
+bool Wifi::configure(const std::string& ssid, const std::string& password, const hg::WifiFastAp* aim) {
   wifi_config_t cfg = {};
   std::memcpy(cfg.sta.ssid, ssid.data(), ssid.size());
   std::memcpy(cfg.sta.password, password.data(), password.size());
   cfg.sta.threshold.authmode = password.empty() ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
   cfg.sta.pmf_cfg.capable = true;
+  if (aim) {
+    // The access point that last worked, on its channel: no scan first (wifi_fast.hpp).
+    cfg.sta.bssid_set = true;
+    std::memcpy(cfg.sta.bssid, aim->bssid, sizeof(cfg.sta.bssid));
+    cfg.sta.channel = aim->channel;
+  }
   if (esp_wifi_set_config(WIFI_IF_STA, &cfg) != ESP_OK) return false;
   ssid_ = ssid;
   password_ = password;
+  aimed_ = aim != nullptr;
+#if CONFIG_HG_WIFI_REUSE_IP
+  // Opt-in: take the last lease as a static address and skip DHCP on a fast join.
+  // Every other join, and the fallback after a failed fast one, uses DHCP.
+  esp_netif_t* sta = station();
+  const esp_err_t stopped = sta && aim && aim->has_lease() ? esp_netif_dhcpc_stop(sta) : ESP_FAIL;
+  if (stopped == ESP_OK || stopped == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
+    esp_netif_ip_info_t info = {};
+    info.ip.addr = aim->ip;
+    info.netmask.addr = aim->netmask;
+    info.gw.addr = aim->gateway;
+    if (esp_netif_set_ip_info(sta, &info) == ESP_OK) {
+      static_ip_ = true;
+      if (aim->dns) {
+        esp_netif_dns_info_t dns = {};
+        dns.ip.type = ESP_IPADDR_TYPE_V4;
+        dns.ip.u_addr.ip4.addr = aim->dns;
+        esp_netif_set_dns_info(sta, ESP_NETIF_DNS_MAIN, &dns);
+      }
+    } else {
+      esp_netif_dhcpc_start(sta);
+    }
+  } else if (sta && static_ip_) {
+    static_ip_ = false;
+    esp_netif_dhcpc_start(sta);
+  }
+#endif
   return true;
+}
+
+void Wifi::remember_ap() {
+  wifi_ap_record_t ap = {};
+  if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK) return;
+  hg::WifiFastAp seen;
+  seen.ssid = ssid_;
+  std::memcpy(seen.bssid, ap.bssid, sizeof(seen.bssid));
+  seen.channel = ap.primary;
+  esp_netif_t* sta = station();
+  esp_netif_ip_info_t ip = {};
+  if (sta && esp_netif_get_ip_info(sta, &ip) == ESP_OK) {
+    seen.ip = ip.ip.addr;
+    seen.netmask = ip.netmask.addr;
+    seen.gateway = ip.gw.addr;
+  }
+  esp_netif_dns_info_t dns = {};
+  if (sta && esp_netif_get_dns_info(sta, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK && dns.ip.type == ESP_IPADDR_TYPE_V4)
+    seen.dns = dns.ip.u_addr.ip4.addr;
+  if (auto record = fast_.joined(seen)) storage_->set(hg::WifiFastJoin::kStorageKey, *record);
+}
+
+void Wifi::forget_unsaved_ap() {
+  // The network was forgotten: so is where its access point was.
+  const auto& cached = fast_.cached();
+  if (!cached || cached->ssid == CONFIG_HG_DEFAULT_WIFI_SSID || networks_.find(cached->ssid) < networks_.size()) return;
+  if (fast_.forget()) storage_->erase(hg::WifiFastJoin::kStorageKey);
 }
 
 void Wifi::join(const std::string& ssid, const std::string& password) {
@@ -73,7 +135,7 @@ void Wifi::join(const std::string& ssid, const std::string& password) {
     events::post(EventType::NetDown, "Wi-Fi not configured", 20);
     return;
   }
-  if (!configure(ssid, password)) return;
+  if (!configure(ssid, password, fast_.aim(ssid))) return;
   configured_ = true;
   events::post(EventType::NetDown, "Joining Wi-Fi", 13);
   retry_.started(now_ms());
@@ -86,6 +148,7 @@ void Wifi::reconfigure() {
   candidate_ = {};
   networks_ = hg::WifiNetworks::load(*storage_);
   if (networks_.dirty()) networks_.save(*storage_);
+  forget_unsaved_ap();
   pick_.reset(networks_.size());
   // With nothing saved, the network built into the firmware (if any).
   const std::string ssid = networks_.empty() ? CONFIG_HG_DEFAULT_WIFI_SSID : networks_.all()[0].ssid;
@@ -97,6 +160,7 @@ void Wifi::reconfigure() {
 void Wifi::networks_changed() {
   networks_ = hg::WifiNetworks::load(*storage_);
   if (networks_.dirty()) networks_.save(*storage_);
+  forget_unsaved_ap();
   // On the device's network, the device has moved it first (connected()).
   const bool on_first = link_up_ && !networks_.empty() && networks_.all()[0].ssid == ssid_ &&
                         networks_.all()[0].password == password_;
@@ -108,8 +172,15 @@ void Wifi::disconnected() {
   wait_disconnect_ = false;
   link_up_ = false;
   if (configured_) {
-    pick_.failed();
-    retry_.lost(now_ms(), on_battery && on_battery());
+    if (fast_.failed()) {
+      // The fast join didn't work: join normally at once, without counting it against
+      // the network or lengthening the battery backoff.
+      retry_.lost(now_ms(), false);
+      retry_.retry_now(now_ms());
+    } else {
+      pick_.failed();
+      retry_.lost(now_ms(), on_battery && on_battery());
+    }
   }
   hold_while_attempting();
 }
@@ -119,6 +190,7 @@ void Wifi::connected(hg::App& app) {
   pick_.connected();
   hold_while_attempting();
   link_up_ = true;
+  remember_ap();
   if (!joining_ && networks_.joined(ssid_)) {
     networks_.save(*storage_);
     pick_.reset(networks_.size());
@@ -184,6 +256,12 @@ void Wifi::attempt(uint32_t now) {
       return;
     }
   }
+  // Fast while the last access point hasn't failed since the last join; otherwise drop the aim.
+  const hg::WifiFastAp* aim = joining_ ? nullptr : fast_.aim(ssid_);
+  if ((aim || aimed_) && !configure(ssid_, password_, aim)) {
+    retry_.start_failed(now);
+    return;
+  }
   if (esp_wifi_connect() != ESP_OK) retry_.start_failed(now);
 }
 
@@ -205,7 +283,7 @@ void Wifi::scan_done() {
   }
   const hg::WifiNetwork& next = networks_.all()[pick_.choose(saved, seen)];
   ESP_LOGI("hg.wifi", "scan saw %u networks, trying %s", static_cast<unsigned>(found), next.ssid.c_str());
-  if ((next.ssid != ssid_ || next.password != password_) && !configure(next.ssid, next.password)) {
+  if ((next.ssid != ssid_ || next.password != password_ || aimed_) && !configure(next.ssid, next.password)) {
     retry_.start_failed(now_ms());
     return;
   }

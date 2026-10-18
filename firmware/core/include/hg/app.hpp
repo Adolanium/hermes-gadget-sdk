@@ -196,6 +196,7 @@ class App {
   void h_error(const json::Value& m);
   void h_prompt(const json::Value& m);
   void h_prompt_close(const json::Value& m);
+  void h_dashboard(const json::Value& m);
   void h_ota_offer(const json::Value& m);
   void h_ota_begin(const json::Value& m);
   void h_ota_end(const json::Value& m);
@@ -246,6 +247,8 @@ class App {
   void answer_prompt(bool yes);
   void clear_prompt();
   void flush_sensors();
+  // Tells Hermes when the screen goes dark or lights up (docs/protocol.md#screen-sleep).
+  void flush_display_state();
   void set_hint_flash(std::string text);
   void update_model();
   void log(LogLevel level, std::string_view msg);
@@ -295,7 +298,10 @@ class App {
   // What the battery indicator shows, in the order a tap cycles through.
   enum class BatteryIndicator : uint8_t { Icon, Percentage, Both, Off };
   BatteryIndicator battery_display_ = BatteryIndicator::Off;
-  // Whether the indicator could show anything: a percentage from a fitted battery.
+  bool battery_estimate_enabled_ = false;
+  std::optional<uint8_t> display_battery_percent() const;
+  bool battery_is_estimated() const;
+  // Whether a native or explicitly enabled display percentage is available.
   bool battery_readable() const;
   bool display_dimmed_ = false, display_sleeping_ = false, power_off_armed_ = false;
   bool dozing_ = false, on_battery_ = false;
@@ -353,7 +359,7 @@ class App {
   uint32_t id_counter_ = 0;
 
   // overlays
-  enum class Overlay : uint8_t { None, Card, Image };
+  enum class Overlay : uint8_t { None, Card, Image, Dashboard };
   Overlay overlay_ = Overlay::None;
   uint32_t overlay_until_ = 0;  // 0 = until dismissed
   std::string card_title_, card_body_;
@@ -361,6 +367,14 @@ class App {
   int image_stream_ = -1;
   int image_w_ = 0, image_h_ = 0, image_x_ = 0, image_y_ = 0;
   size_t image_px_ = 0;
+
+  // the dashboard: Hermes's sessions and the user's tiles, as last sent. Opened
+  // from the idle screen with CANCEL (a swipe down on touch boards).
+  bool dashboard_ready_ = false;  // a dashboard arrived on this connection
+  std::vector<DashRow> dash_rows_;
+  std::string dash_headline_;
+  int dash_scroll_ = 0;
+  bool can_open_dashboard() const { return profile_.has_cancel_button || profile_.touch_screen; }
 
   // a yes/no question from Hermes (confirmations, command approvals)
   std::string prompt_id_, prompt_title_, prompt_text_;
@@ -378,6 +392,7 @@ class App {
   std::vector<std::pair<std::string, double>> sensors_;
   bool sensors_dirty_ = false;
   uint32_t sensors_sent_ = 0;
+  bool display_sleep_sent_ = false;  // what Hermes was last told
 
   // a firmware update: offered (waiting for the server's MAC), receiving, or
   // installed and about to restart

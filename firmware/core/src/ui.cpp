@@ -103,6 +103,18 @@ uint32_t hero_anim_key(const UiModel& m) {
   return h.get();
 }
 
+uint16_t tone_color(DashRow::Tone t) {
+  switch (t) {
+    case DashRow::Tone::Busy: return kBlue;
+    case DashRow::Tone::Waiting: return kAccent;
+    case DashRow::Tone::Good: return kGreen;
+    case DashRow::Tone::Warn: return kYellow;
+    case DashRow::Tone::Bad: return kRed;
+    case DashRow::Tone::Dim: break;
+  }
+  return kDim;
+}
+
 uint16_t caption_color(Screen s) {
   switch (s) {
     case Screen::Listening: return kGreen;
@@ -137,6 +149,7 @@ const char* screen_name(Screen s) {
     case Screen::Updating: return "updating";
     case Screen::Settings: return "settings";
     case Screen::Setup: return "setup";
+    case Screen::Dashboard: return "dashboard";
   }
   return "unknown";
 }
@@ -212,9 +225,11 @@ void Ui::render(const UiModel& m) {
                   .val(m.screen == Screen::Listening ? m.level : uint8_t(0))
                   .val(m.speaking)
                   .get();
-  hashes[2] = Hash().val(m.screen).add(m.detail).add(m.body).add(m.code).val(m.scroll).val(m.color_test)
-                  .val(m.qr ? m.qr->size : 0)
-                  .get();
+  Hash content;
+  content.val(m.screen).add(m.detail).add(m.body).add(m.code).val(m.scroll).val(m.color_test)
+      .val(m.qr ? m.qr->size : 0);
+  for (const DashRow& row : m.dash) content.add(row.label).add(row.value).val(row.tone).val(row.heading);
+  hashes[2] = content.get();
   hashes[3] = Hash().add(m.hint).get();
 
   if (m.hero) {
@@ -438,6 +453,15 @@ void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
       c.text(cx - tw / 2, cy - (7 * s) / 2, "?", s, bg_);
       break;
     }
+    case Screen::Dashboard: {
+      // A 2x2 grid of tiles.
+      const int g = std::max(1, r / 6), t = r - g / 2;
+      c.fill_round_rect(cx - r, cy - r, t, t, s, kAccent);
+      c.fill_round_rect(cx + g / 2 + (g & 1), cy - r, t, t, s, kAccent);
+      c.fill_round_rect(cx - r, cy + g / 2 + (g & 1), t, t, s, kAccent);
+      c.fill_round_rect(cx + g / 2 + (g & 1), cy + g / 2 + (g & 1), t, t, s, kAccent);
+      break;
+    }
     case Screen::Image:
     case Screen::Settings:
     case Screen::Setup:
@@ -490,6 +514,10 @@ void Ui::draw_content(Canvas& c, const UiModel& m) {
   }
 
   if (m.qr && m.qr->ok() && draw_qr(c, m, y0, y1)) return;
+  if (m.screen == Screen::Dashboard) {
+    draw_dashboard(c, m, y0, y1);
+    return;
+  }
 
   if (m.screen == Screen::Boot) {
     int big = s + 2;
@@ -531,6 +559,54 @@ void Ui::draw_content(Canvas& c, const UiModel& m) {
     int track_y = y, track_h = rows * lh;
     int thumb_h = std::max(2 * s, track_h * rows / total);
     int thumb_y = track_y + (track_h - thumb_h) * first / std::max(1, max_first);
+    c.fill_rect(w - 2 * s, track_y, s, track_h, kFaint);
+    c.fill_rect(w - 2 * s, thumb_y, s, thumb_h, kDim);
+  }
+}
+
+int Ui::dash_rows() const {
+  const int s = layout_.scale;
+  const int content_h = info_.height - layout_.top_h - layout_.header_h - layout_.bottom_h;
+  return std::max(1, (content_h - 4 * s) / (Canvas::line_height(s) + 2 * s));
+}
+
+// The dashboard: one row per session or tile, a dot in its state's colour, the
+// label on the left and the value on the right. Headings start a section.
+void Ui::draw_dashboard(Canvas& c, const UiModel& m, int y0, int y1) {
+  const int s = layout_.scale;
+  const int w = info_.width;
+  const int margin = 4 * s;
+  const int row_h = Canvas::line_height(s) + 2 * s;
+  const int glyph_h = font::kGlyphHeight * s;
+  const int rows = dash_rows();
+  const int total = static_cast<int>(m.dash.size());
+  const int max_first = std::max(0, total - rows);
+  const int first = std::max(0, std::min(m.scroll, max_first));
+  const bool scrolls = total > rows;
+  const int right = w - margin - (scrolls ? 2 * s : 0);
+  const int r = std::max(2, glyph_h / 3);
+  int y = y0 + margin;
+  for (int i = 0; i < rows && first + i < total; ++i, y += row_h) {
+    const DashRow& row = m.dash[static_cast<size_t>(first + i)];
+    const int ty = y + (row_h - glyph_h) / 2;
+    if (row.heading) {
+      c.text(margin, ty, fit(row.label, cols_for(right - margin, s)), s, kDim);
+      c.fill_rect(margin, y + row_h - 1, right - margin, 1, kFaint);
+      continue;
+    }
+    c.fill_circle(margin + r, ty + glyph_h / 2, r, tone_color(row.tone));
+    const int lx = margin + 2 * r + 3 * s;
+    const int cols = cols_for(right - lx, s);
+    // The value keeps up to half the row; the label gets the rest, less a space.
+    const std::string value = fit(row.value, std::min<int>(static_cast<int>(row.value.size()), cols / 2));
+    const int value_cols = static_cast<int>(value.size());
+    c.text(lx, ty, fit(row.label, cols - value_cols - (value_cols ? 1 : 0)), s, kText);
+    if (value_cols) c.text(right - Canvas::text_width(value, s), ty, value, s, tone_color(row.tone));
+  }
+  if (scrolls) {
+    const int track_y = y0 + margin, track_h = std::min(rows * row_h, y1 - track_y);
+    const int thumb_h = std::max(2 * s, track_h * rows / total);
+    const int thumb_y = track_y + (track_h - thumb_h) * first / std::max(1, max_first);
     c.fill_rect(w - 2 * s, track_y, s, track_h, kFaint);
     c.fill_rect(w - 2 * s, thumb_y, s, thumb_h, kDim);
   }

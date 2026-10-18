@@ -62,7 +62,10 @@ bool LatchPower::begin(const LatchPowerConfig& cfg) {
 std::optional<hg::PowerStatus> LatchPower::read() {
   hg::PowerStatus status;
   // Not every board brings the charging signal out to a pin.
-  if (cfg_.charging >= 0) status.charging = gpio_get_level(static_cast<gpio_num_t>(cfg_.charging)) == 0;
+  if (cfg_.charging >= 0) {
+    const bool high = gpio_get_level(static_cast<gpio_num_t>(cfg_.charging)) != 0;
+    status.charging = high == cfg_.charging_active_high;
+  }
   if (!calibration_) return status;
   int total = 0;
   for (int i = 0; i < 8; ++i) {

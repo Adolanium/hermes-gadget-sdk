@@ -154,6 +154,7 @@ bool TouchInput::read_touch(TouchSample& out) {
   int y = (buf[2] << 4) | (buf[3] & 0x0F);
   if (touch_.mirror_x && touch_.width) x = touch_.width - 1 - x;
   if (touch_.mirror_y && touch_.height) y = touch_.height - 1 - y;
+  if (touch_.swap_xy) std::swap(x, y);
   out = {down, static_cast<int16_t>(x), static_cast<int16_t>(y)};
   return true;
 }

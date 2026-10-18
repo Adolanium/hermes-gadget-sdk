@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import shutil
 import subprocess
@@ -83,6 +84,11 @@ def _script_step(sim, cmd: str, rest: str) -> None:
         sim.run_for(float(rest))
     elif cmd == "console":
         print(sim.console(rest))
+    elif cmd == "power":
+        try:
+            sim.set_power(json.loads(rest))
+        except (ValueError, TypeError) as exc:
+            raise ScriptError(f"invalid power reading: {exc}") from exc
     elif cmd == "status":
         print(sim.status())
     elif cmd == "screenshot":

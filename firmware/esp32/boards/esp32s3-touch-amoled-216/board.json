@@ -1,0 +1,6 @@
+{
+  "title": "Waveshare ESP32-S3-Touch-AMOLED-2.16",
+  "summary": "2.16\" 480x480 AMOLED touch board with two microphones and a speaker. Experimental.",
+  "docs": "docs/hardware.md#esp32-s3-touch-amoled-216",
+  "ready_made": true
+}

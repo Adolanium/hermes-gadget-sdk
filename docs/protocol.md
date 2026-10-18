@@ -65,8 +65,10 @@ Because the id is derived from the key, nobody can claim another device's id wit
 
 - Every `caps` member is optional. A device without a speaker omits `speaker`, and the server then never sends it audio.
 - `caps.ota` (`{"max_size": 2031616}`) means the device installs firmware updates over this connection, up to `max_size` bytes.
+- `caps.dashboard` (`{"v": 1, "rows": 6}`) means the device draws the [dashboard](#dashboard). `v` is the newest layout it draws, and `rows` is how many lines fit on its screen at once.
 - `actions` is the device's tool manifest. Each action has a JSON-Schema `params` object and a `description` written for the model.
 - `token` is required only when the host sets `GADGET_ACCESS_TOKEN`. A mismatch is rejected with error code `bad_token`.
+- `display_sleeping: true` means the screen is dark as the device connects; it is omitted while the screen is lit. See [Screen sleep](#screen-sleep).
 
 ### `challenge` (server → device)
 
@@ -157,6 +159,42 @@ The server resamples to the device's declared speaker rate. It also paces frames
 
 The server fits images inside `caps.display.image` before sending them, so devices never decode JPEG or PNG.
 
+### Screen sleep
+
+A device whose screen goes dark (a timeout, or the power key) tells the server, and the server holds back screen updates until the screen lights up again. This saves the radio time and the screen wake-ups that cards and images would otherwise cost while nobody is looking.
+
+- The device sends `{"type": "state", "display_sleeping": true}` when the screen goes dark and `{"type": "state", "display_sleeping": false}` when it lights up. Only changes are sent, as they happen, without the rate limit sensor readings have. A device that connects in the dark says so in `hello` instead.
+- While the screen is dark the server keeps the latest `display` card or image (a newer one replaces an older one, as it would on screen), the latest `status` phrase and the latest `dashboard`, and sends none of them.
+- When the screen lights up, the server sends the held `status` phrase, then the held `dashboard`, then the held card or image. A card or image with a `ttl_s` keeps only the time it has left, counted from when it was sent, and one whose time ran out is dropped. A held status phrase is dropped when its turn ends.
+- What is held survives a reconnect: it goes out once the device connects with its screen lit.
+- Everything else is sent at once: `prompt` and `prompt.close`, `pairing`, turns, transcripts, replies, audio, `notice`, actions and firmware updates. A question or a reply still lights the screen.
+- A device that never sends `display_sleeping` counts as lit, so nothing is held back for it.
+
+### Dashboard
+
+A device that advertises `caps.dashboard` gets a live summary of Hermes: the agent's sessions, and status tiles the owner sets on the host (`hermes gadget tile`). Each message is a complete snapshot that replaces the last one:
+
+```json
+{"type": "dashboard", "v": 1,
+ "sessions": [{"id": "3f2a", "label": "telegram 3f2a", "state": "busy"},
+              {"id": "91c0", "label": "cli 91c0", "state": "waiting"}],
+ "tiles": [{"id": "nas", "label": "NAS", "value": "up", "state": "ok"}]}
+```
+
+| Field | Meaning |
+|---|---|
+| `v` | Layout version. A device ignores a dashboard whose `v` it doesn't draw. The server sends only to devices whose `caps.dashboard.v` is at least the version it sends |
+| `sessions[].state` | `idle`, `busy` (a turn is running) or `waiting` (the turn waits for the user to approve a command) |
+| `sessions[].label` | Text to show: the platform and the end of the session id |
+| `tiles[].label`, `tiles[].value` | Text to show for a tile |
+| `tiles[].state` | `ok`, `warn` or `bad`; omitted for a neutral tile |
+| `id` | Stable within the snapshot; devices may ignore it |
+
+- Text is shaped like replies: folded to the device's `charset` and cut to its `text_cols`. Waiting sessions come first, then busy ones, then idle ones; at most 8 sessions and 8 tiles.
+- The server sends a dashboard when a paired device connects, and again only when something in it changes. An unpaired device gets none.
+- A dashboard is data, not a screen takeover: the device keeps showing what it showed. The reference firmware opens it with CANCEL (a swipe down on touch boards) on the idle screen and closes it with CANCEL again. Talking, a question, a card or an image take the screen over. It forgets the dashboard when the connection drops, and the next connection sends it again.
+- While the screen is dark, only the latest dashboard is kept; see [Screen sleep](#screen-sleep).
+
 ### Questions
 
 Hermes asks before some actions: destructive commands such as `/new`, a costly model switch, or a dangerous shell command the agent wants to run. The server turns each one into a `prompt`:
@@ -164,7 +202,7 @@ Hermes asks before some actions: destructive commands such as `/new`, a costly m
 - The device shows the title and text with two answers. The reference firmware maps TALK to yes and CANCEL to no, and ignores presses in the first 0.6 s so a press meant for something else doesn't answer it.
 - The device answers with `prompt.reply` exactly once, or not at all if the question expires (`ttl_s`, when present) or is withdrawn with `prompt.close`.
 - The server sends one question at a time. A question asked while a device was offline is sent again when it reconnects.
-- Text is shaped like replies: short, plain and already folded to the device's charset.
+- Text is shaped like replies: short, plain and already folded to the device's charset. A dangerous-command approval is the exception: its text is the command as it will run, unchanged, or a notice to approve on the host when the command doesn't fit one line of `text_cols`, less two columns, as-is. The server ignores a yes to that notice.
 
 ### Device actions
 
@@ -181,6 +219,7 @@ Devices must answer every `action` exactly once. The server times out after abou
 | Message | Meaning |
 |---|---|
 | `{"type": "state", "sensors": {"battery_pct": 80, "temperature_c": 21.5}}` | Latest readings (rate limited by the device) |
+| `{"type": "state", "display_sleeping": true}` | The screen went dark (`false`: it lit up); see [Screen sleep](#screen-sleep) |
 | `{"type": "event", "name": "button.long_press", "data": {...}, "notify": false}` | With `notify: true`, the event is delivered to the agent as a message |
 
 ### Firmware updates

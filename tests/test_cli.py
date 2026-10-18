@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import argparse
 import json
 
@@ -134,3 +135,86 @@ def test_provision_refuses_what_the_console_would_drop(monkeypatch, capsys):
     assert _provision(monkeypatch, board, wifi_ssid="Café", wifi_pass="secret") == 2
     assert board.settings == {}
     assert "wifi_ssid: the board's console only takes printable ASCII" in capsys.readouterr().err
+
+
+def test_script_power_readings_use_native_status(devserver, tmp_path, capsys):
+    from hermes_gadget.sim import Simulator
+
+    _, _, url = devserver()
+    sim = Simulator(url=url, board="sim-240x240", state_dir=tmp_path / "device")
+    script = tmp_path / "power.script"
+    script.write_text(
+        'wait ready 20\n'
+        'console set battery_estimate liion\n'
+        'console set battery_display percentage\n'
+        'power {"battery_mv":3750,"charging":false}\n'
+        'sleep 5.2\n'
+        'status\n'
+        'power {}\n'
+        'sleep 5.2\n'
+        'status\n'
+        'power null\n'
+        'sleep 5.2\n'
+        'status\n',
+        encoding="utf-8",
+    )
+
+    assert cli.run_script(sim, script) == 0
+    captured = capsys.readouterr()
+    reports = [ast.literal_eval(line) for line in captured.out.splitlines() if line.startswith("{")]
+    assert [report["power"] for report in reports] == [
+        {"available": True, "battery_mv": 3750, "charging": False},
+        {"available": True},
+        {"available": False},
+    ]
+    assert sim.power_status is None
+    assert captured.err == ""
+
+
+@pytest.mark.parametrize("reading", [
+    '{"battery_mv":',
+    '[]',
+    '42',
+    '{"battery_present":1}',
+    '{"charging":"yes"}',
+    '{"external_power":0}',
+    '{"battery_mv":true}',
+    '{"battery_mv":3750.5}',
+    '{"battery_mv":-1}',
+    '{"battery_mv":65536}',
+    '{"battery_percent":false}',
+    '{"battery_percent":-1}',
+    '{"battery_percent":101}',
+    '{"battery_pct":50}',
+])
+def test_script_invalid_power_preserves_native_reading(
+    reading, devserver, tmp_path, capsys, monkeypatch,
+):
+    from hermes_gadget.sim import Simulator
+
+    _, _, url = devserver()
+    sim = Simulator(url=url, board="sim-240x240", state_dir=tmp_path / "device")
+    previous = {"battery_present": True, "battery_mv": 3750, "battery_percent": 0,
+                "charging": False, "external_power": False}
+    script = tmp_path / "invalid-power.script"
+    script.write_text(
+        f"power {json.dumps(previous)}\npower {reading}\n", encoding="utf-8",
+    )
+    snapshot = {}
+    close = sim.close
+
+    def capture_before_close():
+        # Observe the actual HAL after its normal poll, before run_script destroys it.
+        try:
+            sim.run_for(5.2)
+            snapshot.update(sim.status())
+        finally:
+            close()
+
+    monkeypatch.setattr(sim, "close", capture_before_close)
+    assert cli.run_script(sim, script) == 1
+    captured = capsys.readouterr()
+    assert f"{script}:2: invalid power reading:" in captured.err
+    assert "Traceback" not in captured.err
+    assert sim.power_status == previous
+    assert snapshot["power"] == {"available": True, **previous}

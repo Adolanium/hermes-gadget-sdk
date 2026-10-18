@@ -11,6 +11,17 @@
 
 namespace {
 
+class SimPower final : public hg::Power {
+ public:
+  std::optional<hg::PowerStatus> status;
+  std::optional<hg::PowerStatus> read() override { return status; }
+  std::optional<bool> external_power() override {
+    return status ? status->external_power : std::nullopt;
+  }
+  bool can_power_off() const override { return false; }
+  bool power_off() override { return false; }
+};
+
 class SimHal final : public hg::Display,
                      public hg::AudioIn,
                      public hg::AudioOut,
@@ -161,6 +172,7 @@ int copy_out(const std::string& s, char* out, size_t cap) {
 struct hgsim {
   std::unique_ptr<SimHal> hal_impl;
   std::unique_ptr<SimUpdater> updater;
+  SimPower power;
   hg::Hal hal;
   std::unique_ptr<hg::App> app;
   std::unique_ptr<hg::TouchGestures> touch;
@@ -189,6 +201,7 @@ hgsim* hgsim_create(const hgsim_config* cfg, const hgsim_host* host) {
   sim->hal.display = cfg->width ? h : nullptr;
   sim->hal.mic = cfg->has_mic ? h : nullptr;
   sim->hal.speaker = cfg->has_speaker ? h : nullptr;
+  sim->hal.power = cfg->has_power ? &sim->power : nullptr;
   if (cfg->update_capacity && host->update_begin) {
     sim->updater = std::make_unique<SimUpdater>(*cfg, *host);
     sim->hal.updater = sim->updater.get();
@@ -278,6 +291,25 @@ void hgsim_mic_samples(hgsim* sim, const int16_t* samples, size_t count) { sim->
 void hgsim_submit_text(hgsim* sim, const char* text) { sim->app->submit_text(text ? text : ""); }
 void hgsim_set_sensor(hgsim* sim, const char* name, double value) {
   if (name) sim->app->set_sensor(name, value);
+}
+int hgsim_set_power(hgsim* sim, int available, int battery_present, int battery_mv,
+                    int battery_percent, int charging, int external_power) {
+  if (!sim || !sim->hal.power || available < 0 || available > 1 ||
+      battery_present < -1 || battery_present > 1 || charging < -1 || charging > 1 ||
+      external_power < -1 || external_power > 1 || battery_mv < -1 || battery_mv > 65535 ||
+      battery_percent < -1 || battery_percent > 100) return 0;
+  if (!available) {
+    sim->power.status.reset();
+    return 1;
+  }
+  hg::PowerStatus status;
+  if (battery_present != -1) status.battery_present = battery_present != 0;
+  if (battery_mv != -1) status.battery_mv = static_cast<uint16_t>(battery_mv);
+  if (battery_percent != -1) status.battery_percent = static_cast<uint8_t>(battery_percent);
+  if (charging != -1) status.charging = charging != 0;
+  if (external_power != -1) status.external_power = external_power != 0;
+  sim->power.status = status;
+  return 1;
 }
 void hgsim_emit_event(hgsim* sim, const char* name, const char* data_json, int notify_agent) {
   if (!name) return;

@@ -169,7 +169,7 @@ void App::settings_tick() {
 }
 
 bool App::battery_readable() const {
-  return power_status_ && power_status_->battery_percent && power_status_->battery_present != false;
+  return display_battery_percent().has_value();
 }
 
 void App::settings_model() {
@@ -224,11 +224,17 @@ void App::settings_model() {
       else {
         const auto& p = *power_status_;
         if (p.battery_present && !*p.battery_present) m.body = "No battery detected.\n";
-        if (p.battery_percent) m.body += std::to_string(*p.battery_percent) + "% (gauge estimate)\n";
+        if (const auto percent = display_battery_percent())
+          m.body += std::to_string(*percent) + (battery_is_estimated() ? "% (voltage estimate)\n" : "% (gauge estimate)\n");
         if (p.battery_mv) m.body += std::to_string(*p.battery_mv) + " mV\n";
         if (p.charging) m.body += *p.charging ? "Charging\n" : "Not charging\n";
         if (p.external_power) m.body += *p.external_power ? "USB power\n" : "No USB power\n";
         if (p.battery_percent && *p.battery_percent <= 10 && p.external_power == false) m.body += "Low battery: connect USB.\n";
+        if (!battery_estimate_enabled_ && !p.battery_percent && p.battery_present != false &&
+            p.battery_mv && *p.battery_mv >= 2000 && *p.battery_mv <= 4500)
+          m.body += "set battery_estimate liion\nBattery must be fitted; charging affects estimate.\n";
+        else if (battery_is_estimated())
+          m.body += "Battery must be fitted; charging affects estimate.\n";
       }
     if (battery_readable()) {  // nothing to choose when no percentage can appear
       static const char* const kShown[] = {"Icon", "Percent", "Both", "Off"};

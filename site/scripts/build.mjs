@@ -26,7 +26,7 @@ await copyFile(join(esptool, "bundle.js"), join(out, "vendor", "esptool.js"));
 await copyFile(join(esptool, "LICENSE"), join(out, "vendor", "esptool-js-LICENSE.txt"));
 
 await mkdir(join(out, "img"));
-for (const name of ["logo.png", "screen-ready.png", "screen-pairing.png"]) {
+for (const name of ["logo.png", "screen-ready.png", "screen-pairing.png", "banner.webp"]) {
   await copyFile(join(repo, "docs", "images", name), join(out, "img", name));
 }
 

@@ -53,7 +53,17 @@ struct RgbPanelConfig {
   RgbTimings timings{};   // panel scanout timings (per-datasheet)
 };
 
-enum class LcdController { St7789, Box3, CoreS3, St77916, Sh8601 };
+enum class LcdController { St7789, Box3, CoreS3, St77916, Gc9a01, Sh8601 };
+
+// Which vendor initialization table an ST77916 panel gets. Waveshare's 1.85C
+// tables are chosen by the panel ID the driver reads; the ESP-VoCat's glass
+// takes Espressif's own table (panel_vocat.hpp).
+enum class St77916Panel { Waveshare185, Vocat };
+
+// Register changes a GC9A01 panel gets after Espressif's default bring-up.
+// Glass from different makers wants different gate timing and supply levels;
+// None keeps the driver's defaults.
+enum class Gc9a01Panel { None, SpotpearBox128 };
 
 struct LcdConfig {
   bool enabled = false;
@@ -65,6 +75,8 @@ struct LcdConfig {
   LcdBus bus{};
   RgbPanelConfig rgb{};
   LcdController controller = LcdController::St7789;
+  St77916Panel st77916_panel = St77916Panel::Waveshare185;
+  Gc9a01Panel gc9a01_panel = Gc9a01Panel::None;
   bool reset_active_high = false;
   bool backlight_invert = false;  // active-low GPIO backlight, independent of pixel inversion
   bool bgr = false;  // the panel's color filter is BGR (SpiDisplay)
@@ -85,10 +97,10 @@ struct I2sSpeakerConfig {
 };
 
 // Which vendor bring-up table a CO5300 panel needs. The round 466x466 1.75"
-// modules write extra page-2 registers; the rectangular 368x448 1.8" module and
-// the 410x502 2.06" watch use the shorter tables from Waveshare's board support
-// packages.
-enum class AmoledPanel { Co5300_466, Co5300_368, Co5300_410 };
+// modules write extra page-2 registers; the rectangular 368x448 1.8" module,
+// the 410x502 2.06" watch and the 480x480 2.16" board use the shorter tables
+// from Waveshare's board support packages.
+enum class AmoledPanel { Co5300_466, Co5300_368, Co5300_410, Co5300_480 };
 
 // QSPI AMOLED with a CO5300 controller (round 466x466, rectangular 368x448 or 410x502).
 struct AmoledConfig {
@@ -141,8 +153,12 @@ struct TouchConfig {
   int int_gpio = -1;  // touch INT line; -1 when not wired (driver polls instead)
   uint16_t width = 0, height = 0;
   bool mirror_x = false, mirror_y = false;
+  bool swap_xy = false;  // CST9217 report: exchange x and y after mirroring (esp_lcd_touch order)
   int16_t offset_y = 0;  // subtracted from y when the UI starts below the panel's first row
   TouchController controller = TouchController::Cst9217;
+  // The touch controller's own I2C bus; unset = the board's shared bus. When set,
+  // an expander key (pwr_key) is read on this bus too.
+  I2cBusConfig bus{};
 };
 
 // A key whose level is read from a TCA9554 or PCF8574 I/O expander input (e.g.
@@ -162,6 +178,14 @@ struct ExpanderResetConfig {
   uint8_t addr = 0x20;
   uint8_t mask = 0;  // 0 = no expander resets
   uint16_t hold_ms = 10, settle_ms = 50;  // low pulse, then the wait before the display starts
+};
+
+// A supply switch driven straight from a GPIO, set once at boot before any
+// peripheral starts and then left alone (the ESP-VoCat's LCD/SD rail and codec
+// supply).
+struct PowerRail {
+  int gpio = -1;          // -1 = unused
+  bool on_level = true;   // the level that turns the rail on
 };
 
 struct ButtonConfig {
@@ -186,6 +210,9 @@ struct LatchPowerConfig {
   int mv_ratio = 3;
   uint16_t max_battery_mv = 4998;
   bool power_off_supported = true;
+  // The charging signal's level while charging. Most chargers pull it low; the
+  // Spotpear 1.28" box drives it high.
+  bool charging_active_high = false;
 };
 
 struct BoardConfig {
@@ -201,6 +228,8 @@ struct BoardConfig {
   TouchConfig touch;
   ExpanderKeyConfig pwr_key;
   ExpanderResetConfig expander_reset;
+  PowerRail power_rails[2];
+  uint16_t power_rails_settle_ms = 0;  // wait after switching the rails on
   bool axp2101 = false;
   bool axp_audio_supply = false;
   bool axp_power_key = false;  // PWR reaches only the AXP2101: read its short press there

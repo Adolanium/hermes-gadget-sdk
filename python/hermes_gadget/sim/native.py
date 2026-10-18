@@ -20,7 +20,7 @@ from .. import paths
 
 log = logging.getLogger("hermes_gadget.sim")
 
-ABI_VERSION = 5
+ABI_VERSION = 6
 
 BUTTON_TALK, BUTTON_CANCEL, BUTTON_UP, BUTTON_DOWN = 0, 1, 2, 3
 BUTTONS = {"talk": BUTTON_TALK, "cancel": BUTTON_CANCEL, "up": BUTTON_UP, "down": BUTTON_DOWN}
@@ -98,6 +98,7 @@ class _Config(Structure):
         ("touch", c_int),
         ("update_capacity", c_size_t),
         ("update_pending", c_int),
+        ("has_power", c_int),
     ]
 
 
@@ -178,6 +179,8 @@ def load_library(path: Path | None = None) -> ctypes.CDLL:
     lib.hgsim_mic_samples.argtypes = [c_void_p, c_char_p, c_size_t]
     lib.hgsim_submit_text.argtypes = [c_void_p, c_char_p]
     lib.hgsim_set_sensor.argtypes = [c_void_p, c_char_p, c_double]
+    lib.hgsim_set_power.argtypes = [c_void_p, c_int, c_int, c_int, c_int, c_int, c_int]
+    lib.hgsim_set_power.restype = c_int
     lib.hgsim_emit_event.argtypes = [c_void_p, c_char_p, c_char_p, c_int]
     lib.hgsim_console.argtypes = [c_void_p, c_char_p, c_char_p, c_size_t]
     lib.hgsim_console.restype = c_int
@@ -206,7 +209,7 @@ class NativeDevice:
                  speaker_rate: int = 16000, library: Path | None = None,
                  button_labels: tuple[str, str] | None = None, round_panel: bool = False,
                  touch_screen: bool = False, update_capacity: int = 0, update_pending: bool = False,
-                 audio_host: AudioHost | None = None):
+                 audio_host: AudioHost | None = None, power: bool = False):
         self._lib = load_library(library)
         self._host_obj = host
         self.width, self.height = width, height
@@ -214,7 +217,7 @@ class NativeDevice:
         self._strings += [s.encode() for s in button_labels] if button_labels else [None, None]
         self._config = _Config(width, height, int(mic), int(speaker), int(backlight), int(scroll_buttons),
                                mic_rate, speaker_rate, *self._strings, int(round_panel), int(touch_screen),
-                               update_capacity, int(update_pending))
+                               update_capacity, int(update_pending), int(power))
         self._callbacks = self._make_callbacks(host, audio_host or host)
         self._handle = self._lib.hgsim_create(ctypes.byref(self._config), ctypes.byref(self._callbacks))
         if not self._handle:
@@ -388,6 +391,27 @@ class NativeDevice:
 
     def set_sensor(self, name: str, value: float) -> None:
         self._lib.hgsim_set_sensor(self._handle, name.encode(), float(value))
+
+    def set_power(self, status: dict | None) -> None:
+        fields = ("battery_present", "battery_mv", "battery_percent", "charging", "external_power")
+        if status is not None and (not isinstance(status, dict) or status.keys() - set(fields)):
+            raise ValueError("power reading must be an object with known power fields, or null")
+        values = []
+        for key in fields:
+            value = status.get(key) if status is not None else None
+            if value is None:
+                values.append(-1)
+            elif key in ("battery_mv", "battery_percent"):
+                maximum = 65535 if key == "battery_mv" else 100
+                if type(value) is not int or not 0 <= value <= maximum:
+                    raise ValueError(f"{key} must be an integer in 0..{maximum}, or null")
+                values.append(value)
+            else:
+                if type(value) is not bool:
+                    raise ValueError(f"{key} must be a boolean or null")
+                values.append(int(value))
+        if not self._lib.hgsim_set_power(self._handle, int(status is not None), *values):
+            raise ValueError("power reading rejected (power device not configured or invalid reading)")
 
     def emit_event(self, name: str, data: Any = None, notify: bool = False) -> None:
         self._lib.hgsim_emit_event(self._handle, name.encode(), json.dumps(data or {}).encode(), int(notify))

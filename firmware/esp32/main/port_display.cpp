@@ -10,11 +10,14 @@
 #include "driver/spi_master.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_panel_ops.h"
+#include "esp_lcd_gc9a01.h"
 #include "esp_lcd_panel_st7789.h"
 #include "esp_log.h"
 #include "panel_box3.hpp"
 #include "panel_sh8601.hpp"
 #include "panel_cores3.hpp"
+#include "panel_spotpear128.hpp"
+#include "panel_vocat.hpp"
 #include "panel_ws185.hpp"
 #include "freertos/task.h"
 
@@ -39,6 +42,7 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   cfg_ = cfg;
   const bool qspi = cfg.controller == LcdController::St77916 || cfg.controller == LcdController::Sh8601;
   const bool st77916 = cfg.controller == LcdController::St77916;
+  const bool gc9a01 = cfg.controller == LcdController::Gc9a01;
   bool ili9341 = false;
   bool cores3_e = false;
   if (cfg.controller == LcdController::Box3) {
@@ -52,7 +56,7 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
     }
   }
   controller_name_ = cfg.controller == LcdController::Sh8601 ? "sh8601"
-                     : qspi ? "st77916" : ili9341 ? "ili9342" : "st7789";
+                     : qspi ? "st77916" : gc9a01 ? "gc9a01" : ili9341 ? "ili9342" : "st7789";
   if (cfg.controller == LcdController::CoreS3) {
     if (!i2c_bus) return false;
     i2c_device_config_t device = {};
@@ -151,8 +155,11 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
     io_ = nullptr;
     io_cfg.pclk_hz = full_speed;
     ESP_LOGI(TAG, "ST77916 panel ID %02x %02x %02x %02x", panel_id[0], panel_id[1], panel_id[2], panel_id[3]);
-    if (read != ESP_OK || panel_id[0] != 0 || panel_id[2] != 0x7f || panel_id[3] != 0x7f ||
-        (panel_id[1] != 0x7f && panel_id[1] != 0x02)) {
+    // The ID only chooses between Waveshare's two tables; a board with its own
+    // table logs it and goes on.
+    if (cfg.st77916_panel == St77916Panel::Waveshare185 &&
+        (read != ESP_OK || panel_id[0] != 0 || panel_id[2] != 0x7f || panel_id[3] != 0x7f ||
+         (panel_id[1] != 0x7f && panel_id[1] != 0x02))) {
       ESP_LOGE(TAG, "unknown ST77916 panel revision; refusing guessed initialization");
       return false;
     }
@@ -176,12 +183,17 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
       panel_cfg.vendor_config = &sh_vendor;
       if (!esp_ok(esp_lcd_new_panel_sh8601(io_, &panel_cfg, &panel_), TAG, "esp_lcd_new_panel_sh8601")) return false;
     } else {
-    st_vendor.flags.use_qspi_interface = 1;
-    st_vendor.init_cmds = newer ? kWs185PanelNew : kWs185PanelDefault;
-    st_vendor.init_cmds_size = newer ? sizeof(kWs185PanelNew) / sizeof(kWs185PanelNew[0]) :
-                                     sizeof(kWs185PanelDefault) / sizeof(kWs185PanelDefault[0]);
-    panel_cfg.vendor_config = &st_vendor;
-    if (!esp_ok(esp_lcd_new_panel_st77916(io_, &panel_cfg, &panel_), TAG, "esp_lcd_new_panel_st77916")) return false;
+      st_vendor.flags.use_qspi_interface = 1;
+      if (cfg.st77916_panel == St77916Panel::Vocat) {
+        st_vendor.init_cmds = kVocatPanel;
+        st_vendor.init_cmds_size = sizeof(kVocatPanel) / sizeof(kVocatPanel[0]);
+      } else {
+        st_vendor.init_cmds = newer ? kWs185PanelNew : kWs185PanelDefault;
+        st_vendor.init_cmds_size = newer ? sizeof(kWs185PanelNew) / sizeof(kWs185PanelNew[0]) :
+                                         sizeof(kWs185PanelDefault) / sizeof(kWs185PanelDefault[0]);
+      }
+      panel_cfg.vendor_config = &st_vendor;
+      if (!esp_ok(esp_lcd_new_panel_st77916(io_, &panel_cfg, &panel_), TAG, "esp_lcd_new_panel_st77916")) return false;
     }
   } else if (ili9341) {
     if (cfg.controller == LcdController::Box3) {
@@ -194,6 +206,8 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
       panel_cfg.vendor_config = &vendor;
     }
     if (!esp_ok(esp_lcd_new_panel_ili9341(io_, &panel_cfg, &panel_), TAG, "esp_lcd_new_panel_ili9341")) return false;
+  } else if (gc9a01) {
+    if (!esp_ok(esp_lcd_new_panel_gc9a01(io_, &panel_cfg, &panel_), TAG, "esp_lcd_new_panel_gc9a01")) return false;
   } else {
     if (!esp_ok(esp_lcd_new_panel_st7789(io_, &panel_cfg, &panel_), TAG, "esp_lcd_new_panel_st7789")) return false;
   }
@@ -208,6 +222,13 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   }
   if (!esp_ok(esp_lcd_panel_set_gap(panel_, cfg.gap_x, cfg.gap_y), TAG, "esp_lcd_panel_set_gap")) return false;
   if (!esp_ok(esp_lcd_panel_disp_on_off(panel_, true), TAG, "esp_lcd_panel_disp_on_off")) return false;
+  if (gc9a01 && cfg.gc9a01_panel == Gc9a01Panel::SpotpearBox128) {
+    // The driver's default table leaves the inter-register commands enabled, so
+    // these land without another 0xFE/0xEF unlock.
+    for (const auto& c : kSpotpearBox128Panel) {
+      if (!esp_ok(esp_lcd_panel_io_tx_param(io_, c.cmd, c.data, c.data_bytes), TAG, "gc9a01 panel tuning")) return false;
+    }
+  }
 
   if (cfg.backlight >= 0) {
     ledc_timer_config_t timer = {};

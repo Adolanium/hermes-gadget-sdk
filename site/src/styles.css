@@ -1,47 +1,28 @@
-/* Hermes Gadget installer. Dark by default, in the device's own colours: near-black navy and amber. */
+/* Hermes Gadget site. Dark, in the Nous portal look of the Hermes plugin art: flat midnight indigo,
+   periwinkle and lavender-white, square window frames and a faint dot screen. */
 
 :root {
   color-scheme: dark;
-  --bg: #0b0f17;
-  --bg-glow: rgba(245, 165, 36, 0.12);
-  --surface: #121826;
-  --surface-2: #182033;
-  --border: #263049;
-  --border-strong: #34405f;
-  --text: #e8ebf2;
-  --muted: #9aa3b8;
-  --accent: #f5a524;
-  --accent-strong: #ffb84d;
-  --accent-ink: #1a1203;
-  --ok: #3ccf91;
-  --warn: #f3c64b;
-  --error: #ff7a7a;
-  --radius: 14px;
-  --radius-small: 9px;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.25);
-  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color-scheme: light;
-    --bg: #f6f7fb;
-    --bg-glow: rgba(245, 165, 36, 0.16);
-    --surface: #ffffff;
-    --surface-2: #f1f3f8;
-    --border: #dfe3ec;
-    --border-strong: #c8cedc;
-    --text: #141a26;
-    --muted: #5b6477;
-    --accent: #c77700;
-    --accent-strong: #a86400;
-    --accent-ink: #ffffff;
-    --ok: #138a5a;
-    --warn: #9a6a00;
-    --error: #c62f2f;
-    --shadow: 0 1px 2px rgba(20, 26, 38, 0.06), 0 8px 24px rgba(20, 26, 38, 0.06);
-  }
+  --bg: #04003a;
+  --bg-dots: rgba(201, 200, 255, 0.11);
+  --surface: #0a0657;
+  --surface-2: #120d6e;
+  --border: rgba(201, 200, 255, 0.24);
+  --border-strong: rgba(201, 200, 255, 0.5);
+  --text: #f1f0ff;
+  --muted: #aeacec;
+  --accent: #c9c8ff;
+  --accent-strong: #e2e1ff;
+  --accent-ink: #04003a;
+  --ok: #8ee6c0;
+  --warn: #ffd98a;
+  --error: #ffa3b1;
+  --radius: 0;
+  --radius-small: 0;
+  --shadow: 8px 8px 0 rgba(201, 200, 255, 0.08);
+  --font: ui-monospace, "Cascadia Mono", Consolas, "SFMono-Regular", Menlo, monospace;
+  --serif: Georgia, "Times New Roman", serif;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, "SFMono-Regular", Menlo, monospace;
 }
 
 *,
@@ -59,16 +40,23 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background:
-    radial-gradient(900px 480px at 85% -10%, var(--bg-glow), transparent 70%),
-    var(--bg);
+  background: var(--bg) radial-gradient(var(--bg-dots) 1px, transparent 1.2px) 0 0 / 6px 6px;
   color: var(--text);
-  font: 16px/1.6 var(--font);
+  font: 15px/1.65 var(--font);
 }
 
 a {
-  color: var(--accent-strong);
-  text-underline-offset: 2px;
+  color: var(--accent);
+  text-underline-offset: 4px;
+}
+
+a:hover {
+  color: var(--text);
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-ink);
 }
 
 code {
@@ -76,7 +64,7 @@ code {
   font-size: 0.9em;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0;
   padding: 0.05em 0.35em;
   overflow-wrap: anywhere;
 }
@@ -86,8 +74,8 @@ code {
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
 }
 
 .wrap {
@@ -133,13 +121,15 @@ code {
   align-items: center;
   gap: 0.6rem;
   color: var(--text);
-  font-weight: 650;
-  letter-spacing: 0.01em;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   text-decoration: none;
 }
 
 .brand img {
-  border-radius: 8px;
+  border: 1px solid var(--border-strong);
 }
 
 .topbar nav {
@@ -150,7 +140,9 @@ code {
 .topbar nav a {
   color: var(--muted);
   text-decoration: none;
-  font-size: 0.95rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .topbar nav a:hover {
@@ -174,17 +166,16 @@ main {
 
 .eyebrow {
   margin: 0 0 0.5rem;
-  color: var(--accent-strong);
-  font-size: 0.85rem;
-  font-weight: 650;
-  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
 h1 {
   margin: 0 0 0.9rem;
-  font-size: clamp(2rem, 4.5vw, 2.8rem);
-  line-height: 1.15;
+  font: normal clamp(2rem, 4.5vw, 2.8rem)/1.1 var(--serif);
   letter-spacing: -0.02em;
 }
 
@@ -207,10 +198,10 @@ h1 {
 .needs li {
   padding: 0.3rem 0.75rem;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 0;
   background: var(--surface);
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
 
 .hero-device {
@@ -222,7 +213,7 @@ h1 {
   width: 100%;
   height: auto;
   border-radius: 50%;
-  box-shadow: 0 0 0 10px #05070b, 0 0 0 11px var(--border-strong), 0 24px 60px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 0 0 10px #000, 0 0 0 11px var(--border-strong), 12px 12px 0 11px rgba(201, 200, 255, 0.08);
 }
 
 /* ---- notices ---- */
@@ -324,7 +315,7 @@ h1 {
 
 .step-head h2 {
   margin: 0;
-  font-size: 1.15rem;
+  font: normal 1.35rem/1.25 var(--serif);
   letter-spacing: -0.01em;
 }
 
@@ -455,11 +446,13 @@ h1 {
 .badge {
   align-self: flex-start;
   padding: 0.05rem 0.5rem;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--ok) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ok) 55%, transparent);
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
   color: var(--ok);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .board-summary {
@@ -495,13 +488,18 @@ h1 {
   background: var(--surface-2);
   color: var(--text);
   font: inherit;
+  font-size: 0.8rem;
   font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
 .button:hover:not(:disabled) {
-  border-color: var(--muted);
+  border-color: var(--accent);
+  background: var(--surface);
+  color: var(--text);
 }
 
 .button.primary {
@@ -511,19 +509,22 @@ h1 {
 }
 
 .button.primary:hover:not(:disabled) {
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--accent-ink);
 }
 
 .button.text {
   border-color: transparent;
   background: none;
-  color: var(--accent-strong);
+  color: var(--accent);
   padding-inline: 0.4rem;
 }
 
 .button.text:hover:not(:disabled) {
   border-color: transparent;
+  background: none;
+  color: var(--text);
   text-decoration: underline;
 }
 
@@ -653,7 +654,7 @@ input:focus-visible {
 
 .bar {
   height: 8px;
-  border-radius: 999px;
+  border-radius: 0;
   background: var(--surface-2);
   border: 1px solid var(--border);
   overflow: hidden;
@@ -663,7 +664,7 @@ input:focus-visible {
   display: block;
   height: 100%;
   width: 0;
-  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+  background: repeating-linear-gradient(90deg, var(--accent) 0 6px, var(--accent-strong) 6px 8px);
   transition: width 0.3s ease;
 }
 
@@ -751,7 +752,7 @@ li[data-state="done"] .mark::after {
   width: 100%;
   height: auto;
   border-radius: 50%;
-  box-shadow: 0 0 0 5px #05070b, 0 0 0 6px var(--border-strong);
+  box-shadow: 0 0 0 5px #000, 0 0 0 6px var(--border-strong);
 }
 
 .pairing p {
@@ -826,7 +827,7 @@ li[data-state="done"] .mark::after {
 
 .help h2 {
   margin: 0 0 0.8rem;
-  font-size: 1.15rem;
+  font: normal 1.4rem/1.2 var(--serif);
 }
 
 .help details {

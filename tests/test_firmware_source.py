@@ -30,3 +30,15 @@ def test_firmware_never_calls_the_websocket_close_that_ignores_its_timeout():
             if call.search(code):
                 found.append(f"{path.relative_to(REPO)}:{number}: {code.strip()}")
     assert not found, "\n".join(found)
+
+
+def test_the_websocket_transport_never_waits_without_a_limit_on_the_app_task():
+    # The app task hands clients to the send task and queues messages for it. A wait with no limit
+    # there wedges the device when the send task is stuck: the event queue fills and only a reset
+    # clears it (#136). A stuck send task is caught by WsTransport::stuck() and restarts the device.
+    path = FIRMWARE / "esp32" / "main" / "port_ws.cpp"
+    found = []
+    for number, code in _code_lines(path):
+        if re.search(r"\bxQueueSend\w*\s*\(", code) and "portMAX_DELAY" in code:
+            found.append(f"{path.relative_to(REPO)}:{number}: {code.strip()}")
+    assert not found, "\n".join(found)

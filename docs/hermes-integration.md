@@ -35,6 +35,7 @@ platforms:
       unauthorized_dm_behavior: pair
       # heartbeat_s: 20
       # max_utterance_s: 60
+      # dashboard: true        # Hermes's sessions and status tiles on devices that draw them
       # battery_log: true      # keep each device's battery readings in a CSV (see below)
       # tls_cert: /path/cert.pem   # serve wss://
       # tls_key: /path/key.pem
@@ -134,6 +135,8 @@ Hermes asks before destructive commands (`/new`, `/undo`), costly model switches
 
 - **Holding CANCEL** sends `session.new`, which the adapter turns into `/new`. Hermes then asks "Confirm /new". The hold already was a deliberate confirmation, so when the confirmation for `new` arrives within 15 s of the device's own request, the adapter resolves it with `once` and forwards the reset reply. A `/new` typed or spoken any other way still asks.
 - **Everything else** goes to the device as a question. The adapter keeps only the header and detail of Hermes's message, dropping the choice list and typed-reply instructions meant for chat apps.
+- **Dangerous commands** are shown exactly as they will run, never reshaped: no Markdown stripping, folding or dropped characters. The device shows only printable ASCII, collapses runs of spaces and keeps one line of a question on its smallest screens, so a command is shown only when it fits one line of the device's `text_cols`, less two columns for the `..` the device writes when it cuts the description below. Any other command (longer, multi-line, with a tab, double space or non-ASCII character, or for a device that reports no `text_cols`) is shown as "Can't show this command": CANCEL still denies it, and TALK does nothing, so it must be approved on the host.
+- **Paired devices only:** a device that is unpaired, or that reconnects unpaired, loses its open questions, and an answer from an unpaired session is ignored.
 - **One at a time:** questions queue per device in arrival order, which matches Hermes's first-in, first-out approval queue. A question asked while the device was offline is shown when it reconnects.
 - **Elsewhere:** answering with `/approve` or `/deny` from another chat still works; the device's copy then reports "That question has expired" if pressed.
 
@@ -164,6 +167,7 @@ These work on current Hermes and are covered by `tests/test_adapter_hermes.py` a
 4. **Transcript echo detection** matches the echo format: microphone emoji plus quoted text. If the format changes, the transcript is shown as an ordinary reply; nothing breaks.
 5. **Self-confirming `/new`** reads `tools.slash_confirm.get_pending()` to check that the pending confirmation is for the `new` command. It relies on the runner registering a confirmation before it calls `send_slash_confirm`, which Hermes does on purpose so that fast button presses can't race it. If that changes, the device simply asks.
 6. **Question text** is cut down from Hermes's chat-formatted confirmation by dropping the bullet-list and italic paragraphs. A different layout only means a longer question.
+7. **Dashboard session state** comes from plugin hooks, which are a public API: `pre_llm_call` (busy), `on_session_end` (idle), `pre_approval_request` and `post_approval_response` (waiting), and `on_session_finalize` and `on_session_reset` (gone). It relies on `session_id` in their keyword arguments. The approval hooks carry it only when Hermes binds the approval to a session; an approval without one doesn't show as waiting. The hooks see every session in the gateway process, so when several profiles share one process, every profile's paired gadgets see every session.
 
 ## Suggested upstream changes (optional; nothing here blocks the SDK)
 

@@ -64,9 +64,30 @@ https://github.com/waveshareteam/Waveshare-ESP32-components/tree/9daffb7168b3c09
 released by Waveshare under the Apache License 2.0. A copy of that license is in
 LICENSES/Apache-2.0.txt.
 
+The CO5300 start-up commands for the 480x480 module (kInit480 in
+firmware/esp32/main/port_amoled.cpp) and the ESP32-S3-Touch-AMOLED-2.16 pin map
+and touch orientation in firmware/esp32/main/board.cpp follow Waveshare's board
+support package for the ESP32-S3-Touch-AMOLED-2.16, version 2.0.1,
+https://github.com/waveshareteam/Waveshare-ESP32-components/tree/63ac675334db62509082e182ff900bf60f21f009/bsp/esp32_s3_touch_amoled_2_16,
+released by Waveshare under the Apache License 2.0. A copy of that license is in
+LICENSES/Apache-2.0.txt.
+
 The AIPI Lite pin map, panel settings and power wiring in
 firmware/esp32/main/board.cpp follow xiaozhi-esp32's xorigin/aipi-lite board,
 https://github.com/78/xiaozhi-esp32/tree/0d576d3d4c049c6f55eaf879725dc23e516511b4/main/boards/xorigin/aipi-lite,
+MIT License. Only these hardware facts are used.
+
+The Spotpear ESP32-S3-1.54 muma pin map, panel settings and power wiring in
+firmware/esp32/main/board.cpp follow xiaozhi-esp32's
+spotpear/sp-esp32-s3-1.54-muma board,
+https://github.com/78/xiaozhi-esp32/tree/d91d6824309d12df5fc3db5edf8145ee829135d7/main/boards/spotpear/sp-esp32-s3-1.54-muma,
+MIT License. Only these hardware facts are used.
+
+The Spotpear ESP32-S3-1.28-BOX pin map, panel settings and power wiring in
+firmware/esp32/main/board.cpp, and the GC9A01 register changes in
+firmware/esp32/main/panel_spotpear128.hpp, follow xiaozhi-esp32's
+spotpear/sp-esp32-s3-1.28-box board,
+https://github.com/78/xiaozhi-esp32/tree/d91d6824309d12df5fc3db5edf8145ee829135d7/main/boards/spotpear/sp-esp32-s3-1.28-box,
 MIT License. Only these hardware facts are used.
 
 The BOX-3 panel initialization register values in
@@ -94,6 +115,18 @@ ID scheme. No vendor application, ESP-SR code or legacy I2C driver is copied.
 The managed esp_lcd_st77916 2.0.2 driver keeps its Apache License 2.0; source
 and binary packages include LICENSES/Apache-2.0.txt and matching notices.
 
+The ST77916 initialization table in firmware/esp32/main/panel_vocat.hpp is
+adapted from Espressif's ESP-VoCat BSP,
+https://github.com/espressif/esp-bsp/tree/f259a6abd5808019b1903a422092a4234ca95a51/bsp/esp_vocat,
+file bsp/esp_vocat/priv_include/disp_init_data.h,
+Copyright 2026 Espressif Systems (Shanghai) CO LTD, Apache License 2.0.
+The adapter expresses the register payloads as C++ byte strings; the values,
+order and delays are unchanged. The ESP-VoCat v1.2 pin map and power switching
+in firmware/esp32/main/board.cpp follow the same BSP and Espressif's ESP-VoCat
+v1.2 schematic, https://dl.espressif.com/AE/esp-dev-kits/ESP-VoCat_SCH_V1_2.pdf.
+Only these hardware facts are used. A copy of the license is in
+LICENSES/Apache-2.0.txt.
+
 The CrowPanel 2.1 ST7701 initialization values in
 firmware/esp32/main/crowpanel_st7701_init.hpp, and the RGB timings, PCF8574
 power and reset sequence and pin map in port_rgb.cpp and board.cpp, follow
@@ -102,7 +135,7 @@ https://github.com/Elecrow-RD/CrowPanel-2.1inch-HMI-ESP32-Rotary-Display-480-480
 That repository carries no license. Only these hardware facts are used,
 re-expressed for Espressif's esp_lcd_st7701 driver.
 
-The managed esp_lcd_ili9341, esp_lcd_touch, esp_lcd_touch_gt911,
+The managed esp_lcd_ili9341, esp_lcd_gc9a01, esp_lcd_touch, esp_lcd_touch_gt911,
 esp_lcd_touch_tt21100, esp_lcd_touch_ft5x06, esp_lcd_st7701 and
 esp_lcd_panel_io_additions drivers are Espressif components under Apache
 License 2.0. CoreS3 audio uses esp_codec_dev's AW88298 driver.

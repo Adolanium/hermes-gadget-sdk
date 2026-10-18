@@ -60,6 +60,8 @@ The PWR key remains part of the power circuit. Firmware asserts GPIO 2 at startu
 
 The [device settings menu](using-gadget.md#device-settings-and-hardware-checks) shows calibrated battery-node voltage and the charging signal. GPIO 1 samples the R27/R32 divider, whose ratio is three. GPIO 3 reads the active-low charging signal. This board has no fuel gauge, battery presence detector or USB-status input, so those readings are omitted. Voltage is unavailable if the ESP32's ADC calibration cannot start. An unplugged battery can leave voltage on this node while USB powers the charger; voltage alone does not prove a battery is attached.
 
+After confirming a compatible single-cell 3.7 V Li-ion battery is fitted, opt into a rough display-only percentage with `set battery_estimate liion`, then `set battery_display percentage`. See [battery indicator settings and limitations](using-gadget.md#device-settings-and-hardware-checks). It is off by default, stays visible while charging, and does not change raw gateway telemetry or establish charge completion. Do not enable it merely because this node has voltage; USB can energize the node without a battery. Simulator checks and firmware compilation do not calibrate or physically verify this estimate.
+
 Select **Power off** twice to lower GPIO 2 and disconnect battery power. **USB continues to power the board.** Disconnect USB to turn it off, and hold PWR to turn it back on from battery. BOOT and PLUS retain their TALK and CANCEL roles. The optional screen timeout dims and darkens the display while keeping Wi-Fi connected.
 
 Wiring follows the [Waveshare schematic](https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-1.54/ESP32-S3-LCD-1.54-Schematic.pdf). For physical verification, compare the displayed voltage with a meter, test with and without a battery, check the charging signal, and test shutdown separately with USB and battery power. Record the board revision in the [hardware checklist](hardware-validation.md).
@@ -413,6 +415,45 @@ The USB-C port is the S3's own USB Serial/JTAG, used for both flashing and the s
 
 The CO5300 start-up table and the pin map come from Waveshare's [board support package](https://github.com/waveshareteam/Waveshare-ESP32-components/tree/9daffb7168b3c093a330da700988a22092294eef/bsp/esp32_s3_touch_amoled_2_06) 2.0.0 at commit `9daffb7`, checked against the [schematic](https://files.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-2.06/ESP32-S3-Touch-AMOLED-2.06.pdf); see [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
 
+## ESP32-S3-Touch-AMOLED-2.16
+
+Board option `esp32s3-touch-amoled-216`, for Waveshare's 2.16" AMOLED touch development board (SKUs 33969 and 33970, the -EN version): an ESP32-S3R8 (8 MB octal PSRAM) with 16 MB flash, a square 480×480 AMOLED, two microphones with echo-cancellation circuitry, a speaker output, an AXP2101 PMIC with an MX1.25 header for a 3.7 V lithium battery, an IMU, an RTC and a TF slot. Nothing needs wiring.
+
+| Part | Chip | Connection |
+|---|---|---|
+| Display | CO5300, QSPI | CS 12, SCLK 38, D0–D3 4/5/6/7, reset 39; full 480×480 window, no column offset |
+| Touch | CST9220 | I2C 0x5A, read with the CST9217 report; reset 40; INT 11; y mirrored, then x and y swapped, to match the display's MADCTL 0xA0, as in Waveshare's BSP |
+| Speaker DAC | ES8311 | I2C 0x18; I2S MCLK 42, BCLK 9, WS 45, DOUT 8; amplifier enable 46 |
+| Microphones | ES7210 | I2C 0x40; two microphones plus echo cancellation; I2S DIN 10 |
+| Power | AXP2101 | I2C 0x34; battery/USB readings, PWR short press and local power-off; charging and rails keep their defaults |
+| I2C bus | | SDA 15, SCL 14, 400 kHz |
+| KEY3 | | GPIO 18 (not wired as a gadget control) |
+| BOOT key | | GPIO 0 |
+| Not used | QMI8658 IMU (I2C 0x6B), PCF85063 RTC (0x51), TF card | |
+
+No AXP2101 output is switched for audio, as in Waveshare's BSP, which does not configure the PMIC. Battery operation has not been tested. This port stays **experimental** until a full [physical verification report](hardware-validation.md) is recorded for the exact board.
+
+**Controls.** Hold the screen or BOOT to talk, tap to answer "yes", swipe down to cancel. A short press on PWR turns the screen off and on. KEY3 (GPIO18) is not wired as a gadget control in this profile.
+
+**Build and flash it** with PlatformIO:
+
+```bash
+cd firmware/esp32
+pio run -e esp32s3-touch-amoled-216 -t upload -t monitor
+```
+
+The USB-C port is the S3's own USB Serial/JTAG, used for both flashing and the serial console. If the port does not appear, hold BOOT while plugging in USB to enter download mode.
+
+### First flash: what to check
+
+1. **Boot log:** `CO5300 480x480 ready`, `codecs: speaker ready, microphones ready`, plus `touch ready, key off, encoder off`. In the `diag` report, `i2c` should include `0x18` (ES8311), `0x34` (AXP2101), `0x40` (ES7210), `0x51` (PCF85063), `0x5a` (CST9220) and `0x6b` (QMI8658).
+2. **Screen:** the mascot is upright and not mirrored; text is white on dark slate bars, and the link dot is green once online. A stripe at one edge means the column offset is off.
+3. **Touch:** holding the screen shows the listening waves, and a swipe *down* cancels. Report mirrored or offset coordinates with the board revision.
+4. **Microphones:** say something. The waves move with your voice and the transcript is right; in tap mode, a sentence spoken at arm's length starts and ends the recording.
+5. **Speaker:** replies are clear and loud enough (`set volume 80`), with no hiss between replies.
+
+The CO5300 start-up table and the pin map come from Waveshare's [board support package](https://github.com/waveshareteam/Waveshare-ESP32-components/tree/63ac675334db62509082e182ff900bf60f21f009/bsp/esp32_s3_touch_amoled_2_16) 2.0.1 at commit `63ac675`, checked against the [product documentation](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16); see [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
+
 ## Xorigin AIPI Lite
 
 Board option `aipi-lite`, for Xorigin's AIPI Lite: an ESP32-S3 with 16 MB flash and 8 MB octal PSRAM, a 128×128 ST7789 panel, one ES8311 codec for both the speaker and the microphone, BOOT and power keys, and a battery. This port is experimental.
@@ -451,6 +492,142 @@ The profile expects the USB-C port to be the S3's own USB Serial/JTAG, used for 
 6. **Console:** `hermes-gadget diag` answers over the USB-C port.
 
 The pin map follows xiaozhi-esp32's `xorigin/aipi-lite` board at commit `0d576d3`; see [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
+
+## Spotpear ESP32-S3-1.54 muma
+
+Board option `spotpear-muma`, for Spotpear's 1.54" "muma" (little wooden horse) board, SKU `sp-esp32-s3-1.54-muma`: an ESP32-S3R8 (8 MB octal PSRAM) with 16 MB flash, a 240×240 ST7789 panel over SPI, one ES8311 codec for both the speaker and the microphone, a speaker, a BOOT key, a battery connector and, on the touch version, a CST816D touchscreen. It ships with the XiaoZhi firmware, whose boot log prints `SKU=sp-esp32-s3-1.54-muma`. This port is experimental.
+
+**Back up the whole flash before the first flash.** The board has no other copy of its factory firmware:
+
+```bash
+esptool.py --chip esp32s3 read_flash 0 0x1000000 muma-factory.bin
+```
+
+Writing that file back at `0x0` restores the original firmware.
+
+| Part | Chip | Connection |
+|---|---|---|
+| Display | ST7789, SPI | MOSI 2, SCLK 4, CS 5, DC 47, RST 38; colors inverted; backlight GPIO 42, active low |
+| Speaker DAC + microphone ADC | ES8311 | I2C 0x18 on SDA 15, SCL 14; I2S MCLK 16, BCLK 9, WS 45, DOUT 8, DIN 10; amplifier enable 46 |
+| Touch (touch version) | CST816D | I2C 0x15 on its own bus, SDA 11, SCL 7; RST 6, INT 12 |
+| Power | | GPIO 3 latches the battery path on; charge signal on GPIO 41 (high while charging); battery divider on GPIO 1 (ADC1 channel 0) |
+| Keys | | BOOT GPIO 0 (TALK) |
+
+The touchscreen has an I2C bus of its own, so the profile sets `touch.bus` and the firmware opens it on the second I2C controller. Without touch there is no CANCEL input: BOOT is the only key. Hold the screen or BOOT to talk, and swipe down to cancel.
+
+The battery level and charging state aren't reported yet: the divider ratio on GPIO 1 hasn't been measured, and the charge signal is active high where the latch driver expects active low. Upstream also writes `0xBB 0x38` (VCOM) to the panel; this profile keeps the ST7789 default.
+
+**Build and flash it** with PlatformIO:
+
+```bash
+cd firmware/esp32
+pio run -e spotpear-muma -t upload -t monitor
+```
+
+The USB-C port is the S3's own USB Serial/JTAG, used for flashing and the serial console.
+
+### First flash: what to check
+
+1. **Boot log:** `battery latch enabled; no battery voltage reading` and `codecs: speaker ready, microphones ready (es8311 analog)`. The `hg.diag` parts line should read `display st7789, microphone es8311, speaker es8311`, with touch ready on the touch version.
+2. **Screen:** the mascot is upright and not mirrored, and the colors are right (amber accents, not blue). Swapped red and blue means `lcd.bgr` is wrong; a negative-looking image means `lcd.invert` is.
+3. **Brightness:** the settings menu's brightness steps dim the screen, and 100 percent is the brightest. Reversed steps mean `lcd.backlight_invert` is wrong.
+4. **Touch:** holding the screen records, a swipe down cancels, and taps land where you touch.
+5. **Microphone:** hold BOOT and speak; the waves move with your voice and Hermes's transcript is right.
+6. **Speaker:** replies are clear and loud enough (`set volume 80`).
+7. **Power:** unplug USB with the battery in, and the device stays on. **Power off** in settings turns it off.
+
+The pin map follows xiaozhi-esp32's `spotpear/sp-esp32-s3-1.54-muma` board at commit `d91d682`; see [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
+
+## Spotpear ESP32-S3-1.28-BOX
+
+Board option `spotpear-box128`, for Spotpear's round robot, SKU `sp-esp32-s3-1.28-box`: an ESP32-S3R8 (8 MB octal PSRAM) with 16 MB flash, a 1.28" 240×240 round GC9A01 panel over SPI, a CST816D touchscreen, one ES8311 codec for both the speaker and the microphone, an NS4150B amplifier, a BOOT key and a battery. It ships with the XiaoZhi firmware. Apart from the panel, it is wired like the [muma](#spotpear-esp32-s3-154-muma). This port is experimental.
+
+**Back up the whole flash before the first flash.** The board has no other copy of its factory firmware:
+
+```bash
+esptool.py --chip esp32s3 read_flash 0 0x1000000 box128-factory.bin
+```
+
+Writing that file back at `0x0` restores the original firmware.
+
+| Part | Chip | Connection |
+|---|---|---|
+| Display | GC9A01, SPI | MOSI 2, SCLK 4, CS 5, DC 47, RST 38; 40 MHz; BGR, mirrored on X, colors inverted; backlight GPIO 42, active low |
+| Speaker DAC + microphone ADC | ES8311 | I2C 0x18 on SDA 15, SCL 14; I2S MCLK 16, BCLK 9, WS 45, DOUT 8, DIN 10; amplifier enable 46 |
+| Touch | CST816D | I2C 0x15 on its own bus, SDA 11, SCL 7; RST 6 |
+| Power | | GPIO 3 latches the battery path on; charge signal on GPIO 41 (high while charging); battery divider on GPIO 1 (ADC1 channel 0), ratio 2 |
+| Status LED | | GPIO 48 |
+| Keys | | BOOT GPIO 0 (TALK) |
+
+After Espressif's default GC9A01 bring-up, the firmware writes this panel's gate timing (`0x62`, `0x63`) and supply levels (`0xC3`, `0xC4`), as the factory firmware does (`panel_spotpear128.hpp`).
+
+The battery reading assumes the divider halves the cell voltage. At that ratio, the factory firmware's charge table, read at the same attenuation, puts a full cell near 4.0 V, but nobody has measured it on a board yet. **Power off** in settings lowers GPIO 3; on USB power the board stays on.
+
+**Build and flash it** with PlatformIO:
+
+```bash
+cd firmware/esp32
+pio run -e spotpear-box128 -t upload -t monitor
+```
+
+The USB-C port is the S3's own USB Serial/JTAG, used for flashing and the serial console. To preview the round layout without the board, run `hermes-gadget sim --board sim-240x240-round`.
+
+### First flash: what to check
+
+1. **Boot log:** `battery latch enabled; calibrated voltage available` and `codecs: speaker ready, microphones ready (es8311 analog)`. The `hg.diag` parts line should read `display gc9a01, microphone es8311, speaker es8311`, with touch ready.
+2. **Screen:** the mascot is upright, not mirrored, and centred in the circle, and the colors are right (amber accents, not blue). Swapped red and blue means `lcd.bgr` is wrong; a negative-looking image means `lcd.invert` is; a mirrored picture means `lcd.mirror_x` is. Faint or washed-out colors point at the register changes in `panel_spotpear128.hpp`.
+3. **Brightness:** the settings menu's brightness steps dim the screen, and 100 percent is the brightest. Reversed steps mean `lcd.backlight_invert` is wrong.
+4. **Touch:** holding the screen records, a swipe down cancels, and taps land where you touch. A swipe that reads backwards means the touch needs `touch.mirror_x` or `touch.mirror_y`.
+5. **Microphone:** hold BOOT and speak; the waves move with your voice and Hermes's transcript is right.
+6. **Speaker:** replies are clear and loud enough (`set volume 80`).
+7. **Battery:** with a charged cell, `hermes-gadget diag` reports about 4.0 to 4.2 V. A reading far off means the divider ratio is wrong. The charging mark shows on USB and goes away on battery; if it is the wrong way round, clear `latch_power.charging_active_high`.
+8. **Power:** unplug USB with the battery in, and the device stays on. **Power off** in settings turns it off.
+
+The pin map follows xiaozhi-esp32's `spotpear/sp-esp32-s3-1.28-box` board at commit `d91d682`; see [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
+
+## ESP-VoCat
+
+Board option `esp-vocat`, for Espressif's ESP-VoCat AI companion kit, **v1.2 only** (the version is on the mainboard's silkscreen). It has an ESP32-S3-WROOM-1 module with 16 MB flash and 16 MB octal PSRAM, a round 1.85" 360×360 ST77916 panel over QSPI, a CST816S touchscreen, an ES8311 DAC driving an NS4150B 3 W amplifier, an ES7210 with two microphones, a BMI270 IMU, a BQ27220 fuel gauge, a green LED, two capacitive touch pads on its head, a microSD slot, and RST, BOOT and POWER keys. It ships with an ESP-Brookesia chatbot firmware. This port is experimental.
+
+v1.0 boards are not supported: v1.2 moved the microphone data line (GPIO 15 to 3), the amplifier enable (4 to 15) and the LCD reset (3 to 47), and added the codec supply switch on GPIO 48.
+
+**Back up the whole flash before the first flash.** The board has no other copy of its factory firmware:
+
+```bash
+esptool.py --chip esp32s3 read_flash 0 ALL vocat-factory.bin
+```
+
+Writing that file back at `0x0` restores the original firmware.
+
+| Part | Chip | Connection |
+|---|---|---|
+| Display | ST77916, QSPI | SCLK 18, D0 46, D1 13, D2 11, D3 12, CS 14; RST 47, active high (through an inverting FET); backlight GPIO 44, active high |
+| Power rails | | GPIO 9 low switches the LCD/SD 3.3 V rail on; GPIO 48 high switches the codec supply on |
+| Touch | CST816S | I2C 0x15 on SDA 2, SCL 1; INT 10; no reset line |
+| Speaker DAC | ES8311 | I2C 0x18; I2S MCLK 42, BCLK 40, WS 39, DOUT 41; NS4150B amplifier enable GPIO 15, active high |
+| Microphone ADC | ES7210 | I2C 0x40; I2S DIN 3; microphones on MIC1 and MIC2, the speaker output looped back on MIC3 |
+| Keys | | BOOT GPIO 0 (TALK), under the base; RST and POWER act on the hardware only |
+| Unused by this profile | | BMI270 IMU (I2C 0x68, INT1 GPIO 21), BQ27220 fuel gauge (I2C 0x55), touch pads GPIO 6 and 7, green LED GPIO 43 (active low), microSD (CLK 16, CMD 38, D0 17), UART1 on the magnetic connector (RX 4, TX 5) |
+
+All I2C parts share one bus. GPIO 43 and 44 are UART0's pins, so the serial console is the S3's USB Serial/JTAG on the USB-C port. Hold the screen or BOOT to talk, and swipe down to cancel. The firmware doesn't read the battery or the head pads yet, and doesn't use the MIC3 loopback for echo cancellation.
+
+**Build and flash it** with PlatformIO:
+
+```bash
+cd firmware/esp32
+pio run -e esp-vocat -t upload -t monitor
+```
+
+### First flash: what to check
+
+1. **Boot log:** the `hg.lcd` line reads `st77916 360x360 ready` after the panel ID, and the `hg.diag` parts line reads `display st77916, microphone es7210, speaker es8311`, with touch ready.
+2. **Screen:** the mascot is upright, centred in the circle and not mirrored, and the colors are right (amber accents, not blue). A negative-looking image means `lcd.invert` is wrong.
+3. **Brightness:** the settings menu's brightness steps dim the screen, and 100 percent is the brightest.
+4. **Touch:** holding the screen records, a swipe down cancels, and taps land where you touch.
+5. **Microphone:** hold the screen and speak; the waves move with your voice and Hermes's transcript is right.
+6. **Speaker:** replies are clear and loud enough (`set volume 80`).
+
+The pin map follows Espressif's esp-bsp `bsp/esp_vocat` at commit `f259a6a` and the ESP-VoCat v1.2 schematic; the panel's start-up table comes from the same BSP. See [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
 
 ## Elecrow CrowPanel 2.1-inch HMI
 
@@ -630,9 +807,21 @@ gadget> wifi
 - `tested` turns true once the device has joined the network with its saved password. Saving a new password for a network clears it again. `wifi add` does not check the password, so a network saved out of range shows `false` until the device first joins it.
 - When the link drops, the device retries the same network once. If that fails too, it scans and joins the first network if the scan saw it, else the strongest saved network it saw. A network that failed twice is passed over while another saved one is in range. When the scan finds no saved network, for example because it is hidden, the device tries the next one in the list. With one saved network it never scans and retries as before.
 - `set wifi_ssid` and `set wifi_pass` work on the first network: setting a new name saves that network first and keeps the others. If five are saved, the last one is dropped. An empty `wifi_ssid` forgets the first network. [Phone setup](setup-board.md#set-up-wi-fi-with-your-phone) saves its network first the same way.
-- `factory-reset` forgets every network.
+- `factory-reset` forgets every network, and the access point it last joined.
 
 Machine-readable lines start with `@`, so tools can drive a bench device. `hermes-gadget provision` is a thin wrapper over these commands.
+
+### Wi-Fi reconnect
+
+A join that names no access point first scans every channel. To skip that, the device records the access point it joined after each good connection: its BSSID, its channel and the DHCP lease (key `wifi_fast`, written only when something changed).
+
+- **At boot and after the link drops,** the first attempt on the same network aims at that access point on that channel, with no scan.
+- **If that attempt fails,** for example because the router moved to another channel or the device is somewhere else, the device joins normally at once: the usual scan and retries in [saved Wi-Fi networks](#saved-wi-fi-networks). The failed fast attempt doesn't count against the network or lengthen the battery backoff. The next good join replaces the record.
+- **DHCP** asks for the last address first (`CONFIG_LWIP_DHCP_RESTORE_LAST_IP`, on for every board), which skips the discovery round when the router still has the lease.
+- **Static address (opt-in):** with `CONFIG_HG_WIFI_REUSE_IP` (menuconfig, **Hermes Gadget**), a fast join reuses the last lease as a static address and skips DHCP. Turn it on only when the router reserves that address for the device. Nothing renews the lease, and an address the router gave to someone else in the meantime conflicts. Every other join uses DHCP.
+- Forgetting a network forgets its record.
+
+How long a reconnect takes has not been measured on hardware for this firmware.
 
 ## Power-on sequence
 

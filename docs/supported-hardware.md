@@ -13,9 +13,13 @@ Hardware ports remain experimental until the [verification table](hardware-valid
 | [Waveshare ESP32-S3-Touch-AMOLED-1.75C](hardware.md#esp32-s3-touch-amoled-175c) | Hold the screen to talk; PWR turns the screen off and on | Onboard microphones and speaker |
 | [Waveshare ESP32-S3-Touch-AMOLED-1.8 (V2)](hardware.md#esp32-s3-touch-amoled-18) | Hold the screen to talk | Onboard analog microphone; speaker output |
 | [Waveshare ESP32-S3-Touch-AMOLED-2.06 (watch)](hardware.md#esp32-s3-touch-amoled-206) | Hold the screen or BOOT to talk; PWR turns the screen off and on | Onboard microphones and speaker |
+| [Waveshare ESP32-S3-Touch-AMOLED-2.16](hardware.md#esp32-s3-touch-amoled-216) | Hold the screen or BOOT to talk; PWR turns the screen off and on | Onboard microphones; speaker output |
 | [Waveshare ESP32-S3-Touch-LCD-1.85C V2](hardware.md#waveshare-esp32-s3-touch-lcd-185c-v2) | Hold the screen or BOOT to talk | Onboard microphones; speaker output, with a speaker in the speaker-box version |
+| [Espressif ESP-VoCat v1.2](hardware.md#esp-vocat) | Hold the screen or BOOT to talk; swipe down to cancel | Onboard microphones and speaker |
 | [Waveshare ESP32-S3-Knob-Touch-LCD-1.8](hardware.md#waveshare-esp32-s3-knob-touch-lcd-18) | Hold the screen to talk; the knob scrolls; BOOT also works as TALK | Onboard I2S microphone; **no speaker output** (the DAC hangs off the board's secondary ESP32 — replies are text only) |
 | [Xorigin AIPI Lite](hardware.md#xorigin-aipi-lite) | Hold BOOT to talk; the power key cancels | Onboard microphone and speaker |
+| [Spotpear ESP32-S3-1.28-BOX](hardware.md#spotpear-esp32-s3-128-box) | Hold the screen or BOOT to talk; swipe down to cancel | Onboard microphone and speaker; battery |
+| [Spotpear ESP32-S3-1.54 muma](hardware.md#spotpear-esp32-s3-154-muma) | Hold the screen or BOOT to talk; swipe down to cancel | Onboard microphone and speaker |
 | [Espressif ESP32-S3-BOX-3](hardware.md#esp32-s3-box-3) | Hold the screen or BOOT to talk | Onboard microphones and speaker |
 | [M5Stack CoreS3](hardware.md#m5stack-cores3) | Hold the screen to talk | Onboard microphones and speaker; battery management |
 | [LilyGO T-Display-S3](hardware.md#lilygo-t-display-s3) | BOOT and Button2; send text through the USB console | No onboard microphone or speaker |

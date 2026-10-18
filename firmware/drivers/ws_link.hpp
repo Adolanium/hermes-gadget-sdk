@@ -50,6 +50,35 @@ inline bool may_queue_message(size_t free_slots, uint8_t opcode) {
 // waits for its close frame without one and froze the app on a dead link.
 constexpr uint32_t kSendTimeoutMs = 2000;
 constexpr uint32_t kCloseTimeoutMs = 1000;
+// The client's own reads and connects (esp_websocket_client_config_t::network_timeout_ms).
+constexpr uint32_t kNetworkTimeoutMs = 10000;
+
+// Handing a client to the send task for closing waits at most this long for a
+// queue slot. The reserved slots normally make it immediate.
+constexpr uint32_t kHandoffTimeoutMs = 1000;
+
+// Each item has a limit: a send takes at most its lock wait and its write, and a
+// close also waits for the client's task to end, which is bounded by
+// kNetworkTimeoutMs. An item that takes longer than this has the send task stuck
+// in the client library: nothing can be sent or closed again, and the device
+// would answer nothing until someone reset it. Only a restart recovers.
+constexpr uint32_t kStuckMs = 60000;
+
+// Whether the send task is stuck on one item. The send task calls begin() and
+// end() around each item; any task may ask stuck().
+class TxWatch {
+ public:
+  void begin(uint32_t now_ms) {
+    since_.store(now_ms);
+    busy_.store(true);
+  }
+  void end() { busy_.store(false); }
+  bool stuck(uint32_t now_ms) const { return busy_.load() && now_ms - since_.load() > kStuckMs; }
+
+ private:
+  std::atomic<bool> busy_{false};
+  std::atomic<uint32_t> since_{0};
+};
 
 struct TxItem {
   void* client;

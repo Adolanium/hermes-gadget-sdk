@@ -4,6 +4,7 @@ kind: platform
 version: 0.2.0
 manifest_version: 2
 api_version: 1
+requires_hermes: ">=0.21.6"  # first Hermes release with the commit CI tests against (plugin/compat.py)
 description: >
   Connect small hardware devices (ESP32 boards with a screen, microphone and
   speaker) to Hermes. Devices hold a WebSocket to the gateway: voice requests

@@ -21,6 +21,18 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 
 # Public CA bundle for wss:// servers behind a real certificate.
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+# Trust a chain as soon as one of its certificates is issued by a bundled root.
+# Without it only the issuer of the last certificate sent is looked up: Cloudflare
+# sends GTS Root R4 cross-signed by GlobalSign Root CA, which the bundle no longer
+# has, so its tunnels failed although GTS Root R4 itself is bundled. Costs about
+# 700 bytes of heap, by ESP-IDF's estimate.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y
+
+# Rejoining Wi-Fi: DHCP asks for the last address straight away (a DHCPREQUEST
+# without the discovery round) and lwIP keeps that address in NVS for the next boot.
+# The port also skips the channel scan for the access point that last worked
+# (drivers/wifi_fast.hpp).
+CONFIG_LWIP_DHCP_RESTORE_LAST_IP=y
 
 # Keep logs readable on the serial console that also carries the gadget console.
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y

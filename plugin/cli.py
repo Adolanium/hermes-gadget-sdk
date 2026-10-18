@@ -255,6 +255,38 @@ def _cmd_pair(args) -> None:
         sys.exit(1)
 
 
+def _tiles():
+    from plugins.plugin_storage import plugin_data_dir
+
+    from .dashboard import TileStore
+
+    return TileStore(plugin_data_dir("gadget"))
+
+
+def _cmd_tile(args) -> None:
+    tiles = _tiles()
+    if args.tile_command == "set":
+        try:
+            tiles.set(args.name, args.value, state=args.state, label=args.label, ttl_s=args.ttl)
+        except ValueError as exc:
+            sys.exit(str(exc))
+        print(f"Set {args.name}: {args.value}" + (f" ({args.state})" if args.state else "")
+              + ". Gadgets showing the dashboard update within a few seconds.")
+    elif args.tile_command == "clear":
+        if not args.name and not args.all:
+            sys.exit("Give a tile name, or --all.")
+        if tiles.clear(None if args.all else args.name):
+            print("Cleared " + ("every tile." if args.all else f"{args.name}."))
+        else:
+            print("No such tile." if args.name else "There were no tiles.")
+    else:
+        shown = tiles.tiles()
+        if not shown:
+            print("No tiles. Add one: hermes gadget tile set nas up --state ok")
+        for tile in shown:
+            print(f"{tile['id']:<16} {tile['label']:<16} {tile['value']:<16} {tile.get('state', '-')}")
+
+
 def setup_argparse(parser) -> None:
     subs = parser.add_subparsers(dest="gadget_command")
     subs.add_parser("devices", aliases=["ls"], help="List gadgets that have enrolled with this Hermes")
@@ -276,11 +308,23 @@ def setup_argparse(parser) -> None:
                         help="With --latest, install even if the device already runs that version")
     update.add_argument("--no-wait", action="store_true", help="Stage it and return; the gateway installs it")
     update.add_argument("--timeout", type=float, default=600, help="Seconds to wait for the install (default 600)")
+    tile = subs.add_parser("tile", help="Set the status tiles the gadget dashboard shows")
+    tile_subs = tile.add_subparsers(dest="tile_command")
+    tile_set = tile_subs.add_parser("set", help="Add a tile or change its value")
+    tile_set.add_argument("name", help="The tile's name, e.g. nas")
+    tile_set.add_argument("value", help="What it shows, e.g. up")
+    tile_set.add_argument("--state", choices=["ok", "warn", "bad"], help="Colours its dot: green, yellow or red")
+    tile_set.add_argument("--label", help="Text to show instead of the name")
+    tile_set.add_argument("--ttl", type=float, help="Seconds until it disappears unless set again")
+    tile_clear = tile_subs.add_parser("clear", help="Remove a tile")
+    tile_clear.add_argument("name", nargs="?", help="The tile to remove")
+    tile_clear.add_argument("--all", action="store_true", help="Remove every tile")
+    tile_subs.add_parser("list", help="Show the tiles")
     parser.set_defaults(func=handle)
 
 
 _COMMANDS = {"devices": _cmd_devices, "ls": _cmd_devices, "forget": _cmd_forget, "info": _cmd_info,
-             "pair": _cmd_pair, "update": _cmd_update}
+             "pair": _cmd_pair, "update": _cmd_update, "tile": _cmd_tile}
 
 
 def handle(args) -> None:

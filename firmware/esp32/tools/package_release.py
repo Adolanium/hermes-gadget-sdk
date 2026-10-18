@@ -257,6 +257,7 @@ hermes-gadget-<board>-{version}.bin`. This also erases the device's settings, so
 **Update a running device:** `hermes gadget update <device> hermes-gadget-<board>-{version}-app.bin`.
 {plugin}
 Checksums are in `SHA256SUMS`. License texts and notices are in `hermes-gadget-{version}-licenses.zip`.
+Every file has a GitHub build provenance attestation. Check a download with `gh attestation verify <file> --repo Adolanium/hermes-gadget-sdk`.
 """
 
 

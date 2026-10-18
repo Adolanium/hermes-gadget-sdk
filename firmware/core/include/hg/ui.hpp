@@ -33,11 +33,21 @@ enum class Screen : uint8_t {
   Updating,  // installing a firmware update
   Settings,
   Setup,
+  Dashboard,  // Hermes's sessions and the user's status tiles (docs/protocol.md#dashboard)
 };
 
 enum class Link : uint8_t { Offline, Network, Connecting, Online };
 
 const char* screen_name(Screen s);
+
+// One line of the dashboard: a coloured dot, a label and a right-aligned value.
+// A heading has only a label and starts a section.
+struct DashRow {
+  enum class Tone : uint8_t { Dim, Busy, Waiting, Good, Warn, Bad };
+  std::string label, value;
+  Tone tone = Tone::Dim;
+  bool heading = false;
+};
 
 struct UiModel {
   Screen screen = Screen::Boot;
@@ -70,6 +80,8 @@ struct UiModel {
   // the content band. Null on every other screen. Borrowed, not owned: the app
   // keeps the matrix so it is encoded once, not on every model update.
   const qr::Code* qr = nullptr;
+  // Dashboard screen: its rows, drawn from `scroll` (0 = the top).
+  std::vector<DashRow> dash;
 };
 
 struct UiLayout {
@@ -98,6 +110,8 @@ class Ui {
   void flush(int y0, int y1);
   // Body text rows visible on a text screen for this model (after detail lines).
   int body_rows(const UiModel& m) const;
+  // Dashboard rows that fit the content band.
+  int dash_rows() const;
   bool title_hit(int x, int y) const {
     const int left = ox_ + (info_.width - layout_.title_w) / 2;
     return x >= left && x < left + layout_.title_w && y >= oy_ && y < oy_ + layout_.top_h;
@@ -108,6 +122,7 @@ class Ui {
   void draw_header(Canvas& c, const UiModel& m);
   void draw_content(Canvas& c, const UiModel& m);
   bool draw_qr(Canvas& c, const UiModel& m, int y0, int y1);
+  void draw_dashboard(Canvas& c, const UiModel& m, int y0, int y1);
   void draw_bottom(Canvas& c, const UiModel& m);
   void draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r);
   // Draws the battery icon and percent from x, vertically centred on cy.

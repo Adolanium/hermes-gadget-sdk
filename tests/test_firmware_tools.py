@@ -275,6 +275,20 @@ def test_every_real_board_has_what_the_installer_shows():
             assert "nothing to wire" not in meta["summary"].lower(), f"{board}: the badge already says it"
 
 
+def test_every_board_trusts_a_chain_at_any_bundled_root():
+    """Cloudflare sends GTS Root R4 cross-signed by GlobalSign Root CA, which ESP-IDF's bundle no
+    longer has. Without cross-signed verification only the last certificate's issuer is looked up,
+    and every Cloudflare tunnel failed validation although GTS Root R4 is bundled (#137)."""
+    want = {"CONFIG_MBEDTLS_CERTIFICATE_BUNDLE": "y", "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY": "y"}
+    base = package_release.PROJECT_DIR / "sdkconfig.defaults"
+    for board, board_dir in package_release.environments(package_release.PROJECT_DIR).items():
+        settings = {}
+        for path in (base, package_release.PROJECT_DIR / "boards" / board_dir / "sdkconfig.defaults"):
+            if path.exists():
+                settings.update((symbol, value) for _, symbol, value in check_config.parse(path))
+        assert {k: settings.get(k) for k in want} == want, board
+
+
 def test_release_notes_pin_the_plugin_to_the_release_commit(project, tmp_path):
     project("breadboard")
     notes = tmp_path / "notes.md"

@@ -54,6 +54,7 @@ def _parse_target(raw: str):
 
 def register(ctx) -> None:
     from . import cli
+    from .dashboard import BOARD
     from .tools import register_tools
 
     ctx.register_platform(
@@ -75,6 +76,7 @@ def register(ctx) -> None:
         platform_hint=PLATFORM_HINT,
     )
     register_tools(ctx)
+    BOARD.register(ctx)  # session state for the dashboard
     ctx.register_cli_command(
         name="gadget",
         help="Manage Hermes gadgets (ESP32 devices)",

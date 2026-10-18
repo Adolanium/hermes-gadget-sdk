@@ -48,6 +48,8 @@ BOARDS = {
     "sim-240x240-nospeaker": Board("sim-240x240-nospeaker", 240, 240, speaker=False),
     # A 1.54" 240x240 SPI LCD with codecs (e.g. Waveshare ESP32-S3-LCD-1.54): no scroll buttons.
     "sim-240x240": Board("sim-240x240", 240, 240, scroll_buttons=False),
+    # A 1.28" round 240x240 LCD with touch (e.g. Spotpear ESP32-S3-1.28-BOX): no scroll buttons.
+    "sim-240x240-round": Board("sim-240x240-round", 240, 240, scroll_buttons=False, round=True, touch=True),
     # Waveshare 1.85C V2: round LCD and touch, no scroll buttons.
     "sim-360x360-round": Board("sim-360x360-round", 360, 360, scroll_buttons=False, round=True, touch=True),
     # Waveshare ESP32-S3-Knob-Touch-LCD-1.8: same round glass as the 1.85C V2,
@@ -61,6 +63,8 @@ BOARDS = {
     # The 2.06" 410x502 AMOLED watch (ESP32-S3-Touch-AMOLED-2.06), as the firmware draws it:
     # 486 rows, 8 rows clear of the rounded corners at the top and bottom.
     "sim-410x486": Board("sim-410x486", 410, 486, scroll_buttons=False, touch=True),
+    # A 2.16" square 480x480 AMOLED touch board (e.g. ESP32-S3-Touch-AMOLED-2.16).
+    "sim-480x480": Board("sim-480x480", 480, 480, scroll_buttons=False, touch=True),
     # A 1.9" 320x170 board with no audio hardware (e.g. LilyGO T-Display-S3).
     "sim-320x170-nospeaker": Board("sim-320x170-nospeaker", 320, 170, mic=False, speaker=False,
                                    scroll_buttons=False),
@@ -154,6 +158,7 @@ class Simulator:
         self.mic = Microphone(live=live_audio)
         self.speaker = Speaker(state_dir / "audio" if state_dir else None, live=live_audio)
         self.peripherals = VirtualPeripherals()
+        self.power_status: dict | None = None
         self.logs: list[tuple[int, str]] = []
         self.sent: list[dict] = []          # outbound JSON, newest last (for tests/UI)
         self.received: list[dict] = []      # inbound JSON
@@ -176,7 +181,7 @@ class Simulator:
             server_url=url, access_token=token, mic=b.mic, speaker=b.speaker, backlight=b.backlight,
             scroll_buttons=b.scroll_buttons, library=library, button_labels=button_labels,
             round_panel=b.round, touch_screen=b.touch, update_capacity=UPDATE_SLOT_BYTES,
-            update_pending=update_pending)
+            update_pending=update_pending, power=True)
         self._round_spans = _circle_spans(b.width, b.height) if b.round else None
         self._register_actions()
 
@@ -430,6 +435,11 @@ class Simulator:
 
     def set_sensor(self, name: str, value: float) -> None:
         self.device.set_sensor(name, value)
+
+    def set_power(self, status: dict | None) -> None:
+        """Replace the power fixture; native validation rejects invalid inputs atomically."""
+        self.device.set_power(status)
+        self.power_status = dict(status) if status is not None else None
 
     def console(self, line: str) -> str:
         return self.device.console(line)

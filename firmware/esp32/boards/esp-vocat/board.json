@@ -1,0 +1,6 @@
+{
+  "title": "Espressif ESP-VoCat v1.2 (experimental)",
+  "summary": "v1.2 only: round 360×360 touch screen, two microphones and a 3 W speaker; no wake word yet.",
+  "docs": "docs/hardware.md#esp-vocat",
+  "ready_made": true
+}
