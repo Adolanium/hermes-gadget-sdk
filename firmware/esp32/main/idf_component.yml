@@ -3,6 +3,8 @@ dependencies:
   espressif/esp_websocket_client: "^1.2.3"
   # ES8311 / ES7210 / AW88298 codecs on boards that use them
   espressif/esp_codec_dev: "~1.5"
+  # Opus reply audio: Xiph libopus (BSD-3-Clause) packaged for ESP-IDF
+  78/esp-opus: "~1.0.5"
   espressif/esp_lcd_st77916: "~2.0.2"
   espressif/esp_lcd_sh8601: "^1"
   espressif/esp_lcd_ili9341: "^2.1.0"

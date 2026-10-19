@@ -35,6 +35,7 @@ platforms:
       unauthorized_dm_behavior: pair
       # heartbeat_s: 20
       # max_utterance_s: 60
+      # opus_bitrate: 24000    # Opus speaker audio for devices that decode it; 0 = PCM16 only
       # dashboard: true        # Hermes's sessions and status tiles on devices that draw them
       # battery_log: true      # keep each device's battery readings in a CSV (see below)
       # tls_cert: /path/cert.pem   # serve wss://
@@ -42,6 +43,8 @@ platforms:
 ```
 
 `battery_log: true` writes each paired device's battery readings to `<hermes home>/plugin-data/gadget/battery/<device id>.csv`: a row every 30 seconds, and at once when the power source changes, with the time, `battery_mv`, `battery_percent`, `charging`, `external_power` and `battery_present`. Devices that report no battery voltage or percentage add nothing. A file that reaches 8 MB moves to `<device id>.1.csv`, replacing the previous one. Use a log of a full discharge, from a full charge to shutdown with USB unplugged, to check or fit a board's voltage-to-percent estimate. It is off by default and the gateway needs a restart after changing it.
+
+`opus_bitrate` (24000 by default) sends spoken replies as Opus to devices whose firmware decodes it (`caps.speaker.formats`). It needs libopus on the Hermes host (`libopus0` on Debian and Ubuntu, `opus` on Arch and Homebrew), loaded through ctypes with no Python package; without it, or with `opus_bitrate: 0`, replies go out as PCM16 as before. At 24 kbps a reply takes about a tenth of PCM16's 256 kbps, which keeps playback smooth on a phone hotspot or a slow Wi-Fi link.
 
 Secrets go in `~/.hermes/.env`, following Hermes's rule that `.env` is only for secrets:
 

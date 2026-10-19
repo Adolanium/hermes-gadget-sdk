@@ -497,6 +497,69 @@ TEST("app: reply audio plays through the speaker and barge-in stops it") {
   CHECK(r.app.screen() == hg::Screen::Listening);
 }
 
+// Stands in for an Opus decoder: each packet byte becomes four samples, and a packet starting
+// 0xFF is one it cannot decode.
+struct FakeDecoder : hg::AudioDecoder {
+  uint32_t rate = 0;
+  int packets = 0;
+  const char* format() const override { return "opus"; }
+  bool begin(uint32_t r) override { rate = r; return r == 16000; }
+  int decode(const uint8_t* packet, size_t len, int16_t* pcm, size_t max_samples) override {
+    ++packets;
+    if (len == 0 || packet[0] == 0xFF) return -1;
+    const size_t n = std::min(len * 4, max_samples);
+    std::fill(pcm, pcm + n, int16_t(7));
+    return static_cast<int>(n);
+  }
+};
+
+TEST("app: a speaker decoder adds its format to hello and decodes compressed reply audio") {
+  Rig plain;
+  plain.bring_online(true);
+  const auto* hello = plain.fake.last("hello");
+  CHECK(hello && !(*hello)["caps"]["speaker"]["formats"].is_array());  // PCM-only devices stay as they were
+  // An Opus stream to a device without a decoder is refused.
+  plain.server(R"({"type":"audio.start","stream":3,"rate":16000,"format":"opus"})");
+  CHECK(!plain.fake.spk_open);
+
+  Rig r;
+  FakeDecoder decoder;
+  r.hal.speaker_decoder = &decoder;
+  r.bring_online(true);
+  hello = r.fake.last("hello");
+  CHECK(hello != nullptr);
+  if (!hello) return;
+  CHECK_EQ((*hello)["caps"]["speaker"]["format"].as_string(), std::string("pcm16"));  // for older servers
+  const auto& formats = (*hello)["caps"]["speaker"]["formats"];
+  CHECK(formats.is_array() && formats.size() == 2);
+  CHECK_EQ(formats[1].as_string(), std::string("opus"));
+
+  r.server(R"({"type":"audio.start","stream":3,"rate":16000,"format":"opus"})");
+  CHECK(r.fake.spk_open);
+  CHECK_EQ(decoder.rate, uint32_t(16000));
+  std::vector<uint8_t> frame(hg::proto::kBinaryHeader + 30, 1);
+  hg::proto::write_binary_header(frame.data(), hg::proto::Channel::Audio, 3, 0);
+  r.app.on_transport_binary(frame.data(), frame.size());
+  CHECK_EQ(r.fake.spk_samples, size_t(120));  // the decoder's output, not the packet bytes
+  frame[hg::proto::kBinaryHeader] = 0xFF;  // a packet the decoder rejects plays nothing
+  r.app.on_transport_binary(frame.data(), frame.size());
+  CHECK_EQ(r.fake.spk_samples, size_t(120));
+  CHECK_EQ(decoder.packets, 2);
+  r.server(R"({"type":"audio.end","stream":3})");
+
+  // The next PCM stream bypasses the decoder.
+  r.server(R"({"type":"audio.start","stream":4,"rate":16000,"format":"pcm16"})");
+  std::vector<uint8_t> pcm(hg::proto::kBinaryHeader + 640, 0);
+  hg::proto::write_binary_header(pcm.data(), hg::proto::Channel::Audio, 4, 0);
+  r.app.on_transport_binary(pcm.data(), pcm.size());
+  CHECK_EQ(r.fake.spk_samples, size_t(440));
+  CHECK_EQ(decoder.packets, 2);
+  // A rate the decoder refuses leaves the speaker closed.
+  r.server(R"({"type":"audio.end","stream":4})");
+  r.server(R"({"type":"audio.start","stream":5,"rate":24000,"format":"opus"})");
+  CHECK(!r.fake.spk_open);
+}
+
 TEST("app: agent actions run on the device and report results") {
   Rig r;
   int calls = 0;

@@ -31,6 +31,7 @@ hgp::I2sSpeaker g_speaker;
 hgp::CodecAudio g_codec;
 hgp::CodecMic g_codec_mic;
 hgp::CodecSpeaker g_codec_speaker;
+hgp::OpusSpeakerDecoder g_opus;
 hgp::Buttons g_buttons;
 hgp::TouchInput g_touch;
 hgp::Wifi g_wifi;
@@ -278,6 +279,7 @@ extern "C" void app_main(void) {
     // Light-sleep boards power the DAC down while dozing, if the mics don't share it.
     if (board.light_sleep && g_codec.mic_link().switchable) g_codec_speaker.allow_power_down(g_codec.mic_link().format);
   }
+  if (hal.speaker) hal.speaker_decoder = &g_opus;  // Opus replies when Hermes offers them
   g_buttons.begin(board.buttons);
   const bool touch = peripherals_ready && (board.touch.enabled || board.pwr_key.enabled || board.encoder.a >= 0) &&
                      g_touch.begin(board.touch, board.pwr_key, board.encoder,

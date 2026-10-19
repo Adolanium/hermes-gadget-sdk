@@ -24,6 +24,7 @@ idf_component_register(
         "port_rgb.cpp"
         "port_power.cpp"
         "port_latch_power.cpp"
+        "port_opus.cpp"
         "../../drivers/axp2101.cpp"
         "../../drivers/cores3.cpp"
         "port_storage.cpp"
