@@ -4,6 +4,7 @@
 #include "driver/usb_serial_jtag.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 namespace hgp {
 
@@ -28,6 +29,14 @@ bool LatchPower::begin(const LatchPowerConfig& cfg) {
     input.mode = GPIO_MODE_INPUT;
     input.pull_up_en = GPIO_PULLUP_ENABLE;
     if (gpio_config(&input) != ESP_OK) return false;
+  }
+
+  if (cfg.key >= 0) {
+    gpio_config_t key = {};
+    key.pin_bit_mask = 1ULL << cfg.key;
+    key.mode = GPIO_MODE_INPUT;
+    key.pull_up_en = GPIO_PULLUP_ENABLE;
+    if (gpio_config(&key) != ESP_OK) return false;
   }
 
   if (cfg.adc < 0) {
@@ -90,6 +99,31 @@ bool LatchPower::charging_signal() const {
 std::optional<bool> LatchPower::external_power() {
   if (!cfg_.usb_external_power) return std::nullopt;
   return (cfg_.charging >= 0 && charging_signal()) || usb_serial_jtag_is_connected();
+}
+
+// Polled every ~100 ms by the app. A release before the hold time is a press;
+// reaching it powers off once, and the release that follows is not a press.
+bool LatchPower::take_key_press() {
+  if (cfg_.key < 0) return false;
+  const bool down = gpio_get_level(static_cast<gpio_num_t>(cfg_.key)) == 0;
+  const int64_t now_ms = esp_timer_get_time() / 1000;
+  if (down && !key_down_) {
+    key_down_ = true;
+    key_held_ = false;
+    key_since_ms_ = now_ms;
+    return false;
+  }
+  if (down && !key_held_ && now_ms - key_since_ms_ >= kKeyHoldMs) {
+    key_held_ = true;
+    ESP_LOGI("hg.power", "power key held: power off");
+    power_off();
+    return true;  // still running on USB: the screen goes dark as a sign
+  }
+  if (!down && key_down_) {
+    key_down_ = false;
+    return !key_held_;
+  }
+  return false;
 }
 
 bool LatchPower::power_off() {

@@ -394,6 +394,17 @@ BoardConfig make() {
   b.latch_power = {true, 1, 2, 3};
   // No USB-status input: report external power from CHG_STAT or a USB host.
   b.latch_power.usb_external_power = true;
+  // PWR also reads low on GPIO5 while pressed (Waveshare's factory demo powers
+  // off when it is held).
+  b.latch_power.key = 5;
+  // The Touch-LCD-1.54 (SKUs 33868/33869) adds a CST816 on the same I2C bus,
+  // reset on GPIO47 (Waveshare's factory demo). On the non-touch SKUs nothing
+  // answers at 0x15 and the touchscreen is reported absent.
+  b.touch.enabled = true;
+  b.touch.controller = TouchController::Cst816;
+  b.touch.addr = 0x15;
+  b.touch.rst = 47;
+  b.touch.width = b.touch.height = 240;
   b.buttons = {0, 4, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "PLUS";
