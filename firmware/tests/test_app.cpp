@@ -109,13 +109,19 @@ struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Stor
   bool mic_on = false;
   bool start(uint32_t) override { return mic_on = true; }
   void stop() override { mic_on = false; }
+  float mic_loopback_gain_value = 1.0f;
+  float loopback_gain() const override { return mic_loopback_gain_value; }
 
   // Speaker
   bool spk_open = false;
   bool spk_draining = false;  // ended, but the last audio is still playing
   size_t spk_samples = 0;
+  int16_t spk_first_sample = 0;
   bool begin(uint32_t) override { return spk_open = true; }
-  void write(const int16_t*, size_t n) override { spk_samples += n; }
+  void write(const int16_t* samples, size_t n) override {
+    if (n && spk_samples == 0) spk_first_sample = samples[0];
+    spk_samples += n;
+  }
   void end() override { spk_open = false; }
   void abort() override { spk_open = false; }
   bool busy() const override { return spk_open || spk_draining; }
@@ -1204,6 +1210,33 @@ TEST("settings: hardware checks are local and prompts release the microphone") {
   CHECK(!r.app.open_settings());
 }
 
+TEST("settings: P4 microphone loopback plays locally without sending captured audio") {
+  auto p = Rig::profile("ws://hermes.local:8765/gadget");
+  p.mic_loopback_check = true;
+  Rig r(p);
+  r.fake.mic_loopback_gain_value = 10.0f;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 3; ++i) r.app.console("cancel");
+  CHECK_EQ(r.app.model().detail, std::string("Microphone check"));
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK(r.fake.mic_on);
+  int16_t samples[320];
+  for (int block = 0; block < 150; ++block) {
+    const int16_t value = block < 50 ? 1000 : 3000;
+    for (auto& sample : samples) sample = value;
+    r.app.on_mic_samples(samples, 320);
+  }
+  CHECK(!r.fake.mic_on);
+  CHECK_EQ(r.fake.spk_samples, size_t(16000));
+  CHECK_EQ(r.fake.spk_first_sample, int16_t(12000));
+  CHECK(r.fake.sent_binary.empty());
+  CHECK(r.fake.last("audio.start") == nullptr);
+  CHECK(r.app.model().body.find("Playing the loudest second") != std::string::npos);
+  r.advance(20);
+  CHECK(r.app.model().body.find("Did you hear the recording?") != std::string::npos);
+}
 TEST("settings: title hold and menu swipe work without starting a recording") {
   Rig r(Rig::touch_profile());
   r.bring_online(true);
@@ -2064,6 +2097,37 @@ TEST("battery estimate: raw status and gateway telemetry remain unestimated, inc
   CHECK(state && (*state)["sensors"]["power_available"].as_int() == 0);
   CHECK(state && (*state)["sensors"]["battery_mv"].is_null());
   CHECK(state && (*state)["sensors"]["battery_percent"].is_null());
+}
+
+TEST("settings: raw STC8 register list stays local and is not serialized") {
+  EstimatePower battery;
+  auto status = *battery.status;
+  status.battery_present = true;
+  status.battery_mv = 4100;
+  status.battery_percent = 84;
+  status.charging = true;
+  status.battery_adc_mv = 2945;
+  status.battery_state = hg::BatteryChargeState::FullyCharged;
+  status.battery_led_state = hg::BatteryLedState::FullyCharged;
+  const std::array<uint8_t, 12> registers = {0x12, 0x34, 0x56, 0x78, 0x01, 0x23, 0x45, 0x67, 0x54, 0x01, 0x02, 0xAB};
+  status.battery_registers = registers;
+  battery.status = status;
+  Rig r;
+  r.hal.power = &battery;
+  r.bring_online(true);
+  r.advance(5000);
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 20 && r.app.model().detail != "Battery and power"; ++i) r.app.console("cancel");
+  CHECK_EQ(r.app.model().detail, std::string("Battery and power"));
+  CHECK(r.app.model().body.find("STC8 raw registers (local only)") != std::string::npos);
+  CHECK(r.app.model().body.find("0x00 adc_voltage[0] = 0x12") != std::string::npos);
+  CHECK(r.app.model().body.find("0x0B padding = 0xAB") != std::string::npos);
+  Value gateway_status;
+  CHECK(hg::json::parse(r.app.status_json(), gateway_status));
+  CHECK(gateway_status["power"]["battery_registers"].is_null());
+  const Value* state = r.fake.last("state");
+  CHECK(state != nullptr);
+  if (state) CHECK((*state)["sensors"]["battery_registers"].is_null());
 }
 
 TEST("battery indicator: off by default, follows readings once chosen, and each select picks the next style") {

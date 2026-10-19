@@ -1,0 +1,6 @@
+{
+  "title": "Elecrow CrowPanel Advanced 10.1-inch ESP32-P4",
+  "summary": "1024x600 DSI panel, GT911 touch, PDM mic, I2S speaker output, Wi-Fi via ESP32-C6. Display/touch and speaker playback verified; mic works for submissions. Battery/charging validation partial. Experimental.",
+  "docs": "docs/hardware.md#elecrow-crowpanel-advanced-101-inch-esp32-p4",
+  "ready_made": true
+}

@@ -26,6 +26,12 @@ Hardware ports remain experimental until the [verification table](hardware-valid
 | [Elecrow CrowPanel 5.0-inch HMI](hardware.md#elecrow-crowpanel-50-inch-hmi) | Touch screen; send text through the USB console | No onboard microphone or speaker |
 | [ESP32-S3 breadboard build](hardware.md#esp32-s3-breadboard) | Hold the wired TALK button | Wire the microphone and optional speaker |
 
+## ESP32-P4 boards
+
+| Board | Controls | Audio |
+|---|---|---|
+| [Elecrow CrowPanel Advanced 10.1-inch ESP32-P4](hardware.md#elecrow-crowpanel-advanced-101-inch-esp32-p4) | Hold the touch screen to talk; BOOT is configured as TALK | Onboard PDM microphone and I²S speaker output; STC8 battery/charger reporting |
+
 Check the exact model and connections in [Hardware and wiring](hardware.md), then follow [Set up a board](setup-board.md). The browser installer lists profiles included in the latest published release. Newly merged profiles may need a [source build](development.md) until the next release.
 
 Voice needs [speech recognition and text-to-speech configured in Hermes](connect-hermes.md#4-enable-speech). Boards without onboard audio can display replies and accept text through the USB console.

@@ -97,6 +97,9 @@ menu "Hermes Gadget"
             bool "Elecrow CrowPanel 2.1-inch HMI (480x480 RGB, rotary, touch)"
         config HG_BOARD_CROWPANEL_50
             bool "Elecrow CrowPanel 5.0-inch HMI (800x480 RGB ILI6122, GT911 touch)"
+        config HG_BOARD_CROWPANEL_P4_101
+            bool "Elecrow CrowPanel Advanced 10.1-inch ESP32-P4 (1024x600 DSI, GT911)"
+            depends on IDF_TARGET_ESP32P4
         config HG_BOARD_CUSTOM
             bool "Custom pins (configure below)"
     endchoice

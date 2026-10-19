@@ -194,7 +194,8 @@ void report(hg::json::Value& r) {
       .set("microphone", g_parts.mic)
       .set("speaker", g_parts.speaker)
       .set("touch", g_parts.touch)
-      .set("key", g_parts.key);
+      .set("key", g_parts.key)
+      .set("display_flushes", g_parts.flush_counter ? g_parts.flush_counter->load() : g_parts.display_flushes);
   r.set("build", build)
       .set("uptime_s", static_cast<long long>(esp_timer_get_time() / 1000000))
       .set("reset_reason", reset_reason())

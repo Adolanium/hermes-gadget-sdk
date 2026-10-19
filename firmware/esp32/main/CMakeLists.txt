@@ -4,12 +4,17 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
     configure_file(wifi_setup_page.hpp.in wifi_setup_page.hpp @ONLY)
 endif()
 
+set(HG_P4_SOURCES)
+if(IDF_TARGET STREQUAL "esp32p4")
+    list(APPEND HG_P4_SOURCES "port_dsi.cpp" "port_pdm_mic.cpp")
+endif()
 idf_component_register(
     SRCS
         "main.cpp"
         "board.cpp"
         "port_amoled.cpp"
         "port_audio.cpp"
+        ${HG_P4_SOURCES}
         "port_ble.cpp"
         "port_buttons.cpp"
         "port_codec.cpp"
@@ -26,6 +31,7 @@ idf_component_register(
         "port_latch_power.cpp"
         "../../drivers/axp2101.cpp"
         "../../drivers/cores3.cpp"
+        "../../drivers/stc8_battery.cpp"
         "port_storage.cpp"
         "port_system.cpp"
         "port_touch.cpp"

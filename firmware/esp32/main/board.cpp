@@ -40,6 +40,8 @@ namespace {
 #define HG_BOARD_NAME "crowpanel-2.1"
 #elif CONFIG_HG_BOARD_CROWPANEL_50
 #define HG_BOARD_NAME "crowpanel-5.0"
+#elif CONFIG_HG_BOARD_CROWPANEL_P4_101
+#define HG_BOARD_NAME "crowpanel-advance-p4-10.1"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154
 #define HG_BOARD_NAME "waveshare-esp32s3-lcd-154"
 #else
@@ -749,6 +751,54 @@ BoardConfig make() {
   b.buttons = {-1, -1, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "Screen";
+  return b;
+}
+#elif CONFIG_HG_BOARD_CROWPANEL_P4_101
+// Elecrow CrowPanel Advanced 10.1-inch ESP32-P4 V1.1.
+// DSI/touch/audio pins follow Elecrow V1.1 source and schematic; panel is 1024x600.
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.mic = {true, 24, -1, 26, true};  // PDM clock/data on I2S0
+  b.speaker.enabled = true;
+  b.speaker.bclk = 22;
+  b.speaker.ws = 21;
+  b.speaker.dout = 23;
+  b.speaker.pa = 30;
+  b.speaker.pa_active_low = true;
+  b.speaker.stereo = true;
+  b.speaker.left_align = true;
+  b.speaker.i2s_port = 1;
+  b.lcd.enabled = true;
+  b.lcd.width = 1024;
+  b.lcd.height = 600;
+  b.lcd.swap_xy = false;
+  b.lcd.mirror_x = false;
+  b.lcd.mirror_y = false;
+  b.lcd.invert = false;
+  b.lcd.backlight = 31;
+  b.lcd.rst = -1;  // not bonded on V1.1
+  b.lcd.bus.type = LcdBus::Type::Dsi;
+  b.lcd.dsi.lanes = 2;
+  b.lcd.dsi.lane_bit_rate_mbps = 900;
+  b.lcd.dsi.dpi_clock_mhz = 51;
+  b.lcd.dsi.ldo_channel = 3;
+  b.lcd.dsi.ldo_voltage_mv = 2500;
+  b.lcd.dsi.use_dma2d = true;
+  b.i2c = {45, 46, 400000};
+  b.stc8_battery = true;
+  b.default_volume = 35;
+  b.mic_loopback_check = true;
+  b.touch.enabled = true;
+  b.touch.controller = TouchController::Gt911;
+  b.touch.addr = 0x14;
+  b.touch.width = 1024;
+  b.touch.height = 600;
+  b.touch.rst = 40;
+  b.touch.int_gpio = 42;
+  b.buttons = {35, -1, -1, -1};
+  b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
   return b;
 }
 #elif CONFIG_HG_BOARD_CUSTOM

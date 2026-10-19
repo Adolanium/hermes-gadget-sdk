@@ -1,6 +1,16 @@
 dependencies:
   idf: ">=5.3"
   espressif/esp_websocket_client: "^1.2.3"
+  # ESP32-P4 CrowPanel: Wi-Fi via the ESP32-C6 coprocessor over SDIO.
+  # Pinned to the versions validated on the board (see boards/crowpanel-p4-101).
+  espressif/esp_hosted:
+    version: "2.7.0"
+    rules:
+      - if: target in [esp32p4]
+  espressif/esp_wifi_remote:
+    version: "0.16.1"
+    rules:
+      - if: target in [esp32p4]
   # ES8311 / ES7210 / AW88298 codecs on boards that use them
   espressif/esp_codec_dev: "~1.5"
   espressif/esp_lcd_st77916: "~2.0.2"
@@ -11,3 +21,9 @@ dependencies:
   espressif/esp_lcd_touch_ft5x06: "^1"
   espressif/esp_lcd_st7701: "1.1.0"
   espressif/esp_lcd_panel_io_additions: "1.0.1"
+  # EK79007 MIPI-DSI panel bridge (CrowPanel Advanced P4). P4-only: the
+  # component only builds for targets with a MIPI-DSI host.
+  espressif/esp_lcd_ek79007:
+    version: "^1.0.4"
+    rules:
+      - if: target in [esp32p4]

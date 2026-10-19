@@ -41,6 +41,8 @@ struct DeviceProfile {
   uint32_t mic_rate = 16000;
   float vad_min_rms = 500.0f;  // tap mode: the quietest block that counts as speech (a quiet mic wants less)
   uint32_t speaker_rate = 16000;
+  uint8_t default_volume = 70;  // board-specific initial volume; saved setting takes precedence
+  bool mic_loopback_check = false;  // local three-second capture/playback test when selected
   bool has_cancel_button = true;
   bool has_scroll_buttons = false;
   std::string talk_label = "TALK";
@@ -220,6 +222,7 @@ class App {
   void settings_tick();
   void settings_model();
   void stop_hardware_check();
+  void play_mic_loopback();
   void power_tick();
   json::Value power_value() const;
   json::Value status_value() const;
@@ -285,7 +288,7 @@ class App {
   uint8_t brightness_ = 100;
   enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, Microphone, Speaker, Display, Inputs, Info,
                               Power, IdleTimer, PowerOff, WifiSetup, Phone, Back };
-  enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };
+  enum class HardwareCheck : uint8_t { None, Microphone, MicrophonePlayback, Speaker, Display, Inputs };
   Menu menu_ = Menu::Closed;
   HardwareCheck hardware_check_ = HardwareCheck::None;
   std::string check_result_;
@@ -365,10 +368,27 @@ class App {
   int scroll_ = -1;
   uint32_t page_at_ = 0;  // when long text turns its next page
   uint8_t level_ = 0;
+  double mic_meter_energy_ = 0.0;
+  size_t mic_meter_samples_ = 0;
+  uint32_t mic_meter_update_at_ = 0;
+  bool mic_meter_smoothed_ = false;
+  std::vector<int16_t> mic_loopback_buf_;
   Vad vad_;
   std::vector<uint8_t> frame_buf_;
   std::vector<int16_t> pcm_buf_;
   int in_stream_ = -1;
+  struct AudioRxStats {
+    uint32_t rate = 0;
+    uint32_t frames = 0;
+    uint32_t bytes = 0;
+    uint32_t sequence_gaps = 0;
+    uint32_t odd_payloads = 0;
+    uint16_t next_sequence = 0;
+    bool has_sequence = false;
+    uint32_t peak = 0;
+    double sum_squares = 0.0;
+    size_t samples = 0;
+  } audio_rx_;
   uint32_t id_counter_ = 0;
 
   // overlays
