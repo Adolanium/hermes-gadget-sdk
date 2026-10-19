@@ -15,7 +15,7 @@ bool App::battery_is_estimated() const {
 std::optional<uint8_t> App::display_battery_percent() const {
   if (!power_status_ || power_status_->battery_present == false) return std::nullopt;
   if (power_status_->battery_percent) return power_status_->battery_percent;
-  if (battery_is_estimated()) return estimate_liion_percent(*power_status_->battery_mv);
+  if (battery_is_estimated()) return estimate_liion_curve_percent(*power_status_->battery_mv);
   return std::nullopt;
 }
 
