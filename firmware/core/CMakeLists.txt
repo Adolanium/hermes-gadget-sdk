@@ -3,10 +3,12 @@ set(HG_CORE_SOURCES
     src/app.cpp
     src/app_settings.cpp
     src/app_power.cpp
+    src/app_perf.cpp
     src/app_phone.cpp
     src/canvas.cpp
     src/crypto.cpp
     src/font5x7.cpp
+    src/frame_stats.cpp
     src/json.cpp
     src/mascot_data.cpp
     src/protocol.cpp

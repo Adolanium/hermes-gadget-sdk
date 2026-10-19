@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "hg/crypto.hpp"
+#include "hg/frame_stats.hpp"
 #include "hg/hal.hpp"
 #include "hg/json.hpp"
 #include "hg/ui.hpp"
@@ -50,6 +51,11 @@ struct DeviceProfile {
   // Board-specific settings the console accepts besides the core ones. Changes
   // reach the port through App::on_setting_changed.
   std::vector<std::string> extra_settings;
+  // Frame timing (hg::FrameStats, the console's `perf` command): on from boot,
+  // the frame budget, and how often a summary goes to the log (0: never).
+  bool frame_stats = false;
+  uint32_t frame_budget_us = FrameStats::kDefaultBudgetUs;
+  uint32_t frame_log_ms = 10000;
 };
 
 // A device-side capability the agent may invoke. `params` is a JSON-schema
@@ -218,6 +224,13 @@ class App {
   json::Value power_value() const;
   json::Value status_value() const;
   std::string diag_report();
+  // frame timing (app_perf.cpp)
+  std::string perf_command(std::string_view args);
+  void set_frame_stats(bool on);
+  void perf_tick();
+  void bench_step();
+  // Every render of the app's own model goes through here; a bench holds the screen.
+  void render(const UiModel& m);
   std::string setting(std::string_view key, std::string_view fallback = {}) const;
   void connect_now();
   void schedule_reconnect();
@@ -406,6 +419,16 @@ class App {
   crypto::Sha256 ota_hash_;
 
   uint32_t frame_at_ = 0;
+
+  // frame timing: the running statistics while `perf` is on, and the bench
+  std::unique_ptr<FrameStats> frame_stats_;
+  uint32_t frame_log_at_ = 0, frame_log_frames_ = 0;
+  enum class Bench : uint8_t { None, Scroll, Mascot, Redraw };
+  Bench bench_ = Bench::None, bench_last_ = Bench::None;  // running; the last one to run of `perf bench all`
+  int bench_frame_ = 0;
+  FrameStats bench_stats_;
+  UiModel bench_model_;
+  json::Value bench_results_ = json::Value::object();
 };
 
 }  // namespace hg

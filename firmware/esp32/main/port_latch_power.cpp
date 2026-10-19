@@ -1,6 +1,7 @@
 #include "port.hpp"
 
 #include "driver/gpio.h"
+#include "driver/usb_serial_jtag.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_log.h"
 
@@ -62,10 +63,8 @@ bool LatchPower::begin(const LatchPowerConfig& cfg) {
 std::optional<hg::PowerStatus> LatchPower::read() {
   hg::PowerStatus status;
   // Not every board brings the charging signal out to a pin.
-  if (cfg_.charging >= 0) {
-    const bool high = gpio_get_level(static_cast<gpio_num_t>(cfg_.charging)) != 0;
-    status.charging = high == cfg_.charging_active_high;
-  }
+  if (cfg_.charging >= 0) status.charging = charging_signal();
+  status.external_power = external_power();
   if (!calibration_) return status;
   int total = 0;
   for (int i = 0; i < 8; ++i) {
@@ -82,6 +81,15 @@ std::optional<hg::PowerStatus> LatchPower::read() {
   const int battery_mv = mv * ratio;
   if (mv >= 0 && battery_mv <= cfg_.max_battery_mv) status.battery_mv = static_cast<uint16_t>(battery_mv);
   return status;
+}
+
+bool LatchPower::charging_signal() const {
+  return gpio_get_level(static_cast<gpio_num_t>(cfg_.charging)) == (cfg_.charging_active_high ? 1 : 0);
+}
+
+std::optional<bool> LatchPower::external_power() {
+  if (!cfg_.usb_external_power) return std::nullopt;
+  return (cfg_.charging >= 0 && charging_signal()) || usb_serial_jtag_is_connected();
 }
 
 bool LatchPower::power_off() {

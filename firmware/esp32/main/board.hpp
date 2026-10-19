@@ -211,8 +211,12 @@ struct LatchPowerConfig {
   uint16_t max_battery_mv = 4998;
   bool power_off_supported = true;
   // The charging signal's level while charging. Most chargers pull it low; the
-  // Spotpear 1.28" box drives it high.
+  // Spotpear muma and 1.28" box drive it high.
   bool charging_active_high = false;
+  // Report external power from the charging signal or a USB host on the S3's own
+  // USB port, so battery-only savings (Wi-Fi modem sleep) can apply. A charger
+  // without data that has finished charging then counts as battery.
+  bool usb_external_power = false;
 };
 
 struct BoardConfig {

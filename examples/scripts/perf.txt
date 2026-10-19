@@ -1,0 +1,10 @@
+# Frame timing baseline: the fixed bench workloads (docs/development.md#measure-frame-timing).
+# Needs no Hermes: the bench draws its own screens.
+#   hermes-gadget sim --headless --script examples/scripts/perf.txt
+#   hermes-gadget sim --headless --board <profile> --script examples/scripts/perf.txt
+# On a board, run the same `perf` commands from `hermes-gadget console --port <port>`.
+wait boot|offline|connecting|pairing|ready 10
+sleep 1
+console perf bench all
+sleep 8
+console perf

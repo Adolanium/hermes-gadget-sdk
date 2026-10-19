@@ -3,7 +3,8 @@
 // The app fills a UiModel; Ui renders it into the framebuffer in horizontal
 // bands and flushes only the bands whose inputs changed. The renderer is
 // deterministic (no clocks, no randomness): the same model always produces the
-// same pixels, which is what the simulator's screenshot tests rely on.
+// same pixels, which is what the simulator's screenshot tests rely on. Frame
+// timing (measure) reads a clock around the drawing but never changes it.
 #pragma once
 
 #include <cstdint>
@@ -11,6 +12,7 @@
 #include <vector>
 
 #include "hg/canvas.hpp"
+#include "hg/frame_stats.hpp"
 #include "hg/hal.hpp"
 #include "hg/mascot.hpp"
 #include "hg/qr.hpp"
@@ -101,6 +103,11 @@ class Ui {
   void render(const UiModel& model);
   // Forces a full redraw on the next render (after something else drew).
   void invalidate();
+  // Frame timing: while `stats` is set, every render is timed with `clock` and
+  // recorded there. Null (the default) turns it off and leaves the clock unread.
+  void measure(FrameStats* stats, System* clock);
+  // An input arrived: the next render that sends anything records its latency.
+  void mark_input();
   const UiLayout& layout() const { return layout_; }
   // The area the UI draws in: the whole panel, or on a round panel the square
   // inscribed in it. Layout coordinates are relative to this area.
@@ -118,6 +125,9 @@ class Ui {
   }
 
  private:
+  void draw_frame(const UiModel& m);
+  // Sends panel rows [y0, y1) to the display, timed while measuring.
+  void push(int y0, int y1);
   void draw_top(Canvas& c, const UiModel& m);
   void draw_header(Canvas& c, const UiModel& m);
   void draw_content(Canvas& c, const UiModel& m);
@@ -150,6 +160,13 @@ class Ui {
   uint32_t battery_hash_ = 0;
   bool hero_valid_ = false;
   bool valid_ = false;
+  // frame timing (measure)
+  FrameStats* stats_ = nullptr;
+  System* clock_ = nullptr;
+  uint64_t flush_us_ = 0;
+  uint32_t bands_ = 0;
+  uint64_t input_at_ = 0;
+  bool input_pending_ = false;
 };
 
 }  // namespace hg

@@ -34,6 +34,29 @@ menu "Hermes Gadget"
             address first (CONFIG_LWIP_DHCP_RESTORE_LAST_IP), which skips the
             discovery round. docs/hardware.md#wi-fi-reconnect
 
+    config HG_FRAME_STATS
+        bool "Time every frame from boot"
+        default n
+        help
+            Measure how long each screen update takes to draw and to send to
+            the panel, and how long a button or touch waits for it, from boot.
+            Without this option the timing stays off until the console's
+            `perf on`, and costs one check per screen update.
+            docs/development.md#measure-frame-timing
+
+    config HG_FRAME_BUDGET_US
+        int "Frame budget (microseconds)"
+        default 16667
+        range 1 10000000
+        help
+            Frames that take longer count as missed. 16667 is one 60 Hz refresh.
+            The console's `perf budget` changes it until the next restart.
+
+    config HG_FRAME_LOG_S
+        int "Seconds between frame timing summaries in the log (0: none)"
+        default 10
+        range 0 3600
+
     choice HG_BOARD
         prompt "Board"
         default HG_BOARD_ESP32S3_BREADBOARD

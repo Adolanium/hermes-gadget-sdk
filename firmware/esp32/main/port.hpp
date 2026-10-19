@@ -117,6 +117,7 @@ void release(Event& ev);
 class EspSystem final : public hg::System {
  public:
   uint32_t now_ms() override;
+  uint64_t now_us() override;
   void random_bytes(uint8_t* out, size_t len) override;
   void log(hg::LogLevel level, std::string_view message) override;
   // Boards with BoardConfig::light_sleep: keeps the chip out of light sleep
@@ -362,7 +363,11 @@ i2c_master_bus_handle_t touch_bus(const I2cBusConfig& cfg);
 // run at one fixed rate (they share the bit clock).
 class CodecAudio {
  public:
-  static constexpr uint32_t kRate = 16000;
+  // 24000: the known-good xiaozhi aipi-lite pipeline is validated at 24 kHz on
+  // this silicon (coeff {3072000,24000}); at 16000 playback ran ~2.3x slow.
+  // Every codec board shares it; the ES8311, ES7210 and AW88298 drivers all
+  // support 24 kHz as CodecAudio::begin() configures them.
+  static constexpr uint32_t kRate = 24000;
   bool begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus);
   esp_codec_dev_handle_t out() const { return out_; }
   esp_codec_dev_handle_t in() const { return in_; }
@@ -430,6 +435,7 @@ class CodecSpeaker final : public hg::AudioOut {
   std::atomic<bool> open_{false};
   std::atomic<bool> draining_{false};
   std::atomic<bool> flush_{false};
+  std::atomic<uint32_t> drop_bytes_{0};  // bytes dropped on overflow, reported at stream end
 };
 
 // Polls a touchscreen, a key mirrored on an I/O expander and a rotary encoder
@@ -511,8 +517,10 @@ class LatchPower final : public hg::Power {
   std::optional<hg::PowerStatus> read() override;
   bool can_power_off() const override { return cfg_.power_off_supported; }
   bool power_off() override;
+  std::optional<bool> external_power() override;
 
  private:
+  bool charging_signal() const;
   LatchPowerConfig cfg_{};
   adc_oneshot_unit_handle_t adc_ = nullptr;
   adc_cali_handle_t calibration_ = nullptr;

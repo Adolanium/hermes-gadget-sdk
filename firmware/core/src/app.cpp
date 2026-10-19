@@ -198,6 +198,7 @@ void App::begin() {
   }
 
   if (hal_.display) ui_ = std::make_unique<Ui>(*hal_.display);
+  if (profile_.frame_stats) set_frame_stats(true);
   phase_ = Phase::Boot;
   phase_since_ = now();
   boot_until_ = now() + kBootScreenMs;
@@ -792,6 +793,7 @@ void App::h_error(const json::Value& m) {
 // Input
 
 void App::on_button(Button button, bool pressed) {
+  if (ui_ && bench_ == Bench::None) ui_->mark_input();
   if (!wifi_setup_text_.empty()) {
     if (button == Button::Cancel && !pressed) close_wifi_setup();
     return;
@@ -1436,6 +1438,7 @@ void App::tick() {
 
   flush_sensors();
   flush_display_state();
+  perf_tick();
 
   if (t - frame_at_ >= kFrameMs) {
     frame_at_ = t;
@@ -1490,7 +1493,7 @@ void App::update_model() {
     m.qr = wifi_setup_qr_.ok() ? &wifi_setup_qr_ : nullptr;
     m.scroll = 0;
     m.hint = profile_.touch_screen ? "Swipe down to close" : profile_.cancel_label + " to close";
-    if (ui_) ui_->render(m);
+    render(m);
     return;
   }
   if (phone_pairing_) {
@@ -1507,12 +1510,12 @@ void App::update_model() {
       m.body = "Only a phone in front of you should ask for it.";
     }
     m.hint = profile_.touch_screen ? "Swipe down to cancel" : profile_.cancel_label + " to cancel";
-    if (ui_) ui_->render(m);
+    render(m);
     return;
   }
   if (settings_open()) {
     settings_model();
-    if (ui_ && !display_sleeping_) ui_->render(m);
+    if (!display_sleeping_) render(m);
     return;
   }
 
@@ -1659,7 +1662,7 @@ void App::update_model() {
       *power_status_->battery_percent <= 10 && power_status_->external_power == false)
     m.detail = "Low battery: connect USB";
   if (!hint_flash_.empty()) m.hint = hint_flash_;
-  if (ui_ && !display_sleeping_) ui_->render(m);
+  if (!display_sleeping_) render(m);
 }
 
 // --------------------------------------------------------------------------
@@ -1712,6 +1715,7 @@ std::string App::diag_report() {
   if (online_since_) conn.set("online_s", (now() - online_since_) / 1000);
   r.set("connection", conn);
   r.set("app", status_value());
+  if (frame_stats_) r.set("frames", frame_stats_->to_json());
   if (on_diag) on_diag(r);
   return "@diag " + r.dump();
 }
@@ -1739,7 +1743,7 @@ std::string App::console(std::string_view raw) {
     for (const auto& k : profile_.extra_settings) keys += " " + k;
     return "@help commands: status | diag [log] | get <key> | set <key> <value> | say <text> | talk | release | "
            "cancel | new-session | settings [close] | wifi-setup [close] | wifi [list | add <ssid> [password] | join <ssid> | "
-           "forget <ssid>] | phone [pair [close] | forget] | yes | no | reconnect | forget-key | factory-reset   keys:" + keys;
+           "forget <ssid>] | phone [pair [close] | forget] | perf [on | off | reset | budget <us> | bench [scroll | mascot | redraw | all]] | yes | no | reconnect | forget-key | factory-reset   keys:" + keys;
   }
   if (cmd == "status") return "@status " + status_json();
   if (cmd == "phone") {
@@ -1764,6 +1768,7 @@ std::string App::console(std::string_view raw) {
     if (rest == "close") { close_settings(); return "@ok settings closed"; }
     return open_settings() ? "@ok settings" : "@error settings unavailable during a prompt or update";
   }
+  if (cmd == "perf") return perf_command(rest);
   if (cmd == "diag" && rest.empty()) return diag_report();
   if (cmd == "diag" && rest == "log") {
     if (!recent_log) return "@error this device keeps no log";

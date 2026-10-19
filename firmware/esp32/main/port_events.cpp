@@ -15,7 +15,10 @@ QueueHandle_t queue = nullptr;
 
 }  // namespace
 
-void init() { queue = xQueueCreate(48, sizeof(Event)); }
+// 96 deep: TTS bursts land ~13 ms apart at 24 kHz; 48 overflowed while the
+// main task was busy draining into the speaker ring, dropping WsBinary frames
+// (audible gaps). Still cheap: an Event is a few words, and payloads live on the heap.
+void init() { queue = xQueueCreate(96, sizeof(Event)); }
 
 bool post(EventType type, const void* data, size_t len, uint32_t generation, ConsoleRequest* console) {
   Event ev{type, generation, nullptr, len, console};

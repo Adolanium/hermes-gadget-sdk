@@ -242,6 +242,8 @@ extern "C" void app_main(void) {
   hal.transport = &g_transport;
   hal.storage = &g_storage;
   if (latch_power) hal.power = &g_latch_power;
+  if (latch_power && board.latch_power.usb_external_power)
+    g_wifi.on_battery = [] { return g_latch_power.external_power() == std::optional<bool>(false); };
   if (g_updater.capacity()) hal.updater = &g_updater;
   i2c_master_bus_handle_t i2c_bus = hgp::i2c::bus(board.i2c);
   const bool peripherals_ready = (!board.cores3 || g_cores3.begin(i2c_bus)) &&
@@ -301,6 +303,11 @@ extern "C" void app_main(void) {
   hg::DeviceProfile profile;
   profile.board = board.name;
   profile.firmware = version;
+#if CONFIG_HG_FRAME_STATS
+  profile.frame_stats = true;
+#endif
+  profile.frame_budget_us = CONFIG_HG_FRAME_BUDGET_US;
+  profile.frame_log_ms = CONFIG_HG_FRAME_LOG_S * 1000u;
   profile.default_name = CONFIG_HG_DEFAULT_NAME;
   profile.default_server_url = CONFIG_HG_DEFAULT_SERVER_URL;
   profile.default_access_token = CONFIG_HG_DEFAULT_ACCESS_TOKEN;

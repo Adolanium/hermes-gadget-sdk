@@ -1,6 +1,7 @@
 #include "hg/ui.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <vector>
 
@@ -195,17 +196,56 @@ Canvas Ui::canvas() {
                 panel_.width);
 }
 
-void Ui::flush(int y0, int y1) {
-  display_.flush(static_cast<uint16_t>(y0 + oy_), static_cast<uint16_t>(y1 + oy_));
+void Ui::flush(int y0, int y1) { push(y0 + oy_, y1 + oy_); }
+
+void Ui::push(int y0, int y1) {
+  if (!stats_) {
+    display_.flush(static_cast<uint16_t>(y0), static_cast<uint16_t>(y1));
+    return;
+  }
+  const uint64_t t0 = clock_->now_us();
+  display_.flush(static_cast<uint16_t>(y0), static_cast<uint16_t>(y1));
+  flush_us_ += clock_->now_us() - t0;
+  ++bands_;
+}
+
+void Ui::measure(FrameStats* stats, System* clock) {
+  stats_ = clock ? stats : nullptr;
+  clock_ = clock;
+  input_pending_ = false;
+}
+
+void Ui::mark_input() {
+  if (!stats_ || input_pending_) return;  // the first input waiting is the one timed
+  input_at_ = clock_->now_us();
+  input_pending_ = true;
 }
 
 void Ui::render(const UiModel& m) {
+  if (!stats_) {
+    draw_frame(m);
+    return;
+  }
+  flush_us_ = 0;
+  bands_ = 0;
+  const uint64_t t0 = clock_->now_us();
+  draw_frame(m);
+  const uint64_t t1 = clock_->now_us();
+  auto us = [](uint64_t d) { return static_cast<uint32_t>(std::min<uint64_t>(d, UINT32_MAX)); };
+  stats_->add_frame(us(t1 - t0), us(flush_us_), bands_);
+  if (input_pending_ && bands_) {
+    stats_->add_input(us(t1 - input_at_));
+    input_pending_ = false;
+  }
+}
+
+void Ui::draw_frame(const UiModel& m) {
   const int h = info_.height;
   if (!valid_ && (ox_ || oy_)) {
     // Round panel: everything outside the UI area stays the background colour.
     Canvas panel(display_.framebuffer(), panel_.width, panel_.height, panel_.swap_bytes);
     panel.fill_rect(0, 0, panel_.width, panel_.height, bg_);
-    display_.flush(0, panel_.height);
+    push(0, panel_.height);
   }
   if (panel_.round) draw_round_battery(m);
   Canvas c = canvas();
@@ -350,7 +390,7 @@ void Ui::draw_round_battery(const UiModel& m) {
   // Clear the band the strip can occupy at any level, so a shorter or hidden strip leaves nothing behind.
   panel.fill_rect(0, 0, panel_.width, oy_, bg_);
   if (m.battery >= 0) draw_battery(panel, m, (panel_.width - battery_width(m)) / 2, (y0 + y1) / 2);
-  display_.flush(0, static_cast<uint16_t>(oy_));
+  push(0, oy_);
 }
 
 int Ui::battery_width(const UiModel& m) const {

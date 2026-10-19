@@ -93,6 +93,43 @@ Almost everything in `firmware/core` can be developed with the simulator and the
 3. Run `hermes-gadget sim`.
 4. Flash hardware only for driver work in `firmware/esp32/main/port_*.cpp`.
 
+### Measure frame timing
+
+Before and after a renderer change, measure the same workload. The core times each screen update (`Ui::render`) with `System::now_us`. That is `esp_timer` on the ESP32 and the host's steady clock in the simulator. It records:
+
+| Measurement | What it covers |
+|---|---|
+| `render_us` | Drawing into the framebuffer: the whole update minus the flushes |
+| `flush_us` | Time inside `Display::flush`. On SPI panels this includes waiting for each band's DMA to finish |
+| `frame_us` | The whole update, drawing and flushing |
+| `bands` | Regions sent to the panel in one update |
+| `input_us` | From `App::on_button` to the end of the first update after it that sent anything. A touch gesture enters when it becomes a button (a hold after 120 ms). Controller polling and the event queue come before that and are not included |
+
+Each measurement keeps the last 256 updates (64 for `input_us`) and reports `min`, `avg`, `p50`, `p95` and `max`. `frames` counts updates that sent something since the last reset. `missed` counts the ones longer than the budget, 16667 µs (one 60 Hz refresh) by default. `idle` counts updates that had nothing to send; their timings are not recorded.
+
+Timing is off by default. While it is off, the renderer never reads the clock: one check per update is the only cost.
+
+Run the bench in the simulator. It needs no Hermes:
+
+```bash
+hermes-gadget build-sim
+hermes-gadget sim --headless --script examples/scripts/perf.txt
+```
+
+On a board, open `hermes-gadget console --port <port>` and run the same commands:
+
+| Command | Effect |
+|---|---|
+| `perf bench [scroll \| mascot \| redraw \| all]` | Draws a fixed workload, 120 updates each, one per app tick, with the device's own bars. `scroll` moves a 60-paragraph reply one line per update, `mascot` animates the talking mascot, and `redraw` repaints the whole screen every update. `all` runs the three in turn. The normal screen returns afterwards |
+| `perf` | `@perf` JSON: the live statistics while timing is on, and the last bench under `bench` |
+| `perf on` / `perf off` | Time the device's own screen updates |
+| `perf reset` | Clear the live statistics |
+| `perf budget <us>` | The budget for `missed`, until restart |
+
+The bench draws the same frames on every run, so compare its numbers between builds on the same board or computer. While timing is on, the log gets a summary line every 10 seconds when something was drawn, for example `perf: frames 120 (missed 0 > 16.7 ms, idle 4), ms p50/p95/max: render ...`. The `diag` report includes the live statistics under `frames`. On the ESP32, `CONFIG_HG_FRAME_STATS` turns timing on from boot, and `CONFIG_HG_FRAME_BUDGET_US` and `CONFIG_HG_FRAME_LOG_S` set the budget and the log interval (menuconfig: Hermes Gadget).
+
+Simulator numbers measure the core on your computer, not the board's CPU or panel. Label each result as simulator or hardware, and name the board and build when you report it.
+
 ### Build checks
 
 Two checks stop a firmware build that would run with settings nobody asked for. Both run in every PlatformIO build, locally and in CI:

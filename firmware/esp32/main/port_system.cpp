@@ -11,6 +11,8 @@ namespace hgp {
 
 uint32_t EspSystem::now_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
 
+uint64_t EspSystem::now_us() { return static_cast<uint64_t>(esp_timer_get_time()); }
+
 void EspSystem::random_bytes(uint8_t* out, size_t len) {
   // Hardware RNG; entropy is good once the radio is up, and the device key is
   // generated after Wi-Fi starts (see main.cpp).

@@ -1,6 +1,7 @@
 // Simulator HAL: forwards every driver call to host callbacks.
 #include "hgsim.h"
 
+#include <chrono>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -105,6 +106,13 @@ class SimHal final : public hg::Display,
 
   // System
   uint32_t now_ms() override { return host_.now_ms ? host_.now_ms(host_.user) : 0; }
+  // Frame timing measures the core's real work on this computer, whatever clock
+  // the host gives now_ms (a script may run it faster or slower than real time).
+  uint64_t now_us() override {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                     std::chrono::steady_clock::now().time_since_epoch())
+                                     .count());
+  }
   void random_bytes(uint8_t* out, size_t len) override {
     if (host_.random_bytes) host_.random_bytes(host_.user, out, len);
     else std::memset(out, 0, len);

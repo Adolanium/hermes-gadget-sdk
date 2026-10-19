@@ -98,6 +98,9 @@ class System {
  public:
   virtual ~System() = default;
   virtual uint32_t now_ms() = 0;
+  // A monotonic microsecond clock, read only while frame timing is on
+  // (hg::FrameStats). Override it where the port has a finer clock than now_ms.
+  virtual uint64_t now_us() { return static_cast<uint64_t>(now_ms()) * 1000; }
   virtual void random_bytes(uint8_t* out, size_t len) = 0;
   virtual void log(LogLevel level, std::string_view message) = 0;
   // Dozing: the screen is off, nothing is happening and the device runs on its
