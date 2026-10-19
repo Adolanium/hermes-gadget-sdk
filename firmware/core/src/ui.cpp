@@ -254,7 +254,7 @@ void Ui::draw_frame(const UiModel& m) {
   const int y_bottom = h - layout_.bottom_h;
 
   uint32_t hashes[4];
-  hashes[0] = Hash().add(m.title).val(m.link).val(panel_.round && m.screen == Screen::Settings).val(panel_.round && m.settings_hold)
+  hashes[0] = Hash().add(m.title).val(m.lang).val(m.link).val(panel_.round && m.screen == Screen::Settings).val(panel_.round && m.settings_hold)
                   .val(panel_.round ? int8_t(-1) : m.battery).val(!panel_.round && m.battery_charging)
                   .val(!panel_.round && m.battery_icon).val(!panel_.round && m.battery_text)
                   .val(!panel_.round && m.battery_low).get();
@@ -335,20 +335,22 @@ void Ui::draw_top(Canvas& c, const UiModel& m) {
   const int w = info_.width;
   c.fill_rect(0, 0, w, layout_.top_h, panel_.round ? bg_ : kBar);
   uint16_t dot = kRed;
-  const char* label = "OFFLINE";
+  i18n::Msg word = i18n::Msg::LinkOffline;
   switch (m.link) {
-    case Link::Offline: dot = kRed; label = "NO NET"; break;
-    case Link::Network: dot = kYellow; label = "NET"; break;
-    case Link::Connecting: dot = kYellow; label = "LINK"; break;
-    case Link::Online: dot = kGreen; label = "ONLINE"; break;
+    case Link::Offline: dot = kRed; word = i18n::Msg::LinkNoNet; break;
+    case Link::Network: dot = kYellow; word = i18n::Msg::LinkNet; break;
+    case Link::Connecting: dot = kYellow; word = i18n::Msg::LinkConnecting; break;
+    case Link::Online: dot = kGreen; word = i18n::Msg::LinkOnline; break;
   }
+  const char* label = i18n::text(m.lang, word);
   int ty = s;
   if (panel_.round) {
     // The settings hold target: a dim label under the link dot, with no bar
     // behind it. The label line (2r + 4s .. 2r + 13s) fits the band.
     int r = std::max(2, 3 * s / 2 + 1);
     if (m.settings_hold) {
-      const char* control = m.screen == Screen::Settings ? "BACK TO HERMES" : "SETTINGS";
+      const char* control =
+          i18n::text(m.lang, m.screen == Screen::Settings ? i18n::Msg::BackToHermesTarget : i18n::Msg::SettingsTarget);
       c.text((w - Canvas::text_width(control, s)) / 2, 2 * r + 4 * s, control, s, kDim);
     }
     c.fill_circle(w / 2, s + r, r, dot);

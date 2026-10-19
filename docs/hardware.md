@@ -797,7 +797,7 @@ gadget> status
 | `forget-key` | New device identity on next boot (re-enrollment and re-pairing) |
 | `factory-reset` | Erase the device key and all settings |
 
-The keys are `name`, `server`, `token`, `talk_mode` (`hold` or `tap`), `volume`, `brightness`, `screen_timeout` (0..3600 seconds, 0 disables it), `battery_display` (`icon`, `percentage`, `both` or `off`), `wifi_ssid` and `wifi_pass`. The [device settings menu](using-gadget.md#device-settings-and-hardware-checks) saves volume, brightness, talk mode, battery indicator and screen timeout without a console.
+The keys are `name`, `server`, `token`, `talk_mode` (`hold` or `tap`), `volume`, `brightness`, `screen_timeout` (0..3600 seconds, 0 disables it), `battery_display` (`icon`, `percentage`, `both` or `off`), `language` (`en` or `es`; see [Language](using-gadget.md#language)), `wifi_ssid` and `wifi_pass`. The [device settings menu](using-gadget.md#device-settings-and-hardware-checks) saves volume, brightness, talk mode, battery indicator, screen timeout and language without a console.
 
 In the `diag` report, `i2c` lists the addresses that answered, such as `0x18`. A probe can time out while another task uses the bus, so the scan tries each address up to three times. An address that times out on every try appears as `timeout at 0x19`, and the scan continues. Four such addresses in a row end the scan with `bus stuck at` the first of them, such as `bus stuck at 0x08`. That usually means a device or a short holds SDA or SCL low.
 

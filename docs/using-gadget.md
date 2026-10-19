@@ -68,8 +68,9 @@ Tap CANCEL to move to the next item, then tap TALK to change it. On a touchscree
 | Power off | Select twice to shut down a board with a power driver |
 | Wi-Fi setup | Start [phone-based setup](setup-board.md#set-up-wi-fi-with-your-phone) on ESP32 boards, with a QR code for the temporary network where the screen has room |
 | Phone app | On boards with Bluetooth: pair a phone app for two minutes; the screen shows the six-digit code to type on the phone. Shows whether a phone is paired and connected |
+| Language | Step through the languages of the device's own text: English, Spanish |
 
-Volume, brightness, talk mode, battery indicator, and screen timeout survive restarts. Unavailable drivers show as unavailable. These checks help you test the hardware; a completed tone does not prove that a physical speaker produced sound.
+Volume, brightness, talk mode, battery indicator, screen timeout, and language survive restarts. Unavailable drivers show as unavailable. These checks help you test the hardware; a completed tone does not prove that a physical speaker produced sound.
 
 The battery indicator is off by default. When a driver percentage or explicitly enabled voltage estimate is available, each select on **Battery and power** moves to the next choice: icon only, percentage only, both, or off. It sits in the title bar, or centred at the top edge of a round display; without an available percentage it shows nothing. The icon fills green while charging and turns red at 10 percent or less with an explicit battery-only power reading; with the percentage alone, the number changes color instead. The percentage is the same value as in **Battery and power**. From the USB console, use `set battery_display icon`, `percentage`, `both` or `off`.
 
@@ -87,5 +88,17 @@ Use `set battery_estimate off` (or `set battery_estimate` to clear it) to stop d
 Screen timeout is off by default. When enabled, a brightness-capable display dims halfway through the idle period, then goes dark. The first button press or touch wakes it without recording or answering a prompt. Incoming replies and prompts wake it too. Recording, playback, Wi-Fi setup, pairing (with Hermes or a phone) and updates keep it awake. The settings menu sleeps like any other screen, and the input that wakes it leaves the menu on the same item, including a running hardware check. The processor and Wi-Fi remain running; this is screen sleep. AMOLED panels also switch their output off while dark. Use the board's Power off control to shut down the device.
 
 On the AMOLED-1.75C, a short press of PWR puts the screen to sleep the same way, whether or not Screen timeout is on. The same activities keep it awake: a press during recording, playback, Wi-Fi setup or an update does nothing. Press PWR again, touch the screen or press BOOT to wake it. Replies and prompts wake it as well; Wi-Fi or the connection to Hermes dropping and coming back does not.
+
+## Language
+
+The device's own text (the Ready screen, hints, status, settings and errors) is English unless you choose another language. Hermes's replies, cards and questions come in whatever language Hermes writes them, whatever this setting says.
+
+Choose it in one of three ways:
+
+- Select **Language** in device settings until the one you want shows.
+- Ask Hermes, for example "put the screen in Spanish". The firmware offers the agent a `screen.language` action.
+- On the USB console, `set language es`; `set language` with no value goes back to English.
+
+The languages are English (`en`) and Spanish (`es`). The font has no accented letters yet, so translated text shows them without accents ("Informacion"). To add a language, see [Translate the device's text](development.md#translate-the-devices-text).
 
 Incoming confirmation prompts and firmware updates close settings. You cannot open settings during a prompt or update. The USB console also accepts `settings`, `settings close`, and `set brightness 50`.

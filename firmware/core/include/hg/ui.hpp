@@ -14,6 +14,7 @@
 #include "hg/canvas.hpp"
 #include "hg/frame_stats.hpp"
 #include "hg/hal.hpp"
+#include "hg/i18n.hpp"
 #include "hg/mascot.hpp"
 #include "hg/qr.hpp"
 
@@ -55,6 +56,7 @@ struct UiModel {
   Screen screen = Screen::Boot;
   Link link = Link::Offline;
   std::string title;     // top bar (device name)
+  i18n::Lang lang = i18n::Lang::En;  // for the words the UI draws itself (top bar)
   std::string headline;  // header band, next to the indicator
   std::string detail;    // secondary line (status phrase, URL, error)
   std::string body;      // main text (reply, card body)

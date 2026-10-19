@@ -2839,3 +2839,140 @@ TEST("dashboard: touch boards open it with a swipe down") {
   CHECK(r.app.screen() == hg::Screen::Dashboard);
   CHECK_EQ(r.app.model().hint, std::string("Swipe down to close"));
 }
+
+// ---------------------------------------------------------------------------
+// Language of the device's own text (hg/i18n.hpp)
+
+TEST("language: English by default, and set language switches the device's own text") {
+  Rig r;
+  r.bring_online(true);
+  CHECK_EQ(r.app.model().headline, std::string("Hi, I'm Hermes"));
+  CHECK_EQ(r.app.model().hint, std::string("hold TALK to talk"));
+  CHECK(r.app.model().lang == hg::i18n::Lang::En);
+  CHECK_EQ(r.app.console("set language es"), std::string("@ok language"));
+  CHECK_EQ(r.fake.kv["language"], std::string("es"));
+  CHECK(r.app.model().lang == hg::i18n::Lang::Es);
+  CHECK_EQ(r.app.model().headline, std::string("Hola, soy Hermes"));
+  CHECK_EQ(r.app.model().detail, std::string("Preguntame lo que sea"));  // folded: the font has no accents yet
+  CHECK_EQ(r.app.model().hint, std::string("manten TALK y habla"));
+  CHECK_EQ(r.app.console("get language"), std::string(R"(@value {"key":"language","value":"es"})"));
+  // An empty value goes back to English.
+  CHECK_EQ(r.app.console("set language"), std::string("@ok language"));
+  CHECK_EQ(r.app.model().headline, std::string("Hi, I'm Hermes"));
+}
+
+TEST("language: an unknown code is refused and changes nothing") {
+  Rig r;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set language xx"), std::string("@error language must be one of: en es"));
+  CHECK_EQ(r.app.console("set language ES"), std::string("@error language must be one of: en es"));
+  CHECK(r.fake.kv.find("language") == r.fake.kv.end());
+  CHECK_EQ(r.app.model().headline, std::string("Hi, I'm Hermes"));
+  // A stored value this firmware doesn't know (from a newer one) reads as English.
+  r.fake.kv["language"] = "xx";
+  r.app.console("set volume 50");  // reloads the settings
+  CHECK(r.app.model().lang == hg::i18n::Lang::En);
+}
+
+TEST("language: the choice survives a restart") {
+  Rig r;
+  r.bring_online(true);
+  r.app.console("set language es");
+  hg::App again(r.hal, Rig::profile("ws://hermes.local:8765/gadget"));
+  again.begin();
+  CHECK(again.screen() == hg::Screen::Boot);
+  CHECK_EQ(again.model().detail, std::string("iniciando - fw 1.2.3"));
+}
+
+TEST("language: the settings menu has a Language item that steps through the languages") {
+  Rig r;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  CHECK(find_setting(r, "Language"));
+  CHECK(r.app.model().body.find("English") != std::string::npos);
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK_EQ(r.fake.kv["language"], std::string("es"));
+  CHECK(r.app.settings_open());  // still on the same item, now in Spanish
+  CHECK_EQ(r.app.model().headline, std::string("Ajustes"));
+  CHECK_EQ(r.app.model().detail, std::string("Idioma"));
+  CHECK(r.app.model().body.find("Espanol") != std::string::npos);
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK_EQ(r.fake.kv["language"], std::string("en"));
+  CHECK_EQ(r.app.model().detail, std::string("Language"));
+  // Every other item is still reachable after it.
+  CHECK(find_setting(r, "Back to Hermes"));
+  CHECK(find_setting(r, "Speaker volume"));
+}
+
+TEST("language: the agent can set it through the screen.language action") {
+  Rig r;
+  r.bring_online(true);
+  const Value* hello = r.fake.last("hello");
+  bool listed = false;
+  if (hello) {
+    for (const auto& a : (*hello)["actions"].elements()) {
+      if (a["name"].as_string() != "screen.language") continue;
+      listed = true;
+      const auto& codes = a["params"]["properties"]["language"]["enum"];
+      CHECK_EQ(codes.size(), hg::i18n::kLangCount);
+    }
+  }
+  CHECK(listed);
+  r.server(R"({"type":"action","id":"l1","name":"screen.language","args":{"language":"es"}})");
+  const Value* res = r.fake.last("action.result");
+  CHECK(res && (*res)["ok"].as_bool() && (*res)["result"]["language"].as_string() == "es");
+  CHECK_EQ(r.app.model().headline, std::string("Hola, soy Hermes"));
+  r.server(R"({"type":"action","id":"l2","name":"screen.language","args":{"language":"klingon"}})");
+  res = r.fake.last("action.result");
+  CHECK(res && !(*res)["ok"].as_bool() && (*res)["error"].as_string() == "language must be one of: en es");
+  r.server(R"({"type":"action","id":"l3","name":"screen.language","args":{}})");
+  res = r.fake.last("action.result");
+  CHECK(res && !(*res)["ok"].as_bool());
+  CHECK_EQ(r.fake.kv["language"], std::string("es"));
+}
+
+TEST("language: a touch board's control phrase is translated with the rest") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  r.app.console("set language es");
+  CHECK_EQ(r.app.model().hint, std::string("Manten la pantalla y habla"));
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK(r.app.screen() == hg::Screen::Listening);
+  CHECK_EQ(r.app.model().headline, std::string("Escuchando"));
+  CHECK_EQ(r.app.model().detail, std::string("Suelta para enviar"));
+  CHECK_EQ(r.app.model().hint, std::string("Desliza abajo: descartar"));
+}
+
+TEST("language: the dashboard's headings and states are translated") {
+  Rig r;
+  r.bring_online(true);
+  r.app.console("set language es");
+  r.server(kDashboard);
+  tap_cancel(r);
+  CHECK(r.app.screen() == hg::Screen::Dashboard);
+  const auto& rows = r.app.model().dash;
+  CHECK_EQ(rows.size(), size_t(7));
+  if (rows.size() != 7) return;
+  CHECK_EQ(rows[0].label, std::string("Sesiones de Hermes"));
+  CHECK_EQ(rows[1].value, std::string("ocupada"));
+  CHECK(rows[2].value == "aprobar" && rows[2].tone == hg::DashRow::Tone::Waiting);
+  CHECK_EQ(rows[3].value, std::string("en reposo"));
+  CHECK_EQ(rows[4].label, std::string("Estado"));
+  CHECK_EQ(rows[5].value, std::string("up"));  // a tile's value is the user's own text
+  CHECK_EQ(r.app.model().headline, std::string("Esperan: 1"));
+  CHECK_EQ(r.app.model().hint, std::string("CANCEL: cerrar"));
+}
+
+TEST("language: the status report keeps its English reason while the screen translates it") {
+  Rig r("");
+  r.app.console("set language es");
+  r.app.begin();
+  r.app.on_network(true);
+  r.advance(1000);
+  CHECK(r.app.screen() == hg::Screen::Error);
+  CHECK_EQ(r.app.model().headline, std::string("Falta configurar"));
+  CHECK(r.app.model().detail.rfind("No hay servidor de Hermes configurado", 0) == 0);
+  CHECK(r.app.console("status").find("No Hermes server configured") != std::string::npos);
+}

@@ -141,7 +141,7 @@ app.add_action(std::move(relay));
 
 The device declares its actions in `hello`. Hermes's model discovers them through the per-device context and `gadget_devices`, and calls them with `gadget_action`. No Hermes or plugin change is needed. Handlers run on the app task: keep them short, and post long work to another task and report completion with an event.
 
-The firmware ships `speaker.volume` and `screen.brightness` when the hardware allows. The simulator adds `led.set` and `buzzer.beep` as examples.
+The firmware ships `speaker.volume` and `screen.brightness` when the hardware allows, and `screen.language` on every board with a display. The simulator adds `led.set` and `buzzer.beep` as examples.
 
 For runnable Linux examples, see [Home Assistant and MQTT](home-automation.md). They expose fixed lamp targets, report temperature availability and return a job ID for work that completes asynchronously.
 
