@@ -163,8 +163,11 @@ BoardConfig make() {
   b.touch.width = 368;
   b.touch.height = 448;
   b.touch.offset_y = 8;     // touch reports glass rows; the UI starts at row 8
+  // The side PWR key goes to the AXP2101; its conditioned level is on expander pin P4,
+  // high while pressed, as on the AMOLED-1.75. It acts as CANCEL.
+  b.pwr_key = {true, 0x20, 4, true};
   b.axp2101 = true;
-  // TCA9554: P0 LCD_RST, P1 the panel's power rail, P2 TOUCH_RST.
+  // TCA9554: P0 LCD_RST, P1 the panel's power rail, P2 TOUCH_RST, P4 the PWR key (input).
   b.expander_reset = {0x20, 0x07, 20, 150};
   b.buttons = {0, -1, -1, -1};  // BOOT also works as TALK
   b.talk_label = "BOOT";
