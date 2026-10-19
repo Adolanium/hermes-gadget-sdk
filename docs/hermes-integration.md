@@ -204,4 +204,25 @@ The adapter binds its own port, so give each profile that serves gadgets a diffe
 
 Device keys and pending pairing codes live in the plugin data directory. It is resolved with `plugin_data_dir("gadget")` when the adapter connects, so it follows whichever Hermes home the adapter is started under. The gateway re-reads `devices.json` before each lookup or change, so `hermes gadget forget` and `hermes gadget pair` from another terminal take effect without a restart.
 
-The agent tools look up the adapter for the session's profile (`HERMES_SESSION_PROFILE`). Multi-profile setups have only been exercised in unit tests so far.
+The agent tools look up the adapter for the session's profile (`HERMES_SESSION_PROFILE`), and fall back to the only adapter running. Hermes imports the plugin once per profile scope, so the registry of running adapters is kept once per process rather than in each copy of the module.
+
+### One profile per gadget
+
+A multiplexed gateway can give each gadget its own profile (model, memory, sessions and personality) while all of them connect to one listener. Keep the gadget platform on the profile that owns the port, usually `default`, and route each device by its id:
+
+```yaml
+gateway:
+  multiplex_profiles: true
+  profile_routes:
+    - name: gadget-kitchen
+      platform: gadget
+      chat_id: "hg-0123456789abcdef"
+      profile: kitchen
+```
+
+Then, in each routed profile:
+
+- Turn its own listener off with `hermes -p kitchen config set platforms.gadget.enabled false`. A profile cloned from `default` keeps the plugin enabled, and otherwise starts a second listener that retries the taken port. Leave the plugin enabled: the profile needs its tools.
+- Approve the device again with `hermes -p kitchen pairing approve gadget <code>`. Pairing is checked in the routed profile, so the device shows a pairing code after the route takes effect.
+
+Tried with three devices routed to three profiles on one gateway: the turns from the two devices used so far each ran in their own profile's session.
