@@ -20,9 +20,10 @@ Third-party material
 The MIT license above covers only the code and documentation written for this
 project. Except as noted below, third-party code is not included in this
 repository; it is fetched at build or install time and keeps its own license:
-ESP-IDF, esp_codec_dev and esp_websocket_client (Apache License 2.0, Espressif
-Systems), and the Python packages listed in pyproject.toml (each under its own
-license).
+ESP-IDF, esp_codec_dev, esp_websocket_client, esp_hosted 2.12.6,
+esp_wifi_remote 1.6.5, esp_lcd_ek79007 2.0.2, and esp_lcd_st7701 2.0.2
+(1.1.0 for ESP-IDF below 5.4; Apache License 2.0, Espressif Systems), plus the
+Python packages listed in pyproject.toml (each under its own license).
 
 Optional Linux audio uses python-sounddevice (MIT, Matthias Geier) and the
 system PortAudio library (MIT). Raspberry Pi controls use GPIO Zero
@@ -127,6 +128,18 @@ v1.2 schematic, https://dl.espressif.com/AE/esp-dev-kits/ESP-VoCat_SCH_V1_2.pdf.
 Only these hardware facts are used. A copy of the license is in
 LICENSES/Apache-2.0.txt.
 
+The SH8601 initialization values in firmware/esp32/main/panel_sh8601.hpp and
+the Knob-Touch-LCD-1.8 pin map in firmware/esp32/main/board.cpp follow
+Waveshare's ESP32-S3-Knob-Touch-LCD-1.8 demo,
+https://files.waveshare.com/wiki/ESP32-S3-Knob-Touch-LCD-1.8/ESP32-S3-Knob-Touch-LCD-1.8-Demo.zip,
+last modified 2025-06-20, downloaded 2026-10-19, SHA-256
+11e382444fe93470fbe463829c1e0ebad5bdb5115fd2d72f6159cd7700015030: the
+lcd_init_cmds table in ESP-IDF/08_LVGL_Test/main/main.c and the pins in the
+user_config.h files of 08_LVGL_Test, 04_Encoder_Test and 07_Audio_Test.
+The archive carries no license. Only these hardware facts are used, with the
+payloads re-expressed as C++ byte strings for Espressif's esp_lcd_sh8601
+driver; the values, order and delays are unchanged.
+
 The CrowPanel 2.1 ST7701 initialization values in
 firmware/esp32/main/crowpanel_st7701_init.hpp, and the RGB timings, PCF8574
 power and reset sequence and pin map in port_rgb.cpp and board.cpp, follow
@@ -136,8 +149,9 @@ That repository carries no license. Only these hardware facts are used,
 re-expressed for Espressif's esp_lcd_st7701 driver.
 
 The managed esp_lcd_ili9341, esp_lcd_gc9a01, esp_lcd_touch, esp_lcd_touch_gt911,
-esp_lcd_touch_tt21100, esp_lcd_touch_ft5x06, esp_lcd_st7701 and
-esp_lcd_panel_io_additions drivers are Espressif components under Apache
+esp_lcd_touch_tt21100, esp_lcd_touch_ft5x06, esp_lcd_st7701, esp_lcd_sh8601,
+esp_lcd_ek79007
+and esp_lcd_panel_io_additions drivers are Espressif components under Apache
 License 2.0. CoreS3 audio uses esp_codec_dev's AW88298 driver.
 They are fetched at build time. Binary release packages include the installed
 component and ESP-IDF license files alongside this notice.
@@ -163,3 +177,15 @@ replaced with comments; an always-false comparison is removed; and two bounds
 checks are added (the bit writer no longer writes past its buffer, and a payload
 that overflows the chosen version is rejected instead of encoded incorrectly).
 The full upstream license is in LICENSES/QRCode-MIT.txt.
+
+
+The CrowPanel Advanced 10.1-inch ESP32-P4 build downloads Espressif components
+esp_hosted 2.12.6, esp_wifi_remote 1.6.5, and esp_lcd_ek79007 2.0.2 under the
+Apache License 2.0. Their licenses are available in the component registry and
+are included in LICENSES/Apache-2.0.txt and release license archives.
+
+The CrowPanel P4 hardware pin map, DSI timings, backlight polarity and STC8
+register layout are hardware facts referenced from Elecrow V1.1 commit
+6c7c851f3105349dc24b12ad058655ba6afa98ee. See the pinned URLs in
+THIRD_PARTY_NOTICES.md. The Elecrow repository has no license file; only those
+hardware facts are used and no Elecrow source code is copied.

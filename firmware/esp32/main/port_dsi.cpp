@@ -6,7 +6,7 @@
 // internal LDO channel (2500 mV), which must be acquired before the bus is
 // created or the panel never receives a signal.
 //
-// Layout (schematic V1.1 + Elecrow's own P4 board reference):
+// Hardware facts from Elecrow V1.1 at pinned commit 6c7c851f3105349dc24b12ad058655ba6afa98ee; no vendor code is copied.
 //   panel            1024x600, RGB565, 2 data lanes @ 900 Mbps, DPI clock 51 MHz
 //   DSI PHY power    internal LDO channel 3 @ 2500 mV
 //   LCD reset        NC (not bonded) — the EK79007 driver skips the pulse
@@ -114,7 +114,8 @@ bool DsiDisplay::begin(const LcdConfig& cfg, const DsiPanelConfig& dsi) {
   dpi.virtual_channel = 0;
   dpi.dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT;
   dpi.dpi_clock_freq_mhz = static_cast<float>(dsi_.dpi_clock_mhz);
-  dpi.pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565;
+  dpi.in_color_format = LCD_COLOR_FMT_RGB565;
+  dpi.out_color_format = LCD_COLOR_FMT_RGB565;
   dpi.num_fbs = 1;
   dpi.video_timing.h_size = cfg.width;
   dpi.video_timing.v_size = cfg.height;
@@ -124,7 +125,6 @@ bool DsiDisplay::begin(const LcdConfig& cfg, const DsiPanelConfig& dsi) {
   dpi.video_timing.vsync_pulse_width = dsi_.vsync_pulse_width;
   dpi.video_timing.vsync_back_porch = dsi_.vsync_back_porch;
   dpi.video_timing.vsync_front_porch = dsi_.vsync_front_porch;
-  dpi.flags.use_dma2d = use_dma2d_ ? 1 : 0;
 
   // 5. The EK79007 panel driver. reset_gpio_num is GPIO_NUM_NC: the V1.1 board
   //    does not bond an LCD reset line.
@@ -165,6 +165,14 @@ bool DsiDisplay::begin(const LcdConfig& cfg, const DsiPanelConfig& dsi) {
   std::memset(fb_, 0, bytes);
 
   if (use_dma2d_) {
+    err = esp_lcd_dpi_panel_enable_dma2d(panel_);
+    if (err != ESP_OK) {
+      ESP_LOGW(TAG, "DMA2D unavailable (%s); falling back to the CPU copy path", esp_err_to_name(err));
+      use_dma2d_ = false;
+    }
+  }
+
+  if (use_dma2d_) {
     esp_lcd_dpi_panel_event_callbacks_t cbs = {};
     cbs.on_color_trans_done = &DsiDisplay::on_color_done;
     err = esp_lcd_dpi_panel_register_event_callbacks(panel_, &cbs, this);
@@ -195,8 +203,8 @@ bool DsiDisplay::begin(const LcdConfig& cfg, const DsiPanelConfig& dsi) {
     return false;
   }
 
-  // 7. Backlight. GPIO31 is active-high and not inverted (config.h of the
-  //    vendor board, and the schematic). Start dark; the core raises it.
+  // 7. Backlight. GPIO31 active-high is a hardware fact from the pinned Elecrow
+  //    V1.1 config.h and schematic (see docs/hardware.md). Start dark; the core raises it.
   if (cfg.backlight >= 0) {
     ledc_timer_config_t timer = {};
     timer.speed_mode = LEDC_LOW_SPEED_MODE;

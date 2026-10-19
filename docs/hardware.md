@@ -120,6 +120,38 @@ Record the results with the [hardware checklist](hardware-validation.md#record-a
 
 References: [Waveshare V2 documentation](https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.85C), [V2 schematic](https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-1.85C/ESP32-S3-Touch-LCD-1.85C_V2.pdf) and the [factory demo at 8ead4a96](https://github.com/waveshareteam/ESP32-S3-Touch-LCD-1.85C/tree/8ead4a96bf3a278fc4ebd8ef4768657e17fa2880). The demo numbers the expander pins from one (EXIO1 is P0). The LCD initialization tables and their licenses are listed in [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
 
+## Waveshare ESP32-S3-Knob-Touch-LCD-1.8
+
+Use `esp32s3-knob-touch-lcd-1.8` for the knob board: an ESP32-S3R8 with 16 MB flash and 8 MB octal PSRAM, a round 360×360 SH8601 LCD over QSPI (not the ST77916 of the 1.85C V2), CST816S touch, one PDM microphone, a rotary encoder around the screen, a DRV2605 haptic driver and a Li-ion battery with charging management.
+
+**This port is text-only.** It doesn't drive the board's PCM5100A DAC and 3.5 mm headphone jack, so replies are shown on the screen and never spoken. Waveshare's ESP-IDF audio demo plays through that DAC from the S3 (I2S BCLK 39, WS 40, DOUT 41); this port has not tried it. The clone Guition JC3636K518 uses the same hardware and should work the same way. This port is experimental; display, touch and microphone were verified on hardware (360×360 round, hold-to-talk).
+
+| Part | Connection |
+|---|---|
+| SH8601 LCD, QSPI | CS 14, clock 13, D0–D3 15/16/17/18, reset 21, backlight 47 (LEDC) |
+| CST816S touch | I2C 0x15, INT 9, reset 10 |
+| I2C | SDA 11, SCL 12, 400 kHz |
+| PDM microphone | CLK 45, DATA 46 |
+| Rotary encoder | A 8, B 7 (each detent scrolls; the knob's push button is not wired) |
+| BOOT | GPIO 0, TALK |
+
+Hold the screen to talk, release to send, swipe down to cancel. The IMU, RTC, TF card, haptic driver and battery ADC are not used.
+
+```bash
+cd firmware/esp32
+pio run -e esp32s3-knob-touch-lcd-18 -t upload -t monitor
+```
+
+For ESP-IDF, use `SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp32s3-knob-touch-lcd-1.8/sdkconfig.defaults"` with a separate build directory and sdkconfig. The USB-C port handles flashing and the serial console (115200 baud); flipping the cable flashes the other MCU. The `sim-360x360-knob` simulator board has the same screen and audio capabilities.
+
+References: [Waveshare wiki](https://www.waveshare.com/wiki/ESP32-S3-Knob-Touch-LCD-1.8) and its [ESP-IDF and Arduino demo](https://files.waveshare.com/wiki/ESP32-S3-Knob-Touch-LCD-1.8/ESP32-S3-Knob-Touch-LCD-1.8-Demo.zip), the source of the pins above and the SH8601 initialization table. The table's source is listed in [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
+
+### First flash: what to check
+
+- The panel logs `sh8601 360x360 ready`. The knob ships an SH8601 glass; if a future unit logs an ST77916 panel ID instead, it has a different panel and needs the ST77916 bring-up table.
+- The encoder scrolls the reply list; each detent is one step.
+- The microphone captures on a hold: check the VU feedback on screen, and that released audio is recognized.
+
 ## ESP32-S3-BOX-3
 
 Use `esp32-s3-box-3` for Espressif's BOX-3 with 16 MB flash and 16 MB octal PSRAM. The original BOX and BOX-Lite need different profiles. This port is experimental, with no physical report recorded.
@@ -675,7 +707,7 @@ Panel timings (15 MHz PCLK, 8/4/43 and 8/4/12 porches, `pclk_active_neg`) and th
 
 ## Elecrow CrowPanel Advanced 10.1-inch ESP32-P4
 
-Use board profile `crowpanel-p4-101` for the Elecrow CrowPanel Advanced 10.1-inch ESP32-P4, V1.1. Elecrow identifies this panel as 1024×600; the profile is for that resolution and is based on the V1.1 documentation and schematic. This is an ESP-IDF target; Elecrow notes that the ESP32-P4 is not supported by its PlatformIO platform. The profile is experimental. The optional camera is not implemented.
+Use board profile `crowpanel-p4-101` for the Elecrow CrowPanel Advanced 10.1-inch ESP32-P4, V1.1. Elecrow identifies this panel as 1024×600; the profile is for that resolution and is based on the V1.1 documentation and schematic. The profile is experimental and builds with ESP-IDF 6.1.0 via `idf.py` and the dedicated CI job; this project has no ESP-IDF PlatformIO environment for P4. The PlatformIO Arduino framework listing is a different build path. The optional camera is not implemented.
 
 | Part | Interface and profile wiring |
 |---|---|
@@ -686,13 +718,13 @@ Use board profile `crowpanel-p4-101` for the Elecrow CrowPanel Advanced 10.1-inc
 | Battery / charger monitor | STC8 on I2C0 address 0x2F at 400 kHz; reads registers 0x00–0x0B |
 | Wi-Fi | ESP32-C6 companion over 4-bit SDIO; CMD 19, CLK 18, D0–D3 17/16/15/14, reset GPIO 32 |
 
-GPIO 45 and 46 are on the P4 VDD_IO_5 domain. Firmware acquires internal LDO4 at 3.3 V before creating I2C0; the DSI driver separately configures LDO3 for the DSI PHY. Touch and display initialization depend on these rails.
+GPIO 45 and 46 are on the P4 VDD_IO_5 domain. Firmware acquires internal LDO4 at 3.3 V before creating I2C0; the DSI driver separately configures LDO3 for the DSI PHY. Touch and display initialization depend on these rails. Hardware facts are referenced from the pinned [Elecrow V1.1 repository commit](https://github.com/Elecrow-RD/CrowPanel-Advanced-10.1inch-ESP32-P4-HMI-AI-Display-1024x600-IPS-Touch-Screen/tree/6c7c851f3105349dc24b12ad058655ba6afa98ee), including the [board config.h](https://github.com/Elecrow-RD/CrowPanel-Advanced-10.1inch-ESP32-P4-HMI-AI-Display-1024x600-IPS-Touch-Screen/blob/6c7c851f3105349dc24b12ad058655ba6afa98ee/example/V1.1/idf-code/7_9_10.1_P4_HMI_AI/7inch_9inch_10inch_P4_HMI_AI/main/boards/elecrow-p4-board/config.h) and the [V1.1 schematic files](https://github.com/Elecrow-RD/CrowPanel-Advanced-10.1inch-ESP32-P4-HMI-AI-Display-1024x600-IPS-Touch-Screen/tree/6c7c851f3105349dc24b12ad058655ba6afa98ee/Eagle_SCH%26PCB). The upstream repository has no license; only hardware facts are used here, and no Elecrow source code is copied.
 
-**Audio and diagnostics.** The profile routes the PDM microphone to I2S0 and speaker output to I2S1. The local microphone hardware check temporarily holds up to three seconds of PCM in RAM, then plays the loudest second; it does not save or transmit those test samples. Normal speech turns use the regular Hermes audio transport. The Settings → Battery page can show the raw STC8 register bytes for local diagnostics; raw bytes are not included in Gateway status or sensor telemetry.
+**Audio.** The profile uses the existing Gadget audio interface: the upstream I2S microphone driver is configured for PDM on I2S0, and a P4-specific I2S1 speaker adapter handles the amplifier and stereo framing. No local microphone loopback or raw-audio diagnostic path is added.
 
-**Battery limitations.** The STC8 voltage and percentage are uncalibrated estimates. Its charge and LED states do not quantify current; `external_power` is left unknown. USB-connected battery readings are not a calibrated state-of-charge measurement. Validate charging with a meter rather than inferring current from the percentage or LED.
+**Battery limitations.** The STC8 voltage and percentage are uncalibrated estimates. The adapter exposes only the existing Gadget `PowerStatus` fields: `battery_mv`, `battery_percent`, and `charging`; a reported STC8 error leaves `charging` unknown. These readings do not quantify current or calibrated state of charge, and `external_power` remains unknown. Validate charging with a meter rather than inferring current from percentage or an LED.
 
-**Build with ESP-IDF 5.5.4** (the P4 Wi-Fi companion dependencies are pinned in `main/idf_component.yml`):
+**Build with ESP-IDF 6.1.0** (the P4 Wi-Fi and EK79007 dependencies are pinned in `main/idf_component.yml`):
 
 ```bash
 cd firmware/esp32
@@ -767,7 +799,7 @@ gadget> set server ws://192.168.1.20:8765/gadget
 gadget> status
 @status {"device_id":"hg-...","phase":"online","screen":"pairing","pairing_code":"ABCD2345",...}
 ```
-When the board has a power adapter, `status` includes a `power` object; the state sensor message mirrors its battery fields. On the CrowPanel P4, the STC8 adapter samples its 12-byte record every 5 seconds through the app power poller. Fields include `battery_mv`, `battery_adc_mv`, `battery_percent`, `battery_state`, `battery_led_state`, and `charging`. State strings are `idle`, `charging`, `fully_charged`, `no_charge`, or `error`; LED strings also include `low_power`. `battery_present` and `external_power` remain unknown for this adapter and are not inferred.
+When the board has a power adapter, `status` includes a `power` object; the state sensor message mirrors its battery fields. On the CrowPanel P4, the STC8 adapter samples its 12-byte record every 5 seconds through the app power poller and maps it to the existing Gadget fields `battery_mv`, `battery_percent`, and `charging`. The adapter does not expose raw registers, battery-state enums, `battery_present`, or `external_power`.
 
 | Command | Meaning |
 |---|---|

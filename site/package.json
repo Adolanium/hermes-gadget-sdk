@@ -14,8 +14,8 @@
     "preview": "node scripts/serve.mjs"
   },
   "devDependencies": {
-    "@playwright/test": "1.63.0",
+    "@playwright/test": "1.64.0",
     "esptool-js": "0.7.0",
-    "marked": "18.0.14"
+    "marked": "18.1.0"
   }
 }

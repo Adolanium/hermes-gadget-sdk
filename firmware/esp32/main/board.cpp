@@ -32,6 +32,8 @@ namespace {
 #define HG_BOARD_NAME "m5stack-cores3"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_185C_V2
 #define HG_BOARD_NAME "waveshare-esp32-s3-touch-lcd-1.85c-v2"
+#elif CONFIG_HG_BOARD_WS_KNOB_LCD_18
+#define HG_BOARD_NAME "waveshare-esp32s3-knob-touch-lcd-1.8"
 #elif CONFIG_HG_BOARD_ESP_VOCAT
 #define HG_BOARD_NAME "esp-vocat"
 #elif CONFIG_HG_BOARD_T_DISPLAY_S3
@@ -316,6 +318,44 @@ BoardConfig make() {
   b.touch.addr = 0x15;
   b.touch.width = b.touch.height = 360;
   b.buttons = {0, -1, -1, -1};
+  b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
+  return b;
+}
+#elif CONFIG_HG_BOARD_WS_KNOB_LCD_18
+// Waveshare ESP32-S3-Knob-Touch-LCD-1.8: round 360x360 SH8601 QSPI LCD, CST816S
+// touch, one PDM microphone, rotary encoder, battery + DRV2605 haptics. This port
+// doesn't drive the PCM5100A headphone DAC, so it is display + microphone only:
+// replies are shown as text, never spoken. Pins: Waveshare's ESP-IDF demo
+// (08_LVGL_Test, 04_Encoder_Test and 07_Audio_Test user_config.h); see NOTICE.
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.lcd.enabled = true;
+  b.lcd.controller = LcdController::Sh8601;  // the 1.8" round glass is SH8601, not ST77916
+  b.lcd.width = b.lcd.height = 360;
+  b.lcd.swap_xy = b.lcd.mirror_x = b.lcd.mirror_y = false;
+  b.lcd.round = true;
+  b.lcd.font_scale = 2;  // the 360x360 round glass picks scale 1 automatically; double it for readability
+  b.lcd.sclk = 13;
+  b.lcd.mosi = 15;
+  b.lcd.d1 = 16;
+  b.lcd.d2 = 17;
+  b.lcd.d3 = 18;
+  b.lcd.cs = 14;
+  b.lcd.rst = 21;
+  b.lcd.backlight = 47;
+  b.lcd.spi_mhz = 80;
+  b.i2c = {11, 12, 400000};
+  b.mic = {true, 45, -1, 46, true};  // PDM mic: CLK 45, DATA 46 (sck=45 sd=46, ws unused)
+  b.touch.enabled = true;
+  b.touch.controller = TouchController::Cst816;
+  b.touch.addr = 0x15;
+  b.touch.rst = 10;
+  b.touch.int_gpio = 9;
+  b.touch.width = b.touch.height = 360;
+  b.encoder = {8, 7, true};  // knob ring: one pulse per detent, channel = direction
+  b.buttons = {0, -1, -1, -1};  // BOOT also works as TALK
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";
   return b;
@@ -755,7 +795,7 @@ BoardConfig make() {
 }
 #elif CONFIG_HG_BOARD_CROWPANEL_P4_101
 // Elecrow CrowPanel Advanced 10.1-inch ESP32-P4 V1.1.
-// DSI/touch/audio pins follow Elecrow V1.1 source and schematic; panel is 1024x600.
+// Hardware facts follow Elecrow V1.1 files at pinned commit 6c7c851f3105349dc24b12ad058655ba6afa98ee; no vendor code is copied. URLs are in docs/hardware.md.
 BoardConfig make() {
   BoardConfig b{};
   b.name = kBoardName;
@@ -764,11 +804,12 @@ BoardConfig make() {
   b.speaker.bclk = 22;
   b.speaker.ws = 21;
   b.speaker.dout = 23;
-  b.speaker.pa = 30;
-  b.speaker.pa_active_low = true;
-  b.speaker.stereo = true;
-  b.speaker.left_align = true;
-  b.speaker.i2s_port = 1;
+  b.p4_speaker.enabled = true;
+  b.p4_speaker.i2s_port = 1;
+  b.p4_speaker.pa = 30;
+  b.p4_speaker.pa_active_low = true;
+  b.p4_speaker.stereo = true;
+  b.p4_speaker.left_align = true;
   b.lcd.enabled = true;
   b.lcd.width = 1024;
   b.lcd.height = 600;
@@ -787,8 +828,6 @@ BoardConfig make() {
   b.lcd.dsi.use_dma2d = true;
   b.i2c = {45, 46, 400000};
   b.stc8_battery = true;
-  b.default_volume = 35;
-  b.mic_loopback_check = true;
   b.touch.enabled = true;
   b.touch.controller = TouchController::Gt911;
   b.touch.addr = 0x14;

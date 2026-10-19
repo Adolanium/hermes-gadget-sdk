@@ -2,6 +2,10 @@
 
 #include <array>
 
+// Register offsets and status codes are hardware facts from Elecrow V1.1 config.h
+// at pinned commit 6c7c851f3105349dc24b12ad058655ba6afa98ee; this is an
+// independent implementation, not copied vendor source.
+
 namespace hg {
 namespace {
 
@@ -23,22 +27,14 @@ std::optional<PowerStatus> Stc8Battery::read() {
   }
 
   constexpr uint32_t kMaxReportedVoltageMv = 5000;
+  constexpr uint8_t kChargingState = 1;
+  constexpr uint8_t kErrorState = 4;
   PowerStatus status;
-  status.battery_registers = raw;
-  const uint32_t adc_mv = read_u32_le(raw, 0);
   const uint32_t battery_mv = read_u32_le(raw, 4);
-  if (adc_mv <= kMaxReportedVoltageMv) status.battery_adc_mv = static_cast<uint16_t>(adc_mv);
   if (battery_mv <= kMaxReportedVoltageMv) status.battery_mv = static_cast<uint16_t>(battery_mv);
   if (raw[8] <= 100) status.battery_percent = raw[8];
-  if (raw[9] <= static_cast<uint8_t>(BatteryChargeState::Error)) {
-    const auto state = static_cast<BatteryChargeState>(raw[9]);
-    status.battery_state = state;
-    if (state != BatteryChargeState::Error)
-      status.charging = state == BatteryChargeState::Charging;
-  }
-  if (raw[10] <= static_cast<uint8_t>(BatteryLedState::LowPower))
-    status.battery_led_state = static_cast<BatteryLedState>(raw[10]);
-  // raw[11] is the C struct tail-padding byte, not a declared battery field.
+  // The STC8 error code is not evidence that the pack is not charging.
+  if (raw[9] < kErrorState) status.charging = raw[9] == kChargingState;
   return status;
 }
 

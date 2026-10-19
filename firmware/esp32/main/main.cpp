@@ -48,7 +48,8 @@ hgp::RgbDisplay g_rgb;
 hgp::AmoledDisplay g_amoled;
 #if SOC_MIPI_DSI_SUPPORTED
 hgp::DsiDisplay g_dsi;
-hgp::PdmMic g_pdm_mic;
+hgp::P4I2sSpeaker g_p4_speaker;
+hgp::Stc8Power g_stc8_power;
 #endif
 hgp::I2sMic g_mic;
 hgp::I2sSpeaker g_speaker;
@@ -61,7 +62,6 @@ hgp::Wifi g_wifi;
 hgp::EspUpdater g_updater;
 hgp::AxpPower g_power;
 hgp::LatchPower g_latch_power;
-hgp::Stc8Power g_stc8_power;
 hgp::CoreS3Board g_cores3;
 hgp::PhoneLink g_phone;
 hg::TouchGestures* g_gestures = nullptr;
@@ -296,14 +296,12 @@ extern "C" void app_main(void) {
   } else if (board.amoled.enabled && g_amoled.begin(board.amoled)) {
     hal.display = &g_amoled;
   }
-  if (board.mic.enabled) {
+  if (board.mic.enabled && g_mic.begin(board.mic)) hal.mic = &g_mic;
 #if SOC_MIPI_DSI_SUPPORTED
-    if (board.mic.pdm) {
-      if (g_pdm_mic.begin(board.mic)) hal.mic = &g_pdm_mic;
-    } else
+  if (board.p4_speaker.enabled) {
+    if (g_p4_speaker.begin(board.speaker, board.p4_speaker)) hal.speaker = &g_p4_speaker;
+  } else
 #endif
-    if (g_mic.begin(board.mic)) hal.mic = &g_mic;
-  }
   if (board.speaker.enabled && g_speaker.begin(board.speaker)) hal.speaker = &g_speaker;
   if (board.axp2101 && g_power.begin(i2c_bus)) {
     hal.power = &g_power;
@@ -312,7 +310,9 @@ extern "C" void app_main(void) {
     // Wi-Fi retries back off only on battery; unknown counts as plugged in.
     g_wifi.on_battery = [] { return g_power.external_power() == std::optional<bool>(false); };
   }
+#if SOC_MIPI_DSI_SUPPORTED
   if (peripherals_ready && board.stc8_battery && g_stc8_power.begin(i2c_bus)) hal.power = &g_stc8_power;
+#endif
   const bool audio_power = peripherals_ready && (!board.axp_audio_supply || g_power.enable_audio_supply());
   if (!audio_power) ESP_LOGE(TAG, "audio supply unavailable");
   if (board.codec.enabled && audio_power && g_codec.begin(board.codec, i2c_bus)) {
@@ -330,7 +330,6 @@ extern "C" void app_main(void) {
 #if SOC_MIPI_DSI_SUPPORTED
   if (hal.display == &g_dsi) {
     parts.display = g_dsi.controller_name();
-    parts.flush_counter = &g_dsi.flush_counter();
   } else
 #endif
   {
@@ -340,12 +339,12 @@ extern "C" void app_main(void) {
                     : hal.display == &g_amoled ? "co5300"
                                               : "none";
   }
+  parts.mic = hal.mic == &g_codec_mic ? (board.codec.mic == hgp::MicCodec::Es8311 ? "es8311" : "es7210")
+              : hal.mic == &g_mic ? (board.mic.pdm ? "pdm" : "i2s") : "none";
 #if SOC_MIPI_DSI_SUPPORTED
-  if (hal.mic == &g_pdm_mic) parts.mic = "pdm";
+  if (hal.speaker == &g_p4_speaker) parts.speaker = "i2s";
   else
 #endif
-    parts.mic = hal.mic == &g_codec_mic ? (board.codec.mic == hgp::MicCodec::Es8311 ? "es8311" : "es7210")
-                : hal.mic == &g_mic ? "i2s" : "none";
   parts.speaker = hal.speaker == &g_codec_speaker ?
       (board.codec.speaker == hgp::SpeakerCodec::Aw88298 ? "aw88298" : "es8311") :
       hal.speaker == &g_speaker ? "i2s" : "none";
@@ -379,8 +378,6 @@ extern "C" void app_main(void) {
     profile.vad_min_rms = board.codec.vad_min_rms;
   }
   if (hal.speaker == &g_codec_speaker) profile.speaker_rate = hgp::CodecAudio::kRate;
-  profile.default_volume = board.default_volume;
-  profile.mic_loopback_check = board.mic_loopback_check;
 
   static hg::App app(hal, profile);
   static hg::TouchGestures gestures(app);

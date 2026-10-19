@@ -7,7 +7,6 @@
 #pragma once
 
 #include <cstddef>
-#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -27,6 +26,9 @@ struct DisplayInfo {
   // A circular panel (width == height). The UI keeps to the square inscribed
   // in the circle and leaves the rest dark.
   bool round = false;
+  // Multiplier on the UI's automatic font scale, for panels small enough that
+  // the automatic pick reads as too small. The UI clamps the final scale.
+  uint8_t font_scale = 1;
   // Extra left and right padding for the top bar's text, for a rectangular
   // panel with rounded corners.
   uint8_t corner_inset = 0;
@@ -53,8 +55,6 @@ class AudioIn {
   virtual ~AudioIn() = default;
   virtual bool start(uint32_t sample_rate) = 0;
   virtual void stop() = 0;
-  // Gain applied only when locally playing a captured sample back through the speaker.
-  virtual float loopback_gain() const { return 1.0f; }
 };
 
 // Speaker: begin() a stream, write() mono PCM16 (non-blocking, the port
@@ -131,42 +131,12 @@ class Updater {
   virtual void confirm() {}
 };
 
-enum class BatteryChargeState : uint8_t { Idle = 0, Charging = 1, FullyCharged = 2, NoCharge = 3, Error = 4 };
-enum class BatteryLedState : uint8_t { Idle = 0, Charging = 1, FullyCharged = 2, NoCharge = 3, LowPower = 4 };
-
-constexpr const char* battery_charge_state_name(BatteryChargeState state) {
-  switch (state) {
-    case BatteryChargeState::Idle: return "idle";
-    case BatteryChargeState::Charging: return "charging";
-    case BatteryChargeState::FullyCharged: return "fully_charged";
-    case BatteryChargeState::NoCharge: return "no_charge";
-    case BatteryChargeState::Error: return "error";
-  }
-  return "unknown";
-}
-
-constexpr const char* battery_led_state_name(BatteryLedState state) {
-  switch (state) {
-    case BatteryLedState::Idle: return "idle";
-    case BatteryLedState::Charging: return "charging";
-    case BatteryLedState::FullyCharged: return "fully_charged";
-    case BatteryLedState::NoCharge: return "no_charge";
-    case BatteryLedState::LowPower: return "low_power";
-  }
-  return "unknown";
-}
-
 struct PowerStatus {
   std::optional<bool> battery_present;
   std::optional<uint16_t> battery_mv;
   std::optional<uint8_t> battery_percent;
   std::optional<bool> charging;
   std::optional<bool> external_power;
-  std::optional<uint16_t> battery_adc_mv;
-  std::optional<BatteryChargeState> battery_state;
-  std::optional<BatteryLedState> battery_led_state;
-  // Raw STC8 battery bytes for local settings diagnostics; not network telemetry.
-  std::optional<std::array<uint8_t, 12>> battery_registers;
 };
 
 class Power {

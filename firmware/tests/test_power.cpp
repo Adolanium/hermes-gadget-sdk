@@ -17,7 +17,7 @@ TEST("battery estimate: the shared single-cell map clamps endpoints and floors i
   }
 }
 
-TEST("STC8 battery: reads each register byte and preserves all reported telemetry") {
+TEST("STC8 battery: reads register bytes and maps only the Gadget power fields") {
   const std::array<uint8_t, 12> raw = {0xeb, 0x0b, 0, 0, 0x90, 0x10, 0, 0, 0x64, 0x02, 0x02, 0xaa};
   std::vector<uint8_t> registers;
   hg::Stc8Battery power([&](uint8_t reg, uint8_t& value) {
@@ -30,15 +30,9 @@ TEST("STC8 battery: reads each register byte and preserves all reported telemetr
 
   CHECK(status.has_value());
   CHECK(registers == std::vector<uint8_t>({0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}));
-  CHECK(status->battery_adc_mv == uint16_t(3051));
   CHECK(status->battery_mv == uint16_t(4240));
   CHECK(status->battery_percent == uint8_t(100));
-  CHECK(status->battery_registers == raw);
   CHECK(status->charging == false);
-  CHECK(!status->battery_present);
-  CHECK(!status->external_power);
-  CHECK(status->battery_state == hg::BatteryChargeState::FullyCharged);
-  CHECK(status->battery_led_state == hg::BatteryLedState::FullyCharged);
   CHECK(!power.can_power_off());
   CHECK(!power.power_off());
 }
@@ -51,8 +45,6 @@ TEST("STC8 battery: charging state maps to the generic charging flag") {
 
   CHECK(status.has_value());
   CHECK(status->charging == true);
-  CHECK(status->battery_state == hg::BatteryChargeState::Charging);
-  CHECK(status->battery_led_state == hg::BatteryLedState::Charging);
 }
 
 TEST("STC8 battery: error state is preserved without claiming not charging") {
@@ -62,7 +54,6 @@ TEST("STC8 battery: error state is preserved without claiming not charging") {
   const auto status = power.read();
 
   CHECK(status.has_value());
-  CHECK(status->battery_state == hg::BatteryChargeState::Error);
   CHECK(!status->charging.has_value());
 }
 
@@ -86,12 +77,9 @@ TEST("STC8 battery: invalid values are omitted rather than reported as real tele
   const auto status = power.read();
 
   CHECK(status.has_value());
-  CHECK(!status->battery_adc_mv);
   CHECK(!status->battery_mv);
   CHECK(!status->battery_percent);
   CHECK(!status->charging);
-  CHECK(!status->battery_state);
-  CHECK(!status->battery_led_state);
   CHECK(!status->battery_present);
   CHECK(!status->external_power);
 }

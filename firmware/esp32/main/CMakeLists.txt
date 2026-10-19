@@ -5,8 +5,14 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
 endif()
 
 set(HG_P4_SOURCES)
+set(HG_P4_REQUIRES)
 if(IDF_TARGET STREQUAL "esp32p4")
-    list(APPEND HG_P4_SOURCES "port_dsi.cpp" "port_pdm_mic.cpp")
+    list(APPEND HG_P4_SOURCES
+        "port_dsi.cpp"
+        "port_audio_p4.cpp"
+        "port_power_p4.cpp"
+        "../../drivers/stc8_battery.cpp")
+    list(APPEND HG_P4_REQUIRES esp_lcd_ek79007)
 endif()
 idf_component_register(
     SRCS
@@ -31,7 +37,6 @@ idf_component_register(
         "port_latch_power.cpp"
         "../../drivers/axp2101.cpp"
         "../../drivers/cores3.cpp"
-        "../../drivers/stc8_battery.cpp"
         "port_storage.cpp"
         "port_system.cpp"
         "port_touch.cpp"
@@ -55,6 +60,7 @@ idf_component_register(
         esp_lcd
         esp_lcd_st7701
         esp_lcd_panel_io_additions
+        ${HG_P4_REQUIRES}
         esp_netif
         esp_http_server
         esp_psram

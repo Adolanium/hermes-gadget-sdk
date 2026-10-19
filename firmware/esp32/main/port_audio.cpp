@@ -6,7 +6,7 @@
 #include <cstring>
 
 #include "driver/i2s_std.h"
-#include "driver/gpio.h"
+#include "driver/i2s_pdm.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -21,19 +21,10 @@ constexpr size_t kMicChunk = 320;           // 20 ms at 16 kHz
 constexpr size_t kSpeakerBuffer = 48 * 1024;  // ~1.5 s at 16 kHz; the server paces 0.5 s ahead
 constexpr size_t kSpeakerChunk = 512;       // samples per I2S write
 
-i2s_std_config_t std_config(uint32_t rate, i2s_data_bit_width_t bits, int bclk, int ws, int dout, int din,
-                            bool stereo = false, bool left_align = false) {
+i2s_std_config_t std_config(uint32_t rate, i2s_data_bit_width_t bits, int bclk, int ws, int dout, int din) {
   i2s_std_config_t cfg = {};
   cfg.clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(rate);
-  cfg.slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(bits, stereo ? I2S_SLOT_MODE_STEREO : I2S_SLOT_MODE_MONO);
-  if (stereo) cfg.slot_cfg.slot_mask = I2S_STD_SLOT_BOTH;
-  if (left_align) {
-    cfg.slot_cfg.ws_width = bits;
-    cfg.slot_cfg.left_align = true;
-    cfg.slot_cfg.big_endian = false;
-    cfg.slot_cfg.bit_order_lsb = false;
-    cfg.slot_cfg.bit_shift = true;
-  }
+  cfg.slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(bits, I2S_SLOT_MODE_MONO);
   cfg.gpio_cfg.mclk = I2S_GPIO_UNUSED;
   cfg.gpio_cfg.bclk = static_cast<gpio_num_t>(bclk);
   cfg.gpio_cfg.ws = static_cast<gpio_num_t>(ws);
@@ -55,14 +46,29 @@ void log_underruns(const char* tag, const hg::SpeakerUnderruns::Totals& t) {
 // Microphone
 
 bool I2sMic::begin(const I2sMicConfig& cfg) {
-  i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
+  // The PDM2PCM converter only exists on I2S0 (ESP32-S3); plain I2S stays on I2S1,
+  // which leaves I2S0 free for the speaker on boards that have one.
+  i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(cfg.pdm ? I2S_NUM_0 : I2S_NUM_1, I2S_ROLE_MASTER);
   if (i2s_new_channel(&chan, nullptr, &rx_) != ESP_OK) return false;
-  // INMP441 outputs 24-bit samples in a 32-bit left slot.
-  i2s_std_config_t std_cfg = std_config(rate_, I2S_DATA_BIT_WIDTH_32BIT, cfg.sck, cfg.ws, -1, cfg.sd);
-  std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_LEFT;
-  if (i2s_channel_init_std_mode(rx_, &std_cfg) != ESP_OK) return false;
+  if (cfg.pdm) {
+    // PDM mic (e.g. Waveshare Knob-Touch-LCD-1.8): sck = PDM clock, sd = data.
+    i2s_pdm_rx_config_t pdm_cfg = {
+        .clk_cfg = I2S_PDM_RX_CLK_DEFAULT_CONFIG(rate_),
+        .slot_cfg = I2S_PDM_RX_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
+        .gpio_cfg = {.clk = static_cast<gpio_num_t>(cfg.sck),
+                     .din = static_cast<gpio_num_t>(cfg.sd),
+                     .invert_flags = {.clk_inv = false}},
+    };
+    if (i2s_channel_init_pdm_rx_mode(rx_, &pdm_cfg) != ESP_OK) return false;
+    pdm_ = true;
+  } else {
+    // INMP441 outputs 24-bit samples in a 32-bit left slot.
+    i2s_std_config_t std_cfg = std_config(rate_, I2S_DATA_BIT_WIDTH_32BIT, cfg.sck, cfg.ws, -1, cfg.sd);
+    std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_LEFT;
+    if (i2s_channel_init_std_mode(rx_, &std_cfg) != ESP_OK) return false;
+  }
   xTaskCreate(&I2sMic::task, "hg-mic", 4096, this, 6, nullptr);
-  ESP_LOGI(TAG, "microphone ready");
+  ESP_LOGI(TAG, "microphone ready (%s)", pdm_ ? "pdm" : "i2s");
   return true;
 }
 
@@ -86,7 +92,6 @@ void I2sMic::stop() {
 
 void I2sMic::task(void* arg) {
   auto* self = static_cast<I2sMic*>(arg);
-  int32_t raw[kMicChunk];
   int16_t pcm[kMicChunk];
   for (;;) {
     if (!self->capturing_) {
@@ -94,9 +99,23 @@ void I2sMic::task(void* arg) {
       continue;
     }
     size_t got = 0;
+    if (self->pdm_) {
+      // PDM decimation yields 16-bit samples straight out of the driver.
+      // The onboard MEMS runs quiet: ~x4 digital gain puts speech in a
+      // comfortable range for the server-side VAD/STT.
+      i2s_channel_read(self->rx_, pcm, sizeof(pcm), &got, pdMS_TO_TICKS(100));
+      if (got == 0) continue;
+      size_t n = got / sizeof(int16_t);
+      for (size_t i = 0; i < n; ++i) {
+        pcm[i] = static_cast<int16_t>(std::max<int32_t>(-32768, std::min<int32_t>(32767, pcm[i] * 4)));
+      }
+      if (self->capturing_) events::post(EventType::Mic, pcm, n * sizeof(int16_t));
+      continue;
+    }
+    int32_t raw[kMicChunk];
     // A read that spans DMA buffers can return ESP_ERR_TIMEOUT with part of the data in `got`
     // (seen on ESP-IDF 6.0.1): keep what arrived instead of dropping the whole read.
-    i2s_channel_read(self->rx_, raw, sizeof(raw), &got, 100);  // timeout_ms, retain partial data in got
+    i2s_channel_read(self->rx_, raw, sizeof(raw), &got, pdMS_TO_TICKS(100));
     if (got == 0) continue;
     size_t n = got / sizeof(int32_t);
     for (size_t i = 0; i < n; ++i) {
@@ -112,21 +131,10 @@ void I2sMic::task(void* arg) {
 // Speaker
 
 bool I2sSpeaker::begin(const I2sSpeakerConfig& cfg) {
-
-  pa_ = cfg.pa;
-  pa_active_low_ = cfg.pa_active_low;
-  stereo_ = cfg.stereo;
-  left_align_ = cfg.left_align;
-  if (pa_ >= 0) {
-    gpio_reset_pin(static_cast<gpio_num_t>(pa_));
-    gpio_set_direction(static_cast<gpio_num_t>(pa_), GPIO_MODE_OUTPUT);
-    set_pa(false);
-  }
-  i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(static_cast<i2s_port_t>(cfg.i2s_port), I2S_ROLE_MASTER);
-  chan.auto_clear = true;
+  i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+  chan.auto_clear = true;  // silence on underrun instead of repeating the last buffer
   if (i2s_new_channel(&chan, &tx_, nullptr) != ESP_OK) return false;
-  i2s_std_config_t std_cfg = std_config(rate_, I2S_DATA_BIT_WIDTH_16BIT, cfg.bclk, cfg.ws, cfg.dout, -1,
-                                        stereo_, left_align_);
+  i2s_std_config_t std_cfg = std_config(rate_, I2S_DATA_BIT_WIDTH_16BIT, cfg.bclk, cfg.ws, cfg.dout, -1);
   if (i2s_channel_init_std_mode(tx_, &std_cfg) != ESP_OK) return false;
   uint8_t* storage = static_cast<uint8_t*>(heap_caps_malloc(kSpeakerBuffer + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   static StaticStreamBuffer_t control;
@@ -134,28 +142,14 @@ bool I2sSpeaker::begin(const I2sSpeakerConfig& cfg) {
   else buffer_ = xStreamBufferCreate(16 * 1024, 1);
   if (!buffer_) return false;
   xTaskCreate(&I2sSpeaker::task, "hg-spk", 4096, this, 7, nullptr);
-  ESP_LOGI(TAG, "speaker ready on I2S%d", cfg.i2s_port);
+  ESP_LOGI(TAG, "speaker ready");
   return true;
-}
-
-void I2sSpeaker::set_pa(bool on) {
-  if (pa_ < 0) return;
-  gpio_set_level(static_cast<gpio_num_t>(pa_), (on != pa_active_low_) ? 1 : 0);
 }
 
 bool I2sSpeaker::begin(uint32_t sample_rate) {
   if (!tx_) return false;
-  const bool pending = open_.load() || draining_.load() || !flush_done_.load() ||
-                       (buffer_ && xStreamBufferBytesAvailable(buffer_) > 0);
-  if (pending) {
-    abort();
-    for (int i = 0; i < 5 && !flush_done_.load(); ++i) vTaskDelay(pdMS_TO_TICKS(10));
-    if (!flush_done_.load()) {
-      ESP_LOGW(TAG, "speaker flush did not finish before new stream");
-      return false;
-    }
-  }
-  rate_ = sample_rate;
+  abort();
+  rate_ = sample_rate;  // applied by the writer task before it next enables the channel
   open_ = true;
   draining_ = false;
   return true;
@@ -178,19 +172,17 @@ void I2sSpeaker::end() {
 void I2sSpeaker::abort() {
   open_ = false;
   draining_ = false;
-  flush_done_ = false;
   flush_ = true;
 }
 
 bool I2sSpeaker::busy() const {
-  return open_ || draining_ || !flush_done_.load() || (buffer_ && xStreamBufferBytesAvailable(buffer_) > 0);
+  return open_ || draining_ || (buffer_ && xStreamBufferBytesAvailable(buffer_) > 0);
 }
 
 void I2sSpeaker::task(void* arg) {
   // Owns every channel state change (enable, disable, clock) so the app task never races it.
   auto* self = static_cast<I2sSpeaker*>(arg);
   int16_t chunk[kSpeakerChunk];
-  int16_t stereo[kSpeakerChunk];
   bool enabled = false;
   uint32_t applied_rate = self->rate_.load();
   hg::SpeakerUnderruns gaps;
@@ -200,10 +192,8 @@ void I2sSpeaker::task(void* arg) {
       xStreamBufferReset(self->buffer_);
       if (enabled) {
         i2s_channel_disable(self->tx_);
-        self->set_pa(false);
         enabled = false;
       }
-      self->flush_done_ = true;
     }
     size_t got = xStreamBufferReceive(self->buffer_, chunk, sizeof(chunk), pdMS_TO_TICKS(20));
     if (got == 0) {
@@ -213,7 +203,6 @@ void I2sSpeaker::task(void* arg) {
         if (enabled) {
           log_underruns(TAG, gaps.finish());
           i2s_channel_disable(self->tx_);
-          self->set_pa(false);
           enabled = false;
         }
       }
@@ -226,44 +215,14 @@ void I2sSpeaker::task(void* arg) {
         i2s_std_clk_config_t clk = I2S_STD_CLK_DEFAULT_CONFIG(want);
         if (i2s_channel_reconfig_std_clock(self->tx_, &clk) == ESP_OK) applied_rate = want;
       }
-      self->set_pa(true);
-      const esp_err_t enable_err = i2s_channel_enable(self->tx_);
-      if (enable_err != ESP_OK) {
-        self->set_pa(false);
-        ESP_LOGE(TAG, "I2S channel enable failed: %s", esp_err_to_name(enable_err));
-        continue;
-      }
+      i2s_channel_enable(self->tx_);
       enabled = true;
     }
-    const size_t n = got / sizeof(int16_t);
-    const int vol = self->volume_.load();
-    if (self->stereo_) {
-      size_t offset = 0;
-      while (offset < n) {
-        const size_t consumed = hg::mono_to_stereo(chunk + offset, n - offset, stereo, kSpeakerChunk);
-        if (!consumed) break;
-        for (size_t i = 0; i < consumed; ++i) {
-          const int16_t sample = static_cast<int16_t>(chunk[offset + i] * vol / 100);
-          stereo[2 * i] = sample;
-          stereo[2 * i + 1] = sample;
-        }
-        size_t written = 0;
-        const size_t requested = consumed * 2 * sizeof(int16_t);
-        const esp_err_t write_err = i2s_channel_write(self->tx_, stereo, requested, &written, 200);
-        if (write_err != ESP_OK || written != requested)
-          ESP_LOGW(TAG, "I2S short stereo write: requested=%u written=%u err=%s",
-                   static_cast<unsigned>(requested), static_cast<unsigned>(written), esp_err_to_name(write_err));
-        offset += consumed;
-      }
-    } else {
-      for (size_t i = 0; i < n; ++i) chunk[i] = static_cast<int16_t>(chunk[i] * vol / 100);
-      size_t written = 0;
-      const size_t requested = n * sizeof(int16_t);
-      const esp_err_t write_err = i2s_channel_write(self->tx_, chunk, requested, &written, 200);
-      if (write_err != ESP_OK || written != requested)
-        ESP_LOGW(TAG, "I2S short write: requested=%u written=%u err=%s",
-                 static_cast<unsigned>(requested), static_cast<unsigned>(written), esp_err_to_name(write_err));
-    }
+    size_t n = got / sizeof(int16_t);
+    int vol = self->volume_.load();
+    for (size_t i = 0; i < n; ++i) chunk[i] = static_cast<int16_t>(chunk[i] * vol / 100);
+    size_t written = 0;
+    i2s_channel_write(self->tx_, chunk, n * sizeof(int16_t), &written, pdMS_TO_TICKS(200));
   }
 }
 

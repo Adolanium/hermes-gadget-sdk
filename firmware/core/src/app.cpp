@@ -1,7 +1,6 @@
 #include "hg/app.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -108,8 +107,7 @@ void App::load_settings() {
   server_url_ = setting("server", profile_.default_server_url);
   access_token_ = setting("token", profile_.default_access_token);
   talk_mode_ = setting("talk_mode", "hold") == "tap" ? TalkMode::Tap : TalkMode::Hold;
-  const std::string default_volume = std::to_string(profile_.default_volume);
-  int vol = std::atoi(setting("volume", default_volume).c_str());
+  int vol = std::atoi(setting("volume", "70").c_str());
   volume_ = static_cast<uint8_t>(std::max(0, std::min(100, vol)));
   if (hal_.speaker) hal_.speaker->set_volume(volume_);
   brightness_ = static_cast<uint8_t>(std::max(5, std::min(100, std::atoi(setting("brightness", "100").c_str()))));
@@ -538,9 +536,8 @@ void App::h_audio_start(const json::Value& m) {
   wake_display();
   if (settings_open()) close_settings();
   if (!hal_.speaker || mode_ == Mode::Listening) return;
-  const uint32_t rate = static_cast<uint32_t>(m["rate"].as_int(profile_.speaker_rate));
-  const std::string format(m["format"].str_or("pcm16"));
-  if (format != "pcm16") {
+  uint32_t rate = static_cast<uint32_t>(m["rate"].as_int(profile_.speaker_rate));
+  if (m["format"].str_or("pcm16") != "pcm16") {
     log(LogLevel::Warn, "unsupported audio format");
     return;
   }
@@ -549,11 +546,7 @@ void App::h_audio_start(const json::Value& m) {
     return;
   }
   in_stream_ = static_cast<int>(m["stream"].as_int(0));
-  audio_rx_ = {};
-  audio_rx_.rate = rate;
   last_turn_rx_ = now();
-  log(LogLevel::Info, "[GADGET-AUDIO-01] start stream=" + std::to_string(in_stream_) +
-                      " rate=" + std::to_string(rate) + " format=" + format);
   status_.clear();  // audible reply: the working-state phrase is over
   if (mode_ != Mode::Responding) {
     mode_ = Mode::Responding;
@@ -564,17 +557,6 @@ void App::h_audio_start(const json::Value& m) {
 void App::h_audio_end(const json::Value& m) {
   if (in_stream_ < 0 || m["stream"].as_int(-1) != in_stream_) return;
   hal_.speaker->end();
-  const uint32_t rms_value = audio_rx_.samples
-      ? static_cast<uint32_t>(std::sqrt(audio_rx_.sum_squares / audio_rx_.samples)) : 0;
-  log(LogLevel::Info, "[GADGET-AUDIO-01] end stream=" + std::to_string(in_stream_) +
-                      " rate=" + std::to_string(audio_rx_.rate) +
-                      " frames=" + std::to_string(audio_rx_.frames) +
-                      " bytes=" + std::to_string(audio_rx_.bytes) +
-                      " samples=" + std::to_string(audio_rx_.samples) +
-                      " gaps=" + std::to_string(audio_rx_.sequence_gaps) +
-                      " odd_payloads=" + std::to_string(audio_rx_.odd_payloads) +
-                      " peak=" + std::to_string(audio_rx_.peak) +
-                      " rms=" + std::to_string(rms_value));
   in_stream_ = -1;
 }
 
@@ -602,23 +584,9 @@ void App::on_transport_binary(const uint8_t* data, size_t len) {
   }
   if (f.channel == proto::Channel::Audio) {
     if (in_stream_ < 0 || f.stream != in_stream_ || !hal_.speaker) return;
-    if ((audio_rx_.has_sequence && f.seq != audio_rx_.next_sequence) ||
-        (!audio_rx_.has_sequence && f.seq != 0)) ++audio_rx_.sequence_gaps;
-    audio_rx_.next_sequence = static_cast<uint16_t>(f.seq + 1);
-    audio_rx_.has_sequence = true;
-    ++audio_rx_.frames;
-    audio_rx_.bytes += static_cast<uint32_t>(f.payload_len);
-    if (f.payload_len % sizeof(int16_t)) ++audio_rx_.odd_payloads;
-    const size_t n = f.payload_len / sizeof(int16_t);
+    size_t n = f.payload_len / 2;
     pcm_buf_.resize(n);
-    std::memcpy(pcm_buf_.data(), f.payload, n * sizeof(int16_t));  // payload may be unaligned
-    for (int16_t sample : pcm_buf_) {
-      const int32_t value = sample;
-      const uint32_t magnitude = static_cast<uint32_t>(value < 0 ? -value : value);
-      audio_rx_.peak = std::max(audio_rx_.peak, magnitude);
-      audio_rx_.sum_squares += static_cast<double>(value) * value;
-      ++audio_rx_.samples;
-    }
+    std::memcpy(pcm_buf_.data(), f.payload, n * 2);  // payload may be unaligned
     hal_.speaker->write(pcm_buf_.data(), n);
     return;
   }
@@ -1022,33 +990,8 @@ void App::cancel_turn() {
 
 void App::on_mic_samples(const int16_t* samples, size_t count) {
   if (hardware_check_ == HardwareCheck::Microphone) {
-    if (!profile_.mic_loopback_check) {
-      level_ = level_percent(rms(samples, count));
-      update_model();
-      return;
-    }
-    const size_t target = (profile_.mic_rate ? profile_.mic_rate : 16000) * 3;
-    const size_t remaining = target > mic_loopback_buf_.size() ? target - mic_loopback_buf_.size() : 0;
-    const size_t captured = std::min(count, remaining);
-    if (captured > 0) {
-      mic_loopback_buf_.insert(mic_loopback_buf_.end(), samples, samples + captured);
-      const double chunk_rms = rms(samples, captured);
-      mic_meter_energy_ += chunk_rms * chunk_rms * captured;
-      mic_meter_samples_ += captured;
-    }
-    const uint32_t t = now();
-    if (mic_meter_samples_ > 0 &&
-        (!mic_meter_smoothed_ || t - mic_meter_update_at_ >= 100 || mic_loopback_buf_.size() >= target)) {
-      const double average_rms = std::sqrt(mic_meter_energy_ / mic_meter_samples_);
-      const uint8_t reading = level_percent(static_cast<float>(average_rms));
-      level_ = mic_meter_smoothed_ ? static_cast<uint8_t>((3 * level_ + reading + 2) / 4) : reading;
-      mic_meter_smoothed_ = true;
-      mic_meter_update_at_ = t;
-      mic_meter_energy_ = 0.0;
-      mic_meter_samples_ = 0;
-      update_model();
-    }
-    if (mic_loopback_buf_.size() >= target) play_mic_loopback();
+    level_ = level_percent(rms(samples, count));
+    update_model();
     return;
   }
   if (mode_ != Mode::Listening || count == 0) return;
@@ -1193,7 +1136,7 @@ void App::flush_sensors() {
   for (const auto& kv : sensors_) s.set(kv.first, kv.second);
   if (hal_.power) {
     s.set("power_available", power_status_ ? 1 : 0);
-    for (const char* key : {"battery_present", "battery_mv", "battery_percent", "charging", "external_power", "battery_adc_mv", "battery_state", "battery_led_state"})
+    for (const char* key : {"battery_present", "battery_mv", "battery_percent", "charging", "external_power"})
       s.set(key, json::Value());
     if (power_status_) {
       const auto& p = *power_status_;
@@ -1202,9 +1145,6 @@ void App::flush_sensors() {
       if (p.battery_percent) s.set("battery_percent", *p.battery_percent);
       if (p.charging) s.set("charging", *p.charging ? 1 : 0);
       if (p.external_power) s.set("external_power", *p.external_power ? 1 : 0);
-      if (p.battery_adc_mv) s.set("battery_adc_mv", *p.battery_adc_mv);
-      if (p.battery_state) s.set("battery_state", battery_charge_state_name(*p.battery_state));
-      if (p.battery_led_state) s.set("battery_led_state", battery_led_state_name(*p.battery_led_state));
     }
   }
   json::Value msg = proto::message("state");

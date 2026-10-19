@@ -53,7 +53,7 @@ struct RgbPanelConfig {
   RgbTimings timings{};   // panel scanout timings (per-datasheet)
 };
 
-// MIPI-DSI panel settings for the CrowPanel Advanced P4. DSI uses fixed SoC pins.
+// MIPI-DSI panel settings for the CrowPanel Advanced P4; DSI pins are SoC-dedicated.
 struct DsiPanelConfig {
   int lanes = 2;
   int lane_bit_rate_mbps = 900;
@@ -65,7 +65,7 @@ struct DsiPanelConfig {
   uint16_t vsync_pulse_width = 10, vsync_back_porch = 23, vsync_front_porch = 12;
 };
 
-enum class LcdController { St7789, Box3, CoreS3, St77916, Gc9a01 };
+enum class LcdController { St7789, Box3, CoreS3, St77916, Gc9a01, Sh8601 };
 
 // Which vendor initialization table an ST77916 panel gets. Waveshare's 1.85C
 // tables are chosen by the panel ID the driver reads; the ESP-VoCat's glass
@@ -95,28 +95,35 @@ struct LcdConfig {
   bool bgr = false;  // the panel's color filter is BGR (SpiDisplay)
   int d1 = -1, d2 = -1, d3 = -1;  // QSPI data0 uses mosi
   bool round = false;
+  uint8_t font_scale = 1;  // UI text scale multiplier, clamped so the scale stays 1..4 (hg::DisplayInfo)
 };
 
 struct I2sMicConfig {
   bool enabled = false;
   int sck = -1, ws = -1, sd = -1;
-  bool pdm = false;  // use I2S PDM RX instead of standard-mode I2S
+  bool pdm = false;  // PDM mic: sck carries the PDM clock, sd the data; ws unused
 };
 
 struct I2sSpeakerConfig {
   bool enabled = false;
   int bclk = -1, ws = -1, dout = -1;
-  int pa = -1;  // external amplifier-enable GPIO; -1 when absent
+};
+
+// P4-only speaker controls; the pin tuple remains in I2sSpeakerConfig.
+struct P4SpeakerConfig {
+  bool enabled = false;
+  int i2s_port = 1;
+  int pa = -1;
   bool pa_active_low = false;
   bool stereo = false;
   bool left_align = false;
-  int i2s_port = 0;  // default preserves the existing boards
 };
 
 // Which vendor bring-up table a CO5300 panel needs. The round 466x466 1.75"
 // modules write extra page-2 registers; the rectangular 368x448 1.8" module,
 // the 410x502 2.06" watch and the 480x480 2.16" board use the shorter tables
 // from Waveshare's board support packages.
+
 enum class AmoledPanel { Co5300_466, Co5300_368, Co5300_410, Co5300_480 };
 
 // QSPI AMOLED with a CO5300 controller (round 466x466, rectangular 368x448 or 410x502).
@@ -212,6 +219,9 @@ struct ButtonConfig {
 // A quadrature rotary encoder on two GPIOs. Each detent is an Up or Down press.
 struct EncoderConfig {
   int a = -1, b = -1;  // -1 = absent
+  // Mouse-wheel style encoder: one low pulse per detent on exactly one channel,
+  // and the channel picks the direction. False = classic quadrature.
+  bool pulse_per_detent = false;
 };
 
 // A battery behind a resistive divider, with a latch that keeps it powered.
@@ -238,6 +248,7 @@ struct BoardConfig {
   LcdConfig lcd;
   I2sMicConfig mic;
   I2sSpeakerConfig speaker;
+  P4SpeakerConfig p4_speaker;
   ButtonConfig buttons;
   EncoderConfig encoder;
   AmoledConfig amoled;
@@ -249,7 +260,7 @@ struct BoardConfig {
   PowerRail power_rails[2];
   uint16_t power_rails_settle_ms = 0;  // wait after switching the rails on
   bool axp2101 = false;
-  bool stc8_battery = false;  // CrowPanel P4 companion controller on the shared I2C bus
+  bool stc8_battery = false;  // CrowPanel P4 STC8 companion on the shared I2C0 bus
   bool axp_audio_supply = false;
   bool axp_power_key = false;  // PWR reaches only the AXP2101: read its short press there
   // Light sleep while dozing (hg::System::set_dozing): on battery with the screen
@@ -264,8 +275,6 @@ struct BoardConfig {
   bool bluetooth = false;
   LatchPowerConfig latch_power;
   int status_led = -1;
-  uint8_t default_volume = 70;
-  bool mic_loopback_check = false;
   const char* talk_label = "TALK";
   const char* cancel_label = "CANCEL";
 };

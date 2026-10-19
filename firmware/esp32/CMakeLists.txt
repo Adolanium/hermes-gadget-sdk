@@ -11,8 +11,8 @@ set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../core")
 # esp_wifi_remote, whose Kconfig does `orsource ./idf_v$ESP_IDF_VERSION/...`.
 # If ESP_IDF_VERSION is unset the slave-target choice never parses and the
 # build dies with `#error "Unknown Slave Target"`. idf.py/export.sh do not
-# always export it (a shallow clone also lacks version.txt), so derive it here
-# from version.txt / esp_idf_version.h as major.minor before Kconfig runs.
+# always export it, so derive major.minor from IDF_PATH/version.txt before
+# Kconfig runs. The regex below accepts the leading `v` in tags such as v6.1.0.
 if(NOT DEFINED ENV{ESP_IDF_VERSION} AND DEFINED ENV{IDF_PATH})
     set(_hg_idf_ver "")
     foreach(_hg_vf "$ENV{IDF_PATH}/version.txt")

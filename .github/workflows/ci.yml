@@ -102,7 +102,7 @@ jobs:
         run: pip install -e ".[dev,images,display,mqtt]"
       - name: Build the simulator library
         run: hermes-gadget build-sim
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7; the installer's console client runs against the simulator core
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7; the installer's console client runs against the simulator core
         with:
           node-version: 22
       - name: Install virtual display
@@ -136,7 +136,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7
         with:
           node-version: 22
           cache: npm
@@ -189,3 +189,15 @@ jobs:
           name: firmware-${{ matrix.board }}
           path: firmware/esp32/dist/
           if-no-files-found: error
+  esp32p4:
+    name: ESP32-P4 firmware (ESP-IDF 6.1.0)
+    runs-on: ubuntu-24.04
+    container: espressif/idf:v6.1@sha256:f81b6e077e6af93c312181cd7d4e7936cfbafc5c7f77cbacba8fdd34994f218a
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - name: Build CrowPanel P4
+        working-directory: firmware/esp32
+        run: |
+          idf.py -B build/crowpanel-p4-101 -D SDKCONFIG=build/crowpanel-p4-101/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/crowpanel-p4-101/sdkconfig.defaults" set-target esp32p4
+          idf.py -B build/crowpanel-p4-101 -D SDKCONFIG=build/crowpanel-p4-101/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/crowpanel-p4-101/sdkconfig.defaults" build

@@ -23,7 +23,6 @@
 #include "shared_reply.hpp"
 #include "speaker_pa.hpp"
 #include "speaker_underruns.hpp"
-#include "stc8_battery.hpp"
 #include "tag_scanner.hpp"
 #include "wifi_fast.hpp"
 #include "wifi_pick.hpp"
@@ -40,6 +39,7 @@
 #include "soc/soc_caps.h"
 #if SOC_MIPI_DSI_SUPPORTED
 #include "esp_lcd_mipi_dsi.h"
+#include "stc8_battery.hpp"
 #endif
 #include "esp_lcd_io_i80.h"
 #include "esp_lcd_types.h"
@@ -209,7 +209,7 @@ class RgbDisplay final : public hg::Display {
 };
 
 #if SOC_MIPI_DSI_SUPPORTED
-// CrowPanel P4 MIPI-DSI panel. Only compiled on a target with a DSI host.
+// CrowPanel Advanced P4 MIPI-DSI panel. DSI pins are dedicated SoC peripherals.
 class DsiDisplay final : public hg::Display {
  public:
   bool begin(const LcdConfig& cfg, const DsiPanelConfig& dsi);
@@ -218,7 +218,6 @@ class DsiDisplay final : public hg::Display {
   void flush(uint16_t y0, uint16_t y1) override;
   void set_backlight(uint8_t percent) override;
   const char* controller_name() const { return "ek79007-dsi"; }
-  const std::atomic<uint32_t>& flush_counter() const { return flushes_; }
 
  private:
   static bool on_color_done(esp_lcd_panel_handle_t panel, esp_lcd_dpi_panel_event_data_t* event, void* ctx);
@@ -266,25 +265,10 @@ class I2sMic final : public hg::AudioIn {
   static void task(void* arg);
   i2s_chan_handle_t rx_ = nullptr;
   uint32_t rate_ = 16000;
+  bool pdm_ = false;  // PDM capture yields 16-bit samples; I2S yields 32-bit
   std::atomic<bool> capturing_{false};
 };
 
-#if SOC_MIPI_DSI_SUPPORTED
-// PDM microphone on the ESP32-P4 I2S PDM RX peripheral.
-class PdmMic final : public hg::AudioIn {
- public:
-  bool begin(const I2sMicConfig& cfg);
-  bool start(uint32_t sample_rate) override;
-  void stop() override;
-  float loopback_gain() const override { return 10.0f; }
-
- private:
-  static void task(void* arg);
-  i2s_chan_handle_t rx_ = nullptr;
-  uint32_t rate_ = 16000;
-  std::atomic<bool> capturing_{false};
-};
-#endif
 // I2S amplifier fed from a stream buffer by a writer task.
 // Speaker tasks time their underruns (speaker_underruns.hpp) with this clock and log
 // them in one line when a stream has finished playing (port_audio.cpp).
@@ -294,6 +278,29 @@ void log_underruns(const char* tag, const hg::SpeakerUnderruns::Totals& t);
 class I2sSpeaker final : public hg::AudioOut {
  public:
   bool begin(const I2sSpeakerConfig& cfg);
+  bool begin(uint32_t sample_rate) override;
+  void write(const int16_t* samples, size_t count) override;
+  void end() override;
+  void abort() override;
+  bool busy() const override;
+  void set_volume(uint8_t percent) override { volume_ = percent; }
+
+ private:
+  static void task(void* arg);
+  i2s_chan_handle_t tx_ = nullptr;
+  StreamBufferHandle_t buffer_ = nullptr;
+  std::atomic<uint32_t> rate_{16000};
+  std::atomic<bool> open_{false};
+  std::atomic<bool> draining_{false};
+  std::atomic<bool> flush_{false};
+  std::atomic<uint8_t> volume_{70};
+};
+
+#if SOC_MIPI_DSI_SUPPORTED
+// P4-only I2S speaker path with stereo framing and amplifier control.
+class P4I2sSpeaker final : public hg::AudioOut {
+ public:
+  bool begin(const I2sSpeakerConfig& pins, const P4SpeakerConfig& cfg);
   bool begin(uint32_t sample_rate) override;
   void write(const int16_t* samples, size_t count) override;
   void end() override;
@@ -313,11 +320,11 @@ class I2sSpeaker final : public hg::AudioOut {
   std::atomic<bool> flush_done_{true};
   int pa_ = -1;
   bool pa_active_low_ = false;
-  bool stereo_ = false;
-  bool left_align_ = false;
+  bool stereo_ = true;
+  bool left_align_ = true;
   std::atomic<uint8_t> volume_{70};
 };
-
+#endif
 // I80 (8-bit parallel) ST7789 panel via esp_lcd. Panels on LCD modules that
 // wire the controller to a parallel bus rather than SPI, e.g. LilyGO's
 // T-Display-S3. Same framebuffer and bounce-buffer scheme as SpiDisplay.
@@ -506,10 +513,13 @@ class TouchInput {
   bool begin_box_touch(i2c_master_bus_handle_t bus);
   void gate_on_int();
   static void on_int(void* arg);
+  static void on_encoder_edge(void* arg);  // IRAM: steps the quadrature decoder per edge
+  static void on_encoder_a_edge(void* arg);  // IRAM: pulse-per-detent channel A
+  static void on_encoder_b_edge(void* arg);  // IRAM: pulse-per-detent channel B
+  void IRAM_ATTR encoder_pulse(int8_t channel);  // +1 = channel A, -1 = channel B; direction maps at post
   bool may_read(bool was_touching);
   void wait(uint32_t ms);
   bool read_key(bool& pressed);
-  bool sample_encoder(int& direction);
   TouchConfig touch_{};
   ExpanderKeyConfig key_{};
   i2c_master_dev_handle_t touch_dev_ = nullptr;
@@ -520,10 +530,16 @@ class TouchInput {
   void* task_ = nullptr;                  // the touch task, woken by an edge
   gpio_num_t encoder_a_ = GPIO_NUM_NC;
   gpio_num_t encoder_b_ = GPIO_NUM_NC;
-  uint8_t encoder_state_ = 0;
-  int8_t encoder_accumulator_ = 0;
+  volatile uint8_t encoder_state_ = 0;      // last A/B sample (ISR-written)
+  volatile int8_t encoder_accumulator_ = 0;  // quadrature steps toward the next detent (ISR-written)
+  std::atomic<int8_t> encoder_pending_{0};   // whole detents waiting for the task to post
+  bool encoder_pulse_per_detent_ = false;    // knob-ring encoder: channel = direction
+  volatile int8_t encoder_first_ = 0;        // leading channel of the current detent (0 = idle)
+  volatile int64_t encoder_pair_deadline_us_ = 0;  // solo-pulse timeout (task checks it)
+  volatile int64_t last_edge_us_ = INT64_MIN;  // per-edge debounce (ISR-written)
 };
 
+#if SOC_MIPI_DSI_SUPPORTED
 class Stc8Power final : public hg::Power {
  public:
   Stc8Power();
@@ -535,9 +551,8 @@ class Stc8Power final : public hg::Power {
  private:
   i2c_master_dev_handle_t dev_ = nullptr;
   hg::Stc8Battery chip_;
-  bool read_result_seen_ = false;
-  bool last_read_ok_ = false;
 };
+#endif
 
 class AxpPower final : public hg::Power {
  public:
@@ -726,8 +741,6 @@ struct Parts {
   bool touch = false;
   bool key = false;
   i2c_master_bus_handle_t i2c = nullptr;  // scanned by `diag`
-  uint32_t display_flushes = 0;
-  const std::atomic<uint32_t>* flush_counter = nullptr;
 };
 
 // Starts keeping a RAM copy of recent log lines. Call first in app_main.
