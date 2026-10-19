@@ -64,6 +64,8 @@ After confirming a compatible single-cell 3.7 V Li-ion battery is fitted, opt in
 
 Select **Power off** twice to lower GPIO 2 and disconnect battery power. **USB continues to power the board.** Disconnect USB to turn it off, and hold PWR to turn it back on from battery. BOOT and PLUS retain their TALK and CANCEL roles. The optional screen timeout dims and darkens the display while keeping Wi-Fi connected.
 
+While the screen is dark, on battery and idle, the chip dozes: the CPU drops to 80 MHz when idle at any time, and while dozing it takes light sleep between Wi-Fi beacons, waking every 100 ms to read the keys and, on the touch version, the touchscreen. The battery latch, the panel's control lines and the amplifier enable keep their level through light sleep. Light sleep never runs while a USB host is connected (the console and JTAG would stop), so a doze shows only on battery.
+
 Wiring follows the [Waveshare schematic](https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-1.54/ESP32-S3-LCD-1.54-Schematic.pdf). For physical verification, compare the displayed voltage with a meter, test with and without a battery, check the charging signal, and test shutdown separately with USB and battery power. Record the board revision in the [hardware checklist](hardware-validation.md).
 
 **Build and flash it** with PlatformIO (`pio run -e esp32s3-lcd-154 -t upload -t monitor`) or with `idf.py`:
@@ -520,6 +522,8 @@ The touchscreen has an I2C bus of its own, so the profile sets `touch.bus` and t
 The settings menu's **Battery and power** page shows the calibrated battery voltage and the charging signal. The divider ratio of two is inferred from upstream's battery table (raw 1980 to 2480 at 12 dB, about 3.1 to 4.0 V at the cell), not measured with a meter. The charge signal reads high while charging (`latch_power.charging_active_high`). This board has no fuel gauge; a percentage needs the opt-in estimate described under [device settings](using-gadget.md#device-settings-and-hardware-checks).
 
 The board reports external power while the charging signal is high or a USB host is connected to the USB-C port (`latch_power.usb_external_power`), and battery otherwise, so Wi-Fi modem sleep applies on battery. A USB charger without data that has finished charging counts as battery.
+
+While the screen is dark, on battery and idle, the chip dozes: the CPU drops to 80 MHz when idle at any time, and while dozing it takes light sleep between Wi-Fi beacons, waking every 100 ms to read the keys and the touchscreen. The battery latch, the panel's control lines and the amplifier enable keep their level through light sleep. Light sleep never runs while a USB host is connected (the console and JTAG would stop), so a doze shows only on battery.
 
 Upstream also writes `0xBB 0x38` (VCOM) to the panel; this profile keeps the ST7789 default.
 

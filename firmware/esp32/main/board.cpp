@@ -397,6 +397,7 @@ BoardConfig make() {
   b.buttons = {0, 4, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "PLUS";
+  b.light_sleep = true;  // dozing on battery; keep_pins_through_sleep holds the latch and panel
   return b;
 }
 #elif CONFIG_HG_BOARD_BOX3
@@ -644,6 +645,7 @@ BoardConfig make() {
   b.buttons = {0, -1, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";
+  b.light_sleep = true;  // dozing on battery; keep_pins_through_sleep holds the latch and panel
   return b;
 }
 #elif CONFIG_HG_BOARD_SPOTPEAR_BOX128
