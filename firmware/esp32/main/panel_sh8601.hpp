@@ -1,7 +1,9 @@
-// SPDX-License-Identifier: Apache-2.0
 // SH8601 initialization values for the Waveshare ESP32-S3-Knob-Touch-LCD-1.8,
-// from the community roon-knob port (muness/roon-knob, idf_app/main/platform_display_idf.c),
-// which took them from the board's reference example. Byte-string form per house style.
+// from Waveshare's ESP-IDF demo (ESP32-S3-Knob-Touch-LCD-1.8-Demo.zip on the
+// board's wiki, ESP-IDF/08_LVGL_Test/main/main.c, lcd_init_cmds). The demo carries
+// no license, so only these register values are used: C++ byte-string payloads,
+// the demo's unrotated 0x36 entry; values, order and delays unchanged.
+// Source: THIRD_PARTY_NOTICES.md, NOTICE.
 #pragma once
 #include "esp_lcd_sh8601.h"
 namespace hgp {

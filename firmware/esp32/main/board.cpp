@@ -321,12 +321,11 @@ BoardConfig make() {
   return b;
 }
 #elif CONFIG_HG_BOARD_WS_KNOB_LCD_18
-// Waveshare ESP32-S3-Knob-Touch-LCD-1.8: round 360x360 LCD (ST77916, QSPI,
-// the same panel family as the 1.85C V2), CST816S touch, one I2S MEMS
-// microphone, rotary encoder, battery + DRV2605 haptics. The PCM5100A DAC
-// hangs off the board's secondary ESP32, so this port is display + microphone
-// only: replies are shown as text, never spoken. Pins: Waveshare wiki
-// schematic and the community ESPHome configs (nkinnan, patrick3399, KrX3D).
+// Waveshare ESP32-S3-Knob-Touch-LCD-1.8: round 360x360 SH8601 QSPI LCD, CST816S
+// touch, one PDM microphone, rotary encoder, battery + DRV2605 haptics. This port
+// doesn't drive the PCM5100A headphone DAC, so it is display + microphone only:
+// replies are shown as text, never spoken. Pins: Waveshare's ESP-IDF demo
+// (08_LVGL_Test, 04_Encoder_Test and 07_Audio_Test user_config.h); see NOTICE.
 BoardConfig make() {
   BoardConfig b{};
   b.name = kBoardName;

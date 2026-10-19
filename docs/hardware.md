@@ -122,16 +122,16 @@ References: [Waveshare V2 documentation](https://docs.waveshare.com/ESP32-S3-Tou
 
 ## Waveshare ESP32-S3-Knob-Touch-LCD-1.8
 
-Use `esp32s3-knob-touch-lcd-1.8` for the knob board: an ESP32-S3R8 with 16 MB flash and 8 MB octal PSRAM, a round 360×360 SH8601 LCD over QSPI (the same panel the factory EmbeddedWizard demo drives, despite Waveshare listing an ST77916-style panel family for the 1.85C V2), CST816S touch, one I2S MEMS microphone, a rotary encoder around the screen, a DRV2605 haptic driver and a Li-ion battery with charging management.
+Use `esp32s3-knob-touch-lcd-1.8` for the knob board: an ESP32-S3R8 with 16 MB flash and 8 MB octal PSRAM, a round 360×360 SH8601 LCD over QSPI (not the ST77916 of the 1.85C V2), CST816S touch, one PDM microphone, a rotary encoder around the screen, a DRV2605 haptic driver and a Li-ion battery with charging management.
 
-**This port is text-only.** The board's PCM5100A DAC and headphone jack hang off the board's secondary ESP32 (the one that also ships the factory Bluetooth audio firmware), not the S3, so replies are shown on the screen and never spoken. The clone Guition JC3636K518 uses the same hardware and should work the same way. This port is experimental; display, touch and microphone were verified on hardware (360×360 round, hold-to-talk).
+**This port is text-only.** It doesn't drive the board's PCM5100A DAC and 3.5 mm headphone jack, so replies are shown on the screen and never spoken. Waveshare's ESP-IDF audio demo plays through that DAC from the S3 (I2S BCLK 39, WS 40, DOUT 41); this port has not tried it. The clone Guition JC3636K518 uses the same hardware and should work the same way. This port is experimental; display, touch and microphone were verified on hardware (360×360 round, hold-to-talk).
 
 | Part | Connection |
 |---|---|
 | SH8601 LCD, QSPI | CS 14, clock 13, D0–D3 15/16/17/18, reset 21, backlight 47 (LEDC) |
 | CST816S touch | I2C 0x15, INT 9, reset 10 |
 | I2C | SDA 11, SCL 12, 400 kHz |
-| I2S MEMS microphone | BCLK 42, WS 45, DIN 46 |
+| PDM microphone | CLK 45, DATA 46 |
 | Rotary encoder | A 8, B 7 (each detent scrolls; the knob's push button is not wired) |
 | BOOT | GPIO 0, TALK |
 
@@ -143,6 +143,8 @@ pio run -e esp32s3-knob-touch-lcd-18 -t upload -t monitor
 ```
 
 For ESP-IDF, use `SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp32s3-knob-touch-lcd-1.8/sdkconfig.defaults"` with a separate build directory and sdkconfig. The USB-C port handles flashing and the serial console (115200 baud); flipping the cable flashes the other MCU. The `sim-360x360-knob` simulator board has the same screen and audio capabilities.
+
+References: [Waveshare wiki](https://www.waveshare.com/wiki/ESP32-S3-Knob-Touch-LCD-1.8) and its [ESP-IDF and Arduino demo](https://files.waveshare.com/wiki/ESP32-S3-Knob-Touch-LCD-1.8/ESP32-S3-Knob-Touch-LCD-1.8-Demo.zip), the source of the pins above and the SH8601 initialization table. The table's source is listed in [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
 
 ### First flash: what to check
 
