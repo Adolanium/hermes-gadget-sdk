@@ -83,6 +83,8 @@ menu "Hermes Gadget"
             bool "Waveshare ESP32-S3-LCD-1.54 (ST7789 240x240, ES8311 + ES7210 codecs)"
         config HG_BOARD_WS_ESP32S3_TOUCH_LCD_185C_V2
             bool "Waveshare ESP32-S3-Touch-LCD-1.85C V2 (experimental, ST77916, CST816, codecs)"
+        config HG_BOARD_WS_KNOB_LCD_18
+            bool "Waveshare ESP32-S3-Knob-Touch-LCD-1.8 (SH8601 360x360 round, encoder, text-only audio)"
         config HG_BOARD_ESP_VOCAT
             bool "Espressif ESP-VoCat v1.2 (experimental, ST77916 360x360, CST816S, ES8311 + ES7210)"
         config HG_BOARD_T_DISPLAY_S3

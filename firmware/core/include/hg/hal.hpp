@@ -26,6 +26,9 @@ struct DisplayInfo {
   // A circular panel (width == height). The UI keeps to the square inscribed
   // in the circle and leaves the rest dark.
   bool round = false;
+  // Multiplier on the UI's automatic font scale, for panels small enough that
+  // the automatic pick reads as too small. The UI clamps the final scale.
+  uint8_t font_scale = 1;
   // Extra left and right padding for the top bar's text, for a rectangular
   // panel with rounded corners.
   uint8_t corner_inset = 0;

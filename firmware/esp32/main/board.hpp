@@ -53,7 +53,7 @@ struct RgbPanelConfig {
   RgbTimings timings{};   // panel scanout timings (per-datasheet)
 };
 
-enum class LcdController { St7789, Box3, CoreS3, St77916, Gc9a01 };
+enum class LcdController { St7789, Box3, CoreS3, St77916, Gc9a01, Sh8601 };
 
 // Which vendor initialization table an ST77916 panel gets. Waveshare's 1.85C
 // tables are chosen by the panel ID the driver reads; the ESP-VoCat's glass
@@ -82,11 +82,13 @@ struct LcdConfig {
   bool bgr = false;  // the panel's color filter is BGR (SpiDisplay)
   int d1 = -1, d2 = -1, d3 = -1;  // QSPI data0 uses mosi
   bool round = false;
+  uint8_t font_scale = 1;  // UI text scale multiplier, clamped so the scale stays 1..4 (hg::DisplayInfo)
 };
 
 struct I2sMicConfig {
   bool enabled = false;
   int sck = -1, ws = -1, sd = -1;
+  bool pdm = false;  // PDM mic: sck carries the PDM clock, sd the data; ws unused
 };
 
 struct I2sSpeakerConfig {
@@ -193,6 +195,9 @@ struct ButtonConfig {
 // A quadrature rotary encoder on two GPIOs. Each detent is an Up or Down press.
 struct EncoderConfig {
   int a = -1, b = -1;  // -1 = absent
+  // Mouse-wheel style encoder: one low pulse per detent on exactly one channel,
+  // and the channel picks the direction. False = classic quadrature.
+  bool pulse_per_detent = false;
 };
 
 // A battery behind a resistive divider, with a latch that keeps it powered.
