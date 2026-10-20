@@ -36,6 +36,11 @@
 #include "esp_adc/adc_cali.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_rgb.h"
+#include "soc/soc_caps.h"
+#if SOC_MIPI_DSI_SUPPORTED
+#include "esp_lcd_mipi_dsi.h"
+#include "stc8_battery.hpp"
+#endif
 #include "esp_lcd_io_i80.h"
 #include "esp_lcd_types.h"
 #include "esp_lcd_touch.h"
@@ -205,6 +210,30 @@ class RgbDisplay final : public hg::Display {
   SemaphoreHandle_t done_ = nullptr;
 };
 
+#if SOC_MIPI_DSI_SUPPORTED
+// CrowPanel Advanced P4 MIPI-DSI panel. DSI pins are dedicated SoC peripherals.
+class DsiDisplay final : public hg::Display {
+ public:
+  bool begin(const LcdConfig& cfg, const DsiPanelConfig& dsi);
+  hg::DisplayInfo info() const override;
+  uint16_t* framebuffer() override { return fb_; }
+  void flush(uint16_t y0, uint16_t y1) override;
+  void set_backlight(uint8_t percent) override;
+  const char* controller_name() const { return "ek79007-dsi"; }
+
+ private:
+  static bool on_color_done(esp_lcd_panel_handle_t panel, esp_lcd_dpi_panel_event_data_t* event, void* ctx);
+  bool wait_copy(uint32_t timeout_us);
+  LcdConfig cfg_{};
+  DsiPanelConfig dsi_{};
+  esp_lcd_dsi_bus_handle_t bus_ = nullptr;
+  esp_lcd_panel_io_handle_t io_ = nullptr;
+  esp_lcd_panel_handle_t panel_ = nullptr;
+  uint16_t* fb_ = nullptr;
+  bool use_dma2d_ = true;
+  std::atomic<uint32_t> flushes_{0};
+};
+#endif
 class SpiDisplay final : public hg::Display {
  public:
   bool begin(const LcdConfig& cfg, i2c_master_bus_handle_t bus);
@@ -269,6 +298,35 @@ class I2sSpeaker final : public hg::AudioOut {
   std::atomic<uint8_t> volume_{70};
 };
 
+#if SOC_MIPI_DSI_SUPPORTED
+// P4-only I2S speaker path with stereo framing and amplifier control.
+class P4I2sSpeaker final : public hg::AudioOut {
+ public:
+  bool begin(const I2sSpeakerConfig& pins, const P4SpeakerConfig& cfg);
+  bool begin(uint32_t sample_rate) override;
+  void write(const int16_t* samples, size_t count) override;
+  void end() override;
+  void abort() override;
+  bool busy() const override;
+  void set_volume(uint8_t percent) override { volume_ = percent; }
+
+ private:
+  static void task(void* arg);
+  void set_pa(bool on);
+  i2s_chan_handle_t tx_ = nullptr;
+  StreamBufferHandle_t buffer_ = nullptr;
+  std::atomic<uint32_t> rate_{16000};
+  std::atomic<bool> open_{false};
+  std::atomic<bool> draining_{false};
+  std::atomic<bool> flush_{false};
+  std::atomic<bool> flush_done_{true};
+  int pa_ = -1;
+  bool pa_active_low_ = false;
+  bool stereo_ = true;
+  bool left_align_ = true;
+  std::atomic<uint8_t> volume_{70};
+};
+#endif
 // I80 (8-bit parallel) ST7789 panel via esp_lcd. Panels on LCD modules that
 // wire the controller to a parallel bus rather than SPI, e.g. LilyGO's
 // T-Display-S3. Same framebuffer and bounce-buffer scheme as SpiDisplay.
@@ -453,6 +511,7 @@ class TouchInput {
  private:
   static void task(void* arg);
   bool read_touch(TouchSample& out);
+  bool begin_gt911(i2c_master_bus_handle_t bus);
   bool begin_box_touch(i2c_master_bus_handle_t bus);
   void gate_on_int();
   static void on_int(void* arg);
@@ -481,6 +540,21 @@ class TouchInput {
   volatile int64_t encoder_pair_deadline_us_ = 0;  // solo-pulse timeout (task checks it)
   volatile int64_t last_edge_us_ = INT64_MIN;  // per-edge debounce (ISR-written)
 };
+
+#if SOC_MIPI_DSI_SUPPORTED
+class Stc8Power final : public hg::Power {
+ public:
+  Stc8Power();
+  bool begin(i2c_master_bus_handle_t bus);
+  std::optional<hg::PowerStatus> read() override;
+  bool can_power_off() const override { return false; }
+  bool power_off() override { return false; }
+
+ private:
+  i2c_master_dev_handle_t dev_ = nullptr;
+  hg::Stc8Battery chip_;
+};
+#endif
 
 class AxpPower final : public hg::Power {
  public:

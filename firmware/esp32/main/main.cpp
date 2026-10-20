@@ -14,10 +14,30 @@
 #include "hg/touch.hpp"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
+#if SOC_MIPI_DSI_SUPPORTED
+#include "esp_ldo_regulator.h"
+#endif
 
 namespace {
 
 const char* TAG = "hg.main";
+
+#if SOC_MIPI_DSI_SUPPORTED
+esp_ldo_channel_handle_t g_p4_vdd_io_ldo = nullptr;
+
+bool enable_p4_vdd_io_rail() {
+  esp_ldo_channel_config_t config{};
+  config.chan_id = 4;
+  config.voltage_mv = 3300;
+  const esp_err_t err = esp_ldo_acquire_channel(&config, &g_p4_vdd_io_ldo);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "VDD_IO_5 LDO4 at 3300 mV failed: %s", esp_err_to_name(err));
+    return false;
+  }
+  ESP_LOGI(TAG, "VDD_IO_5 enabled by LDO4 at 3300 mV");
+  return true;
+}
+#endif
 
 hgp::EspSystem g_system;
 hgp::NvsStorage g_storage;
@@ -26,6 +46,11 @@ hgp::SpiDisplay g_display;
 hgp::ParallelDisplay g_parallel;
 hgp::RgbDisplay g_rgb;
 hgp::AmoledDisplay g_amoled;
+#if SOC_MIPI_DSI_SUPPORTED
+hgp::DsiDisplay g_dsi;
+hgp::P4I2sSpeaker g_p4_speaker;
+hgp::Stc8Power g_stc8_power;
+#endif
 hgp::I2sMic g_mic;
 hgp::I2sSpeaker g_speaker;
 hgp::CodecAudio g_codec;
@@ -249,12 +274,22 @@ extern "C" void app_main(void) {
   if (latch_power && board.latch_power.usb_external_power)
     g_wifi.on_battery = [] { return g_latch_power.external_power() == std::optional<bool>(false); };
   if (g_updater.capacity()) hal.updater = &g_updater;
-  i2c_master_bus_handle_t i2c_bus = hgp::i2c::bus(board.i2c);
-  const bool peripherals_ready = (!board.cores3 || g_cores3.begin(i2c_bus)) &&
+  bool io_rail_ready = true;
+#if SOC_MIPI_DSI_SUPPORTED
+  if (board.lcd.bus.type == hgp::LcdBus::Type::Dsi) io_rail_ready = enable_p4_vdd_io_rail();
+#endif
+  // GPIO45/46 belong to VDD_IO_5 on the P4; acquire LDO4 before creating I2C0.
+  i2c_master_bus_handle_t i2c_bus = io_rail_ready ? hgp::i2c::bus(board.i2c) : nullptr;
+  const bool peripherals_ready = io_rail_ready && (!board.cores3 || g_cores3.begin(i2c_bus)) &&
       (!board.expander_reset.mask || hgp::tca9554_reset(i2c_bus, board.expander_reset));
   if (board.cores3 && peripherals_ready)
     g_display.board_backlight = [](uint8_t percent) { g_cores3.set_backlight(percent); };
   if (peripherals_ready && board.lcd.enabled) {
+#if SOC_MIPI_DSI_SUPPORTED
+    if (board.lcd.bus.type == hgp::LcdBus::Type::Dsi) {
+      if (g_dsi.begin(board.lcd, board.lcd.dsi)) hal.display = &g_dsi;
+    } else
+#endif
     if (board.lcd.bus.type == hgp::LcdBus::Type::Rgb) {
       if (g_rgb.begin(board.lcd, i2c_bus)) hal.display = &g_rgb;
     } else if (board.lcd.bus.type == hgp::LcdBus::Type::I80) {
@@ -266,6 +301,11 @@ extern "C" void app_main(void) {
     hal.display = &g_amoled;
   }
   if (board.mic.enabled && g_mic.begin(board.mic)) hal.mic = &g_mic;
+#if SOC_MIPI_DSI_SUPPORTED
+  if (board.p4_speaker.enabled) {
+    if (g_p4_speaker.begin(board.speaker, board.p4_speaker)) hal.speaker = &g_p4_speaker;
+  } else
+#endif
   if (board.speaker.enabled && g_speaker.begin(board.speaker)) hal.speaker = &g_speaker;
   if (board.axp2101 && g_power.begin(i2c_bus)) {
     hal.power = &g_power;
@@ -274,6 +314,9 @@ extern "C" void app_main(void) {
     // Wi-Fi retries back off only on battery; unknown counts as plugged in.
     g_wifi.on_battery = [] { return g_power.external_power() == std::optional<bool>(false); };
   }
+#if SOC_MIPI_DSI_SUPPORTED
+  if (peripherals_ready && board.stc8_battery && g_stc8_power.begin(i2c_bus)) hal.power = &g_stc8_power;
+#endif
   const bool audio_power = peripherals_ready && (!board.axp_audio_supply || g_power.enable_audio_supply());
   if (!audio_power) ESP_LOGE(TAG, "audio supply unavailable");
   if (board.codec.enabled && audio_power && g_codec.begin(board.codec, i2c_bus)) {
@@ -289,13 +332,24 @@ extern "C" void app_main(void) {
                                    board.touch.bus.sda >= 0 ? hgp::i2c::touch_bus(board.touch.bus) : i2c_bus);
 
   hgp::diag::Parts parts;
-  parts.display = hal.display == &g_display ? g_display.controller_name()
-                      : hal.display == &g_parallel ? "st7789-i80"
-                      : hal.display == &g_rgb ? g_rgb.controller_name()
-                      : hal.display == &g_amoled ? "co5300"
-                                                : "none";
+#if SOC_MIPI_DSI_SUPPORTED
+  if (hal.display == &g_dsi) {
+    parts.display = g_dsi.controller_name();
+  } else
+#endif
+  {
+    parts.display = hal.display == &g_display ? g_display.controller_name()
+                    : hal.display == &g_parallel ? "st7789-i80"
+                    : hal.display == &g_rgb ? g_rgb.controller_name()
+                    : hal.display == &g_amoled ? "co5300"
+                                              : "none";
+  }
   parts.mic = hal.mic == &g_codec_mic ? (board.codec.mic == hgp::MicCodec::Es8311 ? "es8311" : "es7210")
-              : hal.mic == &g_mic ? "i2s" : "none";
+              : hal.mic == &g_mic ? (board.mic.pdm ? "pdm" : "i2s") : "none";
+#if SOC_MIPI_DSI_SUPPORTED
+  if (hal.speaker == &g_p4_speaker) parts.speaker = "i2s";
+  else
+#endif
   parts.speaker = hal.speaker == &g_codec_speaker ?
       (board.codec.speaker == hgp::SpeakerCodec::Aw88298 ? "aw88298" : "es8311") :
       hal.speaker == &g_speaker ? "i2s" : "none";

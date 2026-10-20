@@ -710,6 +710,38 @@ This port is written from Elecrow's published factory example ([CrowPanel 5.0 re
 
 Panel timings (15 MHz PCLK, 8/4/43 and 8/4/12 porches, `pclk_active_neg`) and the pin map follow the factory `crowpanel-esp32-5.0-3.0` Arduino example at commit `fd959ac`; see [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md). A boot smoke check passed on a real board: the panel initialization log, the GT911's ID, Wi-Fi and pairing. Rendering, colours, brightness and touch coordinates are not yet verified; see the [hardware validation table](hardware-validation.md).
 
+## Elecrow CrowPanel Advanced 10.1-inch ESP32-P4
+
+Use board profile `crowpanel-p4-101` for the Elecrow CrowPanel Advanced 10.1-inch ESP32-P4, V1.1. Elecrow identifies this panel as 1024×600; the profile is for that resolution and is based on the V1.1 documentation and schematic. The profile is experimental and builds with ESP-IDF 6.1.0 via `idf.py` and the dedicated CI job; this project has no ESP-IDF PlatformIO environment for P4. The PlatformIO Arduino framework listing is a different build path. The optional camera is not implemented.
+
+| Part | Interface and profile wiring |
+|---|---|
+| Display | 1024×600 MIPI-DSI, EK79007 bridge, 2 lanes; PHY LDO3 at 2.5 V; backlight GPIO 31, active high; panel reset is not bonded |
+| Touch | GT911; I2C0 SDA 45 / SCL 46 at 400 kHz; reset GPIO 40 active low; interrupt GPIO 42 is polled; driver probes 0x14 and 0x5D after reset |
+| Microphone | PDM RX on I2S0; clock GPIO 24, data GPIO 26; 16 kHz PCM |
+| Speaker output | I2S1; BCLK GPIO 22, WS GPIO 21, DATA GPIO 23; stereo, left-justified / bit-shift framing; active-low amplifier-control GPIO 30 |
+| Battery / charger monitor | STC8 on I2C0 address 0x2F at 400 kHz; reads registers 0x00–0x0B |
+| Wi-Fi | ESP32-C6 companion over 4-bit SDIO; CMD 19, CLK 18, D0–D3 17/16/15/14, reset GPIO 32 |
+
+GPIO 45 and 46 are on the P4 VDD_IO_5 domain. Firmware acquires internal LDO4 at 3.3 V before creating I2C0; the DSI driver separately configures LDO3 for the DSI PHY. Touch and display initialization depend on these rails. Hardware facts are referenced from the pinned [Elecrow V1.1 repository commit](https://github.com/Elecrow-RD/CrowPanel-Advanced-10.1inch-ESP32-P4-HMI-AI-Display-1024x600-IPS-Touch-Screen/tree/6c7c851f3105349dc24b12ad058655ba6afa98ee), including the [board config.h](https://github.com/Elecrow-RD/CrowPanel-Advanced-10.1inch-ESP32-P4-HMI-AI-Display-1024x600-IPS-Touch-Screen/blob/6c7c851f3105349dc24b12ad058655ba6afa98ee/example/V1.1/idf-code/7_9_10.1_P4_HMI_AI/7inch_9inch_10inch_P4_HMI_AI/main/boards/elecrow-p4-board/config.h) and the [V1.1 schematic files](https://github.com/Elecrow-RD/CrowPanel-Advanced-10.1inch-ESP32-P4-HMI-AI-Display-1024x600-IPS-Touch-Screen/tree/6c7c851f3105349dc24b12ad058655ba6afa98ee/Eagle_SCH%26PCB). The upstream repository has no license; only hardware facts are used here, and no Elecrow source code is copied.
+
+**Audio.** The profile uses the existing Gadget audio interface: the upstream I2S microphone driver is configured for PDM on I2S0, and a P4-specific I2S1 speaker adapter handles the amplifier and stereo framing. No local microphone loopback or raw-audio diagnostic path is added.
+
+**Battery limitations.** The STC8 voltage and percentage are uncalibrated estimates. The adapter exposes only the existing Gadget `PowerStatus` fields: `battery_mv`, `battery_percent`, and `charging`; a reported STC8 error leaves `charging` unknown. These readings do not quantify current or calibrated state of charge, and `external_power` remains unknown. Validate charging with a meter rather than inferring current from percentage or an LED.
+
+**Build with ESP-IDF 6.1.0** (the P4 Wi-Fi and EK79007 dependencies are pinned in `main/idf_component.yml`):
+
+```bash
+cd firmware/esp32
+idf.py -B build/crowpanel-p4-101 \
+  -D IDF_TARGET=esp32p4 \
+  -D SDKCONFIG=build/crowpanel-p4-101/sdkconfig \
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/crowpanel-p4-101/sdkconfig.defaults" \
+  build
+```
+
+For physical results and explicit untested items, see the [CrowPanel P4 validation record](hardware-validation.md#crowpanel-advanced-p4-partial-physical-test-record). Resolution reference: [Elecrow product page](https://www.elecrow.com/crowpanel-advanced-10-1inch-esp32-p4-hmi-ai-display-1024x600-ips-touch-screen-wifi-6.html).
+
 ## Build and flash
 
 **No toolchain needed:** the [browser installer](https://adolanium.github.io/hermes-gadget-sdk/) flashes each release's prebuilt firmware from Chrome or Edge, then sets up Wi-Fi and pairing. The release files are also on the [releases page](https://github.com/Adolanium/hermes-gadget-sdk/releases), for `esptool.py write_flash 0x0 hermes-gadget-<board>-<version>.bin`, which also erases the board's settings.
@@ -772,6 +804,7 @@ gadget> set server ws://192.168.1.20:8765/gadget
 gadget> status
 @status {"device_id":"hg-...","phase":"online","screen":"pairing","pairing_code":"ABCD2345",...}
 ```
+When the board has a power adapter, `status` includes a `power` object; the state sensor message mirrors its battery fields. On the CrowPanel P4, the STC8 adapter samples its 12-byte record every 5 seconds through the app power poller and maps it to the existing Gadget fields `battery_mv`, `battery_percent`, and `charging`. The adapter does not expose raw registers, battery-state enums, `battery_present`, or `external_power`.
 
 | Command | Meaning |
 |---|---|

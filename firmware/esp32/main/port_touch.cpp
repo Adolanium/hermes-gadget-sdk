@@ -48,6 +48,8 @@ bool TouchInput::begin(const TouchConfig& touch, const ExpanderKeyConfig& key, c
     if (esp_lcd_new_panel_io_i2c(bus, &io_cfg, &io) == ESP_OK &&
         esp_lcd_touch_new_i2c_ft5x06(io, &cfg, &managed_touch_) != ESP_OK) esp_lcd_panel_io_del(io);
     if (managed_touch_ && touch.int_gpio >= 0) gate_on_int();
+  } else if (touch.enabled && touch.controller == TouchController::Gt911) {
+    begin_gt911(bus);
   } else if (touch.enabled && touch.controller == TouchController::Box3) {
     begin_box_touch(bus);
   } else if (touch.enabled) {
@@ -156,6 +158,60 @@ bool TouchInput::read_touch(TouchSample& out) {
   if (touch_.mirror_y && touch_.height) y = touch_.height - 1 - y;
   if (touch_.swap_xy) std::swap(x, y);
   out = {down, static_cast<int16_t>(x), static_cast<int16_t>(y)};
+  return true;
+}
+
+bool TouchInput::begin_gt911(i2c_master_bus_handle_t bus) {
+  if (touch_.rst >= 0) {
+    gpio_config_t rst = {};
+    rst.pin_bit_mask = 1ULL << touch_.rst;
+    rst.mode = GPIO_MODE_OUTPUT;
+    rst.pull_up_en = GPIO_PULLUP_ENABLE;
+    if (gpio_config(&rst) != ESP_OK) {
+      ESP_LOGE(TAG, "GT911 reset GPIO%d could not be configured", touch_.rst);
+      return false;
+    }
+    gpio_set_level(static_cast<gpio_num_t>(touch_.rst), 0);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    gpio_set_level(static_cast<gpio_num_t>(touch_.rst), 1);
+    vTaskDelay(pdMS_TO_TICKS(60));
+  }
+  if (touch_.int_gpio >= 0) {
+    gpio_config_t int_line = {};
+    int_line.pin_bit_mask = 1ULL << touch_.int_gpio;
+    int_line.mode = GPIO_MODE_INPUT;
+    int_line.pull_up_en = GPIO_PULLUP_DISABLE;
+    int_line.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    gpio_config(&int_line);
+  }
+  const bool at_5d = i2c_master_probe(bus, ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS, 50) == ESP_OK;
+  const bool at_14 = i2c_master_probe(bus, ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS_BACKUP, 50) == ESP_OK;
+  if (!at_5d && !at_14) {
+    ESP_LOGE(TAG, "no GT911 answered at 0x5D or 0x14 on the touch I2C bus");
+    return false;
+  }
+  const uint8_t addr = at_14 ? ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS_BACKUP : ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS;
+  esp_lcd_panel_io_i2c_config_t io_cfg = {};
+  io_cfg.dev_addr = addr;
+  io_cfg.scl_speed_hz = 400000;
+  io_cfg.control_phase_bytes = 1;
+  io_cfg.lcd_cmd_bits = 16;
+  io_cfg.flags.disable_control_phase = 1;
+  esp_lcd_panel_io_handle_t io = nullptr;
+  if (esp_lcd_new_panel_io_i2c(bus, &io_cfg, &io) != ESP_OK) return false;
+  esp_lcd_touch_config_t cfg = {};
+  cfg.x_max = touch_.width;
+  cfg.y_max = touch_.height;
+  cfg.rst_gpio_num = GPIO_NUM_NC;
+  cfg.int_gpio_num = GPIO_NUM_NC;
+  cfg.flags.swap_xy = touch_.swap_xy;
+  cfg.flags.mirror_x = touch_.mirror_x;
+  cfg.flags.mirror_y = touch_.mirror_y;
+  if (esp_lcd_touch_new_i2c_gt911(io, &cfg, &managed_touch_) != ESP_OK) {
+    esp_lcd_panel_io_del(io);
+    return false;
+  }
+  ESP_LOGI(TAG, "GT911 ready at 0x%02x, %ux%u", addr, touch_.width, touch_.height);
   return true;
 }
 
