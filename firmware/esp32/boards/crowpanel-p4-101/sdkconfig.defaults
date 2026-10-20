@@ -6,7 +6,7 @@
 # normal esp_wifi_* API unchanged. NOTE: esp_wifi_remote's Kconfig resolves
 # `orsource ./idf_v$ESP_IDF_VERSION/...`, so ESP_IDF_VERSION (major.minor) must
 # be set before idf.py configure — firmware/esp32/CMakeLists.txt derives it from
-# version.txt when the environment lacks it (see the esp32-p4-hosted-wifi skill).
+# version.txt when the environment lacks it.
 CONFIG_IDF_TARGET="esp32p4"
 # This unit is an ESP32-P4 rev v1.3; restrict the image to pre-v3 silicon so the
 # bootloader/esptool revision check passes (matches the vendor's P4 defaults).

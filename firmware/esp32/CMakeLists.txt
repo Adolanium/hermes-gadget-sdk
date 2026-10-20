@@ -29,42 +29,6 @@ if(NOT DEFINED ENV{ESP_IDF_VERSION} AND DEFINED ENV{IDF_PATH})
     endif()
 endif()
 
-# ESP-IDF 5.x does not define this 6.x-only mbedTLS Kconfig symbol. IDF warns
-# and ignores it, but the strict defaults check would otherwise reject the build.
-# Filter only this known-incompatible line in build-directory copies; keep the
-# repository defaults intact for IDF 6.x, where the option is supported.
-if(DEFINED SDKCONFIG_DEFAULTS AND DEFINED ENV{ESP_IDF_VERSION} AND "$ENV{ESP_IDF_VERSION}" VERSION_LESS "6.0")
-    set(_hg_filtered_defaults)
-    set(_hg_defaults_changed FALSE)
-    set(_hg_default_index 0)
-    foreach(_hg_default IN LISTS SDKCONFIG_DEFAULTS)
-        if(IS_ABSOLUTE "${_hg_default}")
-            set(_hg_default_path "${_hg_default}")
-        else()
-            set(_hg_default_path "${CMAKE_CURRENT_LIST_DIR}/${_hg_default}")
-        endif()
-        if(EXISTS "${_hg_default_path}")
-            file(READ "${_hg_default_path}" _hg_defaults_text)
-            if(_hg_defaults_text MATCHES "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y")
-                string(REPLACE "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y" "" _hg_defaults_text "${_hg_defaults_text}")
-                set(_hg_idf_version "$ENV{ESP_IDF_VERSION}")
-                set(_hg_filtered "${CMAKE_BINARY_DIR}/sdkconfig.defaults.idf${_hg_idf_version}.${_hg_default_index}")
-                file(WRITE "${_hg_filtered}" "${_hg_defaults_text}")
-                list(APPEND _hg_filtered_defaults "${_hg_filtered}")
-                set(_hg_defaults_changed TRUE)
-            else()
-                list(APPEND _hg_filtered_defaults "${_hg_default}")
-            endif()
-        else()
-            list(APPEND _hg_filtered_defaults "${_hg_default}")
-        endif()
-        math(EXPR _hg_default_index "${_hg_default_index} + 1")
-    endforeach()
-    if(_hg_defaults_changed)
-        set(SDKCONFIG_DEFAULTS "${_hg_filtered_defaults}" CACHE STRING "Filtered defaults for this ESP-IDF version" FORCE)
-    endif()
-endif()
-
 # The firmware version: reported to Hermes and written into the image, where
 # `hermes gadget update` reads it. Override with -DPROJECT_VER=...
 if(NOT DEFINED PROJECT_VER)
