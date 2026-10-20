@@ -73,6 +73,7 @@
 
 ### Tools and documentation
 
+- The Hermes integration guide's per-gadget profiles section says to update each cloned profile's copy of the plugin, and how to turn off tool search when the agent never calls the gadget tools. Contributed by Luiz Gustavo Saraiva (@luizgustavosaraiva).
 - Release files (firmware images, `manifest.json`, `SHA256SUMS`, the license archive and the Linux package) now carry GitHub build provenance attestations, so a download can be checked with `gh attestation verify <file> --repo Adolanium/hermes-gadget-sdk`. The release notes say so.
 - The website (home page, installer and guides) takes the look of the Hermes plugin art: midnight indigo with a dot screen, periwinkle text, square window frames, Georgia headings over a monospace body, and a dithered banner of Hermes listening to a gadget. Guides switch from the light paper theme to the same dark theme. Layout, links and the installer flow are unchanged.
 - The Hermes guide explains that the plugin installs from the `plugin` directory, and why installing the repository root fails Hermes's install scan with a "dangerous" verdict that `--force` cannot override: the root also holds the Raspberry Pi system installer. It shows how to check the scan with `hermes plugins validate` before installing. The install test now runs Hermes's plugin scanner, the one `hermes plugins install` uses, and requires a verdict that installs without confirmation. Reported by @Silexperience210.
