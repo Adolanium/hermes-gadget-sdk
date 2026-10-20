@@ -88,6 +88,7 @@
 - The changelog check skips Dependabot's pull requests and reads the `no-changelog` label live, so adding the label and re-running the job is enough.
 - CI pins every action to a commit and PlatformIO to a version, gives every job a timeout, and checks that each pull request adds a changelog line (or carries the `no-changelog` label). A release now requires successful CI and Hermes runs on the tagged commit and a `CHANGELOG.md` section for the version, which opens the release notes. The security policy covers `linux/`.
 - The Linux guide names the real approval command, `hermes gadget pair`. A test now checks that every `hermes gadget` and `hermes-gadget` command in the guides exists in the CLIs.
+- CI installs libopus on the Ubuntu Python jobs and sets `HG_REQUIRE_LIBOPUS=1`, so the Opus encode/decode round trip and bitrate tests run there and fail, not skip, if the library can't load.
 
 ## 0.2.0
 
