@@ -20,7 +20,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import audio, protocol
+from . import audio, opus, protocol
 from .store import DeviceStore
 
 log = logging.getLogger("hermes_gadget.hub")
@@ -120,6 +120,15 @@ class AudioOut:
         self.rate = session.speaker_rate
         self._resampler = audio.Resampler(src_rate, self.rate, channels)
         self._frame_bytes = max(2, self.rate * 2 * AUDIO_FRAME_MS // 1000)
+        # Opus when the device decodes it and the host has libopus: one packet per frame.
+        self._encoder: opus.Encoder | None = None
+        bitrate = session.hub.opus_bitrate
+        if bitrate > 0 and "opus" in session.speaker_formats and opus.available():
+            try:
+                self._encoder = opus.Encoder(self.rate, bitrate)
+            except (RuntimeError, ValueError) as exc:
+                log.info("PCM16 for %s: %s", session.device_id, exc)
+        self.format = "opus" if self._encoder else "pcm16"
         self._buf = bytearray()
         self._queue: asyncio.Queue[bytes | None] = asyncio.Queue()
         self._task: asyncio.Task | None = None
@@ -130,7 +139,7 @@ class AudioOut:
 
     async def start(self, *, turn: str | None = None) -> None:
         await self._session.send_json(
-            protocol.message("audio.start", stream=self.stream, rate=self.rate, format="pcm16", turn=turn))
+            protocol.message("audio.start", stream=self.stream, rate=self.rate, format=self.format, turn=turn))
         self._task = asyncio.create_task(self._pump())
 
     def write(self, pcm: bytes) -> None:
@@ -184,15 +193,21 @@ class AudioOut:
                     base = loop.time() - self.sent_seconds
                 elif ahead > PLAYBACK_LEAD_S:
                     await asyncio.sleep(ahead - PLAYBACK_LEAD_S)
-                await self._session.send_binary(protocol.binary(protocol.CHANNEL_AUDIO, self.stream, seq, frame))
+                payload = frame
+                if self._encoder:
+                    # Opus takes whole frames: pad the last one with silence.
+                    payload = self._encoder.encode(frame.ljust(self._frame_bytes, b"\0"))
+                await self._session.send_binary(protocol.binary(protocol.CHANNEL_AUDIO, self.stream, seq, payload))
                 seq += 1
-                self.sent_seconds += len(frame) / 2 / self.rate
+                self.sent_seconds += len(frame) / 2 / self.rate  # paced by audio time, not bytes
             await self._session.send_json(protocol.message("audio.end", stream=self.stream))
         except asyncio.CancelledError:
             pass
         except Exception as exc:  # connection dropped mid-stream
             log.debug("audio pump stopped: %s", exc)
         finally:
+            if self._encoder:
+                self._encoder.close()
             self.done.set()
 
 
@@ -242,6 +257,14 @@ class DeviceSession:
     @property
     def has_speaker(self) -> bool:
         return isinstance(self.caps.get("speaker"), dict)
+
+    @property
+    def speaker_formats(self) -> list[str]:
+        """Speaker audio formats the device decodes; PCM16 always."""
+        spk = self.caps.get("speaker") or {}
+        formats = spk.get("formats") if isinstance(spk, dict) else None
+        names = [str(f) for f in formats if isinstance(f, str)] if isinstance(formats, list) else []
+        return names if "pcm16" in names else ["pcm16", *names]
 
     @property
     def speaker_rate(self) -> int:
@@ -535,6 +558,7 @@ class DeviceHub:
         heartbeat_s: int = 20,
         ssl_context=None,
         max_utterance_s: float = 60.0,
+        opus_bitrate: int = 24000,
     ):
         self.store = store
         self.delegate = delegate
@@ -543,6 +567,7 @@ class DeviceHub:
         self.heartbeat_s = max(5, int(heartbeat_s))
         self.ssl_context = ssl_context
         self.max_utterance_s = max_utterance_s
+        self.opus_bitrate = max(0, int(opus_bitrate))  # 0 = always PCM16
         self.sessions: dict[str, DeviceSession] = {}
         self.loop: asyncio.AbstractEventLoop | None = None
         self._server = None

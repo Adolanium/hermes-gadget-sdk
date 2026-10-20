@@ -14,7 +14,7 @@ namespace hgp {
 // How a parallel panel is wired. An I80 panel uses eight data lines and a write
 // strobe here; an RGB panel is wired in LcdConfig::rgb.
 struct LcdBus {
-  enum class Type : uint8_t { Spi, I80, Rgb };
+  enum class Type : uint8_t { Spi, I80, Rgb, Dsi };
   Type type = Type::Spi;
   int data[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
   int wr = -1;
@@ -53,6 +53,18 @@ struct RgbPanelConfig {
   RgbTimings timings{};   // panel scanout timings (per-datasheet)
 };
 
+// MIPI-DSI panel settings for the CrowPanel Advanced P4; DSI pins are SoC-dedicated.
+struct DsiPanelConfig {
+  int lanes = 2;
+  int lane_bit_rate_mbps = 900;
+  int dpi_clock_mhz = 51;
+  int ldo_channel = 3;
+  int ldo_voltage_mv = 2500;
+  bool use_dma2d = true;
+  uint16_t hsync_pulse_width = 70, hsync_back_porch = 160, hsync_front_porch = 160;
+  uint16_t vsync_pulse_width = 10, vsync_back_porch = 23, vsync_front_porch = 12;
+};
+
 enum class LcdController { St7789, Box3, CoreS3, St77916, Gc9a01, Sh8601 };
 
 // Which vendor initialization table an ST77916 panel gets. Waveshare's 1.85C
@@ -74,6 +86,7 @@ struct LcdConfig {
   int spi_mhz = 40;
   LcdBus bus{};
   RgbPanelConfig rgb{};
+  DsiPanelConfig dsi{};  // used when bus.type == LcdBus::Type::Dsi
   LcdController controller = LcdController::St7789;
   St77916Panel st77916_panel = St77916Panel::Waveshare185;
   Gc9a01Panel gc9a01_panel = Gc9a01Panel::None;
@@ -94,6 +107,16 @@ struct I2sMicConfig {
 struct I2sSpeakerConfig {
   bool enabled = false;
   int bclk = -1, ws = -1, dout = -1;
+};
+
+// P4-only speaker controls; the pin tuple remains in I2sSpeakerConfig.
+struct P4SpeakerConfig {
+  bool enabled = false;
+  int i2s_port = 1;
+  int pa = -1;
+  bool pa_active_low = false;
+  bool stereo = false;
+  bool left_align = false;
 };
 
 // Which vendor bring-up table a CO5300 panel needs. The round 466x466 1.75"
@@ -144,7 +167,7 @@ struct CodecAudioConfig {
 };
 
 // Capacitive touch on the I2C bus: hold to talk, tap, swipe down to cancel.
-enum class TouchController { Cst9217, Box3, Ft5x06, Cst816 };
+enum class TouchController { Cst9217, Box3, Ft5x06, Cst816, Gt911 };
 
 struct TouchConfig {
   bool enabled = false;
@@ -227,6 +250,7 @@ struct BoardConfig {
   LcdConfig lcd;
   I2sMicConfig mic;
   I2sSpeakerConfig speaker;
+  P4SpeakerConfig p4_speaker;
   ButtonConfig buttons;
   EncoderConfig encoder;
   AmoledConfig amoled;
@@ -238,6 +262,7 @@ struct BoardConfig {
   PowerRail power_rails[2];
   uint16_t power_rails_settle_ms = 0;  // wait after switching the rails on
   bool axp2101 = false;
+  bool stc8_battery = false;  // CrowPanel P4 STC8 companion on the shared I2C0 bus
   bool axp_audio_supply = false;
   bool axp_power_key = false;  // PWR reaches only the AXP2101: read its short press there
   // Light sleep while dozing (hg::System::set_dozing): on battery with the screen

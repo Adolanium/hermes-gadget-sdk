@@ -2,6 +2,7 @@
 #include <vector>
 
 #include "axp2101.hpp"
+#include "stc8_battery.hpp"
 #include "cores3.hpp"
 #include "check.hpp"
 #include "hg/battery.hpp"
@@ -14,6 +15,73 @@ TEST("battery estimate: the shared single-cell map clamps endpoints and floors i
                                Sample{4500, 100}, Sample{65535, 100}}) {
     CHECK_EQ(hg::estimate_liion_percent(sample.mv), sample.percent);
   }
+}
+
+TEST("STC8 battery: reads register bytes and maps only the Gadget power fields") {
+  const std::array<uint8_t, 12> raw = {0xeb, 0x0b, 0, 0, 0x90, 0x10, 0, 0, 0x64, 0x02, 0x02, 0xaa};
+  std::vector<uint8_t> registers;
+  hg::Stc8Battery power([&](uint8_t reg, uint8_t& value) {
+    registers.push_back(reg);
+    value = raw[reg];
+    return true;
+  });
+
+  const auto status = power.read();
+
+  CHECK(status.has_value());
+  CHECK(registers == std::vector<uint8_t>({0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}));
+  CHECK(status->battery_mv == uint16_t(4240));
+  CHECK(status->battery_percent == uint8_t(100));
+  CHECK(status->charging == false);
+  CHECK(!power.can_power_off());
+  CHECK(!power.power_off());
+}
+
+TEST("STC8 battery: charging state maps to the generic charging flag") {
+  const std::array<uint8_t, 12> raw = {0xeb, 0x0b, 0, 0, 0x88, 0x10, 0, 0, 75, 1, 1, 0};
+  hg::Stc8Battery power([&](uint8_t reg, uint8_t& value) { value = raw[reg]; return true; });
+
+  const auto status = power.read();
+
+  CHECK(status.has_value());
+  CHECK(status->charging == true);
+}
+
+TEST("STC8 battery: error state is preserved without claiming not charging") {
+  const std::array<uint8_t, 12> raw = {0xeb, 0x0b, 0, 0, 0x90, 0x10, 0, 0, 100, 4, 4, 0};
+  hg::Stc8Battery power([&](uint8_t reg, uint8_t& value) { value = raw[reg]; return true; });
+
+  const auto status = power.read();
+
+  CHECK(status.has_value());
+  CHECK(!status->charging.has_value());
+}
+
+TEST("STC8 battery: a register read failure discards the sample and stops the sequence") {
+  std::vector<uint8_t> registers;
+  hg::Stc8Battery power([&](uint8_t reg, uint8_t& value) {
+    registers.push_back(reg);
+    if (reg == 5) return false;
+    value = 0;
+    return true;
+  });
+
+  CHECK(!power.read());
+  CHECK(registers == std::vector<uint8_t>({0, 1, 2, 3, 4, 5}));
+}
+
+TEST("STC8 battery: invalid values are omitted rather than reported as real telemetry") {
+  const std::array<uint8_t, 12> raw = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 101, 5, 5, 0xaa};
+  hg::Stc8Battery power([&](uint8_t reg, uint8_t& value) { value = raw[reg]; return true; });
+
+  const auto status = power.read();
+
+  CHECK(status.has_value());
+  CHECK(!status->battery_mv);
+  CHECK(!status->battery_percent);
+  CHECK(!status->charging);
+  CHECK(!status->battery_present);
+  CHECK(!status->external_power);
 }
 
 TEST("battery estimate: the resting-voltage curve clamps endpoints, interpolates and floors") {

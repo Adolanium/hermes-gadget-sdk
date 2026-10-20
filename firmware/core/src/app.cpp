@@ -373,6 +373,13 @@ void App::send_hello() {
   if (hal_.speaker) {
     json::Value s = json::Value::object();
     s.set("rate", profile_.speaker_rate).set("format", "pcm16");
+    if (hal_.speaker_decoder) {
+      // "format" stays PCM16 for servers that predate "formats".
+      json::Value formats = json::Value::array();
+      formats.push("pcm16");
+      formats.push(hal_.speaker_decoder->format());
+      s.set("formats", formats);
+    }
     caps.set("speaker", s);
   }
   json::Value inputs = json::Value::array();
@@ -575,8 +582,14 @@ void App::h_audio_start(const json::Value& m) {
   if (settings_open()) close_settings();
   if (!hal_.speaker || mode_ == Mode::Listening) return;
   uint32_t rate = static_cast<uint32_t>(m["rate"].as_int(profile_.speaker_rate));
-  if (m["format"].str_or("pcm16") != "pcm16") {
+  const std::string_view format = m["format"].str_or("pcm16");
+  const bool decoded = hal_.speaker_decoder && format == hal_.speaker_decoder->format();
+  if (format != "pcm16" && !decoded) {
     log(LogLevel::Warn, "unsupported audio format");
+    return;
+  }
+  if (decoded && !hal_.speaker_decoder->begin(rate)) {
+    log(LogLevel::Warn, "decoder refused stream");
     return;
   }
   if (!hal_.speaker->begin(rate)) {
@@ -584,6 +597,8 @@ void App::h_audio_start(const json::Value& m) {
     return;
   }
   in_stream_ = static_cast<int>(m["stream"].as_int(0));
+  in_decoded_ = decoded;
+  in_rate_ = rate;
   last_turn_rx_ = now();
   status_.clear();  // audible reply: the working-state phrase is over
   if (mode_ != Mode::Responding) {
@@ -622,6 +637,13 @@ void App::on_transport_binary(const uint8_t* data, size_t len) {
   }
   if (f.channel == proto::Channel::Audio) {
     if (in_stream_ < 0 || f.stream != in_stream_ || !hal_.speaker) return;
+    if (in_decoded_) {
+      constexpr size_t kMaxPacketMs = 120;  // the longest Opus packet
+      pcm_buf_.resize(static_cast<size_t>(in_rate_) * kMaxPacketMs / 1000);  // the stream's rate, not the profile's
+      const int n = hal_.speaker_decoder->decode(f.payload, f.payload_len, pcm_buf_.data(), pcm_buf_.size());
+      if (n > 0) hal_.speaker->write(pcm_buf_.data(), static_cast<size_t>(n));
+      return;
+    }
     size_t n = f.payload_len / 2;
     pcm_buf_.resize(n);
     std::memcpy(pcm_buf_.data(), f.payload, n * 2);  // payload may be unaligned

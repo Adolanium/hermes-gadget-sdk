@@ -7,6 +7,28 @@ cmake_minimum_required(VERSION 3.16)
 # The portable device core is shared with the desktop simulator.
 set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../core")
 
+# ESP32-P4 boards bring Wi-Fi through the ESP32-C6 companion via
+# esp_wifi_remote, whose Kconfig does `orsource ./idf_v$ESP_IDF_VERSION/...`.
+# If ESP_IDF_VERSION is unset the slave-target choice never parses and the
+# build dies with `#error "Unknown Slave Target"`. idf.py/export.sh do not
+# always export it, so derive major.minor from IDF_PATH/version.txt before
+# Kconfig runs. The regex below accepts the leading `v` in tags such as v6.1.0.
+if(NOT DEFINED ENV{ESP_IDF_VERSION} AND DEFINED ENV{IDF_PATH})
+    set(_hg_idf_ver "")
+    foreach(_hg_vf "$ENV{IDF_PATH}/version.txt")
+        if(EXISTS "${_hg_vf}")
+            file(READ "${_hg_vf}" _hg_vtxt)
+            string(REGEX MATCH "v([0-9]+\\.[0-9]+)" _hg_m "${_hg_vtxt}")
+            if(_hg_m)
+                set(_hg_idf_ver "${CMAKE_MATCH_1}")
+            endif()
+        endif()
+    endforeach()
+    if(_hg_idf_ver)
+        set(ENV{ESP_IDF_VERSION} "${_hg_idf_ver}")
+    endif()
+endif()
+
 # The firmware version: reported to Hermes and written into the image, where
 # `hermes gadget update` reads it. Override with -DPROJECT_VER=...
 if(NOT DEFINED PROJECT_VER)

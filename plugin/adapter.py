@@ -182,6 +182,9 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._path = str(extra.get("path") or "/gadget")
         self._heartbeat_s = int(extra.get("heartbeat_s") or 20)
         self._max_utterance_s = float(extra.get("max_utterance_s") or 60)
+        # Speaker audio as Opus at this bitrate for devices that decode it; 0 keeps PCM16.
+        opus_bitrate = extra.get("opus_bitrate")
+        self._opus_bitrate = 24000 if opus_bitrate in (None, "") else int(opus_bitrate)
         self._speak_replies = _flag(extra.get("speak_replies"), True)
         self._auto_home = _flag(extra.get("auto_home"), True)
         self._battery_log_on = _flag(extra.get("battery_log"), False)
@@ -228,7 +231,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._hub = DeviceHub(
             self._store, self, host=self._host, port=self._port, path=self._path,
             access_token=self._access_token, heartbeat_s=self._heartbeat_s, ssl_context=ssl_ctx,
-            max_utterance_s=self._max_utterance_s)
+            max_utterance_s=self._max_utterance_s, opus_bitrate=self._opus_bitrate)
         try:
             await self._hub.start()
         except OSError as exc:

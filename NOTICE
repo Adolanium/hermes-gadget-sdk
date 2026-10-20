@@ -20,9 +20,20 @@ Third-party material
 The MIT license above covers only the code and documentation written for this
 project. Except as noted below, third-party code is not included in this
 repository; it is fetched at build or install time and keeps its own license:
-ESP-IDF, esp_codec_dev and esp_websocket_client (Apache License 2.0, Espressif
-Systems), and the Python packages listed in pyproject.toml (each under its own
-license).
+ESP-IDF, esp_codec_dev, esp_websocket_client, esp_hosted 2.12.6,
+esp_wifi_remote 1.6.5, esp_lcd_ek79007 2.0.2, and esp_lcd_st7701 2.0.2
+(1.1.0 for ESP-IDF below 5.4; Apache License 2.0, Espressif Systems), plus the
+Python packages listed in pyproject.toml (each under its own license).
+
+Firmware images include libopus, Xiph.Org's Opus codec, built for ESP-IDF by the
+esp-opus component (78/esp-opus 1.0.x,
+https://components.espressif.com/components/78/esp-opus), fetched at build time
+and used to decode Opus reply audio. libopus is under the BSD 3-Clause License,
+Copyright 2001-2023 Xiph.Org, Skype Limited, Octasic, Jean-Marc Valin, Timothy
+B. Terriberry, CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro Lopo,
+Mozilla, Amazon. A copy of its license is in LICENSES/libopus-BSD-3-Clause.txt.
+The Hermes plugin can load the host's own libopus at run time; none is
+distributed with it.
 
 Optional Linux audio uses python-sounddevice (MIT, Matthias Geier) and the
 system PortAudio library (MIT). Raspberry Pi controls use GPIO Zero
@@ -148,7 +159,8 @@ That repository carries no license. Only these hardware facts are used,
 re-expressed for Espressif's esp_lcd_st7701 driver.
 
 The managed esp_lcd_ili9341, esp_lcd_gc9a01, esp_lcd_touch, esp_lcd_touch_gt911,
-esp_lcd_touch_tt21100, esp_lcd_touch_ft5x06, esp_lcd_st7701, esp_lcd_sh8601
+esp_lcd_touch_tt21100, esp_lcd_touch_ft5x06, esp_lcd_st7701, esp_lcd_sh8601,
+esp_lcd_ek79007
 and esp_lcd_panel_io_additions drivers are Espressif components under Apache
 License 2.0. CoreS3 audio uses esp_codec_dev's AW88298 driver.
 They are fetched at build time. Binary release packages include the installed
@@ -175,3 +187,15 @@ replaced with comments; an always-false comparison is removed; and two bounds
 checks are added (the bit writer no longer writes past its buffer, and a payload
 that overflows the chosen version is rejected instead of encoded incorrectly).
 The full upstream license is in LICENSES/QRCode-MIT.txt.
+
+
+The CrowPanel Advanced 10.1-inch ESP32-P4 build downloads Espressif components
+esp_hosted 2.12.6, esp_wifi_remote 1.6.5, and esp_lcd_ek79007 2.0.2 under the
+Apache License 2.0. Their licenses are available in the component registry and
+are included in LICENSES/Apache-2.0.txt and release license archives.
+
+The CrowPanel P4 hardware pin map, DSI timings, backlight polarity and STC8
+register layout are hardware facts referenced from Elecrow V1.1 commit
+6c7c851f3105349dc24b12ad058655ba6afa98ee. See the pinned URLs in
+THIRD_PARTY_NOTICES.md. The Elecrow repository has no license file; only those
+hardware facts are used and no Elecrow source code is copied.

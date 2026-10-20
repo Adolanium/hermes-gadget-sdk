@@ -1,8 +1,20 @@
 dependencies:
   idf: ">=5.3"
   espressif/esp_websocket_client: "^1.2.3"
+  # ESP32-P4 CrowPanel: Wi-Fi via the ESP32-C6 coprocessor over SDIO.
+  # Pinned to the ESP-IDF 6.1-compatible component releases.
+  espressif/esp_hosted:
+    version: "2.12.6"
+    rules:
+      - if: target in [esp32p4]
+  espressif/esp_wifi_remote:
+    version: "1.6.5"
+    rules:
+      - if: target in [esp32p4]
   # ES8311 / ES7210 / AW88298 codecs on boards that use them
   espressif/esp_codec_dev: "~1.5"
+  # Opus reply audio: Xiph libopus (BSD-3-Clause) packaged for ESP-IDF
+  78/esp-opus: "~1.0.5"
   espressif/esp_lcd_st77916: "~2.0.2"
   espressif/esp_lcd_sh8601: "^1"
   espressif/esp_lcd_ili9341: "^2.1.0"
@@ -10,5 +22,17 @@ dependencies:
   espressif/esp_lcd_touch_tt21100: "^1"
   espressif/esp_lcd_touch_gt911: "^1"
   espressif/esp_lcd_touch_ft5x06: "^1"
-  espressif/esp_lcd_st7701: "1.1.0"
+  # 1.1.0 is what the CrowPanel 2.1 was tested with; its MIPI source only builds
+  # for the P4 (which needs it as well) on ESP-IDF 6.1 from 2.x.
+  espressif/esp_lcd_st7701:
+    matches:
+      - if: target in [esp32p4]
+        version: "2.0.2"
+      - if: target not in [esp32p4]
+        version: "1.1.0"
   espressif/esp_lcd_panel_io_additions: "1.0.1"
+  # EK79007 MIPI-DSI panel bridge (CrowPanel Advanced P4).
+  espressif/esp_lcd_ek79007:
+    version: "2.0.2"
+    rules:
+      - if: target in [esp32p4]

@@ -378,6 +378,8 @@ class App {
   std::vector<uint8_t> frame_buf_;
   std::vector<int16_t> pcm_buf_;
   int in_stream_ = -1;
+  bool in_decoded_ = false;  // the current speaker stream arrives compressed (hal_.speaker_decoder)
+  uint32_t in_rate_ = 0;     // the current speaker stream's sample rate
   uint32_t id_counter_ = 0;
 
   // overlays
