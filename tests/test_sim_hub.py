@@ -231,7 +231,7 @@ def test_voltage_estimate_is_opt_in_display_only_and_clears(devserver, make_sim)
     sim = _power_sim(make_sim, url)
     _wait_power(sim, hub, None)
     hidden = _power_header(sim)
-    voltage = {"battery_mv": 3750, "charging": False}
+    voltage = {"battery_mv": 3840, "charging": False}
     sim.set_power(voltage)
     _wait_power(sim, hub, voltage)
     assert _power_header(sim) == hidden
@@ -276,10 +276,10 @@ def test_voltage_estimate_is_opt_in_display_only_and_clears(devserver, make_sim)
     ({"battery_mv": 4501}, None),
     ({}, None),
     ({"battery_mv": None}, None),
-    ({"battery_mv": 3750, "battery_present": False}, None),
-    ({"battery_mv": 3750, "battery_present": None}, 50),
-    ({"battery_mv": 3750, "battery_present": True}, 50),
-    ({"battery_mv": 3750, "charging": True}, 50),
+    ({"battery_mv": 3840, "battery_present": False}, None),
+    ({"battery_mv": 3840, "battery_present": None}, 50),
+    ({"battery_mv": 3840, "battery_present": True}, 50),
+    ({"battery_mv": 3840, "charging": True}, 50),
     ({"battery_mv": 3750, "battery_percent": 0}, 0),
     ({"battery_mv": 3750, "battery_percent": 100}, 100),
 ])
@@ -299,7 +299,11 @@ def test_power_boundaries_and_native_precedence(devserver, make_sim, reading, pe
         reference = {**reading, "battery_percent": percent}
         sim.set_power(reference)
         _wait_power(sim, hub, reference)
-        assert _power_header(sim) == actual
+        if reading.get("charging"):
+            # A voltage estimate on a charger shows the icon alone; a native percentage keeps its number.
+            assert _power_header(sim) != actual
+        else:
+            assert _power_header(sim) == actual
     # Full replacements must not leave the prior percentage, voltage or flags.
     sim.set_power({})
     _wait_power(sim, hub, {})

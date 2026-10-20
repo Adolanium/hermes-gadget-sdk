@@ -1474,6 +1474,13 @@ void App::update_model() {
       m.battery = static_cast<int8_t>(std::min<int>(*percent, 100));
       m.battery_charging = p.charging == true;
       m.battery_low = *percent <= 10 && p.external_power == false;
+      // A voltage estimate reads high on a charger, so show the icon without a number there,
+      // with the bolt even once the cell is full and the charger has stopped.
+      if (battery_is_estimated() && (p.charging == true || p.external_power == true)) {
+        m.battery_icon = true;
+        m.battery_text = false;
+        m.battery_charging = true;
+      }
     }
   }
 

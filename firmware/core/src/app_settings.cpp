@@ -224,8 +224,12 @@ void App::settings_model() {
       else {
         const auto& p = *power_status_;
         if (p.battery_present && !*p.battery_present) m.body = "No battery detected.\n";
-        if (const auto percent = display_battery_percent())
-          m.body += std::to_string(*percent) + (battery_is_estimated() ? "% (voltage estimate)\n" : "% (gauge estimate)\n");
+        if (const auto percent = display_battery_percent()) {
+          const bool on_charger = p.charging == true || p.external_power == true;
+          m.body += std::to_string(*percent) + (!battery_is_estimated() ? "% (gauge estimate)\n"
+                                                : on_charger         ? "% (voltage estimate, high on a charger)\n"
+                                                                     : "% (voltage estimate)\n");
+        }
         if (p.battery_mv) m.body += std::to_string(*p.battery_mv) + " mV\n";
         if (p.charging) m.body += *p.charging ? "Charging\n" : "Not charging\n";
         if (p.external_power) m.body += *p.external_power ? "USB power\n" : "No USB power\n";
