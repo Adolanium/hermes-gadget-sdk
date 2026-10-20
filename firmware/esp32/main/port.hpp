@@ -50,6 +50,8 @@
 #include "hg/setup.hpp"
 #include "hg/wifi_networks.hpp"
 
+struct OpusDecoder;  // libopus (opus.h); only port_opus.cpp includes it
+
 namespace hgp {
 
 // ---------------------------------------------------------------------------
@@ -509,6 +511,20 @@ class CoreS3Board {
  private:
   i2c_master_dev_handle_t pmic_ = nullptr, expander_ = nullptr;
   std::unique_ptr<hg::CoreS3Control> control_;
+};
+
+// Opus reply audio (port_opus.cpp). It decodes on the app task, whose stack
+// CONFIG_ESP_MAIN_TASK_STACK_SIZE sizes for libopus's alloca scratch.
+class OpusSpeakerDecoder final : public hg::AudioDecoder {
+ public:
+  ~OpusSpeakerDecoder() override;
+  const char* format() const override { return "opus"; }
+  bool begin(uint32_t sample_rate) override;
+  int decode(const uint8_t* packet, size_t len, int16_t* pcm, size_t max_samples) override;
+
+ private:
+  ::OpusDecoder* decoder_ = nullptr;
+  uint32_t rate_ = 0;
 };
 
 class LatchPower final : public hg::Power {
