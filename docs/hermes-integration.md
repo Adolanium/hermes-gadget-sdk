@@ -227,5 +227,8 @@ Then, in each routed profile:
 
 - Turn its own listener off with `hermes -p kitchen config set platforms.gadget.enabled false`. A profile cloned from `default` keeps the plugin enabled, and otherwise starts a second listener that retries the taken port. Leave the plugin enabled: the profile needs its tools.
 - Approve the device again with `hermes -p kitchen pairing approve gadget <code>`. Pairing is checked in the routed profile, so the device shows a pairing code after the route takes effect.
+- Update its copy of the plugin too. Cloning a profile copies `~/.hermes/plugins/gadget` into `~/.hermes/profiles/kitchen/plugins/gadget`, and the routed profile runs that copy: after updating the plugin, copy it into every cloned profile and restart the gateway, or the profile keeps the old code. A copy older than this release cannot see the default profile's devices, and the agent reports that `gadget_action` is unavailable.
+
+Hermes's tool search can keep plugin tools out of the model's tool list until the model searches for them. A model that answers without searching then says it can't change the volume or brightness. If the gadget tools are listed as available but the agent never calls them, turn tool search off in that profile with `hermes -p kitchen config set tools.tool_search.enabled off` and start a new session, so the earlier refusals aren't in its history.
 
 Tried with three devices routed to three profiles on one gateway: the turns from the two devices used so far each ran in their own profile's session.

@@ -534,10 +534,14 @@ class LatchPower final : public hg::Power {
   bool can_power_off() const override { return cfg_.power_off_supported; }
   bool power_off() override;
   std::optional<bool> external_power() override;
+  bool take_key_press() override;
+  static constexpr int64_t kKeyHoldMs = 2500;
 
  private:
   bool charging_signal() const;
   LatchPowerConfig cfg_{};
+  bool key_down_ = false, key_held_ = false;
+  int64_t key_since_ms_ = 0;
   adc_oneshot_unit_handle_t adc_ = nullptr;
   adc_cali_handle_t calibration_ = nullptr;
   adc_channel_t channel_ = ADC_CHANNEL_0;

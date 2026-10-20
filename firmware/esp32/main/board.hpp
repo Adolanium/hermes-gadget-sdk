@@ -217,6 +217,9 @@ struct LatchPowerConfig {
   // USB port, so battery-only savings (Wi-Fi modem sleep) can apply. A charger
   // without data that has finished charging then counts as battery.
   bool usb_external_power = false;
+  // A power key on a GPIO, active low: a short press turns the screen off and on,
+  // holding it for LatchPower::kKeyHoldMs releases the latch (power off on battery).
+  int key = -1;
 };
 
 struct BoardConfig {

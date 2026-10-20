@@ -251,13 +251,13 @@ def test_power_controls_use_real_hal_and_reset_only_fixture_on_board_change(wind
     assert reference != empty_header
 
     enter("battery_percent", "")
-    enter("battery_mv", "3750")
+    enter("battery_mv", "3840")
     window.power_choices["charging"].set("No")
     window.power_apply.invoke()
-    drive(window, lambda: power().get("battery_mv") == 3750 and "battery_percent" not in power()
+    drive(window, lambda: power().get("battery_mv") == 3840 and "battery_percent" not in power()
           and header() == reference)
     assert header() == reference
-    assert power() == {"available": True, "battery_mv": 3750, "charging": False}
+    assert power() == {"available": True, "battery_mv": 3840, "charging": False}
     applied = window.sim.power_status.copy()
     for key, text in (("battery_mv", "3.75"), ("battery_mv", "65536"),
                       ("battery_percent", "101")):
@@ -266,7 +266,7 @@ def test_power_controls_use_real_hal_and_reset_only_fixture_on_board_change(wind
         assert window.power_result_var.get() != "Applied; device polls within 5 seconds."
         assert window.sim.power_status == applied
         assert header() == reference
-        enter(key, "3750" if key == "battery_mv" else "")
+        enter(key, "3840" if key == "battery_mv" else "")
 
     window.power_available.invoke()
     assert window.sim.power_status == applied
@@ -274,11 +274,11 @@ def test_power_controls_use_real_hal_and_reset_only_fixture_on_board_change(wind
     assert window.sim.power_status is None
     drive(window, lambda: power() == {"available": False} and header() == empty_header)
     assert header() == empty_header
-    assert window.power_entries["battery_mv"].get() == "3750"
+    assert window.power_entries["battery_mv"].get() == "3840"
     window.power_available.invoke()
     assert window.sim.power_status is None
     window.power_apply.invoke()
-    drive(window, lambda: power().get("battery_mv") == 3750 and header() == reference)
+    drive(window, lambda: power().get("battery_mv") == 3840 and header() == reference)
     assert header() == reference
 
     # Both firmware opt-ins survive a real new instance; the input fixture does not.
@@ -294,8 +294,8 @@ def test_power_controls_use_real_hal_and_reset_only_fixture_on_board_change(wind
     assert header() == empty_header
     window.developer_toggle.invoke()
     window.power_available.invoke()
-    enter("battery_mv", "3750")
+    enter("battery_mv", "3840")
     window.power_choices["charging"].set("No")
     window.power_apply.invoke()
-    drive(window, lambda: power().get("battery_mv") == 3750 and header() == reference)
+    drive(window, lambda: power().get("battery_mv") == 3840 and header() == reference)
     assert header() == reference

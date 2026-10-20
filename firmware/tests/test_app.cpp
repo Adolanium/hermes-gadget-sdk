@@ -1779,8 +1779,13 @@ TEST("battery indicator: the top band shows the level, colours charging and low,
     CHECK_EQ(count(green), 0);
     m.battery_charging = true;
     ui.render(m);
-    CHECK(count(green) > 0);  // charging: green fill, and the text is no longer red
+    CHECK(count(green) > 0);  // charging: green bolt, and the text is no longer red
     CHECK_EQ(count(red), 0);
+    // The bolt shows however low the level: an almost empty cell still lights green.
+    m.battery = 1;
+    ui.render(m);
+    CHECK(count(green) >= 10);
+    m.battery = 8;
     // Percentage only: no icon, so charging turns the text green instead.
     m.battery_icon = false;
     ui.render(m);
@@ -1833,7 +1838,7 @@ TEST("display: an emissive panel leaves its background unlit; a backlit one keep
 namespace {
 struct EstimatePower : hg::Power {
   std::optional<hg::PowerStatus> status =
-      hg::PowerStatus{std::nullopt, 3750, std::nullopt, false, std::nullopt};
+      hg::PowerStatus{std::nullopt, 3840, std::nullopt, false, std::nullopt};
   int reads = 0;
   std::optional<hg::PowerStatus> read() override { ++reads; return status; }
   bool power_off() override { return false; }
@@ -1883,7 +1888,7 @@ TEST("battery estimate: plausible limits, missing inputs and explicit absence co
            Sample{hg::PowerStatus{true, std::nullopt, std::nullopt, false, false}, -1},
            Sample{hg::PowerStatus{false, 3750, std::nullopt, false, true}, -1},
            Sample{hg::PowerStatus{false, 3750, 65, false, true}, -1},
-           Sample{hg::PowerStatus{std::nullopt, 3750, std::nullopt, false, std::nullopt}, 50},
+           Sample{hg::PowerStatus{std::nullopt, 3840, std::nullopt, false, std::nullopt}, 50},
            Sample{std::nullopt, -1}}) {
     battery.status = sample.status;
     r.advance(5000);
@@ -1912,17 +1917,26 @@ TEST("battery estimate: voltage and charging change at normal five-second polls 
   CHECK_EQ(battery.reads, 2);
   CHECK_EQ(int(r.app.model().battery), 100);
   CHECK(r.app.model().battery_charging);  // the endpoint does not mean charging has finished
+  // An estimate reads high on a charger: the icon replaces the number there.
+  CHECK(r.app.model().battery_icon);
+  CHECK(!r.app.model().battery_text);
   battery.status = hg::PowerStatus{std::nullopt, 3300, std::nullopt, false, std::nullopt};
   r.advance(5000);
   CHECK_EQ(int(r.app.model().battery), 0);
   CHECK(!r.app.model().battery_charging);
   CHECK(!r.app.model().battery_low);
+  CHECK(r.app.model().battery_text);  // the chosen style returns off the charger
+  CHECK(!r.app.model().battery_icon);
   battery.status->external_power = false;
   r.advance(5000);
   CHECK(r.app.model().battery_low);
+  CHECK(r.app.model().battery_text);
   battery.status->external_power = true;
   r.advance(5000);
   CHECK(!r.app.model().battery_low);
+  CHECK(!r.app.model().battery_text);  // external power alone counts as a charger
+  CHECK(r.app.model().battery_icon);
+  CHECK(r.app.model().battery_charging);  // full on USB, charger stopped: the bolt still shows
   battery.status.reset();
   r.advance(4990);
   CHECK_EQ(int(r.app.model().battery), 0);
@@ -2086,7 +2100,7 @@ TEST("battery estimate: raw status and gateway telemetry remain unestimated, inc
   Value status;
   CHECK(hg::json::parse(r.app.status_json(), status));
   CHECK(status["power"]["available"].as_bool());
-  CHECK_EQ(status["power"]["battery_mv"].as_int(), int64_t(3750));
+  CHECK_EQ(status["power"]["battery_mv"].as_int(), int64_t(3840));
   CHECK(status["power"]["battery_percent"].is_null());
   CHECK(status["power"]["battery_present"].is_null());
   CHECK(status["power"]["external_power"].is_null());
@@ -2095,7 +2109,7 @@ TEST("battery estimate: raw status and gateway telemetry remain unestimated, inc
   CHECK(state != nullptr);
   if (!state) return;
   CHECK_EQ((*state)["sensors"]["power_available"].as_int(), int64_t(1));
-  CHECK_EQ((*state)["sensors"]["battery_mv"].as_int(), int64_t(3750));
+  CHECK_EQ((*state)["sensors"]["battery_mv"].as_int(), int64_t(3840));
   CHECK((*state)["sensors"]["battery_percent"].is_null());
   CHECK((*state)["sensors"]["battery_present"].is_null());
   CHECK((*state)["sensors"]["external_power"].is_null());
