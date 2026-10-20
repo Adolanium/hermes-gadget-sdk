@@ -14,6 +14,12 @@ device keeps its Wi-Fi, server and key.
 
     python tools/package_release.py --all --out dist
     python tools/package_release.py --board esp32s3-breadboard --out dist --expect-version 0.1.0
+
+Boards in IDF_BOARDS are built with idf.py instead, since PlatformIO has no platform for their
+chip; tools/stage_idf_build.py copies such a build to where this script reads a PlatformIO one.
+--all packages the PlatformIO boards, and --board adds others:
+
+    python tools/package_release.py --all --board crowpanel-p4-101 --out dist
 """
 
 from __future__ import annotations
@@ -39,10 +45,13 @@ BOARD_TAG = b"HGBOARD="             # the board name the firmware reports (main/
 INSTALLER_URL = "https://adolanium.github.io/hermes-gadget-sdk/"
 GIT_URL = "https://github.com/Adolanium/hermes-gadget-sdk.git"
 TYPE_DATA, SUBTYPE_OTA, SUBTYPE_NVS = 0x01, 0x00, 0x02
-# Where the second-stage bootloader goes; every chip after the ESP32-S2 starts at 0.
-BOOTLOADER_OFFSET = {"esp32": 0x1000, "esp32s2": 0x1000}
+# Where the second-stage bootloader goes; the other chips after the ESP32-S2 start at 0.
+BOOTLOADER_OFFSET = {"esp32": 0x1000, "esp32s2": 0x1000, "esp32p4": 0x2000}
 CHIP_NAMES = {"esp32": "ESP32", "esp32s2": "ESP32-S2", "esp32s3": "ESP32-S3", "esp32c3": "ESP32-C3",
-              "esp32c6": "ESP32-C6", "esp32h2": "ESP32-H2"}
+              "esp32c6": "ESP32-C6", "esp32h2": "ESP32-H2", "esp32p4": "ESP32-P4"}
+# Boards built with idf.py, not PlatformIO, mapped to where their build command lives. Each one's
+# directory under boards/ has the board's name.
+IDF_BOARDS = {"crowpanel-p4-101": "the esp32p4 job in .github/workflows/ci.yml"}
 BUILD_FILES = ("bootloader.bin", "partitions.bin", "ota_data_initial.bin", "firmware.bin")
 
 
@@ -59,7 +68,7 @@ class Build:
     image_board: str    # the board name inside the image, which the device reports to Hermes
     chip: str
     flash_size: str
-    psram: str | None   # "octal", "quad" or None
+    psram: str | None   # "hex", "octal", "quad" or None
     settings: tuple[int, int] | None  # the NVS partition: (offset, size)
     meta: dict
 
@@ -128,8 +137,9 @@ def build_for(project: Path, board: str, board_dir: str) -> Build:
     missing = [name for name in BUILD_FILES if not (build_dir / name).is_file()]
     sdkconfig = project / f"sdkconfig.{board}"
     if missing or not sdkconfig.is_file():
-        raise PackageError(f"{board} isn't built (missing {', '.join(missing) or sdkconfig.name}); "
-                           f"run: pio run -e {board}")
+        how = (f"build it as {IDF_BOARDS[board]} does, then run tools/stage_idf_build.py"
+               if board in IDF_BOARDS else f"run: pio run -e {board}")
+        raise PackageError(f"{board} isn't built (missing {', '.join(missing) or sdkconfig.name}); {how}")
     def read(name: str) -> bytes:
         return (build_dir / name).read_bytes()
 
@@ -156,7 +166,8 @@ def build_for(project: Path, board: str, board_dir: str) -> Build:
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
     psram = None
     if sdk.get("CONFIG_SPIRAM") == "y":
-        psram = "octal" if sdk.get("CONFIG_SPIRAM_MODE_OCT") == "y" else "quad"
+        psram = ("hex" if sdk.get("CONFIG_SPIRAM_MODE_HEX") == "y" else
+                 "octal" if sdk.get("CONFIG_SPIRAM_MODE_OCT") == "y" else "quad")
     return Build(
         board=board, image=merge(parts), app=app, version=version, image_board=image_board,
         chip=CHIP_NAMES.get(target, target.upper()), flash_size=sdk.get("CONFIG_ESPTOOLPY_FLASHSIZE", ""),
@@ -168,20 +179,33 @@ def _file(path: Path, data: bytes) -> dict:
     return {"path": path.name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
 
 
-def license_archive(project: Path, path: Path) -> dict:
-    """Ship notices with binary artifacts, including the installed driver sources' notices."""
-    repo = PROJECT_DIR.parents[1]
-    files = [(repo / name, name) for name in ("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md")]
-    files.extend((p, p.relative_to(repo).as_posix()) for p in (repo / "LICENSES").rglob("*") if p.is_file())
+def build_notices(project: Path) -> list[tuple[Path, str]]:
+    """The installed driver sources' and ESP-IDF's notices, as (file, name in the archive)."""
     framework = Path(os.environ.get("IDF_PATH") or
                      Path(os.environ.get("PLATFORMIO_CORE_DIR", Path.home() / ".platformio")) /
                      "packages" / "framework-espidf")
+    files = []
     for root, prefix in ((project / "managed_components", "components"), (framework, "esp-idf")):
         if not root.is_dir():
             continue
         for entry in root.rglob("*"):
             if entry.is_file() and entry.name.upper().startswith(("LICENSE", "LICENCE", "NOTICE", "COPYING", "COPYRIGHT")):
                 files.append((entry, f"{prefix}/{entry.relative_to(root).as_posix()}"))
+    return files
+
+
+def license_archive(project: Path, path: Path, extra: list[Path] = ()) -> dict:
+    """Ship notices with binary artifacts, including the installed driver sources' notices.
+
+    Each directory in `extra` holds the notices of a build made elsewhere (an idf.py board's,
+    from tools/stage_idf_build.py), added under their paths relative to it.
+    """
+    repo = PROJECT_DIR.parents[1]
+    files = [(repo / name, name) for name in ("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md")]
+    files.extend((p, p.relative_to(repo).as_posix()) for p in (repo / "LICENSES").rglob("*") if p.is_file())
+    files.extend(build_notices(project))
+    for root in extra:
+        files.extend((p, p.relative_to(root).as_posix()) for p in root.rglob("*") if p.is_file())
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for source, name in sorted(files, key=lambda item: item[1]):
             info = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
@@ -191,14 +215,14 @@ def license_archive(project: Path, path: Path) -> dict:
     return {"path": path.name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
 
 
-def write_release(builds: list[Build], out: Path, project: Path = PROJECT_DIR) -> dict:
+def write_release(builds: list[Build], out: Path, project: Path = PROJECT_DIR, notices: list[Path] = ()) -> dict:
     versions = sorted({b.version for b in builds})
     if len(versions) != 1:
         raise PackageError(f"the boards report different versions: {', '.join(versions)}")
     version = versions[0]
     out.mkdir(parents=True, exist_ok=True)
     manifest = {"name": "Hermes Gadget", "version": version, "builds": []}
-    manifest["licenses"] = license_archive(project, out / f"hermes-gadget-{version}-licenses.zip")
+    manifest["licenses"] = license_archive(project, out / f"hermes-gadget-{version}-licenses.zip", notices)
     for b in builds:
         stem = f"hermes-gadget-{b.board}-{version}"
         manifest["builds"].append({
@@ -263,28 +287,33 @@ Every file has a GitHub build provenance attestation. Check a download with `gh 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    which = p.add_mutually_exclusive_group(required=True)
-    which.add_argument("--board", action="append", help="A PlatformIO environment (repeatable)")
-    which.add_argument("--all", action="store_true", help="Every environment in platformio.ini")
+    p.add_argument("--board", action="append", default=[],
+                   help="A PlatformIO environment or a board in IDF_BOARDS (repeatable)")
+    p.add_argument("--all", action="store_true", help="Every environment in platformio.ini")
     p.add_argument("--out", required=True, type=Path, help="Directory for the release files")
     p.add_argument("--project", type=Path, default=PROJECT_DIR, help="The firmware/esp32 directory")
     p.add_argument("--expect-version", help="Fail unless the firmware reports this version (e.g. from the tag)")
     p.add_argument("--notes", type=Path, help="Also write release notes (Markdown) to this file")
     p.add_argument("--commit", help="The release's commit, for the pinned plugin install in the notes")
     p.add_argument("--changelog", type=Path, help="CHANGELOG.md; its section for this version opens the notes")
+    p.add_argument("--notices", type=Path, action="append", default=[],
+                   help="A directory of another build's notices for the license archive (repeatable)")
     args = p.parse_args(argv)
+    if not args.all and not args.board:
+        p.error("give --all, --board or both")
 
     try:
-        known = environments(args.project)
-        boards = list(known) if args.all else args.board
+        known = environments(args.project) | {board: board for board in IDF_BOARDS}
+        boards = list(environments(args.project)) if args.all else []
+        boards += [board for board in args.board if board not in boards]
         unknown = [board for board in boards if board not in known]
         if unknown:
-            raise PackageError(f"not in platformio.ini: {', '.join(unknown)}")
+            raise PackageError(f"not in platformio.ini or IDF_BOARDS: {', '.join(unknown)}")
         builds = [build_for(args.project, board, known[board]) for board in boards]
         if args.expect_version and builds[0].version != args.expect_version:
             raise PackageError(f"the firmware reports {builds[0].version}, not {args.expect_version}; "
                                "update PROJECT_VER in firmware/esp32/CMakeLists.txt")
-        manifest = write_release(builds, args.out, args.project)
+        manifest = write_release(builds, args.out, args.project, args.notices)
     except PackageError as exc:
         print(f"package_release: {exc}", file=sys.stderr)
         return 1

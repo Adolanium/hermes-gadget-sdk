@@ -34,6 +34,8 @@ export function embeddedPsram(features) {
 
 // On the ESP32-S3 the size says the kind: the S3R8 has 8 MB of octal PSRAM, the S3R2 2 MB of quad.
 const PSRAM_KIND = { 8: "octal", 2: "quad" };
+// The chips whose PSRAM esptool reports. It lists none for the ESP32-P4, whatever is in the package.
+const REPORTS_PSRAM = new Set(["ESP32-S3"]);
 
 /**
  * What stands between `build` and the chip esptool found ({name, flashSize, features}).
@@ -53,7 +55,7 @@ export function checkChip(build, chip) {
   if (need && have && have < need) {
     problems.push({ level: "error", message: `The firmware needs ${need} MB of flash, and this board has ${have} MB.` });
   }
-  if (build.psram) {
+  if (build.psram && REPORTS_PSRAM.has(chip.name)) {
     const size = embeddedPsram(chip.features);
     const kind = PSRAM_KIND[size];
     const effect = "The firmware will start, but the screen may stay dark.";

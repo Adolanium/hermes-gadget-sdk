@@ -34,7 +34,7 @@ The LCD-1.54 `-EN` SKU uses the same hardware. The separate Touch-LCD-1.54 model
 
 A [partial LCD-1.54 physical report](#waveshare-lcd-154-partial-physical-report) covers the Touch-LCD-1.54 SKU 33869 running the LCD-1.54 profile. It does not verify the separate non-touch SKUs.
 
-CI builds and packages the PlatformIO profiles. The CrowPanel P4 has a separate ESP-IDF 6.1.0 build job; release packaging for P4 is not configured yet. The browser installer lists profiles included in the latest published release, so newly merged profiles may require a source build until the next release. Other chips, wiring, and unlisted hardware revisions are porting targets, not verified configurations.
+CI builds and packages every profile: the PlatformIO profiles with PlatformIO, and the CrowPanel P4 with ESP-IDF 6.1.0 in a separate job. Releases include the CrowPanel P4 image from the next tagged release on; its bootloader sits at 0x2000, as the ESP32-P4 requires, so the merged image is still flashed at 0x0. The browser installer lists profiles included in the latest published release, so newly merged profiles may require a source build until the next release. Other chips, wiring, and unlisted hardware revisions are porting targets, not verified configurations.
 
 ## Waveshare LCD-1.54 partial physical report
 
