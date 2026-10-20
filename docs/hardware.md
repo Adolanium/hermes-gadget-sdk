@@ -344,13 +344,13 @@ The V1 board uses a different panel and touch controller, and this image doesn't
 | Speaker DAC + microphone ADC | ES8311 | I2C 0x18; I2S MCLK 16, BCLK 9, WS 45, DOUT 8, DIN 10; amplifier enable 46 |
 | Microphone | ES8311 analog input | One analog electret microphone into the ES8311's own ADC (not an ES7210) |
 | Power | AXP2101 | I2C 0x34; battery/USB readings and local power-off; charging and rails keep their defaults |
-| Reset expander | TCA9554 | I2C 0x20; drives LCD_RST (P0), the display power rail (P1) and TOUCH_RST (P2) |
+| Reset expander | TCA9554 | I2C 0x20; drives LCD_RST (P0), the display power rail (P1) and TOUCH_RST (P2); reads the PWR key (P4, high while pressed) |
 | I2C bus | | SDA 15, SCL 14, 400 kHz |
 | BOOT key | | GPIO 0 |
 
 The display and touch controllers are held in reset by the TCA9554, not by direct GPIOs. Before the display starts, the firmware pulls P0–P2 low for 20 ms, releases them and waits 150 ms; the other expander pins keep their state.
 
-**Controls.** Hold the screen to talk, tap to answer "yes", swipe down to cancel; hold BOOT to talk as well.
+**Controls.** Hold the screen to talk, tap to answer "yes", swipe down to cancel; hold BOOT to talk as well. PWR is CANCEL: a press cancels, and holding it for two seconds starts a new conversation.
 
 **Build and flash it** with PlatformIO:
 
