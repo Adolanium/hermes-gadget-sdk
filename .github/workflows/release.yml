@@ -1,7 +1,8 @@
 name: Release
 
-# Pushing a tag vX.Y.Z builds every board in platformio.ini and publishes the images,
-# checksums and installer manifest as a GitHub release. PROJECT_VER in
+# Pushing a tag vX.Y.Z builds every board in platformio.ini, and with idf.py the boards
+# PlatformIO can't build (IDF_BOARDS in firmware/esp32/tools/package_release.py), and publishes
+# the images, checksums and installer manifest as a GitHub release. PROJECT_VER in
 # firmware/esp32/CMakeLists.txt must match the tag.
 on:
   push:
@@ -72,9 +73,41 @@ jobs:
           name: linux-arm64
           path: dist/hermes-gadget-*-linux-arm64.tar.gz*
           if-no-files-found: error
+
+  esp32p4:
+    name: Build ESP32-P4 boards
+    # PlatformIO has no ESP32-P4 platform, so the CrowPanel P4 is built as CI's esp32p4 job builds it.
+    # The release job packages the staged build with the others, so one manifest, SHA256SUMS
+    # and license archive covers every board.
+    needs: verify
+    runs-on: ubuntu-24.04
+    container: espressif/idf:v6.1@sha256:f81b6e077e6af93c312181cd7d4e7936cfbafc5c7f77cbacba8fdd34994f218a
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Build CrowPanel P4
+        shell: bash
+        working-directory: firmware/esp32
+        run: |
+          source /opt/esp/idf/export.sh
+          idf.py -B build/crowpanel-p4-101 -D SDKCONFIG=build/crowpanel-p4-101/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/crowpanel-p4-101/sdkconfig.defaults" set-target esp32p4
+          idf.py -B build/crowpanel-p4-101 -D SDKCONFIG=build/crowpanel-p4-101/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/crowpanel-p4-101/sdkconfig.defaults" build
+          python tools/stage_idf_build.py crowpanel-p4-101 build/crowpanel-p4-101 --notices notices
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: esp32p4-builds
+          path: |
+            firmware/esp32/.pio/build/crowpanel-p4-101/
+            firmware/esp32/sdkconfig.crowpanel-p4-101
+            firmware/esp32/notices/
+          include-hidden-files: true  # .pio
+          if-no-files-found: error
+
   release:
     name: Build and publish
-    needs: linux
+    needs: [linux, esp32p4]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -104,10 +137,15 @@ jobs:
       - name: Build every board
         working-directory: firmware/esp32
         run: pio run
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
+        with:
+          name: esp32p4-builds
+          path: firmware/esp32/
       - name: Package
         working-directory: firmware/esp32
         run: >-
-          python tools/package_release.py --all --out dist --expect-version "${TAG#v}"
+          python tools/package_release.py --all --board crowpanel-p4-101 --notices notices
+          --out dist --expect-version "${TAG#v}"
           --notes "$RUNNER_TEMP/notes.md" --commit "$(git rev-parse HEAD)" --changelog ../../CHANGELOG.md
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
         with:

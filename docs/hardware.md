@@ -740,6 +740,13 @@ idf.py -B build/crowpanel-p4-101 \
   build
 ```
 
+Releases include a merged image and an OTA app for this profile, and every CI run keeps them in its `firmware-crowpanel-p4-101` artifact. To package a local build the same way:
+
+```bash
+python tools/stage_idf_build.py crowpanel-p4-101 build/crowpanel-p4-101
+python tools/package_release.py --board crowpanel-p4-101 --out dist
+```
+
 For physical results and explicit untested items, see the [CrowPanel P4 validation record](hardware-validation.md#crowpanel-advanced-p4-partial-physical-test-record). Resolution reference: [Elecrow product page](https://www.elecrow.com/crowpanel-advanced-10-1inch-esp32-p4-hmi-ai-display-1024x600-ips-touch-screen-wifi-6.html).
 
 ## Build and flash

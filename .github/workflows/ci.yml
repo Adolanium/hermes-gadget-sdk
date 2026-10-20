@@ -203,3 +203,17 @@ jobs:
           source /opt/esp/idf/export.sh
           idf.py -B build/crowpanel-p4-101 -D SDKCONFIG=build/crowpanel-p4-101/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/crowpanel-p4-101/sdkconfig.defaults" set-target esp32p4
           idf.py -B build/crowpanel-p4-101 -D SDKCONFIG=build/crowpanel-p4-101/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/crowpanel-p4-101/sdkconfig.defaults" build
+      - name: Package
+        # The same image, app and manifest a release ships, so a contributor can flash a CI build.
+        shell: bash
+        working-directory: firmware/esp32
+        run: |
+          source /opt/esp/idf/export.sh
+          python tools/stage_idf_build.py crowpanel-p4-101 build/crowpanel-p4-101
+          python tools/package_release.py --board crowpanel-p4-101 --out dist
+      - name: Keep the images
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: firmware-crowpanel-p4-101
+          path: firmware/esp32/dist/
+          if-no-files-found: error
