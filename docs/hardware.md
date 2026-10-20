@@ -44,25 +44,26 @@ All pins avoid the S3's flash/PSRAM pins (26–37) and native USB (19/20). Use *
 
 ## Waveshare ESP32-S3-LCD-1.54
 
-Board option `esp32s3-lcd-154`, for Waveshare's all-in-one 1.54" board (SKUs 33866/33867; the `-EN` SKU is the same hardware): an ESP32-S3R8 (8 MB octal PSRAM) with 16 MB flash, a 240×240 ST7789 panel over SPI, an ES8311 DAC and an ES7210 microphone ADC with two microphones, an NS4150B amplifier, a speaker, a QMI8658 6-axis IMU, a TF card slot, a battery charger and the BOOT / PLUS / PWR keys. Nothing to wire and nothing to connect, it works out of the box. The touch version (`ESP32-S3-Touch-LCD-1.54`, SKUs 33868/33869) adds a CST816 touchscreen that this port does not use.
+Board option `esp32s3-lcd-154`, for Waveshare's all-in-one 1.54" board (SKUs 33866/33867; the `-EN` SKU is the same hardware): an ESP32-S3R8 (8 MB octal PSRAM) with 16 MB flash, a 240×240 ST7789 panel over SPI, an ES8311 DAC and an ES7210 microphone ADC with two microphones, an NS4150B amplifier, a speaker, a QMI8658 6-axis IMU, a TF card slot, a battery charger and the BOOT / PLUS / PWR keys. Nothing to wire and nothing to connect, it works out of the box. The touch version (`ESP32-S3-Touch-LCD-1.54`, SKUs 33868/33869) adds a CST816 touchscreen, which the same profile drives; on the non-touch SKUs nothing answers at its address and the touchscreen is reported absent.
 
 | Part | Chip | Connection |
 |---|---|---|
 | Display | ST7789, SPI | SCLK 38, MOSI 39, CS 21, DC 45, RST 40, BL 46 (LEDC) |
 | Speaker DAC | ES8311 | I2C 0x18; I2S MCLK 8, BCLK 9, WS 10, DOUT 12; amplifier enable 7 |
 | Microphones | ES7210 | I2C 0x40; I2S DIN 11 (shares the bus above), MIC1 + MIC2 |
+| Touch (touch version) | CST816 | I2C 0x15 on the bus below; RST 47 |
 | IMU | QMI8658 | I2C 0x6B |
 | I2C bus | | SDA 42, SCL 41, 400 kHz |
-| Buttons (to GND) | | TALK = BOOT (0), CANCEL = PLUS (4) |
+| Buttons (to GND) | | TALK = BOOT (0), CANCEL = PLUS (4), power key = PWR (5) |
 | Battery | ETA6098 | GPIO 1 (BAT_ADC), GPIO 2 (power latch), GPIO 3 (CHG_STAT) |
 
-The PWR key remains part of the power circuit. Firmware asserts GPIO 2 at startup to keep the battery path enabled. The TF card, QMI8658 and touchscreen are unused.
+The PWR key is part of the power circuit and also reads low on GPIO 5 while pressed (`latch_power.key`). A short press turns the screen off and on; holding it for 2.5 seconds lowers GPIO 2, which powers the board off on battery. Firmware asserts GPIO 2 at startup to keep the battery path enabled. On the touch version, holding the screen talks and a swipe down cancels, as on other touch boards. The TF card and QMI8658 are unused.
 
 The [device settings menu](using-gadget.md#device-settings-and-hardware-checks) shows calibrated battery-node voltage and the charging signal. GPIO 1 samples the R27/R32 divider, whose ratio is three. GPIO 3 reads the active-low charging signal. This board has no fuel gauge, battery presence detector or USB-status input, so those readings are omitted. External power is reported while CHG_STAT reads charging or a USB host is connected to the USB-C port (`latch_power.usb_external_power`), and battery otherwise, so Wi-Fi modem sleep applies on battery; a USB charger without data that has finished charging counts as battery. Voltage is unavailable if the ESP32's ADC calibration cannot start. An unplugged battery can leave voltage on this node while USB powers the charger; voltage alone does not prove a battery is attached.
 
 After confirming a compatible single-cell 3.7 V Li-ion battery is fitted, opt into a rough display-only percentage with `set battery_estimate liion`, then `set battery_display percentage`. See [battery indicator settings and limitations](using-gadget.md#device-settings-and-hardware-checks). It is off by default, stays visible while charging, and does not change raw gateway telemetry or establish charge completion. Do not enable it merely because this node has voltage; USB can energize the node without a battery. Simulator checks and firmware compilation do not calibrate or physically verify this estimate.
 
-Select **Power off** twice to lower GPIO 2 and disconnect battery power. **USB continues to power the board.** Disconnect USB to turn it off, and hold PWR to turn it back on from battery. BOOT and PLUS retain their TALK and CANCEL roles. The optional screen timeout dims and darkens the display while keeping Wi-Fi connected.
+Select **Power off** twice to lower GPIO 2 and disconnect battery power. **USB continues to power the board.** Disconnect USB to turn it off, and hold PWR to turn it back on from battery. Holding PWR for 2.5 seconds while the board runs does the same as **Power off**; on USB the screen goes dark instead. BOOT and PLUS retain their TALK and CANCEL roles. The optional screen timeout dims and darkens the display while keeping Wi-Fi connected.
 
 While the screen is dark, on battery and idle, the chip dozes: the CPU drops to 80 MHz when idle at any time, and while dozing it takes light sleep between Wi-Fi beacons, waking every 100 ms to read the keys and, on the touch version, the touchscreen. The battery latch, the panel's control lines and the amplifier enable keep their level through light sleep. Light sleep never runs while a USB host is connected (the console and JTAG would stop), so a doze shows only on battery.
 
@@ -345,13 +346,13 @@ The V1 board uses a different panel and touch controller, and this image doesn't
 | Speaker DAC + microphone ADC | ES8311 | I2C 0x18; I2S MCLK 16, BCLK 9, WS 45, DOUT 8, DIN 10; amplifier enable 46 |
 | Microphone | ES8311 analog input | One analog electret microphone into the ES8311's own ADC (not an ES7210) |
 | Power | AXP2101 | I2C 0x34; battery/USB readings and local power-off; charging and rails keep their defaults |
-| Reset expander | TCA9554 | I2C 0x20; drives LCD_RST (P0), the display power rail (P1) and TOUCH_RST (P2) |
+| Reset expander | TCA9554 | I2C 0x20; drives LCD_RST (P0), the display power rail (P1) and TOUCH_RST (P2); reads the PWR key (P4, high while pressed) |
 | I2C bus | | SDA 15, SCL 14, 400 kHz |
 | BOOT key | | GPIO 0 |
 
 The display and touch controllers are held in reset by the TCA9554, not by direct GPIOs. Before the display starts, the firmware pulls P0–P2 low for 20 ms, releases them and waits 150 ms; the other expander pins keep their state.
 
-**Controls.** Hold the screen to talk, tap to answer "yes", swipe down to cancel; hold BOOT to talk as well.
+**Controls.** Hold the screen to talk, tap to answer "yes", swipe down to cancel; hold BOOT to talk as well. PWR is CANCEL: a press cancels, and holding it for two seconds starts a new conversation.
 
 **Build and flash it** with PlatformIO:
 
