@@ -560,6 +560,7 @@ void App::h_audio_start(const json::Value& m) {
   }
   in_stream_ = static_cast<int>(m["stream"].as_int(0));
   in_decoded_ = decoded;
+  in_rate_ = rate;
   last_turn_rx_ = now();
   status_.clear();  // audible reply: the working-state phrase is over
   if (mode_ != Mode::Responding) {
@@ -600,7 +601,7 @@ void App::on_transport_binary(const uint8_t* data, size_t len) {
     if (in_stream_ < 0 || f.stream != in_stream_ || !hal_.speaker) return;
     if (in_decoded_) {
       constexpr size_t kMaxPacketMs = 120;  // the longest Opus packet
-      pcm_buf_.resize(static_cast<size_t>(profile_.speaker_rate) * kMaxPacketMs / 1000);
+      pcm_buf_.resize(static_cast<size_t>(in_rate_) * kMaxPacketMs / 1000);  // the stream's rate, not the profile's
       const int n = hal_.speaker_decoder->decode(f.payload, f.payload_len, pcm_buf_.data(), pcm_buf_.size());
       if (n > 0) hal_.speaker->write(pcm_buf_.data(), static_cast<size_t>(n));
       return;

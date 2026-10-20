@@ -40,6 +40,10 @@ def _load() -> Optional[ctypes.CDLL]:
         lib.opus_encode.restype = ctypes.c_int32
         lib.opus_encode.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_int32]
         lib.opus_encoder_destroy.argtypes = [ctypes.c_void_p]
+        # opus_encoder_ctl is variadic: declaring only the fixed arguments makes ctypes use
+        # the variadic calling convention for the rest (it differs on Apple arm64).
+        lib.opus_encoder_ctl.restype = ctypes.c_int
+        lib.opus_encoder_ctl.argtypes = [ctypes.c_void_p, ctypes.c_int]
         _lib = lib
         break
     if _lib is None:
@@ -65,8 +69,12 @@ class Encoder:
         if err.value != 0 or not state:
             raise RuntimeError(f"opus_encoder_create failed ({err.value})")
         self._lib, self._state, self.rate = lib, state, rate
-        # opus_encoder_ctl is variadic: pass the value with an explicit C type.
-        lib.opus_encoder_ctl(ctypes.c_void_p(state), ctypes.c_int(SET_BITRATE_REQUEST), ctypes.c_int32(int(bitrate)))
+        # The variadic value goes with an explicit C type; a refused bitrate fails the stream,
+        # so the hub falls back to PCM16 instead of sending at a bitrate nobody asked for.
+        rc = lib.opus_encoder_ctl(state, SET_BITRATE_REQUEST, ctypes.c_int32(int(bitrate)))
+        if rc != 0:
+            self.close()
+            raise ValueError(f"Opus refused bitrate {bitrate} ({rc})")
         self._out = ctypes.create_string_buffer(MAX_PACKET)
 
     def encode(self, pcm: bytes) -> bytes:
