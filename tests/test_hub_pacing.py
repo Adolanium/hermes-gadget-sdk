@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
+from types import SimpleNamespace
 
 import pytest
 
@@ -24,6 +25,8 @@ class VirtualClock:
 
 class RecordingSession:
     speaker_rate = RATE
+    speaker_formats = ["pcm16"]
+    hub = SimpleNamespace(opus_bitrate=0)
 
     def __init__(self, clock: VirtualClock):
         self.clock = clock

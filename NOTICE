@@ -25,6 +25,16 @@ esp_wifi_remote 1.6.5, esp_lcd_ek79007 2.0.2, and esp_lcd_st7701 2.0.2
 (1.1.0 for ESP-IDF below 5.4; Apache License 2.0, Espressif Systems), plus the
 Python packages listed in pyproject.toml (each under its own license).
 
+Firmware images include libopus, Xiph.Org's Opus codec, built for ESP-IDF by the
+esp-opus component (78/esp-opus 1.0.x,
+https://components.espressif.com/components/78/esp-opus), fetched at build time
+and used to decode Opus reply audio. libopus is under the BSD 3-Clause License,
+Copyright 2001-2023 Xiph.Org, Skype Limited, Octasic, Jean-Marc Valin, Timothy
+B. Terriberry, CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro Lopo,
+Mozilla, Amazon. A copy of its license is in LICENSES/libopus-BSD-3-Clause.txt.
+The Hermes plugin can load the host's own libopus at run time; none is
+distributed with it.
+
 Optional Linux audio uses python-sounddevice (MIT, Matthias Geier) and the
 system PortAudio library (MIT). Raspberry Pi controls use GPIO Zero
 (BSD-3-Clause) and the system lgpio library (Unlicense). These dependencies are

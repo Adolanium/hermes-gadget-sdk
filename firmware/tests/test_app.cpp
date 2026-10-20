@@ -497,6 +497,69 @@ TEST("app: reply audio plays through the speaker and barge-in stops it") {
   CHECK(r.app.screen() == hg::Screen::Listening);
 }
 
+// Stands in for an Opus decoder: each packet byte becomes four samples, and a packet starting
+// 0xFF is one it cannot decode.
+struct FakeDecoder : hg::AudioDecoder {
+  uint32_t rate = 0;
+  int packets = 0;
+  const char* format() const override { return "opus"; }
+  bool begin(uint32_t r) override { rate = r; return r == 16000; }
+  int decode(const uint8_t* packet, size_t len, int16_t* pcm, size_t max_samples) override {
+    ++packets;
+    if (len == 0 || packet[0] == 0xFF) return -1;
+    const size_t n = std::min(len * 4, max_samples);
+    std::fill(pcm, pcm + n, int16_t(7));
+    return static_cast<int>(n);
+  }
+};
+
+TEST("app: a speaker decoder adds its format to hello and decodes compressed reply audio") {
+  Rig plain;
+  plain.bring_online(true);
+  const auto* hello = plain.fake.last("hello");
+  CHECK(hello && !(*hello)["caps"]["speaker"]["formats"].is_array());  // PCM-only devices stay as they were
+  // An Opus stream to a device without a decoder is refused.
+  plain.server(R"({"type":"audio.start","stream":3,"rate":16000,"format":"opus"})");
+  CHECK(!plain.fake.spk_open);
+
+  Rig r;
+  FakeDecoder decoder;
+  r.hal.speaker_decoder = &decoder;
+  r.bring_online(true);
+  hello = r.fake.last("hello");
+  CHECK(hello != nullptr);
+  if (!hello) return;
+  CHECK_EQ((*hello)["caps"]["speaker"]["format"].as_string(), std::string("pcm16"));  // for older servers
+  const auto& formats = (*hello)["caps"]["speaker"]["formats"];
+  CHECK(formats.is_array() && formats.size() == 2);
+  CHECK_EQ(formats[1].as_string(), std::string("opus"));
+
+  r.server(R"({"type":"audio.start","stream":3,"rate":16000,"format":"opus"})");
+  CHECK(r.fake.spk_open);
+  CHECK_EQ(decoder.rate, uint32_t(16000));
+  std::vector<uint8_t> frame(hg::proto::kBinaryHeader + 30, 1);
+  hg::proto::write_binary_header(frame.data(), hg::proto::Channel::Audio, 3, 0);
+  r.app.on_transport_binary(frame.data(), frame.size());
+  CHECK_EQ(r.fake.spk_samples, size_t(120));  // the decoder's output, not the packet bytes
+  frame[hg::proto::kBinaryHeader] = 0xFF;  // a packet the decoder rejects plays nothing
+  r.app.on_transport_binary(frame.data(), frame.size());
+  CHECK_EQ(r.fake.spk_samples, size_t(120));
+  CHECK_EQ(decoder.packets, 2);
+  r.server(R"({"type":"audio.end","stream":3})");
+
+  // The next PCM stream bypasses the decoder.
+  r.server(R"({"type":"audio.start","stream":4,"rate":16000,"format":"pcm16"})");
+  std::vector<uint8_t> pcm(hg::proto::kBinaryHeader + 640, 0);
+  hg::proto::write_binary_header(pcm.data(), hg::proto::Channel::Audio, 4, 0);
+  r.app.on_transport_binary(pcm.data(), pcm.size());
+  CHECK_EQ(r.fake.spk_samples, size_t(440));
+  CHECK_EQ(decoder.packets, 2);
+  // A rate the decoder refuses leaves the speaker closed.
+  r.server(R"({"type":"audio.end","stream":4})");
+  r.server(R"({"type":"audio.start","stream":5,"rate":24000,"format":"opus"})");
+  CHECK(!r.fake.spk_open);
+}
+
 TEST("app: agent actions run on the device and report results") {
   Rig r;
   int calls = 0;
@@ -1716,8 +1779,13 @@ TEST("battery indicator: the top band shows the level, colours charging and low,
     CHECK_EQ(count(green), 0);
     m.battery_charging = true;
     ui.render(m);
-    CHECK(count(green) > 0);  // charging: green fill, and the text is no longer red
+    CHECK(count(green) > 0);  // charging: green bolt, and the text is no longer red
     CHECK_EQ(count(red), 0);
+    // The bolt shows however low the level: an almost empty cell still lights green.
+    m.battery = 1;
+    ui.render(m);
+    CHECK(count(green) >= 10);
+    m.battery = 8;
     // Percentage only: no icon, so charging turns the text green instead.
     m.battery_icon = false;
     ui.render(m);
@@ -1770,7 +1838,7 @@ TEST("display: an emissive panel leaves its background unlit; a backlit one keep
 namespace {
 struct EstimatePower : hg::Power {
   std::optional<hg::PowerStatus> status =
-      hg::PowerStatus{std::nullopt, 3750, std::nullopt, false, std::nullopt};
+      hg::PowerStatus{std::nullopt, 3840, std::nullopt, false, std::nullopt};
   int reads = 0;
   std::optional<hg::PowerStatus> read() override { ++reads; return status; }
   bool power_off() override { return false; }
@@ -1820,7 +1888,7 @@ TEST("battery estimate: plausible limits, missing inputs and explicit absence co
            Sample{hg::PowerStatus{true, std::nullopt, std::nullopt, false, false}, -1},
            Sample{hg::PowerStatus{false, 3750, std::nullopt, false, true}, -1},
            Sample{hg::PowerStatus{false, 3750, 65, false, true}, -1},
-           Sample{hg::PowerStatus{std::nullopt, 3750, std::nullopt, false, std::nullopt}, 50},
+           Sample{hg::PowerStatus{std::nullopt, 3840, std::nullopt, false, std::nullopt}, 50},
            Sample{std::nullopt, -1}}) {
     battery.status = sample.status;
     r.advance(5000);
@@ -1849,17 +1917,26 @@ TEST("battery estimate: voltage and charging change at normal five-second polls 
   CHECK_EQ(battery.reads, 2);
   CHECK_EQ(int(r.app.model().battery), 100);
   CHECK(r.app.model().battery_charging);  // the endpoint does not mean charging has finished
+  // An estimate reads high on a charger: the icon replaces the number there.
+  CHECK(r.app.model().battery_icon);
+  CHECK(!r.app.model().battery_text);
   battery.status = hg::PowerStatus{std::nullopt, 3300, std::nullopt, false, std::nullopt};
   r.advance(5000);
   CHECK_EQ(int(r.app.model().battery), 0);
   CHECK(!r.app.model().battery_charging);
   CHECK(!r.app.model().battery_low);
+  CHECK(r.app.model().battery_text);  // the chosen style returns off the charger
+  CHECK(!r.app.model().battery_icon);
   battery.status->external_power = false;
   r.advance(5000);
   CHECK(r.app.model().battery_low);
+  CHECK(r.app.model().battery_text);
   battery.status->external_power = true;
   r.advance(5000);
   CHECK(!r.app.model().battery_low);
+  CHECK(!r.app.model().battery_text);  // external power alone counts as a charger
+  CHECK(r.app.model().battery_icon);
+  CHECK(r.app.model().battery_charging);  // full on USB, charger stopped: the bolt still shows
   battery.status.reset();
   r.advance(4990);
   CHECK_EQ(int(r.app.model().battery), 0);
@@ -2023,7 +2100,7 @@ TEST("battery estimate: raw status and gateway telemetry remain unestimated, inc
   Value status;
   CHECK(hg::json::parse(r.app.status_json(), status));
   CHECK(status["power"]["available"].as_bool());
-  CHECK_EQ(status["power"]["battery_mv"].as_int(), int64_t(3750));
+  CHECK_EQ(status["power"]["battery_mv"].as_int(), int64_t(3840));
   CHECK(status["power"]["battery_percent"].is_null());
   CHECK(status["power"]["battery_present"].is_null());
   CHECK(status["power"]["external_power"].is_null());
@@ -2032,7 +2109,7 @@ TEST("battery estimate: raw status and gateway telemetry remain unestimated, inc
   CHECK(state != nullptr);
   if (!state) return;
   CHECK_EQ((*state)["sensors"]["power_available"].as_int(), int64_t(1));
-  CHECK_EQ((*state)["sensors"]["battery_mv"].as_int(), int64_t(3750));
+  CHECK_EQ((*state)["sensors"]["battery_mv"].as_int(), int64_t(3840));
   CHECK((*state)["sensors"]["battery_percent"].is_null());
   CHECK((*state)["sensors"]["battery_present"].is_null());
   CHECK((*state)["sensors"]["external_power"].is_null());

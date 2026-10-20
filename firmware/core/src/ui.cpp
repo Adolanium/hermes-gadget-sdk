@@ -406,13 +406,26 @@ void Ui::draw_battery(Canvas& c, const UiModel& m, int x, int cy) {
   if (m.battery_icon) {
     const int bw = 9 * s, bh = 5 * s + 1, t = std::max(1, s / 2);
     const int y = cy - bh / 2;
-    const uint16_t fill = m.battery_charging ? kGreen : m.battery_low ? kRed : kText;
+    // Charging: a dim green fill under a bright bolt, so it shows at any level.
+    const uint16_t fill = m.battery_charging ? kGreenDim : m.battery_low ? kRed : kText;
     c.fill_rect(x, y, bw, bh, kDim);
     c.fill_rect(x + t, y + t, bw - 2 * t, bh - 2 * t, panel_.round ? bg_ : kBar);
     c.fill_rect(x + bw, cy - s, s, 2 * s, kDim);
-    const int inner = bw - 4 * t;
+    const int inner = bw - 4 * t, inner_h = bh - 4 * t;
     const int level = std::max(m.battery > 0 ? 1 : 0, inner * std::min<int>(m.battery, 100) / 100);
-    c.fill_rect(x + 2 * t, y + 2 * t, level, bh - 4 * t, fill);
+    c.fill_rect(x + 2 * t, y + 2 * t, level, inner_h, fill);
+    if (m.battery_charging) {
+      static const char* const kBolt[] = {"....##.", "...##..", ".#####.", "..##...", ".##...."};
+      const int cw = inner / 7, ch = std::max(1, inner_h / 5);
+      if (cw > 0) {
+        const int bx = x + 2 * t + (inner - 7 * cw) / 2, by = y + 2 * t + (inner_h - 5 * ch) / 2;
+        for (int r = 0; r < 5; ++r)
+          for (int col = 0; col < 7; ++col)
+            if (kBolt[r][col] == '#') c.fill_rect(bx + col * cw, by + r * ch, cw, ch, kGreen);
+      } else {
+        c.fill_rect(x + 2 * t, y + 2 * t, inner, inner_h, kGreen);  // too small for a bolt
+      }
+    }
     x += 12 * s;
   }
   if (m.battery_text) {

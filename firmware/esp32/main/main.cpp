@@ -56,6 +56,7 @@ hgp::I2sSpeaker g_speaker;
 hgp::CodecAudio g_codec;
 hgp::CodecMic g_codec_mic;
 hgp::CodecSpeaker g_codec_speaker;
+hgp::OpusSpeakerDecoder g_opus;
 hgp::Buttons g_buttons;
 hgp::TouchInput g_touch;
 hgp::Wifi g_wifi;
@@ -143,8 +144,11 @@ void power_rails_on(const hgp::BoardConfig& b) {
 // Light sleep disables every GPIO it doesn't know about; these must keep their
 // level so the panel, touch controller, amplifier and buses survive a doze.
 void keep_pins_through_sleep(const hgp::BoardConfig& b) {
+  // A latch-powered board must also keep its battery latch high, or light sleep cuts the supply.
   const int pins[] = {b.amoled.cs, b.amoled.sclk, b.amoled.d0, b.amoled.d1, b.amoled.d2, b.amoled.d3,
-                      b.amoled.rst, b.touch.rst, b.codec.pa, b.i2c.sda, b.i2c.scl};
+                      b.amoled.rst, b.lcd.cs, b.lcd.dc, b.lcd.rst, b.lcd.backlight, b.touch.rst,
+                      b.touch.bus.sda, b.touch.bus.scl, b.codec.pa, b.i2c.sda, b.i2c.scl,
+                      b.latch_power.enabled ? b.latch_power.enable : -1};
   for (int pin : pins)
     if (pin >= 0) gpio_sleep_sel_dis(static_cast<gpio_num_t>(pin));
   for (const hgp::PowerRail& rail : b.power_rails)
@@ -321,6 +325,7 @@ extern "C" void app_main(void) {
     // Light-sleep boards power the DAC down while dozing, if the mics don't share it.
     if (board.light_sleep && g_codec.mic_link().switchable) g_codec_speaker.allow_power_down(g_codec.mic_link().format);
   }
+  if (hal.speaker) hal.speaker_decoder = &g_opus;  // Opus replies when Hermes offers them
   g_buttons.begin(board.buttons);
   const bool touch = peripherals_ready && (board.touch.enabled || board.pwr_key.enabled || board.encoder.a >= 0) &&
                      g_touch.begin(board.touch, board.pwr_key, board.encoder,

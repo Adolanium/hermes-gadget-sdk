@@ -72,6 +72,18 @@ class AudioOut {
   virtual void set_volume(uint8_t percent) { (void)percent; }
 };
 
+// Decodes compressed speaker audio into mono PCM16. Optional: a device without
+// one announces and plays PCM16 only. Each binary audio frame carries one packet.
+class AudioDecoder {
+ public:
+  virtual ~AudioDecoder() = default;
+  virtual const char* format() const = 0;  // the protocol name, e.g. "opus"
+  // A new stream at this rate; false when the rate is unsupported.
+  virtual bool begin(uint32_t sample_rate) = 0;
+  // One packet in; returns the samples written to pcm, or -1 for a packet it cannot decode.
+  virtual int decode(const uint8_t* packet, size_t len, int16_t* pcm, size_t max_samples) = 0;
+};
+
 // Message transport (a WebSocket on every current port). connect() is
 // asynchronous: the port later calls App::on_transport_open() or
 // App::on_transport_closed().
@@ -163,6 +175,7 @@ struct Hal {
   Display* display = nullptr;
   AudioIn* mic = nullptr;
   AudioOut* speaker = nullptr;
+  AudioDecoder* speaker_decoder = nullptr;  // optional compressed speaker audio
   Updater* updater = nullptr;
   Power* power = nullptr;
 };

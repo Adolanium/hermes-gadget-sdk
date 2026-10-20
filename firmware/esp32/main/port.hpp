@@ -55,6 +55,8 @@
 #include "hg/setup.hpp"
 #include "hg/wifi_networks.hpp"
 
+struct OpusDecoder;  // libopus (opus.h); only port_opus.cpp includes it
+
 namespace hgp {
 
 // ---------------------------------------------------------------------------
@@ -585,6 +587,20 @@ class CoreS3Board {
   std::unique_ptr<hg::CoreS3Control> control_;
 };
 
+// Opus reply audio (port_opus.cpp). It decodes on the app task, whose stack
+// CONFIG_ESP_MAIN_TASK_STACK_SIZE sizes for libopus's alloca scratch.
+class OpusSpeakerDecoder final : public hg::AudioDecoder {
+ public:
+  ~OpusSpeakerDecoder() override;
+  const char* format() const override { return "opus"; }
+  bool begin(uint32_t sample_rate) override;
+  int decode(const uint8_t* packet, size_t len, int16_t* pcm, size_t max_samples) override;
+
+ private:
+  ::OpusDecoder* decoder_ = nullptr;
+  uint32_t rate_ = 0;
+};
+
 class LatchPower final : public hg::Power {
  public:
   bool begin(const LatchPowerConfig& cfg);
@@ -592,10 +608,14 @@ class LatchPower final : public hg::Power {
   bool can_power_off() const override { return cfg_.power_off_supported; }
   bool power_off() override;
   std::optional<bool> external_power() override;
+  bool take_key_press() override;
+  static constexpr int64_t kKeyHoldMs = 2500;
 
  private:
   bool charging_signal() const;
   LatchPowerConfig cfg_{};
+  bool key_down_ = false, key_held_ = false;
+  int64_t key_since_ms_ = 0;
   adc_oneshot_unit_handle_t adc_ = nullptr;
   adc_cali_handle_t calibration_ = nullptr;
   adc_channel_t channel_ = ADC_CHANNEL_0;

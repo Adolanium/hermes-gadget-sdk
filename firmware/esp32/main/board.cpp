@@ -165,8 +165,11 @@ BoardConfig make() {
   b.touch.width = 368;
   b.touch.height = 448;
   b.touch.offset_y = 8;     // touch reports glass rows; the UI starts at row 8
+  // The side PWR key goes to the AXP2101; its conditioned level is on expander pin P4,
+  // high while pressed, as on the AMOLED-1.75. It acts as CANCEL.
+  b.pwr_key = {true, 0x20, 4, true};
   b.axp2101 = true;
-  // TCA9554: P0 LCD_RST, P1 the panel's power rail, P2 TOUCH_RST.
+  // TCA9554: P0 LCD_RST, P1 the panel's power rail, P2 TOUCH_RST, P4 the PWR key (input).
   b.expander_reset = {0x20, 0x07, 20, 150};
   b.buttons = {0, -1, -1, -1};  // BOOT also works as TALK
   b.talk_label = "BOOT";
@@ -396,9 +399,21 @@ BoardConfig make() {
   b.latch_power = {true, 1, 2, 3};
   // No USB-status input: report external power from CHG_STAT or a USB host.
   b.latch_power.usb_external_power = true;
+  // PWR also reads low on GPIO5 while pressed (Waveshare's factory demo powers
+  // off when it is held).
+  b.latch_power.key = 5;
+  // The Touch-LCD-1.54 (SKUs 33868/33869) adds a CST816 on the same I2C bus,
+  // reset on GPIO47 (Waveshare's factory demo). On the non-touch SKUs nothing
+  // answers at 0x15 and the touchscreen is reported absent.
+  b.touch.enabled = true;
+  b.touch.controller = TouchController::Cst816;
+  b.touch.addr = 0x15;
+  b.touch.rst = 47;
+  b.touch.width = b.touch.height = 240;
   b.buttons = {0, 4, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "PLUS";
+  b.light_sleep = true;  // dozing on battery; keep_pins_through_sleep holds the latch and panel
   return b;
 }
 #elif CONFIG_HG_BOARD_BOX3
@@ -646,6 +661,7 @@ BoardConfig make() {
   b.buttons = {0, -1, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";
+  b.light_sleep = true;  // dozing on battery; keep_pins_through_sleep holds the latch and panel
   return b;
 }
 #elif CONFIG_HG_BOARD_SPOTPEAR_BOX128

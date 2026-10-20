@@ -84,6 +84,18 @@ TEST("STC8 battery: invalid values are omitted rather than reported as real tele
   CHECK(!status->external_power);
 }
 
+TEST("battery estimate: the resting-voltage curve clamps endpoints, interpolates and floors") {
+  struct Sample { uint16_t mv; uint8_t percent; };
+  for (const Sample& sample : {Sample{0, 0}, Sample{3300, 0}, Sample{3455, 2}, Sample{3610, 5}, Sample{3750, 25},
+                               Sample{3840, 50}, Sample{3867, 59}, Sample{3909, 64}, Sample{4110, 90},
+                               Sample{4199, 99}, Sample{4200, 100}, Sample{65535, 100}}) {
+    CHECK_EQ(hg::estimate_liion_curve_percent(sample.mv), sample.percent);
+  }
+  // Monotonic: a higher voltage never shows a lower level.
+  for (uint16_t mv = 3300; mv < 4200; ++mv)
+    CHECK(hg::estimate_liion_curve_percent(mv + 1) >= hg::estimate_liion_curve_percent(mv));
+}
+
 TEST("AXP2101: battery, USB and charging readings never alter power configuration") {
   std::array<uint8_t, 256> regs{};
   regs[0x00] = 0x28;
