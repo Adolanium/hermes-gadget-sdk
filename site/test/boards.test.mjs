@@ -51,6 +51,11 @@ test("the wrong kind of PSRAM, or none, is a warning", () => {
   assert.deepEqual(checkChip({ ...AMOLED, psram: null }, { ...S3R8, features: [] }), []);
 });
 
+test("PSRAM esptool can't see is not a warning", () => {
+  const p4 = { ...AMOLED, chip: "ESP32-P4", psram: "hex" };
+  assert.deepEqual(checkChip(p4, { name: "ESP32-P4", flashSize: "16MB", features: ["High-Performance MCU"] }), []);
+});
+
 test("keeping the settings writes around the settings partition", () => {
   assert.deepEqual(imageParts(AMOLED, 0x150000, false), [{ start: 0, end: 0x150000 }]);
   assert.deepEqual(imageParts(AMOLED, 0x150000, true), [{ start: 0, end: 0x9000 }, { start: 0xf000, end: 0x150000 }]);
