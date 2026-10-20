@@ -2895,7 +2895,7 @@ TEST("language: the settings menu has a Language item that steps through the lan
   CHECK_EQ(r.fake.kv["language"], std::string("es"));
   CHECK(r.app.settings_open());  // still on the same item, now in Spanish
   CHECK_EQ(r.app.model().headline, std::string("Ajustes"));
-  CHECK_EQ(r.app.model().detail, std::string("Idioma"));
+  CHECK_EQ(r.app.model().detail, std::string("Idioma / Language"));  // the way back stays readable
   CHECK(r.app.model().body.find("Espanol") != std::string::npos);
   r.app.console("talk");
   r.app.console("release");

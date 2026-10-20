@@ -95,7 +95,7 @@ The device's own text (the Ready screen, hints, status, settings and errors) is 
 
 Choose it in one of three ways:
 
-- Select **Language** in device settings until the one you want shows.
+- Select **Language** in device settings until the one you want shows. Each language is shown in its own name (Español), and the item keeps the English word beside its translation (Idioma / Language), so you can find it again in a language you can't read.
 - Ask Hermes, for example "put the screen in Spanish". The firmware offers the agent a `screen.language` action.
 - On the USB console, `set language es`; `set language` with no value goes back to English.
 
