@@ -1,5 +1,6 @@
 // The translation catalogue (hg/i18n.hpp): lookups, placeholders, folding to
 // the font, and that translated one-line text fits wherever the English does.
+#include <algorithm>
 #include <set>
 #include <string>
 #include <vector>
@@ -150,8 +151,11 @@ struct BlankDisplay : hg::Display {
 };
 
 struct Columns {
-  int line = 0;      // bottom-bar hints and hero captions (Ui: hero_cols)
-  int headline = 0;  // the header band of a text screen, at the larger scale
+  int line = 0;          // bottom-bar hints and hero captions (Ui: hero_cols)
+  int headline = 0;      // the header band of a text screen, at the larger scale
+  int button = 0;        // one of the Prompt screen's two answer buttons
+  int dash_heading = 0;  // a dashboard heading row
+  int dash_value = 0;    // a dashboard row's value: at most half the row
 };
 
 // What ui.cpp fits on one line of each kind on this panel.
@@ -165,6 +169,14 @@ Columns columns(int w, int h, bool round) {
   Columns c;
   c.line = l.hero_cols;
   c.headline = (ui.area().width - tx - 2 * s) / (hg::font::kCellWidth * (s + 1));
+  const int cell = hg::font::kCellWidth * s, aw = ui.area().width, margin = 4 * s;
+  const int bw = (aw - 2 * margin - 4 * s) / 2;
+  c.button = (bw - 2 * s) / cell;
+  // A long dashboard scrolls and gives up 2s on the right; take that worst case.
+  const int right = aw - margin - 2 * s;
+  const int dot = std::max(2, hg::font::kGlyphHeight * s / 3);
+  c.dash_heading = (right - margin) / cell;
+  c.dash_value = (right - (margin + 2 * dot + 3 * s)) / cell / 2;
   return c;
 }
 
@@ -175,6 +187,8 @@ std::string filled(Lang lang, Msg m) {
   std::string a = "", b = "";
   switch (m) {
     case Msg::SettingsHintButtons: a = talk, b = "CANCEL"; break;  // only on boards with buttons
+    case Msg::ButtonYes: a = talk; break;
+    case Msg::ButtonNo: a = "CANCEL"; break;  // a No button needs a CANCEL button
     case Msg::ButtonToClose:
     case Msg::ButtonToCancel:
     case Msg::ButtonToDiscard:
@@ -221,6 +235,12 @@ constexpr Msg kHeadlines[] = {
     Msg::Image, Msg::NWaiting, Msg::NBusy, Msg::AllIdle,
 };
 
+// The Prompt screen's answer buttons.
+constexpr Msg kButtons[] = {Msg::TapYes, Msg::ButtonYes, Msg::SwipeNo, Msg::ButtonNo};
+// Dashboard headings, and the session states shown as a row's value.
+constexpr Msg kDashHeadings[] = {Msg::HermesSessions, Msg::NoSessions, Msg::DashStatus};
+constexpr Msg kDashValues[] = {Msg::DashApproval, Msg::DashBusy, Msg::DashIdle};
+
 struct Panel {
   int w, h;
   bool round;
@@ -246,10 +266,13 @@ void check_fits(Lang lang, Msg m, int cols, const Panel& p) {
 TEST("i18n: one-line text fits wherever the English fits") {
   for (const Panel& p : kPanels) {
     const Columns c = columns(p.w, p.h, p.round);
-    CHECK(c.line > 0 && c.headline > 0);
+    CHECK(c.line > 0 && c.headline > 0 && c.button > 0 && c.dash_heading > 0 && c.dash_value > 0);
     for (Lang lang : translations()) {
       for (Msg m : kLines) check_fits(lang, m, c.line, p);
       for (Msg m : kHeadlines) check_fits(lang, m, c.headline, p);
+      for (Msg m : kButtons) check_fits(lang, m, c.button, p);
+      for (Msg m : kDashHeadings) check_fits(lang, m, c.dash_heading, p);
+      for (Msg m : kDashValues) check_fits(lang, m, c.dash_value, p);
     }
   }
 }
