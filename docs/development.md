@@ -130,7 +130,7 @@ The bench draws the same frames on every run, so compare its numbers between bui
 
 Simulator numbers measure the core on your computer, not the board's CPU or panel. Label each result as simulator or hardware, and name the board and build when you report it.
 
-### Translate the device's text
+### Translate the device text
 
 The text the device shows by itself is listed once, with its English, in `firmware/core/include/hg/i18n.hpp` (`HG_I18N_MESSAGES`). Each other language is a table in `firmware/core/src/i18n_<code>.cpp` that maps message ids to text; `i18n_es.cpp` is the example to copy. To add a language:
 
