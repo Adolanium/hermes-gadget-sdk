@@ -2927,8 +2927,8 @@ TEST("language: English by default, and set language switches the device's own t
 TEST("language: an unknown code is refused and changes nothing") {
   Rig r;
   r.bring_online(true);
-  CHECK_EQ(r.app.console("set language xx"), std::string("@error language must be one of: en es"));
-  CHECK_EQ(r.app.console("set language ES"), std::string("@error language must be one of: en es"));
+  CHECK_EQ(r.app.console("set language xx"), std::string("@error language must be one of: en es auto"));
+  CHECK_EQ(r.app.console("set language ES"), std::string("@error language must be one of: en es auto"));
   CHECK(r.fake.kv.find("language") == r.fake.kv.end());
   CHECK_EQ(r.app.model().headline, std::string("Hi, I'm Hermes"));
   // A stored value this firmware doesn't know (from a newer one) reads as English.
@@ -2962,6 +2962,11 @@ TEST("language: the settings menu has a Language item that steps through the lan
   CHECK(r.app.model().body.find("Espanol") != std::string::npos);
   r.app.console("talk");
   r.app.console("release");
+  CHECK_EQ(r.fake.kv["language"], std::string("auto"));  // after the last translation: follow Hermes
+  CHECK_EQ(r.app.model().detail, std::string("Language"));  // this Hermes named no language: English
+  CHECK(r.app.model().body.find("Automatic, as Hermes: English") != std::string::npos);
+  r.app.console("talk");
+  r.app.console("release");
   CHECK_EQ(r.fake.kv["language"], std::string("en"));
   CHECK_EQ(r.app.model().detail, std::string("Language"));
   // Every other item is still reachable after it.
@@ -2979,7 +2984,7 @@ TEST("language: the agent can set it through the screen.language action") {
       if (a["name"].as_string() != "screen.language") continue;
       listed = true;
       const auto& codes = a["params"]["properties"]["language"]["enum"];
-      CHECK_EQ(codes.size(), hg::i18n::kLangCount);
+      CHECK_EQ(codes.size(), hg::i18n::kLangCount + 1);  // and "auto"
     }
   }
   CHECK(listed);
@@ -2989,7 +2994,7 @@ TEST("language: the agent can set it through the screen.language action") {
   CHECK_EQ(r.app.model().headline, std::string("Hola, soy Hermes"));
   r.server(R"({"type":"action","id":"l2","name":"screen.language","args":{"language":"klingon"}})");
   res = r.fake.last("action.result");
-  CHECK(res && !(*res)["ok"].as_bool() && (*res)["error"].as_string() == "language must be one of: en es");
+  CHECK(res && !(*res)["ok"].as_bool() && (*res)["error"].as_string() == "language must be one of: en es auto");
   r.server(R"({"type":"action","id":"l3","name":"screen.language","args":{}})");
   res = r.fake.last("action.result");
   CHECK(res && !(*res)["ok"].as_bool());
@@ -3038,4 +3043,77 @@ TEST("language: the status report keeps its English reason while the screen tran
   CHECK_EQ(r.app.model().headline, std::string("Falta configurar"));
   CHECK(r.app.model().detail.rfind("No hay servidor de Hermes configurado", 0) == 0);
   CHECK(r.app.console("status").find("No Hermes server configured") != std::string::npos);
+}
+
+// The language Hermes names in `welcome`, for a device left on auto.
+namespace {
+void welcome_with_language(Rig& r, const std::string& language) {
+  r.app.begin();
+  r.app.on_network(true, "test-wifi");
+  r.advance(1000);
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":false})");
+  std::string welcome = R"({"type":"welcome","session":"s1","heartbeat_s":20,"paired":true)";
+  if (!language.empty()) welcome += R"(,"language":")" + language + "\"";
+  r.server(welcome + "}");
+}
+}  // namespace
+
+TEST("language: auto follows the language Hermes names in welcome") {
+  Rig r;
+  r.fake.kv["language"] = "auto";
+  welcome_with_language(r, "es");
+  CHECK(r.app.model().lang == hg::i18n::Lang::Es);
+  CHECK_EQ(r.app.model().headline, std::string("Hola, soy Hermes"));
+  // A region or script falls back to its language; case and underscores don't matter.
+  for (const char* id : {"es-mx", "ES_MX", "es-419"}) {
+    Rig other;
+    other.fake.kv["language"] = "auto";
+    welcome_with_language(other, id);
+    CHECK(other.app.model().lang == hg::i18n::Lang::Es);
+  }
+}
+
+TEST("language: auto is English when Hermes names none, or one this firmware lacks") {
+  for (const char* id : {"", "pt-br", "zh-hant", "x"}) {
+    Rig r;
+    r.fake.kv["language"] = "auto";
+    welcome_with_language(r, id);
+    CHECK(r.app.model().lang == hg::i18n::Lang::En);
+    CHECK_EQ(r.app.model().headline, std::string("Hi, I'm Hermes"));
+  }
+}
+
+TEST("language: a chosen language ignores Hermes's, and auto picks it up when chosen later") {
+  Rig r;  // English by default: welcome doesn't change it
+  welcome_with_language(r, "es");
+  CHECK(r.app.model().lang == hg::i18n::Lang::En);
+  r.fake.kv["language"] = "en";
+  CHECK_EQ(r.app.console("set language auto"), std::string("@ok language"));
+  CHECK(r.app.model().lang == hg::i18n::Lang::Es);  // remembered from this connection's welcome
+  CHECK_EQ(r.app.console("set language en"), std::string("@ok language"));
+  CHECK(r.app.model().lang == hg::i18n::Lang::En);
+}
+
+TEST("language: a later welcome with another language switches an auto device") {
+  Rig r;
+  r.fake.kv["language"] = "auto";
+  welcome_with_language(r, "es");
+  CHECK(r.app.model().lang == hg::i18n::Lang::Es);
+  r.app.on_transport_closed("bye");
+  r.advance(3000);
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bjI=","enrolled":true})");
+  r.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":true,"language":"en"})");
+  CHECK(r.app.model().lang == hg::i18n::Lang::En);
+}
+
+TEST("language: the agent can set auto through screen.language") {
+  Rig r;
+  welcome_with_language(r, "es");
+  r.server(R"({"type":"action","id":"l9","name":"screen.language","args":{"language":"auto"}})");
+  const Value* res = r.fake.last("action.result");
+  CHECK(res && (*res)["ok"].as_bool() && (*res)["result"]["language"].as_string() == "auto");
+  CHECK_EQ(r.fake.kv["language"], std::string("auto"));
+  CHECK(r.app.model().lang == hg::i18n::Lang::Es);
 }

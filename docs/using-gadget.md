@@ -91,13 +91,15 @@ On the AMOLED-1.75C, a short press of PWR puts the screen to sleep the same way,
 
 ## Language
 
-The device's own text (the Ready screen, hints, status, settings and errors) is English unless you choose another language. Hermes's replies, cards and questions come in whatever language Hermes writes them, whatever this setting says.
+The device's own text (the Ready screen, hints, status, settings and errors) is English unless you choose another language, or choose **auto** to follow Hermes's. Hermes's replies, cards and questions come in whatever language Hermes writes them, whatever this setting says.
 
 Choose it in one of three ways:
 
-- Select **Language** in device settings until the one you want shows. Each language is shown in its own name (Español), and the item keeps the English word beside its translation (Idioma / Language), so you can find it again in a language you can't read.
+- Select **Language** in device settings until the one you want shows. After the last language comes **Automatic, as Hermes**. Each language is shown in its own name (Español), and the item keeps the English word beside its translation (Idioma / Language), so you can find it again in a language you can't read.
 - Ask Hermes, for example "put the screen in Spanish". The firmware offers the agent a `screen.language` action.
-- On the USB console, `set language es`; `set language` with no value goes back to English.
+- On the USB console, `set language es` or `set language auto`; `set language` with no value goes back to English.
+
+With **auto**, the device takes the language Hermes names when it connects: Hermes's own language (`HERMES_LANGUAGE`, else `display.language`), or the gadget plugin's `language` setting if you set one ([configuration](hermes-integration.md#configuration)). A language the firmware doesn't have, or none, shows as English.
 
 The languages are English (`en`) and Spanish (`es`). The font has no accented letters yet, so translated text shows them without accents ("Informacion"). To add a language, see [Translate the device text](development.md#translate-the-device-text).
 

@@ -45,8 +45,10 @@ def tone(rate: int, seconds: float, freq: float = 660.0, volume: float = 0.25) -
 
 
 class EchoBrain(HubDelegate):
-    def __init__(self, *, require_pairing: bool = False, loopback: bool = True, word_delay: float = 0.08):
+    def __init__(self, *, require_pairing: bool = False, loopback: bool = True, word_delay: float = 0.08,
+                 language: str | None = None):
         self.require_pairing = require_pairing
+        self.language_id = language  # named in welcome, as Hermes's language is
         self.loopback = loopback
         self.word_delay = word_delay
         self.approved: set[str] = set()
@@ -56,6 +58,9 @@ class EchoBrain(HubDelegate):
 
     async def is_paired(self, session: DeviceSession) -> bool:
         return not self.require_pairing or session.device_id in self.approved
+
+    def language(self, session: DeviceSession) -> str | None:
+        return self.language_id
 
     async def on_ready(self, session: DeviceSession) -> None:
         if session.paired:
@@ -264,8 +269,8 @@ async def _console(hub: DeviceHub, brain: EchoBrain, stop: asyncio.Event) -> Non
 
 async def serve(host: str, port: int, path: str, state_dir: Path, *, require_pairing: bool,
                 loopback: bool, token: str | None, interactive: bool = True,
-                ready: "asyncio.Future | None" = None) -> None:
-    brain = EchoBrain(require_pairing=require_pairing, loopback=loopback)
+                ready: "asyncio.Future | None" = None, language: str | None = None) -> None:
+    brain = EchoBrain(require_pairing=require_pairing, loopback=loopback, language=language)
     hub = DeviceHub(DeviceStore(state_dir), brain, host=host, port=port, path=path, access_token=token)
     brain.hub = hub
     await hub.start()

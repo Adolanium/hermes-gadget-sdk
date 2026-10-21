@@ -81,6 +81,7 @@ namespace hg::i18n {
   X(SelectToPairAnother,    "Select to pair another.") \
   X(Language,               "Language") \
   X(LanguageBody,           "{0}\nSelect for the next language.") \
+  X(LanguageAuto,           "Automatic, as Hermes: {0}") \
   X(BackToHermes,           "Back to Hermes") \
   X(SelectToClose,          "Select to close settings.") \
   X(CheckStopped,           "Check stopped") \

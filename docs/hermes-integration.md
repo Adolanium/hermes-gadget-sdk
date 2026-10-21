@@ -38,6 +38,7 @@ platforms:
       # opus_bitrate: 24000    # Opus speaker audio for devices that decode it; 0 = PCM16 only
       # dashboard: true        # Hermes's sessions and status tiles on devices that draw them
       # battery_log: true      # keep each device's battery readings in a CSV (see below)
+      # language: es           # the language devices on `auto` show; default: Hermes's own
       # tls_cert: /path/cert.pem   # serve wss://
       # tls_key: /path/key.pem
 ```

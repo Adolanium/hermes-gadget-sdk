@@ -23,7 +23,7 @@ TESTED_HERMES_COMMIT = "2eceb0275501b09febdec88d08b80d1fff730cf8"
 
 # Module -> names the plugin imports from it.
 IMPORTS: dict[str, tuple[str, ...]] = {
-    "agent.i18n": ("t",),
+    "agent.i18n": ("get_language", "t"),
     "gateway.config": ("Platform", "PlatformConfig", "HomeChannel", "persist_home_channel"),
     "gateway.pairing": ("PairingStore",),
     "gateway.platforms._shared": ("extra_or_secret", "get_scoped_secret"),
