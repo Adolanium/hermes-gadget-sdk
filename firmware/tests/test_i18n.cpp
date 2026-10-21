@@ -152,6 +152,7 @@ struct BlankDisplay : hg::Display {
 
 struct Columns {
   int line = 0;          // bottom-bar hints and hero captions (Ui: hero_cols)
+  int name = 0;          // a hero headline in a name panel (Ui: name_cols)
   int headline = 0;      // the header band of a text screen, at the larger scale
   int button = 0;        // one of the Prompt screen's two answer buttons
   int dash_heading = 0;  // a dashboard heading row
@@ -168,6 +169,7 @@ Columns columns(int w, int h, bool round) {
   const int tx = 4 * s + r + r + 4 * s;
   Columns c;
   c.line = l.hero_cols;
+  c.name = l.name_cols;
   c.headline = (ui.area().width - tx - 2 * s) / (hg::font::kCellWidth * (s + 1));
   const int cell = hg::font::kCellWidth * s, aw = ui.area().width, margin = 4 * s;
   const int bw = (aw - 2 * margin - 4 * s) / 2;
@@ -223,25 +225,28 @@ constexpr Msg kLines[] = {
     Msg::NotConnected, Msg::HoldScreenWhileSpeaking, Msg::HoldButtonWhileSpeaking, Msg::DidntHearAnything,
     Msg::Cancelled, Msg::NewSessionIn, Msg::NewSession, Msg::MicUnavailable, Msg::AnsweredYes, Msg::AnsweredNo,
     Msg::PhonePaired, Msg::PhonePairingFailed, Msg::PhonePairingClosed, Msg::BluetoothUnavailable,
-    Msg::WifiSetupUnavailable,
+    Msg::WifiSetupUnavailable, Msg::ProfileListHint, Msg::ProfileCantSwitch, Msg::ProfileRefusedBusy,
+    Msg::ProfileRefusedUnknown, Msg::ProfileRefused,
     // hero headlines and one-line captions
     Msg::HiImHermes, Msg::AskMeAnything, Msg::UpShowsLastReply, Msg::SwipeDownForSessions,
     Msg::ButtonShowsSessions, Msg::LowBattery, Msg::Listening, Msg::SpeakNowPause, Msg::LiftFingerToSend,
     Msg::ReleaseToSend, Msg::Thinking, Msg::HermesAsks, Msg::Restarting, Msg::Updating, Msg::SetupNeeded,
     Msg::NoNetwork, Msg::Authenticating, Msg::ConnectingToHermes, Msg::PairingCode, Msg::PairThisDevice,
-    Msg::ProfileGreeting,
+    Msg::ProfileTapName, Msg::ProfileInSettings,
 };
+// A profile's greeting, in the name panel a touchscreen taps.
+constexpr Msg kNameLines[] = {Msg::ProfileGreeting};
 // Headlines of text screens: larger letters after the status indicator.
 constexpr Msg kHeadlines[] = {
     Msg::Settings, Msg::WifiSetup, Msg::PairAPhone, Msg::PhoneCode, Msg::Speaking, Msg::Ready,
-    Msg::Image, Msg::NWaiting, Msg::NBusy, Msg::AllIdle,
+    Msg::Image, Msg::NWaiting, Msg::NBusy, Msg::AllIdle, Msg::ProfileListTitle,
 };
 
 // The Prompt screen's answer buttons.
 constexpr Msg kButtons[] = {Msg::TapYes, Msg::ButtonYes, Msg::SwipeNo, Msg::ButtonNo};
 // Dashboard headings, and the session states shown as a row's value.
 constexpr Msg kDashHeadings[] = {Msg::HermesSessions, Msg::NoSessions, Msg::DashStatus};
-constexpr Msg kDashValues[] = {Msg::DashApproval, Msg::DashBusy, Msg::DashIdle};
+constexpr Msg kDashValues[] = {Msg::DashApproval, Msg::DashBusy, Msg::DashIdle, Msg::ProfileListCurrent};
 
 struct Panel {
   int w, h;
@@ -268,9 +273,10 @@ void check_fits(Lang lang, Msg m, int cols, const Panel& p) {
 TEST("i18n: one-line text fits wherever the English fits") {
   for (const Panel& p : kPanels) {
     const Columns c = columns(p.w, p.h, p.round);
-    CHECK(c.line > 0 && c.headline > 0 && c.button > 0 && c.dash_heading > 0 && c.dash_value > 0);
+    CHECK(c.line > 0 && c.name > 0 && c.headline > 0 && c.button > 0 && c.dash_heading > 0 && c.dash_value > 0);
     for (Lang lang : translations()) {
       for (Msg m : kLines) check_fits(lang, m, c.line, p);
+      for (Msg m : kNameLines) check_fits(lang, m, c.name, p);
       for (Msg m : kHeadlines) check_fits(lang, m, c.headline, p);
       for (Msg m : kButtons) check_fits(lang, m, c.button, p);
       for (Msg m : kDashHeadings) check_fits(lang, m, c.dash_heading, p);

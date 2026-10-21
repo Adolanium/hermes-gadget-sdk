@@ -102,7 +102,8 @@ void App::settings_input(Button button, bool pressed) {
       if (hal_.mic) console(talk_mode_ == TalkMode::Hold ? "set talk_mode tap" : "set talk_mode hold");
       break;
     case Menu::Profile:
-      if (!next_agent_profile()) check_result_ = tr(i18n::Msg::ProfileCantSwitch);
+      if (!(profile_.touch_screen ? open_profile_picker() : next_agent_profile()))
+        check_result_ = tr(i18n::Msg::ProfileCantSwitch);
       break;
     case Menu::Microphone:
       if (hal_.mic && hal_.mic->start(profile_.mic_rate)) hardware_check_ = HardwareCheck::Microphone;
@@ -203,7 +204,7 @@ void App::settings_model() {
       break;
     case Menu::Profile:
       m.detail = tr(Msg::ProfileSetting);
-      m.body = tr(Msg::ProfileSettingNext, {agent_profile_name()});
+      m.body = tr(profile_.touch_screen ? Msg::ProfileSettingChoose : Msg::ProfileSettingNext, {agent_profile_name()});
       break;
     case Menu::Microphone:
       m.detail = tr(Msg::MicCheck);

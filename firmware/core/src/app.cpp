@@ -238,6 +238,8 @@ void App::begin() {
   }
 
   if (hal_.display) ui_ = std::make_unique<Ui>(*hal_.display);
+  if (ui_ && profile_.touch_screen)  // about 7 mm: 7 * ppi / 25.4, rounded up
+    ui_->set_touch_px((70 * (profile_.touch_ppi ? profile_.touch_ppi : DeviceProfile::kDefaultTouchPpi) + 253) / 254);
   if (profile_.frame_stats) set_frame_stats(true);
   phase_ = Phase::Boot;
   phase_since_ = now();
@@ -319,6 +321,7 @@ void App::drop_session(std::string_view reason) {
   // What the dashboard showed is stale now; the next connection sends it afresh.
   dashboard_ready_ = false;
   dash_rows_.clear();
+  profile_pending_.clear();
   clear_prompt();
   transport_active_ = false;
   schedule_reconnect();
@@ -485,6 +488,7 @@ void App::h_welcome(const json::Value& m) {
     agent_profiles_.push_back({id, (name.empty() ? id : name).substr(0, 24)});
   }
   if (m["profile"].is_string()) set_agent_profile(m["profile"].as_string());
+  profile_pending_.clear();  // the welcome says which profile answers
   // A freshly installed firmware has reached Hermes, so it can take the next update: keep it.
   if (hal_.updater && hal_.updater->pending_verify()) {
     hal_.updater->confirm();
@@ -494,9 +498,16 @@ void App::h_welcome(const json::Value& m) {
 
 void App::h_profile(const json::Value& m) {
   const std::string& error = m["error"].as_string();
-  if (error.empty() && m["profile"].is_string()) set_agent_profile(m["profile"].as_string());  // a refusal changes nothing
+  const std::string& profile = m["profile"].as_string();
+  if (error.empty()) set_agent_profile(profile);  // a refusal changes nothing
+  // Only the answer to a pending switch (its profile, or a refusal) ends the wait; a profile Hermes
+  // sends on its own, such as a reset to default, does not.
+  if (!profile_pending_.empty() && error.empty() && profile != profile_pending_) return;
+  profile_pending_.clear();
   profile_notice(error.empty() ? tr(i18n::Msg::ProfileSwitched, {agent_profile_name()})
-                               : tr(i18n::Msg::ProfileNotChanged, {error}));
+                 : tr(error == "busy"      ? i18n::Msg::ProfileRefusedBusy
+                      : error == "unknown" ? i18n::Msg::ProfileRefusedUnknown
+                                           : i18n::Msg::ProfileRefused));
 }
 
 // The notice line and the open settings item; not the hint bar, which settings hides.
@@ -520,18 +531,60 @@ std::string App::agent_profile_name() const {
   return agent_profile_;
 }
 
+bool App::can_switch_profile() const {
+  return phase_ == Phase::Online && paired_ && agent_profiles_.size() > 1 && mode_ == Mode::Idle && !prompt_showing() &&
+         !ota_busy() && !wifi_setup_open() && profile_pending_.empty();
+}
+
 bool App::next_agent_profile() {
-  if (phase_ != Phase::Online || !paired_ || agent_profiles_.size() < 2 || mode_ != Mode::Idle ||
-      prompt_showing() || ota_busy())
-    return false;
   size_t i = 0;
   while (i < agent_profiles_.size() && agent_profiles_[i].id != agent_profile_) ++i;
-  const AgentProfile& next = agent_profiles_[i < agent_profiles_.size() ? (i + 1) % agent_profiles_.size() : 0];
-  json::Value msg = proto::message("profile.select");
-  msg.set("profile", next.id);
-  send(msg);
-  profile_notice(tr(i18n::Msg::ProfileSwitching, {next.name}));
+  return select_agent_profile(i < agent_profiles_.size() ? (i + 1) % agent_profiles_.size() : 0);
+}
+
+bool App::select_agent_profile(size_t index) {
+  if (!can_switch_profile() || index >= agent_profiles_.size()) return false;
+  if (profile_picker_open()) dismiss_overlay();
+  const AgentProfile& next = agent_profiles_[index];
+  if (next.id != agent_profile_) {
+    json::Value msg = proto::message("profile.select");
+    msg.set("profile", next.id);
+    if (send(msg)) {
+      profile_pending_ = next.id;
+      profile_pending_at_ = now();
+      profile_notice(tr(i18n::Msg::ProfileSwitching, {next.name}));
+      notice_until_ = now() + kProfileReplyMs;  // shown until the answer replaces it
+    } else {
+      profile_notice(tr(i18n::Msg::ProfileCantSwitch));
+    }
+  }
+  update_model();
   return true;
+}
+
+bool App::profile_name_hit(int x, int y) const { return ui_ && !display_sleeping_ && ui_->name_hit(model_, x, y); }
+
+bool App::open_profile_picker() {
+  if (!profile_.touch_screen || !can_switch_profile()) return false;
+  if (settings_open()) close_settings();
+  overlay_ = Overlay::Profiles;
+  overlay_until_ = 0;
+  profile_page_ = 0;
+  notice_.clear();
+  update_model();
+  return true;
+}
+
+int App::profile_row_hit(int x, int y) const { return ui_ ? ui_->profile_row_hit(model_, x, y) : -1; }
+
+void App::profile_tap(int x, int y) {
+  const int row = profile_row_hit(x, y);
+  if (row >= 0) {
+    select_agent_profile(static_cast<size_t>(row));
+  } else if (row == Ui::kMoreRow) {
+    profile_page_ = ui_->profile_next_page(model_);
+    update_model();
+  }
 }
 
 void App::h_pairing(const json::Value& m) {
@@ -1486,6 +1539,11 @@ void App::tick() {
     hal_.transport->close();
     drop_session("server silent");
     update_model();
+  } else if (!profile_pending_.empty() && t - profile_pending_at_ > kProfileReplyMs) {
+    // The switch may still have happened: reconnect, and the welcome says which profile answers.
+    hal_.transport->close();
+    drop_session("no answer to the profile switch");
+    update_model();
   }
 
   if (ota_busy() && t - ota_last_rx_ > kOtaIdleMs) {
@@ -1581,6 +1639,7 @@ void App::update_model() {
   m.qr = nullptr;
   m.dash.clear();
   m.hero = false;
+  m.name_target = false;
   m.caption_lines = 1;
   m.scroll = scroll_;
   m.level = level_;
@@ -1736,6 +1795,15 @@ void App::update_model() {
     m.screen = Screen::Image;
     m.headline = tr(Msg::Image);
     m.hint = tr(Msg::ButtonToClose, {cancel});
+  } else if (overlay_ == Overlay::Profiles) {
+    m.screen = Screen::Profiles;
+    m.headline = tr(Msg::ProfileListTitle);
+    for (const auto& p : agent_profiles_)
+      m.dash.push_back({p.name, p.id == agent_profile_ ? tr(Msg::ProfileListCurrent) : ">",
+                        p.id == agent_profile_ ? DashRow::Tone::Waiting : DashRow::Tone::Dim});
+    m.hint = tr(Msg::ProfileListHint);
+    m.detail = tr(Msg::ProfileListMore);
+    m.scroll = profile_page_;
   } else if (overlay_ == Overlay::Dashboard) {
     m.screen = Screen::Dashboard;
     m.headline = dash_headline_;
@@ -1784,15 +1852,24 @@ void App::update_model() {
     bool showing_reply = !reply_.empty() && static_cast<int32_t>(reply_until_ - now()) > 0;
     m.hero = !showing_reply;
     if (m.hero) {
-      m.headline = agent_profiles_.size() > 1 && agent_profile_ != "default"
-                       ? tr(Msg::ProfileGreeting, {agent_profile_name()})
-                       : std::string(tr(Msg::HiImHermes));
+      const bool switching = agent_profiles_.size() > 1;
+      m.headline = switching && agent_profile_ != "default" ? tr(Msg::ProfileGreeting, {agent_profile_name()})
+                                                            : std::string(tr(Msg::HiImHermes));
       m.detail = tr(reply_.empty() || !profile_.has_scroll_buttons ? Msg::AskMeAnything : Msg::UpShowsLastReply);
-      if (dashboard_ready_ && can_open_dashboard() && reply_.empty())
+      const bool sessions = dashboard_ready_ && can_open_dashboard() && reply_.empty();
+      if (sessions)
         m.detail = profile_.touch_screen ? std::string(tr(Msg::SwipeDownForSessions)) : tr(Msg::ButtonShowsSessions, {cancel});
+      if (switching) {
+        // In tap-to-talk mode a tap records, so the name is no target there.
+        m.name_target = profile_.touch_screen && talk_mode_ == TalkMode::Hold;
+        m.detail = tr(m.name_target ? Msg::ProfileTapName : Msg::ProfileInSettings) +
+                   (sessions ? "\n" + m.detail : "");
+        m.caption_lines = 2;
+      }
     }
   }
-  bool keeps_detail = m.screen == Screen::Pairing || m.screen == Screen::Boot || m.screen == Screen::Prompt;
+  bool keeps_detail = m.screen == Screen::Pairing || m.screen == Screen::Boot || m.screen == Screen::Prompt ||
+                      m.screen == Screen::Profiles;
   if (!notice_.empty() && !keeps_detail) m.detail = notice_;
   if (m.screen == Screen::Ready && m.hero && power_status_ && power_status_->battery_percent &&
       *power_status_->battery_percent <= 10 && power_status_->external_power == false)

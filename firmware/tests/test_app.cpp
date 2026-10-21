@@ -1,4 +1,5 @@
 // Drives hg::App through a fake HAL the way a Hermes gateway would.
+#include <algorithm>
 #include <deque>
 #include <map>
 #include <string>
@@ -74,6 +75,7 @@ struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Stor
   // Display
   int width = 320, height = 240;
   bool round = false;
+  uint8_t font_scale = 1;
   bool emissive = false;
   bool backlight = false;
   int brightness = 0, volume = 0;
@@ -85,14 +87,17 @@ struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Stor
     d.width = static_cast<uint16_t>(width);
     d.height = static_cast<uint16_t>(height);
     d.round = round;
+    d.font_scale = font_scale;
     d.emissive = emissive;
     d.has_backlight = backlight;
     return d;
   }
-  void make_round(int diameter) {
-    width = height = diameter;
-    round = true;
-    fb.assign(static_cast<size_t>(diameter * diameter), 0);
+  void make_round(int diameter) { make_panel(diameter, diameter, true); }
+  void make_panel(int w, int h, bool round_panel = false) {
+    width = w;
+    height = h;
+    round = round_panel;
+    fb.assign(static_cast<size_t>(w * h), 0);
   }
   uint16_t* framebuffer() override { return fb.data(); }
   bool lit_while_dozing = false;  // the screen was turned on before the port woke
@@ -3126,7 +3131,7 @@ TEST("profiles: a stored profile Hermes no longer offers is dropped; the console
   CHECK(r.fake.kv.count("profile") == 0);
   CHECK_EQ(r.app.console("set profile ops"), std::string("@error unknown key"));
   r.server(R"({"type":"profile","profile":"default","error":"busy"})");
-  CHECK(r.app.model().detail.find("busy") != std::string::npos);  // refusals are visible on Ready
+  CHECK_EQ(r.app.model().detail, std::string("Finish this turn first"));  // refusals are visible on Ready
   r.server(R"({"type":"profile","profile":"ops"})");
   CHECK_EQ(r.fake.kv["profile"], std::string("ops"));
   r.app.console("factory-reset");
@@ -3159,3 +3164,294 @@ TEST("profiles: hello names only the stored choice, through reconnects and setti
   CHECK(hello != nullptr);
   if (hello) CHECK(!hello->has("profile"));
 }
+
+namespace {
+// The middle of the first panel row where `hit` holds, or {-1, -1}.
+template <class Hit>
+std::pair<int, int> find_point(const Rig& r, Hit hit) {
+  for (int y = 0; y < r.fake.height; y += 2) {
+    int x0 = -1, x1 = -1;
+    for (int x = 0; x < r.fake.width; ++x)
+      if (hit(x, y)) (x0 < 0 ? x0 : x1) = x, x1 = x;
+    if (x0 >= 0) return {(x0 + x1) / 2, y + 2};
+  }
+  return {-1, -1};
+}
+std::pair<int, int> name_point(Rig& r) { return find_point(r, [&](int x, int y) { return r.app.profile_name_hit(x, y); }); }
+std::pair<int, int> row_point(Rig& r, int row) {
+  return find_point(r, [&](int x, int y) { return r.app.profile_row_hit(x, y) == row; });
+}
+}  // namespace
+
+TEST("profiles: a quick tap on the name opens the list; a hold on it talks") {
+  for (int round : {0, 466}) {
+    Rig r(Rig::touch_profile());
+    if (round) r.fake.make_round(round);
+    r.bring_online_with_profiles();
+    CHECK_EQ(r.app.model().detail.rfind("Tap name to change", 0), size_t(0));
+    auto [x, y] = name_point(r);
+    CHECK(x >= 0);
+    int shared = 0;  // the name and the SETTINGS target never overlap
+    for (int py = 0; py < r.fake.height; ++py)
+      for (int px = 0; px < r.fake.width; ++px) shared += r.app.profile_name_hit(px, py) && r.app.settings_title_hit(px, py);
+    CHECK_EQ(shared, 0);
+    hg::TouchGestures touch(r.app);
+    touch.update(true, x, y, r.fake.clock);
+    r.advance(500);
+    touch.tick(r.fake.clock);
+    CHECK(r.fake.mic_on);  // the name sits where people hold to talk
+    touch.update(false, 0, 0, r.fake.clock);
+    CHECK(!r.app.profile_picker_open());
+    r.advance(30000);  // past the reply's dwell
+    touch.update(true, x, y, r.fake.clock);
+    r.advance(50);
+    touch.update(false, 0, 0, r.fake.clock);
+    CHECK(r.app.profile_picker_open());
+    CHECK_EQ(r.app.status_json().find("\"screen\":\"profiles\"") != std::string::npos, true);
+    CHECK_EQ(r.app.model().dash.size(), size_t(2));
+    CHECK_EQ(r.app.model().dash[0].value, std::string("NOW"));
+  }
+}
+
+TEST("profiles: a tap on a row asks Hermes for it; a hold or a swipe down picks nothing") {
+  Rig r(Rig::touch_profile());
+  r.bring_online_with_profiles();
+  hg::TouchGestures touch(r.app);
+  CHECK(r.app.open_profile_picker());
+  auto [x, y] = row_point(r, 1);
+  CHECK(x >= 0);
+  touch.update(true, x, y, r.fake.clock);
+  r.advance(800);
+  touch.tick(r.fake.clock);
+  CHECK(!r.fake.mic_on);  // a hold in the list never records
+  touch.update(true, x, y + 70, r.fake.clock);  // and becomes a swipe down
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(!r.app.profile_picker_open());
+  CHECK(r.fake.last("profile.select") == nullptr);
+  CHECK(r.app.model().screen != hg::Screen::Dashboard);
+
+  CHECK(r.app.open_profile_picker());
+  touch.update(true, x, y, r.fake.clock);
+  r.advance(50);
+  touch.update(false, 0, 0, r.fake.clock);
+  const Value* select = r.fake.last("profile.select");
+  CHECK(select != nullptr);
+  if (select) CHECK_EQ((*select)["profile"].as_string(), std::string("ops"));
+  CHECK(!r.app.profile_picker_open());
+  CHECK_EQ(r.app.model().detail, std::string("Switching to Ops..."));
+  r.server(R"({"type":"profile","profile":"ops"})");
+  CHECK_EQ(r.app.model().headline, std::string("Hi, I'm Ops"));
+}
+
+TEST("profiles: a refused switch keeps the profile; no list while a turn runs") {
+  Rig r(Rig::touch_profile());
+  r.bring_online_with_profiles();
+  CHECK(r.app.open_profile_picker());
+  CHECK(r.app.select_agent_profile(1));
+  r.server(R"({"type":"profile","profile":"default","error":"unpaired"})");
+  CHECK_EQ(r.app.agent_profile(), std::string("default"));
+  CHECK_EQ(r.app.model().detail, std::string("Switch not allowed"));
+  CHECK(r.fake.kv.count("profile") == 0);
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  CHECK(!r.app.open_profile_picker());
+  CHECK(!r.app.select_agent_profile(1));
+  CHECK(!r.app.profile_name_hit(name_point(r).first, name_point(r).second));
+}
+
+TEST("profiles: a long name never runs under the name panel's marker") {
+  Rig r(Rig::touch_profile());
+  r.fake.make_round(466);
+  r.app.begin();
+  r.app.on_network(true, "wifi");
+  r.advance(1000);
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":false})");
+  r.server(R"({"type":"welcome","session":"s1","heartbeat_s":20,"paired":true,"profile":"r",)"
+           R"("profiles":[{"id":"default","name":"Hermes"},{"id":"r","name":"Research Assistant"}]})");
+  r.advance(100);
+  CHECK_EQ(r.app.model().headline, std::string("Hi, I'm Research Assistant"));
+  const int w = r.fake.width;
+  auto px = [&](int x, int y) { return r.fake.fb[static_cast<size_t>(y * w + x)]; };
+  int top = -1, bottom = -1, left = w;
+  for (int y = 0; y < r.fake.height; ++y)
+    for (int x = 0; x < w; ++x)
+      if (r.app.profile_name_hit(x, y)) top = top < 0 ? y : top, bottom = y, left = std::min(left, x);
+  CHECK(top >= 0);
+  if (top < 0) return;
+  // Where each colour is drawn in the panel; rows that do not start in the panel's colour are its rounded edge.
+  struct Box { int x0, y0, x1, y1; };
+  const uint16_t panel = px(left + 1, (top + bottom) / 2);
+  std::map<uint16_t, Box> boxes;
+  for (int y = top; y <= bottom; ++y) {
+    if (px(left, y) != panel) continue;
+    for (int x = left; x < w && r.app.profile_name_hit(x, y); ++x) {
+      if (px(x, y) == panel) continue;
+      auto [it, added] = boxes.try_emplace(px(x, y), Box{x, y, x, y});
+      Box& b = it->second;
+      b.x0 = std::min(b.x0, x), b.y0 = std::min(b.y0, y), b.x1 = std::max(b.x1, x), b.y1 = std::max(b.y1, y);
+    }
+  }
+  // The headline is the widest line, so it starts furthest left; the marker ends furthest right of the rest.
+  CHECK(boxes.size() >= 3);
+  if (boxes.size() < 3) return;
+  auto head = std::min_element(boxes.begin(), boxes.end(), [](auto& a, auto& b) { return a.second.x0 < b.second.x0; });
+  const Box h = head->second;
+  boxes.erase(head);
+  const Box m =
+      std::max_element(boxes.begin(), boxes.end(), [](auto& a, auto& b) { return a.second.x1 < b.second.x1; })->second;
+  CHECK(h.x1 < m.x0 || m.y1 < h.y0 || h.y1 < m.y0);
+}
+
+TEST("profiles: buttons and tap-to-talk show Change in Settings; one profile shows nothing new") {
+  Rig buttons;
+  buttons.bring_online_with_profiles();
+  CHECK_EQ(buttons.app.model().detail, std::string("Change in Settings"));
+  CHECK(!buttons.app.model().name_target);
+  CHECK(!buttons.app.open_profile_picker());  // the settings item steps through profiles instead
+
+  Rig tap(Rig::touch_profile());
+  tap.bring_online_with_profiles();
+  tap.app.console("set talk_mode tap");
+  CHECK_EQ(tap.app.model().detail, std::string("Change in Settings"));
+  CHECK_EQ(name_point(tap).first, -1);
+
+  Rig single(Rig::touch_profile());
+  single.bring_online(true);
+  single.server(R"({"type":"welcome","session":"s1","heartbeat_s":20,"paired":true,"profile":"default",)"
+                R"("profiles":[{"id":"default","name":"Hermes"}]})");
+  CHECK_EQ(single.app.model().headline, std::string("Hi, I'm Hermes"));
+  CHECK(single.app.model().detail.find("name") == std::string::npos);
+  CHECK(single.app.model().detail.find("Settings") == std::string::npos);
+  CHECK_EQ(name_point(single).first, -1);
+}
+
+TEST("profiles: one switch at a time; a later pick waits for Hermes's answer") {
+  Rig r(Rig::touch_profile());
+  r.bring_online_with_profiles();
+  CHECK(r.app.open_profile_picker());
+  CHECK(r.app.select_agent_profile(1));  // Ops, then back to the list before Hermes answers
+  CHECK(r.app.profile_switch_pending());
+  CHECK(!r.app.open_profile_picker());
+  CHECK(!r.app.select_agent_profile(0));
+  CHECK(!r.app.next_agent_profile());
+  int selects = 0;
+  for (const Value& v : r.fake.sent) selects += v["type"].as_string() == "profile.select";
+  CHECK_EQ(selects, 1);
+  r.advance(5000);
+  CHECK_EQ(r.app.model().detail, std::string("Switching to Ops..."));
+  CHECK_EQ(r.app.agent_profile(), std::string("default"));  // nothing changes until Hermes confirms
+  CHECK(r.fake.kv.count("profile") == 0);
+  r.server(R"({"type":"profile","profile":"default","error":"busy"})");
+  CHECK(!r.app.profile_switch_pending());
+  CHECK_EQ(r.app.agent_profile(), std::string("default"));
+  CHECK(r.app.open_profile_picker());  // a refusal frees the next choice
+}
+
+TEST("profiles: no answer to a switch reconnects, and the welcome says which profile answers") {
+  Rig r(Rig::touch_profile());
+  r.bring_online_with_profiles();
+  CHECK(r.app.select_agent_profile(1));
+  r.advance(hg::App::kProfileReplyMs - 1000);
+  CHECK(r.app.profile_switch_pending());
+  r.advance(2000);
+  CHECK(!r.app.profile_switch_pending());
+  CHECK(r.app.status_json().find("\"phase\":\"connecting\"") != std::string::npos);  // reconnecting
+  CHECK_EQ(r.app.agent_profile(), std::string("default"));
+  r.advance(5000);
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":false})");
+  r.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":true,"profile":"ops",)"
+           R"("profiles":[{"id":"default","name":"Hermes"},{"id":"ops","name":"Ops"}]})");
+  CHECK_EQ(r.app.agent_profile(), std::string("ops"));  // the switch had happened after all
+  CHECK(r.app.open_profile_picker());
+}
+
+TEST("profiles: the name and every list row are about 7 mm tall on each touch board, 2 or 8 profiles") {
+  struct Board {
+    const char* name;
+    int w, h;
+    bool round;
+    uint8_t font_scale;
+    uint16_t ppi;  // the estimates in firmware/esp32/main/board.cpp
+    int mm10 = 70;  // the smallest target, in tenths of a millimetre
+  };
+  const Board boards[] = {
+      {"lcd-1.54", 240, 240, false, 1, 220},   {"amoled-1.75", 466, 466, true, 1, 266},
+      {"amoled-1.8", 368, 432, false, 1, 322}, {"amoled-2.06", 410, 486, false, 1, 315},
+      {"amoled-2.16", 480, 480, false, 1, 314}, {"lcd-1.85c", 360, 360, true, 1, 195},
+      {"knob-1.8", 360, 360, true, 2, 200},     {"box-3", 320, 240, false, 1, 167},
+      {"box-1.28", 240, 240, true, 1, 188, 64},  // Spotpear BOX 1.28: two 48 px rows fill its 169 px square, ~6.49 mm
+      {"crowpanel-2.1", 480, 480, true, 1, 229},
+      {"crowpanel-5.0", 800, 480, false, 1, 187}, {"p4-10.1", 1024, 600, false, 1, 118},
+      {"cores3", 320, 240, false, 1, 200},
+  };
+  for (const Board& b : boards) {
+    for (int n : {2, 8}) {
+      hg::DeviceProfile p = Rig::touch_profile();
+      p.touch_ppi = b.ppi;
+      Rig r(p);
+      r.fake.make_panel(b.w, b.h, b.round);
+      r.fake.font_scale = b.font_scale;
+      std::string roster;
+      for (int i = 0; i < n; ++i) roster += std::string(i ? "," : "") + R"({"id":"p)" + std::to_string(i) + R"(","name":"P)" + std::to_string(i) + "\"}";
+      r.app.begin();
+      r.app.on_network(true, "wifi");
+      r.advance(1000);
+      r.app.on_transport_open();
+      r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":false})");
+      r.server(R"({"type":"welcome","session":"s1","heartbeat_s":20,"paired":true,"profile":"p0","profiles":[)" + roster + "]}");
+      const int min_px = (b.mm10 * b.ppi + 253) / 254, x = b.w / 2;
+      int name_rows = 0;
+      for (int y = 0; y < b.h; ++y) name_rows += r.app.profile_name_hit(x, y);
+      if (name_rows < min_px) std::printf("    %s, %d profiles: name %d px < %d\n", b.name, n, name_rows, min_px);
+      CHECK(name_rows >= min_px);
+      CHECK(r.app.open_profile_picker());
+      std::vector<bool> seen(static_cast<size_t>(n));
+      for (int page = 0; page < n; ++page) {  // every row on every page, then More to the next
+        int more_y = -1, run = 0, last = -1;
+        for (int y = 0; y <= b.h; ++y) {
+          const int hit = y < b.h ? r.app.profile_row_hit(x, y) : -1;
+          if (hit == last) { ++run; continue; }
+          if (last != -1) {
+            if (run < min_px) std::printf("    %s, %d profiles: row %d is %d px < %d\n", b.name, n, last, run, min_px);
+            CHECK(run >= min_px);
+            if (last >= 0) seen[static_cast<size_t>(last)] = true;
+            else more_y = y - 1;
+          }
+          last = hit;
+          run = 1;
+        }
+        if (more_y < 0) break;
+        r.app.profile_tap(x, more_y);
+        CHECK(r.app.profile_picker_open());
+      }
+      for (int i = 0; i < n; ++i) CHECK(seen[static_cast<size_t>(i)]);
+    }
+  }
+}
+
+TEST("profiles: a reset Hermes sends on its own does not end the wait for a pending switch") {
+  Rig r(Rig::touch_profile());
+  r.app.begin();
+  r.app.on_network(true, "wifi");
+  r.advance(1000);
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":false})");
+  r.server(R"({"type":"welcome","session":"s1","heartbeat_s":20,"paired":true,"profile":"ops","profiles":[)"
+           R"({"id":"default","name":"Hermes"},{"id":"ops","name":"Ops"},{"id":"lab","name":"Lab"}]})");
+  CHECK(r.app.select_agent_profile(2));  // Lab; its grant is slow
+  r.server(R"({"type":"profile","profile":"default"})");  // meanwhile Ops is parked and the device reset
+  CHECK_EQ(r.app.agent_profile(), std::string("default"));
+  CHECK(r.app.profile_switch_pending());
+  CHECK_EQ(r.app.model().detail, std::string("Switching to Lab..."));
+  CHECK(!r.app.open_profile_picker());
+  CHECK(!r.app.select_agent_profile(0));
+  r.server(R"({"type":"profile","profile":"lab"})");  // the answer to the Lab request
+  CHECK(!r.app.profile_switch_pending());
+  CHECK_EQ(r.app.agent_profile(), std::string("lab"));
+  CHECK(r.app.open_profile_picker());
+  int selects = 0;
+  for (const Value& v : r.fake.sent) selects += v["type"].as_string() == "profile.select";
+  CHECK_EQ(selects, 1);
+}
+

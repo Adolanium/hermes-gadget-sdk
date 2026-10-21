@@ -151,6 +151,7 @@ const char* screen_name(Screen s) {
     case Screen::Settings: return "settings";
     case Screen::Setup: return "setup";
     case Screen::Dashboard: return "dashboard";
+    case Screen::Profiles: return "profiles";
   }
   return "unknown";
 }
@@ -187,6 +188,8 @@ Ui::Ui(Display& display)
 
   // Hero layout: the mascot is sized per screen (see hero_geom).
   layout_.hero_cols = cols_for(w - 4 * s, s);
+  // The headline is centred, so keeping clear of the marker on the right costs the same on the left.
+  layout_.name_cols = cols_for(2 * (name_marker_x() - s) - w, s);
 }
 
 void Ui::invalidate() { valid_ = false; }
@@ -283,7 +286,8 @@ void Ui::draw_frame(const UiModel& m) {
       flush(y0, y1);
       hash_[i] = hashes[i];
     }
-    uint32_t stat = Hash().val(m.screen).add(m.headline).add(m.detail).add(m.yes).add(m.no).val(m.caption_lines).get();
+    uint32_t stat = Hash().val(m.screen).add(m.headline).add(m.detail).add(m.yes).add(m.no).val(m.caption_lines)
+                        .val(m.name_target).get();
     uint32_t anim = hero_anim_key(m);
     int y0 = y_header, y1 = y_bottom;
     bool redraw = !valid_ || !hero_valid_ || stat != hero_static_;
@@ -520,6 +524,7 @@ void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
     case Screen::Image:
     case Screen::Settings:
     case Screen::Setup:
+    case Screen::Profiles:
       break;
   }
 }
@@ -571,6 +576,10 @@ void Ui::draw_content(Canvas& c, const UiModel& m) {
   if (m.qr && m.qr->ok() && draw_qr(c, m, y0, y1)) return;
   if (m.screen == Screen::Dashboard) {
     draw_dashboard(c, m, y0, y1);
+    return;
+  }
+  if (m.screen == Screen::Profiles) {
+    draw_profiles(c, m);
     return;
   }
 
@@ -667,6 +676,69 @@ void Ui::draw_dashboard(Canvas& c, const UiModel& m, int y0, int y1) {
   }
 }
 
+Ui::Rect Ui::name_rect(const UiModel& m) const {
+  if (!m.name_target || !m.hero) return {};
+  const int s = layout_.scale, lh = Canvas::line_height(s);
+  const HeroGeom g = hero_geom(m);
+  // The headline and the cue under it, padded to a finger's height.
+  return {2 * s, g.caption_y - s, info_.width - 4 * s, g.name_h};
+}
+
+int Ui::name_marker_x() const {
+  const int s = layout_.scale;
+  return info_.width - 2 * s - 3 * s - Canvas::text_width("v", s);  // name_rect's right edge, less 3s
+}
+
+bool Ui::name_hit(const UiModel& m, int x, int y) const { return name_rect(m).has(x - ox_, y - oy_); }
+
+// Rows at least a finger tall. When they do not all fit, a page shows what does, starting at
+// item m.scroll, and its last row is More.
+Ui::ProfilePage Ui::profile_page(const UiModel& m) const {
+  ProfilePage p;
+  const int s = layout_.scale, y0 = layout_.top_h + layout_.header_h, y1 = info_.height - layout_.bottom_h;
+  const int n = static_cast<int>(m.dash.size()), band = y1 - y0 - 2 * s;
+  if (m.screen != Screen::Profiles || n == 0) return p;
+  const int fit = std::max(2, band / (std::max(touch_px_, Canvas::line_height(s) + 2 * s) + s));  // + the gap
+  p.more = n > fit;
+  p.first = p.more ? std::max(0, std::min(m.scroll, n - 1)) : 0;
+  p.count = p.more ? std::min(fit - 1, n - p.first) : n;
+  p.row = band / (p.more ? fit : std::max(n, std::min(4, fit)));
+  p.top = y0 + 2 * s;
+  return p;
+}
+
+Ui::Rect Ui::ProfilePage::slot(const Ui& ui, int i) const {
+  const int s = ui.layout_.scale;
+  return {2 * s, top + i * row, ui.info_.width - 4 * s, row - s};
+}
+
+int Ui::profile_row_hit(const UiModel& m, int x, int y) const {
+  const ProfilePage p = profile_page(m);
+  for (int i = 0; i < p.count + p.more; ++i)
+    if (p.slot(*this, i).has(x - ox_, y - oy_)) return i < p.count ? p.first + i : kMoreRow;
+  return -1;
+}
+
+int Ui::profile_next_page(const UiModel& m) const {
+  const ProfilePage p = profile_page(m);
+  return p.first + p.count < static_cast<int>(m.dash.size()) ? p.first + p.count : 0;
+}
+
+void Ui::draw_profiles(Canvas& c, const UiModel& m) {
+  const int s = layout_.scale, glyph_h = font::kGlyphHeight * s;
+  const ProfilePage p = profile_page(m);
+  for (int i = 0; i < p.count + p.more; ++i) {
+    const Rect r = p.slot(*this, i);
+    const bool more = i == p.count;
+    const DashRow row = more ? DashRow{m.detail, ">"} : m.dash[static_cast<size_t>(p.first + i)];
+    c.fill_round_rect(r.x, r.y, r.w, r.h, 3 * s, kBar);
+    const int ty = r.y + (r.h - glyph_h) / 2, right = r.x + r.w - 3 * s;
+    const int value_w = Canvas::text_width(row.value, s);
+    c.text(right - value_w, ty, row.value, s, tone_color(row.tone));
+    c.text(r.x + 3 * s, ty, fit(row.label, cols_for(right - value_w - r.x - 5 * s, s)), s, more ? kDim : kText);
+  }
+}
+
 // A Wi-Fi setup code: a white panel with a four-module quiet zone, one square
 // per module, at the largest integer scale that fits the content band. A phone
 // camera needs the quiet zone and dark-on-light contrast, so neither is optional.
@@ -730,8 +802,10 @@ Ui::HeroGeom Ui::hero_geom(const UiModel& m) const {
     if (static_cast<int>(last.size()) + 2 > cols) last.resize(static_cast<size_t>(std::max(0, cols - 2)));
     last += "..";
   }
-  // Reserve one detail line even when there is none, so the mascot keeps its size.
-  const int ch = caption_h(std::max<int>(1, static_cast<int>(g.detail.size())));
+  // Reserve one detail line even when there is none, so the mascot keeps its size. A name
+  // panel (headline and first detail line) grows to a finger's height.
+  g.name_h = m.name_target ? std::max(2 * lh + s, touch_px_) : 0;
+  const int ch = caption_h(std::max<int>(1, static_cast<int>(g.detail.size()))) + std::max(0, g.name_h - (2 * lh + s));
   const int avail = std::min(w - 8 * s, layout_.main_h - ch - buttons_h - 4 * s);
   g.size = mascot::pick(avail, mascot::Frame::Idle)->size;
   const int block = g.size + 2 * s + ch + buttons_h;
@@ -829,10 +903,14 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
     default: break;
   }
 
+  if (const Rect r = name_rect(m); r.w) {
+    c.fill_round_rect(r.x, r.y, r.w, r.h, 3 * s, kBar);
+    c.text(name_marker_x(), r.y + s, "v", s, kAccent);
+  }
   // Caption: headline, then the detail lines, centred.
   const int cols = layout_.hero_cols;
-  std::string head = fit(m.headline, cols);
-  int cy = g.caption_y;
+  std::string head = fit(m.headline, m.name_target ? layout_.name_cols : cols);
+  int cy = g.caption_y + std::max(0, g.name_h - (2 * lh + s)) / 2;
   c.text((w - Canvas::text_width(head, s)) / 2, cy, head, s, caption_color(m.screen));
   for (const auto& line : g.detail) {
     cy += lh;
