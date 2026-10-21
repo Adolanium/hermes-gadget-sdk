@@ -104,7 +104,7 @@ If authentication fails, the server sends `{"type": "error", "code": "auth_faile
  "profile": "ops", "profiles": [{"id": "default", "name": "Hermes"}, {"id": "ops", "name": "Ops"}]}
 ```
 
-`profile` and `profiles` are present only when the device sent `caps.profiles` and the server offers profiles. The Hermes plugin offers the profiles a multiplexed gateway serves that `platforms.gadget.extra.profiles` lists (all of them for `all`), with `default` first; without that setting it offers none.
+`profile` and `profiles` are present only when the device sent `caps.profiles` and the server offers profiles. The Hermes plugin offers the profiles a multiplexed gateway serves that `platforms.gadget.extra.profiles` lists (all of them for `all`), with `default` first; without that setting it offers none. The device keeps the first 8 entries of `profiles` and ignores the rest.
 
 ### Pairing
 
