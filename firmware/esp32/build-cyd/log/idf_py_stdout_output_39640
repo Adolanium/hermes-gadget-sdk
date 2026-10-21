@@ -1,0 +1,24 @@
+Command: ninja size
+[0/1] C:\Windows\system32\cmd.exe /C "cd /D E:\Trae\hermes-gadget-sdk\firmware\esp32\build-cyd && C:\Espressif\tools\cmake\4.0.3\bin\cmake.exe -D IDF_SIZE_TOOL=C:/Espressif/tools/python/v6.1/venv/Scripts/python.exe;-m;esp_idf_size -D MAP_FILE=E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/hermes_gadget.map -D OUTPUT_JSON= -P C:/esp/v6.1/esp-idf/tools/cmake/run_size_tool.cmake"
+                           Memory Type Usage Summary                            
+┌───────────────────┬──────────────┬──────────┬────────────────┬───────────────┐
+│ Memory            │              │          │                │               │
+│ Type/Section      │ Used [bytes] │ Used [%] │ Remain [bytes] │ Total [bytes] │
+├───────────────────┼──────────────┼──────────┼────────────────┼───────────────┤
+│ Flash Code        │       834040 │          │                │               │
+│    .text          │       834040 │          │                │               │
+│ Flash Data        │       294848 │          │                │               │
+│    .rodata        │       294576 │          │                │               │
+│    .appdesc       │          256 │          │                │               │
+│    .tdata         │           16 │          │                │               │
+│ IRAM              │        93283 │    71.17 │          37789 │        131072 │
+│    .text          │        92255 │    70.38 │                │               │
+│    .vectors       │         1028 │     0.78 │                │               │
+│ DRAM              │        43547 │    24.09 │         137189 │        180736 │
+│    .bss           │        24664 │    13.65 │                │               │
+│    .data          │        18883 │    10.45 │                │               │
+│ RTC SLOW          │           64 │     0.78 │           8128 │          8192 │
+│    .force_slow    │           40 │     0.49 │                │               │
+│    .rtc_slow_rese │           24 │     0.29 │                │               │
+│ rved              │              │          │                │               │
+└───────────────────┴──────────────┴──────────┴────────────────┴───────────────┘

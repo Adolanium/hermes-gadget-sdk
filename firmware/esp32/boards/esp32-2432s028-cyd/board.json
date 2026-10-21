@@ -1,0 +1,6 @@
+{
+  "title": "ESP32-2432S028 CYD (Cheap Yellow Display)",
+  "summary": "320x240 screen, BOOT as the only button. No microphone, speaker or touch: text only. Experimental.",
+  "docs": "docs/hardware.md#esp32-2432s028-cyd-cheap-yellow-display",
+  "ready_made": true
+}

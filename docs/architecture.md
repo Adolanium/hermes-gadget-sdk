@@ -47,7 +47,7 @@ As a result the core has no locks and every test is deterministic.
 
 ### Rendering
 
-- The port owns a full RGB565 framebuffer, in PSRAM on the ESP32.
+- The port owns an RGB565 framebuffer, in PSRAM on the ESP32. A board with no PSRAM (the CYD) holds a band of rows instead and reports it from `Display::framebuffer_rows()`; the UI then renders each changed band once per window, so the renderer below is unchanged.
 - `Ui::render()` hashes the inputs of each band and redraws only the bands that changed, flushing them as full-width rows (contiguous memory, so a panel driver can DMA them).
 - Animations (spinner, level meter, speaking bars) live only in the 35-pixel header band, so a 10 fps animation pushes about 22 KB/s over SPI.
 - The renderer reads no clocks and uses no randomness. Identical models produce identical pixels, and the simulator tests rely on that.

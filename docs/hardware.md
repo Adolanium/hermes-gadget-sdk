@@ -6,7 +6,7 @@ Start with [Supported hardware](supported-hardware.md) for a board comparison, t
 
 ## Requirements
 
-- **Chip:** the release profiles target ESP32-S3. Other ESP32 variants need their own configuration and validation. On a board without PSRAM, the framebuffer (width × height × 2 bytes) must fit in internal RAM next to Wi-Fi and audio buffers.
+- **Chip:** the release profiles target ESP32-S3. Other ESP32 variants need their own configuration and validation. On a board without PSRAM, either the whole-panel framebuffer (width × height × 2 bytes) fits in internal RAM next to Wi-Fi and audio buffers, or the board holds a band of rows and lets the UI render in bands (see `Display::framebuffer_rows()` and the CYD below).
 - **Display:** an SPI ST7789 panel (240×320, 240×240 or 240×135). Other controllers need a different `esp_lcd` panel driver.
 - **Microphone:** an I2S MEMS microphone (INMP441, ICS-43434, SPH0645 style).
 - **Speaker (optional):** an I2S class-D amplifier (MAX98357A) and a 4–8 Ω speaker.
@@ -748,6 +748,43 @@ python tools/package_release.py --board crowpanel-p4-101 --out dist
 ```
 
 For physical results and explicit untested items, see the [CrowPanel P4 validation record](hardware-validation.md#crowpanel-advanced-p4-partial-physical-test-record). Resolution reference: [Elecrow product page](https://www.elecrow.com/crowpanel-advanced-10-1inch-esp32-p4-hmi-ai-display-1024x600-ips-touch-screen-wifi-6.html).
+
+## ESP32-2432S028 CYD (Cheap Yellow Display)
+
+Board option `esp32-2432s028-cyd`, for the ESP32-2432S028 "Cheap Yellow Display": a **classic ESP32-WROOM-32** with 4 MB flash and **no PSRAM**, a 2.8" 240×320 ST7789 panel driven in landscape, and the BOOT key. **This board has no microphone, speaker or touchscreen**, so it works as a text gadget: Hermes replies, cards and prompts appear on the screen and typed messages go out through the USB console. It is the only classic-ESP32 profile, so the RGB, i80-parallel, DSI and codec drivers are compiled out; the panel uses the same SPI `SpiDisplay` path as the S3 boards, with ESP-IDF's built-in ST7789 driver.
+
+Without PSRAM the full 320×240 framebuffer (150 KB) does not fit: about 137 KB of internal DRAM is free at boot, and Wi-Fi and the app need their share too. The port therefore holds a **band of 120 rows** (75 KB) instead, reserved in an early constructor before the heap fragments (`port_display.cpp`), and flushes through a four-row bounce buffer. The UI detects the band through `Display::framebuffer_rows()` and draws each band once per 120-row window, moving the window with `set_frame_origin()`, so the screen looks the same; a flush that times out asks the UI to repaint the whole screen because the band keeps no rows to resend. An `image.start` overlay is refused on this board for the same reason. If Wi-Fi cannot start for lack of heap, lower `kCydFrameRows` in `port_display.cpp`.
+
+| Part | Chip | Connection |
+|---|---|---|
+| Display | ST7789, SPI2 | SCLK 14, MOSI 13, MISO 12, CS 15, DC 2; no reset line (the panel resets on power-up); 320×240, swapped axes and mirrored x |
+| Backlight | PWM | GPIO 21, active-high |
+| Button | BOOT | GPIO 0 (TALK) |
+
+The variant also carries a resistor-touch XPT2046, a microSD slot and a small amplifier that share the same SPI bus; this profile does not bring them up. Probe your own board before assuming it: the CYD ships in several revisions whose backlight pin, panel controller and colour order differ.
+
+**Build and flash** it with PlatformIO:
+
+```bash
+cd firmware/esp32
+pio run -e esp32-2432s028-cyd -t upload -t monitor
+```
+
+Or with `idf.py set-target esp32` followed by `idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp32-2432s028-cyd/sdkconfig.defaults" build`. The micro-USB port reaches UART0 through a USB-UART bridge (usually CH340), so flashing and the serial console (115200 baud) both use it.
+
+### First flash: what to check
+
+The pin map and panel settings follow a LovyanGFX test sketch known to work on this board (`Panel_ST7789` on HSPI). On the first flash:
+
+1. **Boot log:** `st7789 320x240 ready` and the `parts:` line naming the display and no touch.
+2. **Memory:** no `the reserved 120-row band does not fit` error, and `diag` reports a plausible free heap. The band is reserved before Wi-Fi starts, so a Wi-Fi failure to allocate is the signal to lower `kCydFrameRows`.
+3. **Screen:** the mascot renders in landscape and colours are right (amber accents, not blue). A red/blue swap means `b.lcd.bgr` in this board's `board.cpp` entry needs flipping; an inverted picture means `b.lcd.invert` does.
+4. **Brightness:** cycle 10 → 100 in settings; brightness must rise with the number. The backlight is active-high — do not set `backlight_invert`.
+5. **Orientation:** the picture should not be mirrored or upside down; adjust `b.lcd.swap_xy`, `mirror_x` and `mirror_y` if it is.
+6. **Button:** holding BOOT records a voice turn; without audio, replies are text only.
+7. **Text:** `say hello` over the console should render on the display.
+
+LovyanGFX is used only as a reference for the pin map and register settings; no LovyanGFX code is copied. This port has been built and smoke-checked by its contributor but has no complete physical report; see the [verification table](hardware-validation.md).
 
 ## Build and flash
 

@@ -37,7 +37,9 @@ struct DisplayInfo {
   bool emissive = false;
 };
 
-// A full-frame RGB565 framebuffer owned by the port (PSRAM on hardware).
+// An RGB565 framebuffer owned by the port (PSRAM on hardware). On a board that
+// cannot afford one for the whole panel it holds a band of rows instead; the UI
+// renders in bands of that size (see framebuffer_rows).
 class Display {
  public:
   virtual ~Display() = default;
@@ -46,6 +48,18 @@ class Display {
   // Push rows [y0, y1) to the panel. Rows are contiguous in the framebuffer.
   virtual void flush(uint16_t y0, uint16_t y1) = 0;
   virtual void set_backlight(uint8_t percent) { (void)percent; }
+  // How many panel rows the framebuffer holds at once, or 0 when it holds the
+  // whole panel. A board with no PSRAM reports a band here: the UI then draws
+  // every changed band once per window (see set_frame_origin), so nothing has
+  // to change in the drawing code.
+  virtual int framebuffer_rows() const { return 0; }
+  // Maps the framebuffer onto panel rows [y, y + framebuffer_rows()) for draws
+  // and flushes until it is moved again. Ignored when framebuffer_rows() is 0.
+  virtual void set_frame_origin(int y) { (void)y; }
+  // True once when the panel can no longer be trusted to show what was flushed
+  // (a transfer was lost and this display cannot hold the rows to resend them).
+  // The UI answers it by redrawing the whole screen.
+  virtual bool take_redraw_request() { return false; }
 };
 
 // Microphone: after start() succeeds, the port delivers mono PCM16 samples at

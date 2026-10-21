@@ -1,0 +1,75 @@
+Command: ninja all
+[1/44] Building CXX object esp-idf/core/CMakeFiles/__idf_core.dir/src/canvas.cpp.obj
+[2/44] Building CXX object esp-idf/core/CMakeFiles/__idf_core.dir/src/wifi_networks.cpp.obj
+[3/44] Building CXX object esp-idf/core/CMakeFiles/__idf_core.dir/src/touch.cpp.obj
+[4/44] Building CXX object esp-idf/core/CMakeFiles/__idf_core.dir/src/app_phone.cpp.obj
+[5/44] Building CXX object esp-idf/core/CMakeFiles/__idf_core.dir/src/app_power.cpp.obj
+[6/44] Building CXX object esp-idf/core/CMakeFiles/__idf_core.dir/src/app_settings.cpp.obj
+[7/44] Building CXX object esp-idf/core/CMakeFiles/__idf_core.dir/src/setup.cpp.obj
+[8/44] Building CXX object esp-idf/core/CMakeFiles/__idf_core.dir/src/ui.cpp.obj
+[9/44] Building CXX object esp-idf/core/CMakeFiles/__idf_core.dir/src/app.cpp.obj
+[10/44] Building CXX object esp-idf/core/CMakeFiles/__idf_core.dir/src/app_perf.cpp.obj
+[11/44] Linking C static library esp-idf\core\libcore.a
+[12/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/main.cpp.obj
+[13/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_ble.cpp.obj
+[14/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_amoled.cpp.obj
+[15/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_audio.cpp.obj
+[16/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_codec.cpp.obj
+[17/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_buttons.cpp.obj
+[18/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_diag.cpp.obj
+[19/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_events.cpp.obj
+[20/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_cores3.cpp.obj
+[21/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_tca9554.cpp.obj
+[22/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_console.cpp.obj
+[23/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_display.cpp.obj
+[24/44] Performing build step for 'bootloader'
+[1/1] C:\Windows\system32\cmd.exe /C "cd /D E:\Trae\hermes-gadget-sdk\firmware\esp32\build-cyd\bootloader && C:\Espressif\tools\python\v6.1\venv\Scripts\python.exe C:/esp/v6.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x1000 E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/bootloader/bootloader.bin"
+Bootloader binary size 0x6680 bytes. 0x980 bytes (8%) free.
+[25/44] No install step for 'bootloader'
+[26/44] Completed 'bootloader'
+[27/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_ota.cpp.obj
+[28/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_parallel.cpp.obj
+[29/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/E_/Trae/hermes-gadget-sdk/firmware/drivers/axp2101.cpp.obj
+[30/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_opus.cpp.obj
+[31/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_rgb.cpp.obj
+[32/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_power.cpp.obj
+[33/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_latch_power.cpp.obj
+[34/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_storage.cpp.obj
+[35/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_system.cpp.obj
+[36/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_touch.cpp.obj
+E:/Trae/hermes-gadget-sdk/firmware/esp32/main/port_touch.cpp: In member function 'bool hgp::TouchInput::read_touch(hgp::TouchSample&)':
+E:/Trae/hermes-gadget-sdk/firmware/esp32/main/port_touch.cpp:136:52: warning: 'bool esp_lcd_touch_get_coordinates(esp_lcd_touch_handle_t, uint16_t*, uint16_t*, uint16_t*, uint8_t*, uint8_t)' is deprecated: This API will be removed in version 2.0.0. Use esp_lcd_touch_get_data instead! [-Wdeprecated-declarations]
+  136 |     const bool down = esp_lcd_touch_get_coordinates(managed_touch_, &x, &y, nullptr, &points, 1);
+      |                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from E:/Trae/hermes-gadget-sdk/firmware/esp32/main/port.hpp:50,
+                 from E:/Trae/hermes-gadget-sdk/firmware/esp32/main/port_touch.cpp:5:
+E:/Trae/hermes-gadget-sdk/firmware/esp32/managed_components/espressif__esp_lcd_touch/include/esp_lcd_touch.h:317:6: note: declared here
+  317 | bool esp_lcd_touch_get_coordinates(esp_lcd_touch_handle_t tp, uint16_t *x, uint16_t *y, uint16_t *strength, uint8_t *point_num, uint8_t max_point_num);
+      |      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[37/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_wifi_setup.cpp.obj
+[38/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_ws.cpp.obj
+[39/44] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_wifi.cpp.obj
+[40/44] Linking C static library esp-idf\main\libmain.a
+[41/44] Generating esp-idf/esp_system/ld/sections.ld
+NOTE: C:/esp/v6.1/esp-idf/components/bt/host/nimble/Kconfig.in:1428: 
+BT_NIMBLE_MESH_PROVISIONER: 'default 0' is not a valid bool value (only 'y' and
+'n' are allowed). Value is treated as 'n'.
+NOTE: C:/esp/v6.1/esp-idf/components/bt/controller/esp32/Kconfig.in:177: 
+BTDM_CTRL_LEGACY_AUTH_VENDOR_EVT_EFF: 'default 0' is not a valid bool value 
+(only 'y' and 'n' are allowed). Value is treated as 'n'.
+NOTE: C:/esp/v6.1/esp-idf/components/fatfs/Kconfig:240: FATFS_PRINT_LLI: 
+'default 0' is not a valid bool value (only 'y' and 'n' are allowed). Value is 
+treated as 'n'.
+NOTE: C:/esp/v6.1/esp-idf/components/fatfs/Kconfig:245: FATFS_PRINT_FLOAT: 
+'default 0' is not a valid bool value (only 'y' and 'n' are allowed). Value is 
+treated as 'n'.
+Skipping linker fragment parsing, fragment files unchanged
+[42/44] Linking CXX executable hermes_gadget.elf
+[43/44] Generating binary image from built executable
+esptool v5.3.1
+Creating ESP32 image...
+Merged 3 ELF sections.
+Successfully created ESP32 image.
+Generated E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/hermes_gadget.bin
+[44/44] C:\Windows\system32\cmd.exe /C "cd /D E:\Trae\hermes-gadget-sdk\firmware\esp32\build-cyd && C:\Espressif\tools\python\v6.1\venv\Scripts\python.exe C:/esp/v6.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/partition_table/partition-table.bin E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/hermes_gadget.bin"
+hermes_gadget.bin binary size 0x12f240 bytes. Smallest app partition is 0x1f0000 bytes. 0xc0dc0 bytes (39%) free.

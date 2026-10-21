@@ -83,6 +83,7 @@ struct LcdConfig {
   bool swap_xy = true, mirror_x = true, mirror_y = false, invert = true;
   int gap_x = 0, gap_y = 0;
   int mosi = -1, sclk = -1, cs = -1, dc = -1, rst = -1, backlight = -1;
+  int miso = -1;  // SPI data-in, only wired on the CYD's shared SPI bus
   int spi_mhz = 40;
   LcdBus bus{};
   RgbPanelConfig rgb{};

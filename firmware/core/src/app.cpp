@@ -697,6 +697,13 @@ void App::h_image_start(const json::Value& m) {
   const DisplayInfo& di = ui_->area();
   image_w_ = static_cast<int>(m["width"].as_int(0));
   image_h_ = static_cast<int>(m["height"].as_int(0));
+  // An image is composed in the framebuffer over several packets, so a panel
+  // that only holds a band of rows (no PSRAM) has nowhere to keep it.
+  if (hal_.display->framebuffer_rows() > 0) {
+    log(LogLevel::Warn, "rejecting image: this display has no full framebuffer");
+    image_stream_ = -1;
+    return;
+  }
   if (image_w_ <= 0 || image_h_ <= 0 || image_w_ > di.width || image_h_ > l.main_h ||
       m["format"].str_or("rgb565") != "rgb565") {
     log(LogLevel::Warn, "rejecting image with unsupported geometry");

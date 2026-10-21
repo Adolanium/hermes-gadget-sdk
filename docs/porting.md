@@ -58,9 +58,14 @@ Implement `hg::Display` (`firmware/core/include/hg/hal.hpp`):
 | Method | What it must do |
 |---|---|
 | `info()` | Width, height, whether to store pixels byte-swapped (most SPI panels want big-endian RGB565, so return `swap_bytes = true`), whether a backlight can be dimmed, and whether the panel is `round` |
-| `framebuffer()` | A width × height RGB565 buffer you own (PSRAM on ESP32) |
+| `framebuffer()` | An RGB565 buffer you own (PSRAM on ESP32). It holds the whole panel, or a band of rows when `framebuffer_rows()` says so |
 | `flush(y0, y1)` | Push full-width rows `[y0, y1)` to the panel |
 | `set_backlight(percent)` | Optional |
+| `framebuffer_rows()` | Optional. Rows the framebuffer holds, or `0` (the default) when it holds the whole panel. Return a band on a board that cannot spare a whole-panel buffer: the UI then draws each changed band once per window (see below) |
+| `set_frame_origin(y)` | Optional. Maps the framebuffer onto panel rows `[y, y + framebuffer_rows())` for later draws and flushes. Only means something with a banded `framebuffer_rows()` |
+| `take_redraw_request()` | Optional. `true` once when a lost transfer left the panel stale and the buffer holds no rows to resend; the UI answers by redrawing the whole screen |
+
+A **banded framebuffer** is how a board with no PSRAM fits: the port owns only `width × framebuffer_rows()` pixels and reports the row count from `framebuffer_rows()`. The UI then renders each changed band once per window it spans, moving the window with `set_frame_origin()` between draws, so no drawing code needs to know about the banding. `SpiDisplay` on the CYD (`firmware/esp32/main/port_display.cpp`) is the reference: it reserves a 320×120 band in an early constructor, before the heap fragments, and sets `take_redraw_request()` if a flush times out because the band holds no rows to resend. An image overlay (`image.start`) needs the whole panel visible at once and is refused on a banded display.
 
 `SpiDisplay` in `port_display.cpp` is the reference. It drives ST7789, ILI9341/ILI9342, ST77916 (QSPI) and GC9A01 panels; set `b.lcd.controller`. A GC9A01 whose glass wants different gate timing or supply levels gets a `Gc9a01Panel` entry with those register changes, sent after the driver's default bring-up (`panel_spotpear128.hpp` is the example). To add another panel, swap `esp_lcd_new_panel_st7789` for the matching `esp_lcd` driver (most are managed components). For RGB/parallel or QSPI AMOLED panels, the same interface applies with that panel's `esp_lcd` IO.
 

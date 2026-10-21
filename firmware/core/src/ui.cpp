@@ -192,11 +192,36 @@ Ui::Ui(Display& display)
 void Ui::invalidate() { valid_ = false; }
 
 Canvas Ui::canvas() {
-  return Canvas(display_.framebuffer() + oy_ * panel_.width + ox_, info_.width, info_.height, info_.swap_bytes,
-                panel_.width);
+  // UI row y is panel row y + oy_. The framebuffer holds panel rows starting at
+  // frame_origin_, so row y lives at buffer row y + oy_ - frame_origin_, which is
+  // what base_y_ = frame_origin_ - oy_ makes Canvas index arithmetic produce.
+  const int rows = display_.framebuffer_rows();
+  return Canvas(display_.framebuffer() + ox_, info_.width, info_.height, info_.swap_bytes, panel_.width,
+                frame_origin_ - oy_, rows > 0 ? rows : panel_.height);
 }
 
 void Ui::flush(int y0, int y1) { push(y0 + oy_, y1 + oy_); }
+
+void Ui::draw_bands(int y0, int y1, void (Ui::*draw)(Canvas&, const UiModel&), const UiModel& m) {
+  // Windows tile the panel, `step` rows at a time (the whole panel when the
+  // framebuffer holds it). UI row y sits at panel row y + oy_, so a window
+  // covers UI rows [top - oy_, top + step - oy_).
+  const int win = display_.framebuffer_rows();
+  const int ui_h = static_cast<int>(info_.height);
+  const int panel_h = panel_.height;
+  const int step = win > 0 ? win : panel_h;
+  for (int top = 0; top < panel_h; top += step) {
+    const int a = std::max(y0, top - oy_);
+    const int b = std::min(y1, std::min(ui_h, top + step - oy_));
+    if (a >= b) continue;
+    frame_origin_ = top;
+    display_.set_frame_origin(frame_origin_);
+    Canvas c = canvas();
+    c.set_clip_rows(a, b);  // the canvas drops anything past the window as well
+    (this->*draw)(c, m);
+    push(a + oy_, b + oy_);
+  }
+}
 
 void Ui::push(int y0, int y1) {
   if (!stats_) {
@@ -240,6 +265,9 @@ void Ui::render(const UiModel& m) {
 }
 
 void Ui::draw_frame(const UiModel& m) {
+  // A display that holds only a band of rows cannot resend rows it missed, so it
+  // asks for the whole screen again rather than leave a stale band on the panel.
+  if (display_.take_redraw_request()) valid_ = false;
   const int h = info_.height;
   if (!valid_ && (ox_ || oy_)) {
     // Round panel: everything outside the UI area stays the background colour.
@@ -248,7 +276,6 @@ void Ui::draw_frame(const UiModel& m) {
     push(0, panel_.height);
   }
   if (panel_.round) draw_round_battery(m);
-  Canvas c = canvas();
   const int y_header = layout_.top_h;
   const int y_content = y_header + layout_.header_h;
   const int y_bottom = h - layout_.bottom_h;
@@ -277,10 +304,7 @@ void Ui::draw_frame(const UiModel& m) {
     for (int i : {0, 3}) {
       if (valid_ && hash_[i] == hashes[i]) continue;
       int y0 = i == 0 ? 0 : y_bottom, y1 = i == 0 ? y_header : h;
-      c.set_clip_rows(y0, y1);
-      if (i == 0) draw_top(c, m);
-      else draw_bottom(c, m);
-      flush(y0, y1);
+      draw_bands(y0, y1, i == 0 ? &Ui::draw_top : &Ui::draw_bottom, m);
       hash_[i] = hashes[i];
     }
     uint32_t stat = Hash().val(m.screen).add(m.headline).add(m.detail).add(m.yes).add(m.no).val(m.caption_lines).get();
@@ -291,11 +315,7 @@ void Ui::draw_frame(const UiModel& m) {
       hero_anim_rows(m, y0, y1);  // only what can move
       redraw = true;
     }
-    if (redraw) {
-      c.set_clip_rows(y0, y1);
-      draw_hero(c, m);
-      flush(y0, y1);
-    }
+    if (redraw) draw_bands(y0, y1, &Ui::draw_hero, m);
     hero_static_ = stat;
     hero_anim_ = anim;
     hero_valid_ = true;
@@ -322,9 +342,7 @@ void Ui::draw_frame(const UiModel& m) {
       continue;
     }
     if (valid_ && hash_[i] == hashes[i]) continue;
-    c.set_clip_rows(bands[i].y0, bands[i].y1);
-    (this->*bands[i].draw)(c, m);
-    flush(bands[i].y0, bands[i].y1);
+    draw_bands(bands[i].y0, bands[i].y1, bands[i].draw, m);
     hash_[i] = hashes[i];
   }
   valid_ = true;

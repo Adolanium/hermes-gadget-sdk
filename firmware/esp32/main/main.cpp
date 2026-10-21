@@ -43,6 +43,10 @@ hgp::EspSystem g_system;
 hgp::NvsStorage g_storage;
 hgp::WsTransport g_transport;
 hgp::SpiDisplay g_display;
+#if !CONFIG_HG_BOARD_ESP32_CYD
+// The CYD has no PSRAM: its 320x240 framebuffer takes all but a few KiB of
+// internal RAM, so only the drivers a board profile can select are
+// instantiated. Its own peripherals are wired in the CYD branch of app_main.
 hgp::ParallelDisplay g_parallel;
 hgp::RgbDisplay g_rgb;
 hgp::AmoledDisplay g_amoled;
@@ -57,14 +61,15 @@ hgp::CodecAudio g_codec;
 hgp::CodecMic g_codec_mic;
 hgp::CodecSpeaker g_codec_speaker;
 hgp::OpusSpeakerDecoder g_opus;
-hgp::Buttons g_buttons;
 hgp::TouchInput g_touch;
-hgp::Wifi g_wifi;
-hgp::EspUpdater g_updater;
 hgp::AxpPower g_power;
 hgp::LatchPower g_latch_power;
 hgp::CoreS3Board g_cores3;
 hgp::PhoneLink g_phone;
+#endif
+hgp::Buttons g_buttons;
+hgp::Wifi g_wifi;
+hgp::EspUpdater g_updater;
 hg::TouchGestures* g_gestures = nullptr;
 
 // touch_cancel: which inputs act as CANCEL on touch boards.
@@ -82,10 +87,12 @@ void apply_touch_cancel() {
 }
 
 // The name a phone sees: the `name` setting, as hg::App uses it.
+#if !CONFIG_HG_BOARD_ESP32_CYD  // the CYD has no Bluetooth phone link
 std::string device_name() {
   auto v = g_storage.get("name");
   return v && !v->empty() ? *v : std::string(CONFIG_HG_DEFAULT_NAME);
 }
+#endif
 
 void init_nvs() {
   esp_err_t err = nvs_flash_init();
@@ -234,7 +241,9 @@ extern "C" void app_main(void) {
   ESP_ERROR_CHECK(g_storage.begin() ? ESP_OK : ESP_FAIL);
   const hgp::BoardConfig& board = hgp::board_config();
   power_rails_on(board);
+#if !CONFIG_HG_BOARD_ESP32_CYD
   const bool latch_power = board.latch_power.enabled && g_latch_power.begin(board.latch_power);
+#endif
   const char* version = esp_app_get_description()->version;
   ESP_LOGI(TAG, "Hermes Gadget %s on %s", version, board.name);
 #if CONFIG_SPIRAM
@@ -270,10 +279,20 @@ extern "C" void app_main(void) {
   hal.system = &g_system;
   hal.transport = &g_transport;
   hal.storage = &g_storage;
+#if !CONFIG_HG_BOARD_ESP32_CYD
   if (latch_power) hal.power = &g_latch_power;
   if (latch_power && board.latch_power.usb_external_power)
     g_wifi.on_battery = [] { return g_latch_power.external_power() == std::optional<bool>(false); };
+#endif
   if (g_updater.capacity()) hal.updater = &g_updater;
+#if CONFIG_HG_BOARD_ESP32_CYD
+  // The CYD's only peripherals are the panel and the BOOT key: no I2C bus,
+  // expander, codec, touch controller or PMIC to bring up.
+  if (board.lcd.enabled && g_display.begin(board.lcd, nullptr)) hal.display = &g_display;
+  constexpr bool touch = false;
+  hgp::diag::Parts parts;
+  parts.display = hal.display ? g_display.controller_name() : "none";
+#else
   bool io_rail_ready = true;
 #if SOC_MIPI_DSI_SUPPORTED
   if (board.lcd.bus.type == hgp::LcdBus::Type::Dsi) io_rail_ready = enable_p4_vdd_io_rail();
@@ -326,7 +345,6 @@ extern "C" void app_main(void) {
     if (board.light_sleep && g_codec.mic_link().switchable) g_codec_speaker.allow_power_down(g_codec.mic_link().format);
   }
   if (hal.speaker) hal.speaker_decoder = &g_opus;  // Opus replies when Hermes offers them
-  g_buttons.begin(board.buttons);
   const bool touch = peripherals_ready && (board.touch.enabled || board.pwr_key.enabled || board.encoder.a >= 0) &&
                      g_touch.begin(board.touch, board.pwr_key, board.encoder,
                                    board.touch.bus.sda >= 0 ? hgp::i2c::touch_bus(board.touch.bus) : i2c_bus);
@@ -356,6 +374,8 @@ extern "C" void app_main(void) {
   parts.touch = touch && g_touch.has_touch();
   parts.key = touch && g_touch.has_key();
   parts.i2c = i2c_bus;
+#endif
+  g_buttons.begin(board.buttons);
   hgp::diag::set_parts(parts);
   hgp::diag::log_boot_summary();
 
@@ -378,13 +398,21 @@ extern "C" void app_main(void) {
     profile.touch_screen = true;
     profile.extra_settings = {"touch_cancel"};
   }
+#if !CONFIG_HG_BOARD_ESP32_CYD
   if (hal.mic == &g_codec_mic) {
     profile.mic_rate = hgp::CodecAudio::kRate;
     profile.vad_min_rms = board.codec.vad_min_rms;
   }
   if (hal.speaker == &g_codec_speaker) profile.speaker_rate = hgp::CodecAudio::kRate;
+#endif
 
+#if CONFIG_HG_BOARD_ESP32_CYD
+  // From the heap, so the early framebuffer can take the one large contiguous
+  // block before this claims part of what is left of internal RAM.
+  static hg::App& app = *new hg::App(hal, profile);
+#else
   static hg::App app(hal, profile);
+#endif
   static hg::TouchGestures gestures(app);
   if (profile.touch_screen) g_gestures = &gestures;
   apply_touch_cancel();
@@ -393,13 +421,17 @@ extern "C" void app_main(void) {
     if (key == "wifi_ssid" || key == "wifi_pass") app.close_wifi_setup();
     if (key == "wifi_ssid" || key == "wifi_pass" || key == "wifi_nets") g_wifi.networks_changed();
     if (key == "touch_cancel") apply_touch_cancel();
+#if !CONFIG_HG_BOARD_ESP32_CYD
     if (key == "name" && hgp::board_config().bluetooth) g_phone.set_name(device_name());
+#endif
   };
+#if !CONFIG_HG_BOARD_ESP32_CYD
   if (board.bluetooth && g_phone.begin(device_name())) {
     app.on_phone_pair = [] { return g_phone.open_pairing(); };
     app.on_phone_pair_close = [] { g_phone.close_pairing(); };
     app.on_phone_forget = [] { g_phone.forget(); };
   }
+#endif
   app.on_wifi_setup = [] { return g_wifi.start_setup(); };
   app.on_wifi_setup_close = [] { g_wifi.stop_setup(); };
   app.on_wifi_setup_ap = [] { return g_wifi.setup_ap(); };
@@ -407,15 +439,19 @@ extern "C" void app_main(void) {
   app.on_diag = [](hg::json::Value& report) {
     hgp::diag::report(report);
     report.set("ota", g_updater.describe());
+#if !CONFIG_HG_BOARD_ESP32_CYD
     if (const auto ma = g_power.charge_current_ma()) report.set("charge_current_ma", static_cast<unsigned>(*ma));
+#endif
   };
   app.recent_log = &hgp::diag::recent_log;
   if (board.light_sleep) keep_pins_through_sleep(board);
+#if !CONFIG_HG_BOARD_ESP32_CYD
   g_system.on_doze_start = [] { g_codec_speaker.power_down(); };
   g_system.on_doze_end = [] {
     g_codec_speaker.power_up();
     g_wifi.retry_now();
   };
+#endif
   app.begin();
   hgp::console::begin();
 

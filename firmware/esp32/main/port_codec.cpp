@@ -73,9 +73,11 @@ bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus)
   if (i2s_new_channel(&chan, &tx_, &rx_) != ESP_OK) return false;
   i2s_std_config_t std_cfg = {};
   std_cfg.clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(kRate);  // MCLK = 256 x fs
-  std_cfg.slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
-      cfg.stereo32 ? I2S_DATA_BIT_WIDTH_32BIT : I2S_DATA_BIT_WIDTH_16BIT,
-      cfg.stereo32 ? I2S_SLOT_MODE_STEREO : I2S_SLOT_MODE_MONO);
+  // The classic-ESP32 macro compares its arguments without parenthesizing them,
+  // so a ternary passed straight in would bind wrong; name them first.
+  const auto bits = cfg.stereo32 ? I2S_DATA_BIT_WIDTH_32BIT : I2S_DATA_BIT_WIDTH_16BIT;
+  const auto slots = cfg.stereo32 ? I2S_SLOT_MODE_STEREO : I2S_SLOT_MODE_MONO;
+  std_cfg.slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(bits, slots);
   std_cfg.gpio_cfg.mclk = static_cast<gpio_num_t>(cfg.mclk);
   std_cfg.gpio_cfg.bclk = static_cast<gpio_num_t>(cfg.bclk);
   std_cfg.gpio_cfg.ws = static_cast<gpio_num_t>(cfg.ws);

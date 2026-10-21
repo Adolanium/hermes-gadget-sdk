@@ -46,6 +46,8 @@ namespace {
 #define HG_BOARD_NAME "crowpanel-advance-p4-10.1"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154
 #define HG_BOARD_NAME "waveshare-esp32s3-lcd-154"
+#elif CONFIG_HG_BOARD_ESP32_CYD
+#define HG_BOARD_NAME "esp32-2432s028-cyd"
 #else
 #define HG_BOARD_NAME "custom"
 #endif
@@ -854,6 +856,37 @@ BoardConfig make() {
   b.buttons = {35, -1, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";
+  return b;
+}
+#elif CONFIG_HG_BOARD_ESP32_CYD
+// ESP32-2432S028 "Cheap Yellow Display" (CYD): a classic ESP32-WROOM-32 with
+// 4 MB flash and no PSRAM, a 2.8" 240x320 ST7789 panel in landscape, plus a
+// resistor-touch XPT2046, microSD and an amplifier that share the same SPI bus.
+// Only the panel and the BOOT key are wired here; touch, microphone and the DAC
+// speaker are not brought up yet.
+// Pins: Espressif ESP32-2432S028 schematic, cross-checked with LovyanGFX
+// (Panel_ST7789 on HSPI: SCLK=14 MOSI=13 MISO=12 DC=2 CS=15, backlight GPIO21).
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.lcd.enabled = true;
+  b.lcd.width = 320;
+  b.lcd.height = 240;
+  b.lcd.swap_xy = true;   // LovyanGFX setRotation(1): MAD_MV | MAD_MX
+  b.lcd.mirror_x = true;
+  b.lcd.mirror_y = false;
+  b.lcd.invert = true;    // LovyanGFX CYD_INVERT = 1
+  b.lcd.bgr = false;      // LovyanGFX rgb_order = true writes MAD_RGB, i.e. native RGB565
+  b.lcd.mosi = 13;
+  b.lcd.miso = 12;
+  b.lcd.sclk = 14;
+  b.lcd.cs = 15;
+  b.lcd.dc = 2;
+  b.lcd.rst = -1;         // no reset line; the panel resets on power-up
+  b.lcd.backlight = 21;
+  b.lcd.spi_mhz = 40;
+  b.buttons = {0, -1, -1, -1};  // BOOT, the only key on the board
+  b.talk_label = "BOOT";
   return b;
 }
 #elif CONFIG_HG_BOARD_CUSTOM

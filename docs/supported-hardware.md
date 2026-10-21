@@ -27,6 +27,12 @@ Hardware ports remain experimental until the [verification table](hardware-valid
 | [Elecrow CrowPanel 5.0-inch HMI](hardware.md#elecrow-crowpanel-50-inch-hmi) | Touch screen; send text through the USB console | No onboard microphone or speaker |
 | [ESP32-S3 breadboard build](hardware.md#esp32-s3-breadboard) | Hold the wired TALK button | Wire the microphone and optional speaker |
 
+## Classic ESP32 boards
+
+| Board | Controls | Audio |
+|---|---|---|
+| [ESP32-2432S028 CYD (Cheap Yellow Display)](hardware.md#esp32-2432s028-cyd-cheap-yellow-display) | BOOT to talk; send text through the USB console | No onboard microphone or speaker; no touchscreen |
+
 ## ESP32-P4 boards
 
 | Board | Controls | Audio |

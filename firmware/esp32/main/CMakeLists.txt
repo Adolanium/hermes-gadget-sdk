@@ -6,6 +6,7 @@ endif()
 
 set(HG_P4_SOURCES)
 set(HG_P4_REQUIRES)
+set(HG_RGB_REQUIRES)
 if(IDF_TARGET STREQUAL "esp32p4")
     list(APPEND HG_P4_SOURCES
         "port_dsi.cpp"
@@ -13,6 +14,12 @@ if(IDF_TARGET STREQUAL "esp32p4")
         "port_power_p4.cpp"
         "../../drivers/stc8_battery.cpp")
     list(APPEND HG_P4_REQUIRES esp_lcd_ek79007)
+endif()
+# The RGB panel driver (ST7701 over an I/O expander) only builds for the chips
+# with an LCD_CAM RGB scanout: port_rgb.cpp is compiled out on every other
+# target, and esp_lcd_st7701 does not publish builds for them either.
+if(IDF_TARGET STREQUAL "esp32s3" OR IDF_TARGET STREQUAL "esp32p4")
+    list(APPEND HG_RGB_REQUIRES esp_lcd_st7701 esp_lcd_panel_io_additions)
 endif()
 idf_component_register(
     SRCS
@@ -59,8 +66,7 @@ idf_component_register(
         esp_adc
         esp_event
         esp_lcd
-        esp_lcd_st7701
-        esp_lcd_panel_io_additions
+        ${HG_RGB_REQUIRES}
         ${HG_P4_REQUIRES}
         esp_netif
         esp_http_server

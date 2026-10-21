@@ -1,0 +1,2 @@
+--flash-mode dio --flash-freq 40m --flash-size 4MB
+0x1000 bootloader/bootloader.bin
