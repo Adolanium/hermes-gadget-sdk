@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import math
+import os
 import struct
 from types import SimpleNamespace
 
@@ -16,7 +17,14 @@ from hermes_gadget_plugin import opus, protocol
 RATE = 16000
 FRAME_BYTES = RATE * 2 * hubmod.AUDIO_FRAME_MS // 1000
 
-needs_libopus = pytest.mark.skipif(not opus.available(), reason="libopus is not installed")
+# CI sets HG_REQUIRE_LIBOPUS=1 after installing libopus, so a missing library fails there instead of skipping.
+needs_libopus = pytest.mark.skipif(
+    not opus.available() and not os.environ.get("HG_REQUIRE_LIBOPUS"), reason="libopus is not installed")
+
+
+@pytest.mark.skipif(not os.environ.get("HG_REQUIRE_LIBOPUS"), reason="libopus not required here")
+def test_libopus_present_when_required():
+    assert opus.available(), "HG_REQUIRE_LIBOPUS is set but libopus did not load"
 
 
 class Session:
