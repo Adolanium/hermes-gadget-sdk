@@ -82,6 +82,7 @@
 
 ### Tools and documentation
 
+- `hermes-gadget sim --live-audio` stops with the install command for the audio extra when `sounddevice` is missing, instead of starting with silent capture. The window's settings and the microphone's own setter already refused that case, but the command-line flag was dropped quietly, so a recording captured nothing and the reply reported a silent clip.
 - The Hermes integration guide's per-gadget profiles section says to update each cloned profile's copy of the plugin, and how to turn off tool search when the agent never calls the gadget tools. Contributed by Luiz Gustavo Saraiva (@luizgustavosaraiva).
 - Release files (firmware images, `manifest.json`, `SHA256SUMS`, the license archive and the Linux package) now carry GitHub build provenance attestations, so a download can be checked with `gh attestation verify <file> --repo Adolanium/hermes-gadget-sdk`. The release notes say so.
 - The website (home page, installer and guides) takes the look of the Hermes plugin art: midnight indigo with a dot screen, periwinkle text, square window frames, Georgia headings over a monospace body, and a dithered banner of Hermes listening to a gadget. Guides switch from the light paper theme to the same dark theme. Layout, links and the installer flow are unchanged.
