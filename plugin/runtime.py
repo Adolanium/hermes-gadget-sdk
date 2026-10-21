@@ -9,7 +9,7 @@ from __future__ import annotations
 import sys
 import threading
 import types
-from typing import Any
+from typing import Any, Callable
 
 # Hermes imports a directory plugin once per profile scope (``hermes_plugins.gadget``, then
 # ``hermes_plugins.gadget__home_<digest>``), so module globals would give each profile its own
@@ -22,6 +22,14 @@ _fresh.adapters = {}
 _registry = sys.modules.setdefault(_SHARED, _fresh)  # atomic: two copies importing at once share one
 _lock: threading.Lock = _registry.lock
 _adapters: dict[str, Any] = _registry.adapters
+
+
+def shared(name: str, make: Callable[[], Any]) -> Any:
+    """One ``make()`` per process under ``name``, whichever copy of the plugin asks first."""
+    with _lock:
+        if not hasattr(_registry, name):
+            setattr(_registry, name, make())
+        return getattr(_registry, name)
 
 
 def register(profile: str, adapter: Any) -> None:
