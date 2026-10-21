@@ -1,9 +1,10 @@
 """Turn chat-flavoured agent text into something a tiny screen can show.
 
-Devices render a small bitmap font (ASCII only on the reference firmware), so
-the server strips Markdown, folds typographic punctuation and accents to
-ASCII, and drops emoji. Doing it here keeps the firmware simple and lets every
-board benefit from improvements without a reflash.
+Devices render a small bitmap font, so the server strips Markdown, folds
+typographic punctuation, folds accents to what the device's ``charset`` draws
+(``ascii``, or ``latin1`` on firmware whose font has Latin-1), and drops emoji.
+Doing it here keeps the firmware simple and lets every board benefit from
+improvements without a reflash.
 """
 
 from __future__ import annotations
@@ -73,9 +74,36 @@ def fold_ascii(text: str) -> str:
     return "".join(out)
 
 
+def fold_latin1(text: str) -> str:
+    """For a device whose font draws Latin-1 too: keep ASCII and U+00A1..U+00FF, fold the rest."""
+    out = []
+    for ch in text:
+        if ch == "\n" or " " <= ch <= "~" or ("\xa1" <= ch <= "\xff" and ch != "\xad"):
+            out.append(ch)
+            continue
+        if ch == "\xa0":  # the device breaks lines only at plain spaces
+            out.append(" ")
+            continue
+        if ch == "\xad":  # soft hyphen: invisible unless a line breaks there, and the device never does
+            continue
+        if ch in _PUNCT:
+            out.append(_PUNCT[ch])
+            continue
+        decomposed = unicodedata.normalize("NFKD", ch)
+        kept = "".join(c for c in decomposed if " " <= c <= "~" or "\xa1" <= c <= "\xff")
+        if kept:
+            out.append(kept)
+        elif ch == "\t":
+            out.append(" ")
+        # Anything else (emoji, symbols, other scripts) is dropped.
+    return "".join(out)
+
+
 def for_device(text: str, charset: str = "ascii") -> str:
     text = strip_markdown(text or "")
-    if charset == "ascii":
+    if charset == "latin1":
+        text = fold_latin1(text)
+    elif charset == "ascii":
         text = fold_ascii(text)
     text = "\n".join(_SPACES.sub(" ", line).rstrip() for line in text.splitlines())
     return _BLANKS.sub("\n\n", text).strip()

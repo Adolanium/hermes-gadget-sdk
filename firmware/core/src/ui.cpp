@@ -51,11 +51,12 @@ class Hash {
   uint32_t h_ = 2166136261u;
 };
 
+// Columns are code points (font::length), and cuts fall between them.
 std::string fit(std::string_view s, int max_chars) {
   if (max_chars <= 0) return {};
-  if (static_cast<int>(s.size()) <= max_chars) return std::string(s);
-  if (max_chars <= 2) return std::string(s.substr(0, static_cast<size_t>(max_chars)));
-  return std::string(s.substr(0, static_cast<size_t>(max_chars - 2))) + "..";
+  if (static_cast<int>(font::length(s)) <= max_chars) return std::string(s);
+  if (max_chars <= 2) return std::string(s.substr(0, font::prefix(s, static_cast<size_t>(max_chars))));
+  return std::string(s.substr(0, font::prefix(s, static_cast<size_t>(max_chars - 2)))) + "..";
 }
 
 int cols_for(int width_px, int scale) { return width_px / (font::kCellWidth * scale); }
@@ -653,8 +654,8 @@ void Ui::draw_dashboard(Canvas& c, const UiModel& m, int y0, int y1) {
     const int lx = margin + 2 * r + 3 * s;
     const int cols = cols_for(right - lx, s);
     // The value keeps up to half the row; the label gets the rest, less a space.
-    const std::string value = fit(row.value, std::min<int>(static_cast<int>(row.value.size()), cols / 2));
-    const int value_cols = static_cast<int>(value.size());
+    const std::string value = fit(row.value, std::min<int>(static_cast<int>(font::length(row.value)), cols / 2));
+    const int value_cols = static_cast<int>(font::length(value));
     c.text(lx, ty, fit(row.label, cols - value_cols - (value_cols ? 1 : 0)), s, kText);
     if (value_cols) c.text(right - Canvas::text_width(value, s), ty, value, s, tone_color(row.tone));
   }
