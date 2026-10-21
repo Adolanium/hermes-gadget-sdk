@@ -100,7 +100,7 @@ Every screen that isn't showing reply text uses a **hero layout**: the Hermes Ag
   - Each device holds a random 32-byte key, and its id is a hash of that key.
   - The key is sent once, at enrollment. After that the device proves possession with an HMAC over a fresh server nonce, so recorded traffic cannot be replayed.
   - Another device cannot take over an enrolled id.
-- **Authorization:** Hermes's own allowlists and DM pairing. Every message from a device is authorized by the gateway runner exactly like a message from a Telegram user, and pairing approval happens on the Hermes host.
+- **Authorization:** Hermes's own allowlists and DM pairing. Every message from a device is authorized by the gateway runner exactly like a message from a Telegram user, and pairing approval happens on the Hermes host. A device that switches profiles is approved once, in the default profile: the plugin approves it in each profile when it first switches there, and a revocation in the default profile sends it back.
 - **Transport:** use `wss://` (`tls_cert`/`tls_key`) on any network you don't trust. On a home LAN, plain `ws://` exposes conversation content to anyone on the network, though not the device key after enrollment.
 
 ## Why not use an existing Hermes API instead of a plugin?
