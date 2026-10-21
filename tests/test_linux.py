@@ -37,7 +37,7 @@ def test_headless_pairs_sends_text_and_keeps_identity(devserver, loop_thread, tm
         assert loop_thread.run(brain.approve(code)) is True
         wait(client, lambda: client.device.status()["paired"])
         session = next(iter(hub.sessions.values()))
-        assert session.caps == {"inputs": ["talk", "cancel"], "talk_mode": "hold"}
+        assert session.caps == {"inputs": ["talk", "cancel"], "talk_mode": "hold", "profiles": True}
         assert session.sensors == {}
         assert session.action_names() == []
         client.command({"command": "send", "text": "Hello kitchen"})

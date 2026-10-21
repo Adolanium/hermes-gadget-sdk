@@ -174,6 +174,14 @@ const Entry kSpanish[] = {
     {Msg::SwipeDownForSessions, "Desliza abajo: sesiones"},
     {Msg::ButtonShowsSessions, "{0}: sesiones"},
     {Msg::LowBattery, "Batería baja: conecta USB"},
+    // Hermes profiles
+    {Msg::ProfileSetting, "Perfil de Hermes"},
+    {Msg::ProfileSettingNext, "{0}\nSelecciona para pasar al siguiente perfil."},
+    {Msg::ProfileCantSwitch, "No se puede cambiar"},
+    {Msg::ProfileGreeting, "Soy {0}"},
+    {Msg::ProfileSwitching, "Cambiando a {0}"},
+    {Msg::ProfileSwitched, "Ahora hablas con {0}"},
+    {Msg::ProfileNotChanged, "Perfil sin cambiar ({0})"},
     // Dashboard
     {Msg::HermesSessions, "Sesiones de Hermes"},
     {Msg::NoSessions, "Sin sesiones"},

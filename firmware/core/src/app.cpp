@@ -94,6 +94,7 @@ const App::Route App::kRoutes[] = {
     {"prompt.close", &App::h_prompt_close}, {"ota.offer", &App::h_ota_offer},
     {"ota.begin", &App::h_ota_begin},     {"ota.end", &App::h_ota_end},
     {"ota.abort", &App::h_ota_abort},     {"dashboard", &App::h_dashboard},
+    {"profile", &App::h_profile},
 };
 
 App::App(Hal& hal, DeviceProfile profile) : hal_(hal), profile_(std::move(profile)) {}
@@ -152,6 +153,7 @@ void App::begin() {
   }
   device_id_ = proto::device_id_for_key(key_.data(), key_.size());
   load_settings();
+  agent_profile_ = setting("profile", "default");  // shown until Hermes confirms it; not a console setting
 
   if (hal_.speaker) {
     Action vol;
@@ -394,6 +396,7 @@ void App::send_hello() {
     dash.set("v", kDashboardVersion).set("rows", ui_->dash_rows());
     caps.set("dashboard", dash);
   }
+  caps.set("profiles", true);
   if (hal_.updater) {
     json::Value ota = json::Value::object();
     ota.set("max_size", hal_.updater->capacity());
@@ -418,6 +421,8 @@ void App::send_hello() {
       .set("caps", caps)
       .set("actions", acts)
       .set("sensors", sensors);
+  const std::string stored = setting("profile", "");  // only what Hermes confirmed, never what it showed
+  if (!stored.empty()) hello.set("profile", stored);
   if (!access_token_.empty()) hello.set("token", access_token_);
   if (display_sleeping_) hello.set("display_sleeping", true);
   send(hello);
@@ -471,11 +476,62 @@ void App::h_welcome(const json::Value& m) {
     pairing_command_.clear();
   }
   log(LogLevel::Info, paired_ ? "online (paired)" : "online (waiting for pairing approval)");
+  agent_profiles_.clear();
+  for (const auto& p : m["profiles"].elements()) {
+    if (agent_profiles_.size() >= 8) break;
+    const std::string& id = p["id"].as_string();
+    if (id.empty()) continue;
+    const std::string& name = p["name"].as_string();
+    agent_profiles_.push_back({id, (name.empty() ? id : name).substr(0, 24)});
+  }
+  if (m["profile"].is_string()) set_agent_profile(m["profile"].as_string());
   // A freshly installed firmware has reached Hermes, so it can take the next update: keep it.
   if (hal_.updater && hal_.updater->pending_verify()) {
     hal_.updater->confirm();
     log(LogLevel::Info, "new firmware " + profile_.firmware + " reached Hermes; keeping it");
   }
+}
+
+void App::h_profile(const json::Value& m) {
+  const std::string& error = m["error"].as_string();
+  if (error.empty() && m["profile"].is_string()) set_agent_profile(m["profile"].as_string());  // a refusal changes nothing
+  profile_notice(error.empty() ? tr(i18n::Msg::ProfileSwitched, {agent_profile_name()})
+                               : tr(i18n::Msg::ProfileNotChanged, {error}));
+}
+
+// The notice line and the open settings item; not the hint bar, which settings hides.
+void App::profile_notice(std::string text) {
+  if (menu_ == Menu::Profile) check_result_ = text;
+  notice_ = std::move(text);
+  notice_until_ = now() + 4000;
+}
+
+void App::set_agent_profile(const std::string& id) {
+  if (id.empty()) return;
+  agent_profile_ = id;
+  if (!hal_.storage || setting("profile", "default") == id) return;
+  if (id == "default") hal_.storage->erase("profile");
+  else if (!hal_.storage->set("profile", id)) log(LogLevel::Warn, "could not save profile");
+}
+
+std::string App::agent_profile_name() const {
+  for (const auto& p : agent_profiles_)
+    if (p.id == agent_profile_) return p.name;
+  return agent_profile_;
+}
+
+bool App::next_agent_profile() {
+  if (phase_ != Phase::Online || !paired_ || agent_profiles_.size() < 2 || mode_ != Mode::Idle ||
+      prompt_showing() || ota_busy())
+    return false;
+  size_t i = 0;
+  while (i < agent_profiles_.size() && agent_profiles_[i].id != agent_profile_) ++i;
+  const AgentProfile& next = agent_profiles_[i < agent_profiles_.size() ? (i + 1) % agent_profiles_.size() : 0];
+  json::Value msg = proto::message("profile.select");
+  msg.set("profile", next.id);
+  send(msg);
+  profile_notice(tr(i18n::Msg::ProfileSwitching, {next.name}));
+  return true;
 }
 
 void App::h_pairing(const json::Value& m) {
@@ -1728,7 +1784,9 @@ void App::update_model() {
     bool showing_reply = !reply_.empty() && static_cast<int32_t>(reply_until_ - now()) > 0;
     m.hero = !showing_reply;
     if (m.hero) {
-      m.headline = tr(Msg::HiImHermes);
+      m.headline = agent_profiles_.size() > 1 && agent_profile_ != "default"
+                       ? tr(Msg::ProfileGreeting, {agent_profile_name()})
+                       : std::string(tr(Msg::HiImHermes));
       m.detail = tr(reply_.empty() || !profile_.has_scroll_buttons ? Msg::AskMeAnything : Msg::UpShowsLastReply);
       if (dashboard_ready_ && can_open_dashboard() && reply_.empty())
         m.detail = profile_.touch_screen ? std::string(tr(Msg::SwipeDownForSessions)) : tr(Msg::ButtonShowsSessions, {cancel});
@@ -1765,6 +1823,7 @@ json::Value App::status_value() const {
       .set("phase", phase)
       .set("screen", screen_name(model_.screen))
       .set("paired", paired_)
+      .set("profile", agent_profile_)
       .set("server", server_url_)
       .set("network", network_up_);
   s.set("display_sleeping", display_sleeping_);
@@ -1942,6 +2001,7 @@ std::string App::console(std::string_view raw) {
     hal_.storage->erase("device_key");
     if (cmd == "factory-reset") {
       for (const char* k : kSettingKeys) hal_.storage->erase(setting_storage_key(k));
+      hal_.storage->erase("profile");
       for (const auto& k : profile_.extra_settings) hal_.storage->erase(k);
       hal_.storage->erase("wifi_nets");
       hal_.storage->erase("wifi_fast");  // where the last access point was (drivers/wifi_fast.hpp)

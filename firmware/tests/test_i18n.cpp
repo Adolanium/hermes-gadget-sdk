@@ -206,6 +206,7 @@ std::string filled(Lang lang, Msg m) {
     case Msg::NewSessionIn: a = "2"; break;
     case Msg::PairingCode: a = "ABCD1234"; break;
     case Msg::PhoneCode: a = "123456"; break;
+    case Msg::ProfileGreeting: a = "Equipo de trabajo"; break;  // a long profile name
     default: break;
   }
   return hg::i18n::format(hg::i18n::text(lang, m), {a, b});
@@ -228,6 +229,7 @@ constexpr Msg kLines[] = {
     Msg::ButtonShowsSessions, Msg::LowBattery, Msg::Listening, Msg::SpeakNowPause, Msg::LiftFingerToSend,
     Msg::ReleaseToSend, Msg::Thinking, Msg::HermesAsks, Msg::Restarting, Msg::Updating, Msg::SetupNeeded,
     Msg::NoNetwork, Msg::Authenticating, Msg::ConnectingToHermes, Msg::PairingCode, Msg::PairThisDevice,
+    Msg::ProfileGreeting,
 };
 // Headlines of text screens: larger letters after the status indicator.
 constexpr Msg kHeadlines[] = {
