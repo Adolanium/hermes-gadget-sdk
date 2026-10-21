@@ -41,6 +41,14 @@ class HubDelegate:
     async def is_paired(self, session: "DeviceSession") -> bool:
         return True
 
+    def profiles(self, session: "DeviceSession | None" = None) -> list[dict]:
+        """Hermes profiles ``session`` may switch between, as ``[{"id", "name"}]``; empty disables switching."""
+        return []
+
+    async def select_profile(self, session: "DeviceSession", profile: str) -> str | None:
+        """Bind ``session`` to ``profile`` (set ``session.profile``); return None, or why not."""
+        return "unknown"
+
     async def on_ready(self, session: "DeviceSession") -> None:
         pass
 
@@ -235,6 +243,7 @@ class DeviceSession:
         # doesn't counts as always lit, so nothing is held back for it.
         self.display_sleeping: bool = hello.get("display_sleeping") is True
         self.paired = False
+        self.profile = "default"  # the Hermes profile that answers this device
         self.connected_at = time.time()
         self.last_rx = time.monotonic()
         self.closed = False
@@ -353,6 +362,9 @@ class DeviceSession:
 
     async def close_prompt(self, prompt_id: str) -> None:
         await self.send_json(protocol.message("prompt.close", id=prompt_id))
+
+    async def send_profile(self, error: str | None = None) -> None:
+        await self.send_json(protocol.message("profile", profile=self.profile, error=error))
 
     async def show_card(self, title: str, body: str, ttl_s: float = 15) -> bool:
         """Show a card. False when it is held until the screen lights up."""
@@ -515,6 +527,7 @@ class DeviceSession:
             "board": self.board,
             "firmware": self.firmware,
             "paired": self.paired,
+            "profile": self.profile,
             "connected_for_s": int(time.time() - self.connected_at),
             "screen": {k: disp[k] for k in ("width", "height", "text_cols", "text_rows") if k in disp} or None,
             "speaker": self.has_speaker,
@@ -725,9 +738,14 @@ class DeviceHub:
             session.paired = bool(await self.delegate.is_paired(session))
             if session.paired:
                 self.store.confirm(session.device_id)
-            await session.send_json(protocol.message(
-                "welcome", session=session.session_id, paired=session.paired,
-                heartbeat_s=self.heartbeat_s, server="hermes", proto=protocol.VERSION))
+            welcome = dict(session=session.session_id, paired=session.paired, heartbeat_s=self.heartbeat_s,
+                           server="hermes", proto=protocol.VERSION)
+            if session.caps.get("profiles") is True and (roster := self.delegate.profiles(session)):
+                wanted = hello.get("profile")
+                if isinstance(wanted, str) and wanted and wanted != session.profile:
+                    await self.delegate.select_profile(session, wanted)  # a refusal leaves "default"
+                welcome.update(profile=session.profile, profiles=roster)
+            await session.send_json(protocol.message("welcome", **welcome))
             log.info("device %s (%s) online, paired=%s", session.device_id, session.name, session.paired)
             await self.delegate.on_ready(session)
             if not session.display_sleeping:
@@ -887,6 +905,11 @@ class DeviceHub:
         if session._ota_inbox is not None:
             session._ota_inbox.put_nowait(msg)
 
+    async def _h_profile_select(self, session: DeviceSession, msg: dict) -> None:
+        wanted = msg.get("profile")
+        error = await self.delegate.select_profile(session, wanted) if isinstance(wanted, str) and wanted else "unknown"
+        await session.send_profile(error)
+
     _routes = {
         "text": _h_text,
         "audio.start": _h_audio_start,
@@ -904,4 +927,5 @@ class DeviceHub:
         "ota.ack": _h_ota,
         "ota.done": _h_ota,
         "ota.error": _h_ota,
+        "profile.select": _h_profile_select,
     }

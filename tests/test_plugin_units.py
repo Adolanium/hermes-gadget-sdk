@@ -169,3 +169,15 @@ def test_battery_log_rolls_over_a_full_file(tmp_path):
     assert (tmp_path / "hg-1.1.csv").exists()
     assert (tmp_path / "hg-1.csv").stat().st_size < 400
     assert (tmp_path / "hg-1.csv").read_text().startswith("time,unix_s,battery_mv")
+
+
+def test_owner_binding_survives_forget_from_a_stale_store(tmp_path):
+    device = "hg-0123456789abcdef"
+    gateway = DeviceStore(tmp_path)
+    gateway.enroll(device, b"k" * 32)
+    cli = DeviceStore(tmp_path)  # another process
+    assert not gateway.owner_bound(device)
+    gateway.bind_to_owner(device)
+    gateway.bind_to_owner(device)  # idempotent
+    assert cli.forget(device)  # deletes the device's record; it is not a revocation
+    assert DeviceStore(tmp_path).owner_bound(device)

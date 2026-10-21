@@ -7,6 +7,7 @@ import struct
 import pytest
 
 from conftest import requires_sim
+from hermes_gadget_plugin.hub import HubDelegate
 
 pytestmark = requires_sim
 
@@ -555,3 +556,57 @@ def test_the_dashboard_opens_from_the_idle_screen(loop_thread, devserver, make_s
     assert any(p[0] < 120 and 140 < p[1] < 200 and p[2] > 200 for p in pixels)  # the busy session's blue
     assert any(p[0] > 200 and 150 < p[1] < 200 and p[2] < 90 for p in pixels)  # the waiting one's amber
     sim.screenshot(tmp_path / f"dashboard-{board}.png")
+
+
+class _TwoProfiles(HubDelegate):
+    """Offers two profiles; switching always succeeds for known ones."""
+
+    def profiles(self, session=None):
+        return [{"id": "default", "name": "Hermes"}, {"id": "ops", "name": "Ops"}]
+
+    async def select_profile(self, session, profile):
+        if profile not in ("default", "ops"):
+            return "unknown"
+        session.profile = profile
+        return None
+
+
+def test_devices_switch_hermes_profile_and_keep_it(loop_thread, tmp_path, make_sim):
+    from hermes_gadget_plugin.hub import DeviceHub
+    from hermes_gadget_plugin.store import DeviceStore
+
+    hub = DeviceHub(DeviceStore(tmp_path / "server"), _TwoProfiles(), host="127.0.0.1", port=0, heartbeat_s=5)
+    loop_thread.run(hub.start())
+    try:
+        url = f"ws://127.0.0.1:{hub.bound_port}/gadget"
+        sim = make_sim(url)
+        assert sim.wait_screen("ready", timeout=10)
+        welcome = sim.last_received("welcome")
+        assert welcome["profile"] == "default"
+        assert [p["id"] for p in welcome["profiles"]] == ["default", "ops"]
+        sim.console("settings")
+        for _ in range(3):
+            sim.console("cancel")
+        sim.console("talk")
+        sim.console("release")
+        assert sim.wait_for(lambda: sim.status().get("profile") == "ops", timeout=5)
+        assert hub.get(sim.status()["device_id"]).profile == "ops"
+        assert sim.last_received("profile") == {"type": "profile", "profile": "ops"}  # the wire, not only state
+        first_session = welcome["session"]
+        sim.close()
+        again = make_sim(url)  # same state dir: the device remembers its profile
+        assert again.wait_screen("ready", timeout=10)
+        assert again.last_received("welcome")["session"] != first_session
+        assert again.last_received("welcome")["profile"] == "ops"
+    finally:
+        loop_thread.run(hub.stop())
+
+
+def test_a_server_without_profiles_sends_no_roster(devserver, make_sim):
+    # Server side of compatibility; old firmware against a capable adapter is in test_profile_select_hermes.py.
+    hub, _brain, url = devserver()  # EchoBrain keeps the default hooks: no profiles
+    sim = make_sim(url)
+    assert sim.wait_screen("ready", timeout=10)
+    welcome = sim.last_received("welcome")
+    assert "profile" not in welcome and "profiles" not in welcome
+    assert hub.get(sim.status()["device_id"]).profile == "default"
