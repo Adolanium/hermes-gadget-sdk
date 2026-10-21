@@ -107,7 +107,7 @@ TEST("i18n: drawn text is plain ASCII, the only characters the font has") {
 TEST("i18n: folding keeps ASCII and finds the nearest letter for the rest") {
   using hg::i18n::fold_ascii;
   CHECK_EQ(fold_ascii("Ready"), std::string("Ready"));
-  CHECK_EQ(fold_ascii("¿Cómo estás? ¡Sí! Añadir"), std::string("?Como estas? !Si! Anadir"));
+  CHECK_EQ(fold_ascii("¿Cómo estás? ¡Sí! Añadir"), std::string("Como estas? Si! Anadir"));
   CHECK_EQ(fold_ascii("Ça va, garçon, über"), std::string("Ca va, garcon, uber"));
   CHECK_EQ(fold_ascii("Straße ÆØÅ"), std::string("Strasse AEOA"));
   CHECK_EQ(fold_ascii("“quoted” – it’s…"), std::string("\"quoted\" - it's..."));

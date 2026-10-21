@@ -247,8 +247,8 @@ const char* english(Msg id);
 const char* translation(Lang lang, Msg id);
 // `text` with {0}, {1}... replaced by `args`. A placeholder with no argument is kept.
 std::string format(std::string_view text, std::initializer_list<std::string_view> args);
-// The nearest ASCII for UTF-8 text: accents dropped, ¿ ¡ and typographic
-// punctuation replaced; anything else becomes '?'.
+// The nearest ASCII for UTF-8 text: accents dropped, ¿ and ¡ left out,
+// typographic punctuation replaced; anything else becomes '?'.
 std::string fold_ascii(std::string_view utf8);
 
 // A board's control name in `lang`: the words above are translated, a button's

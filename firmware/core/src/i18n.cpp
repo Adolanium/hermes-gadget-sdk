@@ -77,10 +77,11 @@ const std::array<const char*, kMessageCount>& drawn(Lang lang) {
   return tables[l];
 }
 
-// ASCII stand-ins for U+00A0..U+00FF; "" drops the character.
+// ASCII stand-ins for U+00A0..U+00FF; "" drops the character. Spanish written
+// without accents leaves out ¿ and ¡ rather than showing ?Que? and !Hola!.
 const char* const kLatin1[96] = {
-    " ", "!", "c", "L", "", "Y", "|", "S", "", "(c)", "a", "<<", "-", "-", "(R)", "-",  // A0-AF
-    "o", "+-", "2", "3", "'", "u", "P", ".", "", "1", "o", ">>", "1/4", "1/2", "3/4", "?",  // B0-BF
+    " ", "", "c", "L", "", "Y", "|", "S", "", "(c)", "a", "<<", "-", "-", "(R)", "-",  // A0-AF
+    "o", "+-", "2", "3", "'", "u", "P", ".", "", "1", "o", ">>", "1/4", "1/2", "3/4", "",  // B0-BF
     "A", "A", "A", "A", "A", "A", "AE", "C", "E", "E", "E", "E", "I", "I", "I", "I",  // C0-CF
     "D", "N", "O", "O", "O", "O", "O", "x", "O", "U", "U", "U", "U", "Y", "Th", "ss",  // D0-DF
     "a", "a", "a", "a", "a", "a", "ae", "c", "e", "e", "e", "e", "i", "i", "i", "i",  // E0-EF
