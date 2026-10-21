@@ -17,6 +17,7 @@
 #include "hg/crypto.hpp"
 #include "hg/frame_stats.hpp"
 #include "hg/hal.hpp"
+#include "hg/i18n.hpp"
 #include "hg/json.hpp"
 #include "hg/ui.hpp"
 #include "hg/vad.hpp"
@@ -263,6 +264,13 @@ class App {
   // Tells Hermes when the screen goes dark or lights up (docs/protocol.md#screen-sleep).
   void flush_display_state();
   void set_hint_flash(std::string text);
+  // The device's own text in the chosen language (hg/i18n.hpp).
+  const char* tr(i18n::Msg id) const { return i18n::text(lang_, id); }
+  std::string tr(i18n::Msg id, std::initializer_list<std::string_view> args) const {
+    return i18n::format(tr(id), args);
+  }
+  // A board's control name (DeviceProfile talk_label, cancel_label) in that language.
+  std::string control(const std::string& label) const { return i18n::control_name(lang_, label); }
   void update_model();
   void log(LogLevel level, std::string_view msg);
   uint32_t now() const { return hal_.system->now_ms(); }
@@ -283,8 +291,9 @@ class App {
   TalkMode talk_mode_ = TalkMode::Hold;
   uint8_t volume_ = 70;
   uint8_t brightness_ = 100;
+  i18n::Lang lang_ = i18n::Lang::En;
   enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, Microphone, Speaker, Display, Inputs, Info,
-                              Power, IdleTimer, PowerOff, WifiSetup, Phone, Back };
+                              Power, IdleTimer, PowerOff, WifiSetup, Phone, Language, Back };
   enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };
   Menu menu_ = Menu::Closed;
   HardwareCheck hardware_check_ = HardwareCheck::None;
@@ -400,6 +409,7 @@ class App {
   std::string notice_;
   uint32_t notice_until_ = 0;
   std::string hint_flash_;
+  bool hint_countdown_ = false;  // hint_flash_ counts down to a new session
   uint32_t hint_flash_until_ = 0;
 
   // actions & telemetry

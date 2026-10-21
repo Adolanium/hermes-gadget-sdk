@@ -19,7 +19,7 @@ bool App::start_phone_pairing() {
   settings_chord_fired_ = false;
   wake_buttons_ = 0;
   if (!on_phone_pair()) {
-    set_hint_flash("Bluetooth unavailable");
+    set_hint_flash(tr(i18n::Msg::BluetoothUnavailable));
     update_model();
     return false;
   }
@@ -55,7 +55,7 @@ void App::on_phone_passkey(uint32_t passkey) {
 void App::on_phone_paired(bool ok) {
   if (!phone_pairing_) return;
   close_phone_pairing();
-  set_hint_flash(ok ? "Phone paired" : "Phone pairing failed");
+  set_hint_flash(tr(ok ? i18n::Msg::PhonePaired : i18n::Msg::PhonePairingFailed));
   update_model();
 }
 
@@ -68,7 +68,7 @@ void App::on_phone_status(int paired, bool connected) {
 void App::phone_tick() {
   if (phone_pairing_ && static_cast<int32_t>(now() - phone_pair_until_) >= 0) {
     close_phone_pairing();
-    set_hint_flash("Phone pairing closed");
+    set_hint_flash(tr(i18n::Msg::PhonePairingClosed));
     update_model();
   }
 }
