@@ -27,6 +27,20 @@ def test_typography_and_accents_fold_to_ascii_and_emoji_drop():
     assert out == "Cafe \"quoted\" - it's 20 degC"
 
 
+def test_a_latin1_device_keeps_its_accents_and_folds_the_rest():
+    out = textfmt.for_device("¿Café “quoted” — it’s 20°C, Ñandú? Łódź 日本 \U0001F600", "latin1")
+    assert out == "¿Café \"quoted\" - it's 20°C, Ñandú? Lódz"
+
+
+def test_a_latin1_device_gets_plain_spaces_and_no_soft_hyphens():
+    assert textfmt.for_device("a\xa0b co\xadop\tx", "latin1") == "a b coop x"
+
+
+def test_an_unknown_charset_is_left_alone():
+    # A device announcing something the plugin doesn't know draws what it can itself.
+    assert textfmt.for_device("Café \U0001F600", "utf-8") == "Café \U0001F600"
+
+
 def test_think_blocks_never_reach_the_screen():
     assert textfmt.for_device("<think>secret plan</think>Answer") == "Answer"
 

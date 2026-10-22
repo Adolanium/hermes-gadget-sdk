@@ -50,7 +50,7 @@ Because the id is derived from the key, nobody can claim another device's id wit
  "name": "Kitchen Gadget", "board": "esp32s3-breadboard", "firmware": "0.1.0",
  "token": "<optional access token>",
  "caps": {
-   "display": {"width": 320, "height": 240, "color": true, "charset": "ascii",
+   "display": {"width": 320, "height": 240, "color": true, "charset": "latin1",
                "text_cols": 25, "text_rows": 8,
                "image": {"width": 320, "height": 196, "format": "rgb565"}},
    "mic": {"rate": 16000, "format": "pcm16"},
@@ -139,7 +139,7 @@ If authentication fails, the server sends `{"type": "error", "code": "auth_faile
 | `{"type": "prompt.close", "id": "q1"}` | The question was withdrawn (timed out or answered elsewhere) |
 | `{"type": "error", "code": "...", "message": "..."}` | Protocol or auth error; the server usually closes the connection next |
 
-Reply text is already shaped for the device: Markdown is stripped and the text is folded to ASCII when `charset` is `"ascii"`. Devices render it as-is.
+Reply text is already shaped for the device: Markdown is stripped and the text is folded to what its `charset` draws. `"ascii"` gets printable ASCII only. `"latin1"` gets ASCII and Latin-1 (U+00A1 to U+00FF, so accented letters, ¿ ¡ and the like), with no-break spaces as plain spaces; anything else is folded to the nearest letter or dropped. Text is UTF-8 either way, and devices render it as-is. The reference firmware reports `"latin1"` since its font gained Latin-1; older firmware reports `"ascii"`.
 
 ### Audio to the device
 
@@ -206,7 +206,7 @@ A device that advertises `caps.dashboard` gets a live summary of Hermes: the age
 Hermes asks before some actions: destructive commands such as `/new`, a costly model switch, or a dangerous shell command the agent wants to run. The server turns each one into a `prompt`:
 
 - The device shows the title and text with two answers. The reference firmware maps TALK to yes and CANCEL to no, and ignores presses in the first 0.6 s so a press meant for something else doesn't answer it.
-- The device answers with `prompt.reply` exactly once, or not at all if the question expires (`ttl_s`, when present) or is withdrawn with `prompt.close`.
+- The device answers with `prompt.reply` exactly once, or not at all if the question expires (`ttl_s`, when present) or is withdrawn with `prompt.close`. A command approval carries Hermes's approval timeout (`approvals.timeout`, 300 s by default) as its `ttl_s`.
 - The server sends one question at a time. A question asked while a device was offline is sent again when it reconnects.
 - Text is shaped like replies: short, plain and already folded to the device's charset. A dangerous-command approval is the exception: its text is the command as it will run, unchanged, or a notice to approve on the host when the command doesn't fit one line of `text_cols`, less two columns, as-is. The server ignores a yes to that notice.
 

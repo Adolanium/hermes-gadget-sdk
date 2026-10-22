@@ -101,6 +101,6 @@ Choose it in one of three ways:
 
 With **auto**, the device takes the language Hermes names when it connects: Hermes's own language (`HERMES_LANGUAGE`, else `display.language`), or the gadget plugin's `language` setting if you set one ([configuration](hermes-integration.md#configuration)). A language the firmware doesn't have, or none, shows as English.
 
-The languages are English (`en`) and Spanish (`es`). The font has no accented letters yet, so translated text shows them without accents ("Informacion"). To add a language, see [Translate the device text](development.md#translate-the-device-text).
+The languages are English (`en`) and Spanish (`es`). The font draws Latin-1, so translations and Hermes's replies keep their accents, ñ, ¿ and ¡; letters from other alphabets show without their marks, or as `?`. To add a language, see [Translate the device text](development.md#translate-the-device-text).
 
 Incoming confirmation prompts and firmware updates close settings. You cannot open settings during a prompt or update. The USB console also accepts `settings`, `settings close`, and `set brightness 50`.

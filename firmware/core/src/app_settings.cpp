@@ -281,7 +281,7 @@ void App::settings_model() {
       // language they can't read can still find the way back.
       m.detail = lang_ == i18n::Lang::En ? std::string(tr(Msg::Language))
                                          : std::string(tr(Msg::Language)) + " / " + i18n::english(Msg::Language);
-      const std::string name = i18n::fold_ascii(i18n::info(lang_).name);
+      const std::string name = i18n::info(lang_).name;  // the font draws Latin-1 (#172)
       m.body = tr(Msg::LanguageBody, {lang_auto_ ? tr(Msg::LanguageAuto, {name}) : name});
       break;
     }

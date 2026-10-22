@@ -1,5 +1,7 @@
 #include "hg/i18n.hpp"
 
+#include "hg/font.hpp"
+
 #include <array>
 #include <deque>
 
@@ -50,13 +52,13 @@ const std::array<const char*, kMessageCount>& written(Lang lang) {
   return tables[l];
 }
 
-bool is_ascii(const char* s) {
-  for (; *s; ++s)
-    if (static_cast<unsigned char>(*s) >= 0x80) return false;
+bool drawable(std::string_view s) {
+  for (size_t i = 0; i < s.size();)
+    if (const char32_t cp = font::next(s, i); cp != '\n' && !font::drawable(cp)) return false;
   return true;
 }
 
-// Message id -> text as drawn: the translation folded to ASCII, else English.
+// Message id -> text as drawn: the translation folded to the font, else English.
 const std::array<const char*, kMessageCount>& drawn(Lang lang) {
   static std::array<std::array<const char*, kMessageCount>, kLangCount> tables{};
   static std::array<bool, kLangCount> built{};
@@ -66,8 +68,8 @@ const std::array<const char*, kMessageCount>& drawn(Lang lang) {
     const auto& w = written(lang);
     for (size_t i = 0; i < kMessageCount; ++i) {
       const char* s = w[i] ? w[i] : kEnglish[i];
-      if (!is_ascii(s)) {
-        folded.push_back(fold_ascii(s));
+      if (!drawable(s)) {
+        folded.push_back(fold_to_font(s));
         s = folded.back().c_str();
       }
       tables[l][i] = s;
@@ -165,6 +167,22 @@ std::string fold_ascii(std::string_view s) {
     }
     i += len;
     if (cp >= 0xA0 && cp <= 0xFF) out += kLatin1[cp - 0xA0];
+    else if (cp == 0x2018 || cp == 0x2019) out += '\'';
+    else if (cp == 0x201C || cp == 0x201D) out += '"';
+    else if (cp == 0x2013 || cp == 0x2014) out += '-';
+    else if (cp == 0x2026) out += "...";
+    else out += '?';
+  }
+  return out;
+}
+
+std::string fold_to_font(std::string_view s) {
+  std::string out;
+  out.reserve(s.size());
+  for (size_t i = 0; i < s.size();) {
+    const size_t at = i;
+    const char32_t cp = font::next(s, i);
+    if (cp == '\n' || font::drawable(cp)) out.append(s.substr(at, i - at));
     else if (cp == 0x2018 || cp == 0x2019) out += '\'';
     else if (cp == 0x201C || cp == 0x201D) out += '"';
     else if (cp == 0x2013 || cp == 0x2014) out += '-';
