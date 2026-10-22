@@ -21,6 +21,7 @@ Firmware builds and simulator tests check software behavior. A physical verifica
 | Waveshare ESP32-S3-Knob-Touch-LCD-1.8 (ESP32-S3R8, 16 MB flash, 8 MB octal PSRAM) | SH8601 360×360 round QSPI LCD; CST816S touch, rotary encoder and BOOT | One PDM microphone; no speaker output (the PCM5100A headphone DAC is not driven) | USB power; battery ADC, charging and haptics not read | Experimental; contributor smoke test (display, hold-to-talk touch, microphone capture through a voice turn with a text reply); full checklist not completed |
 | Espressif ESP-VoCat, v1.2 only (ESP32-S3 rev v0.2, 16 MB flash, 16 MB octal PSRAM) | ST77916 360×360 round QSPI LCD; CST816S touch and BOOT | ES7210 microphones (MIC1 captured, mono transport) and ES8311 speaker through an NS4150B; MIC3 speaker loopback unused | GPIO power switches for the LCD/SD rail and the codec supply; battery, BQ27220 gauge and head touch pads not read; no software shutdown | Experimental; contributor smoke test on USB power (boot, display, both codecs, touch, Wi-Fi, pairing, a hold-to-talk voice turn); full checklist not completed |
 | Elecrow CrowPanel Advanced 10.1-inch ESP32-P4 V1.1 | 1024×600 MIPI-DSI; GT911 touch; BOOT/TALK | PDM microphone; I²S speaker output | STC8 battery/charger status; uncalibrated | Experimental; [partial physical report](#crowpanel-advanced-p4-partial-physical-test-record): display/touch, normal speech submissions and speaker playback confirmed by the owner on an earlier build of the port, not this one; battery-only Wi-Fi startup issue remains unexplained; full checklist incomplete |
+| Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C (SKU 31523; ESP32-P4 rev v1.3) | JD9365 800×800 round MIPI-DSI; GT911 touch; BOOT | ES8311 speaker + ES7210 microphone | USB power only; no battery connector or telemetry | Experimental; [partial physical report](#waveshare-p4-touch-lcd-34c-partial-physical-report): display and C6-hosted Wi-Fi confirmed by the owner; touch, microphone capture, speaker playback, OTA and the full checklist not completed |
 | Xorigin AIPI Lite | ST7789 128×128; BOOT and power keys | One ES8311 for speaker and microphone | GPIO 10 power latch and power-off; battery level and charging not reported | Experimental; contributor smoke test on an earlier revision (boot, display and audio start, online pairing); microphone capture, colors, USB console and battery not verified on this revision |
 | Spotpear ESP32-S3-1.28-BOX (SKU `sp-esp32-s3-1.28-box`) | GC9A01 240×240 round; CST816D touch on its own I2C bus, BOOT | One ES8311 for speaker and microphone | GPIO 3 battery latch and power-off; battery voltage on GPIO 1 (divider ratio 2, not measured) and charging on GPIO 41, active high | Experimental; firmware builds; not run on a board; full checklist not completed |
 | Spotpear ESP32-S3-1.54 muma (touch version, SKU `sp-esp32-s3-1.54-muma`; ESP32-S3 rev v0.2; PCB revision not marked) | ST7789 240×240; CST816D touch on its own I2C bus, BOOT | One ES8311 for speaker and microphone | GPIO 3 battery latch and power-off; battery voltage (divider by two, inferred from upstream, not metered) and active-high charging signal; external power from the charging signal or a USB host; idle CPU at 80 MHz and light sleep while dozing on battery | Experimental; owner smoke test on two units on USB power (boot, display, touch, phone Wi-Fi setup, pairing, voice turns, agent-driven volume and brightness); battery readings on one unit: on USB `diag` showed 3418 mV, charging and external power; on battery the latch held and the Power page showed 3512 mV and Not charging; colors, touch coordinates, power-off, external power on battery and OTA not verified; full checklist not completed |
@@ -75,6 +76,37 @@ Sanitized logs and diagnostics: No sanitized diag report or log bundle is attach
 ```
 
 The port remains experimental. The partial physical observations above belong to the prior firmware and must not be read as validation of this upstream port.
+
+## Waveshare P4 Touch-LCD-3.4C partial physical report
+
+- **Board / revision:** Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C, SKU 31523. ESP32-P4 rev v1.3, 16 MB flash (QIO, 80 MHz) and 32 MB PSRAM (HEX, 200 MHz). PCB revision not marked. No battery connector; USB-C power only.
+- **Firmware:** local build `0.2.0-ws34c-usbconsole`, ESP-IDF 5.5.4, built with `idf.py` from the `ws-p4-touch-lcd-3.4c` board profile; not a published release. App-only image at `0x20000`, SHA-256 `34fcec816590ce6cea6254dc19179e3a62b2b3d7e5a01f2893794a5f5189cfa6`. The board profile is not merged yet; this report describes the working tree that produced the image.
+- **Host / Hermes:** Linux. The live Hermes version was not recorded; gateway configuration was not changed.
+- **Display:** boot logs reported `jd9365-dsi`. The owner confirmed the panel renders: Waveshare's own color-bar example drew hardware color bars, and the Hermes Gadget UI then drew correctly. A central streak instead of a full image appeared on builds that had reverted to the CrowPanel EK79007 driver; restoring the JD9365 path fixed it.
+- **Touch:** GT911 detected on I2C. Coordinates and orientation not verified.
+- **Audio:** ES8311 and ES7210 start. Microphone capture, speaker playback and levels not verified.
+- **Wi-Fi / C6:** the ESP32-C6 companion carries Wi-Fi over 4-bit SDIO. With a working C6 image the boot log reports `Identified slave [esp32c6]` and `Base transport is set-up`; the owner confirmed the device joined the network and reached the normal Gadget UI.
+- **Pairing and persistence:** paired. Reconnect after restart confirmed by the owner; identity and pairing survived.
+- **Factory reset:** confirmed by the owner.
+- **Long run:** a one-hour run confirmed by the owner.
+- **Untested:** touch coordinates and orientation; microphone capture and level; speaker playback; deliberate network loss and recovery; OTA and rollback; the two-hour session; the full checklist.
+- **Not implemented:** battery telemetry and software shutdown (no battery on this board).
+
+### Getting the C6 working on this board
+
+The C6 companion does not ship with an esp_hosted slave image this host can talk to, and the host's `g_wifi.begin()` gives up after about 10 s, leaving the gadget offline. Every step below was needed before Wi-Fi came up, and each one is its own trap.
+
+1. **Flash a C6 slave image.** The image that worked was `network_adapter.bin` from the CrowPanel C6 firmware package (V2.12.3). The slave image already on the board did not work.
+2. **The C6 is programmed over its own UART, not the P4's USB-JTAG.** On this board that is the SH1.0 header (J4). Wire a USB-UART bridge to it and flash with esptool. This UART is a separate physical link from the P4↔C6 hosted SDIO link used in normal operation, so it can be unplugged afterwards without affecting Wi-Fi.
+3. **C6 reset is P4 GPIO54, not GPIO32.** The schematic routes C6 `CHIP_PU` to P4 GPIO54. An earlier configuration pulsed GPIO32, which resets nothing on this board. `CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=54`, active high.
+4. **SDIO lane mapping.** P4 side: CMD 19, CLK 18, D0 14, D1 15, D2 16, D3 17. C6 side: D0..D3 are GPIO20..23. 4-bit bus at 40 MHz.
+5. **`g_wifi.begin(g_storage)` must actually run.** It was found commented out in the test tree, so Wi-Fi never started even with a good C6 image. Check it before blaming the C6.
+6. **The console is on the P4 USB Serial/JTAG, not UART0.** The board profile defaulted to `CONFIG_ESP_CONSOLE_UART_DEFAULT`, so console commands typed over the connected USB-JTAG never reached the app and every `set`/`get` looked ignored. Set `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y` in the board's `sdkconfig.defaults`.
+7. **Non-interactive `idf_monitor` needs `--eol CRLF`.** The USB Serial/JTAG REPL expects CRLF; with the default LF the monitor reports `Unknown command` for every line.
+8. **Silicon revision.** This unit is rev v1.3. `CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y` with `CONFIG_ESP32P4_REV_MIN_100=y` and `CONFIG_ESP32P4_REV_MAX_FULL=199` keeps the bootloader and esptool revision check happy.
+9. **Flash the app only.** `esptool write_flash 0x20000 hermes_gadget.bin` preserves the bootloader, partition table and NVS, so Wi-Fi settings and pairing survive an app update.
+
+The port stays experimental.
 
 ## Waveshare 1.85C V2 partial physical report
 
