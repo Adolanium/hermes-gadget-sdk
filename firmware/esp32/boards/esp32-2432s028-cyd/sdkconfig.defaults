@@ -1,6 +1,6 @@
-# ESP32-2432S028 "Cheap Yellow Display": classic ESP32-WROOM-32 with 4 MB flash.
-# 320x240 ST7789 on SPI2, backlight on GPIO 21, BOOT as the only button.
-# No PSRAM, no microphone, speaker, touch or PMIC. Pins: docs/hardware.md#esp32-2432s028-cyd-cheap-yellow-display
+# ESP32-2432S028 "Cheap Yellow Display", two-USB revision: classic ESP32-WROOM-32
+# with 4 MB flash. 320x240 ST7789 on SPI2, backlight on GPIO 21, BOOT as the only
+# button. No PSRAM or PMIC; touch is not driven. Pins: docs/hardware.md#esp32-2432s028-cyd-cheap-yellow-display
 CONFIG_IDF_TARGET="esp32"
 # The base file selects 4 MB; this board uses the same 4 MB flash (no override needed).
 # There is no PSRAM and the full 320x240 framebuffer (150 KB) does not fit, so

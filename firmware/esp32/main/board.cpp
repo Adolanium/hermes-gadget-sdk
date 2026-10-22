@@ -874,14 +874,18 @@ BoardConfig make() {
   return b;
 }
 #elif CONFIG_HG_BOARD_ESP32_CYD
-// ESP32-2432S028 "Cheap Yellow Display" (CYD): a classic ESP32-WROOM-32 with
-// 4 MB flash and no PSRAM, a 2.8" 240x320 ST7789 panel in landscape, plus a
-// resistor-touch XPT2046, microSD and an SC8002B amplifier that share the same
-// SPI bus. The panel, the BOOT key, the amplifier (through the chip's DAC) and a
-// PDM microphone on the 4-pin header are wired here; touch and microSD are not
-// brought up yet.
-// Pins: Espressif ESP32-2432S028 schematic, cross-checked with LovyanGFX
-// (Panel_ST7789 on HSPI: SCLK=14 MOSI=13 MISO=12 DC=2 CS=15, backlight GPIO21).
+// ESP32-2432S028 "Cheap Yellow Display" (CYD), the revision with two USB ports
+// (micro-USB and USB-C) and an ST7789 panel: a classic ESP32-WROOM-32 with 4 MB
+// flash and no PSRAM, a 2.8" 240x320 panel in landscape, a resistive XPT2046
+// touchscreen on its own pins, a microSD slot on VSPI and an SC8002B amplifier
+// on the DAC. The panel, the BOOT key, the amplifier (through the chip's DAC) and
+// a PDM microphone on the 4-pin header are wired here; touch and microSD are not
+// brought up yet. The original micro-USB-only CYD has an ILI9341 and needs its
+// own profile.
+// Pins: witnessmenow/ESP32-Cheap-Yellow-Display (MIT), commit 0564a140, PINS.md
+// and DisplayConfig/CYD2USB/User_Setup.h: the panel on HSPI with SCLK 14,
+// MOSI 13, MISO 12, DC 2, CS 15, no reset, backlight GPIO 21 active-high; the
+// amplifier on GPIO 26; IO22 and IO27 on the header.
 BoardConfig make() {
   BoardConfig b{};
   b.name = kBoardName;

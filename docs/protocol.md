@@ -185,7 +185,7 @@ The server resamples to the device's declared speaker rate. It also paces frames
 | `{"type": "image.start", "stream": 9, "width": 196, "height": 196, "format": "rgb565", "ttl_s": 30}` | Image rows follow on binary channel 2, then `image.end` |
 | `{"type": "image.end", "stream": 9}` | End of image data |
 
-The server fits images inside `caps.display.image` before sending them, so devices never decode JPEG or PNG.
+The server fits images inside `caps.display.image` before sending them, so devices never decode JPEG or PNG. A device that can't show images (such as a board whose framebuffer holds only a band of rows) leaves `image` out of `caps.display`.
 
 ### Screen sleep
 

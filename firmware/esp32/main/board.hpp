@@ -96,8 +96,8 @@ struct LcdConfig {
   int d1 = -1, d2 = -1, d3 = -1;  // QSPI data0 uses mosi
   bool round = false;
   uint8_t font_scale = 1;  // UI text scale multiplier, clamped so the scale stays 1..4 (hg::DisplayInfo)
-  // SPI data-in, only wired on the CYD's shared SPI bus. Last, so positional
-  // initializers written before it existed keep their meaning.
+  // SPI data-in (the CYD wires its panel's SDO to GPIO 12); -1 when unused.
+  // Last, so positional initializers written before it existed keep their meaning.
   int miso = -1;
 };
 
