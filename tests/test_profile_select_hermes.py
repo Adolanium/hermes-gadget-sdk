@@ -69,7 +69,7 @@ def test_switching_is_refused_when_unknown_unpaired_or_busy(hermes_home, gadget,
     assert run(adapter.select_profile(session, "ops")) == "busy"
     adapter._turns.pop(session.device_id)
     # A question pending -> busy; once it has expired, switching works again.
-    stale = _Prompt(id="q1", kind="slash", session_key="k", title="t", text="x")
+    stale = _Prompt(id="q1", kind="slash", session_key="k", title="t", text="x", ttl_s=300)
     adapter._prompts[session.device_id] = [stale]
     assert run(adapter.select_profile(session, "ops")) == "busy"
     stale.created = _time.monotonic() - 10_000
