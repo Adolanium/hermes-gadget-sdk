@@ -872,10 +872,13 @@ BoardConfig make() {
   b.lcd.enabled = true;
   b.lcd.width = 320;
   b.lcd.height = 240;
-  b.lcd.swap_xy = true;   // LovyanGFX setRotation(1): MAD_MV | MAD_MX
+  // Landscape orientation. MADCTL 0x60 (MV|MX) rendered the UI rotated 180
+  // degrees on this panel, so both mirror bits are swapped: MADCTL 0xA0
+  // (MV|MY), the same landscape orientation the ST7789 T-Display-S3 uses.
+  b.lcd.swap_xy = true;
   b.lcd.mirror_x = true;
-  b.lcd.mirror_y = false;
-  b.lcd.invert = true;    // LovyanGFX CYD_INVERT = 1
+  b.lcd.mirror_y = true;
+  b.lcd.invert = false;    // LovyanGFX CYD_INVERT = 1
   b.lcd.bgr = false;      // LovyanGFX rgb_order = true writes MAD_RGB, i.e. native RGB565
   b.lcd.mosi = 13;
   b.lcd.miso = 12;

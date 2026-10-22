@@ -1,0 +1,8 @@
+Command: C:\Espressif\tools\python\v6.1\venv\Scripts\python.exe C:\esp\v6.1\esp-idf\tools/idf_monitor.py -p COM14 -b 115200 --toolchain-prefix xtensa-esp32-elf- --target esp32 --revision 0 E:\Trae\hermes-gadget-sdk\firmware\esp32\build-cyd\hermes_gadget.elf E:\Trae\hermes-gadget-sdk\firmware\esp32\build-cyd\bootloader\bootloader.elf --force-color -m 'C:\Espressif\tools\python\v6.1\venv\Scripts\python.exe' 'C:\esp\v6.1\esp-idf\tools\idf.py' '-B' 'build-cyd' '-D' 'IDF_TARGET=esp32'
+[0;33m--- Warning: GDB cannot open serial ports accessed as COMx[0m
+[0;33m--- Using \\.\COM14 instead...[0m
+[0;33m--- esp-idf-monitor 1.9.0 on \\.\COM14 115200[0m
+[0;33m--- Quit: Ctrl+] | Menu: Ctrl+T | Help: Ctrl+T followed by Ctrl+H[0m
+[0m--- 0x40080400: [0;33m_invalid_pc_placeholder[0m[0m at [0;32mC:/esp/v6.1/esp-idf/components/xtensa/xtensa_vectors.S[0m[0m:[1;31m2259[0m
+[0m--- 0x40080644: [0;33mcall_start_cpu0[0m[0m at [0;32mC:/esp/v6.1/esp-idf/components/bootloader/subproject/main/bootloader_start.c[0m[0m:[1;31m27[0m
+[0m
