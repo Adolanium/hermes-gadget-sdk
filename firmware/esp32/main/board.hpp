@@ -53,16 +53,23 @@ struct RgbPanelConfig {
   RgbTimings timings{};   // panel scanout timings (per-datasheet)
 };
 
-// MIPI-DSI panel settings for the CrowPanel Advanced P4; DSI pins are SoC-dedicated.
+// MIPI-DSI panel controller. Only meaningful when bus.type == Type::Dsi.
+enum class DsiController { Ek79007, Jd9365 };
+
+// A MIPI-DSI panel: a serial bus on dedicated SoC pins (no GPIO numbers), a
+// PHY that needs its own internal LDO rail, and a DPI clock. The CrowPanel and
+// Waveshare P4 boards use this.
 struct DsiPanelConfig {
-  int lanes = 2;
-  int lane_bit_rate_mbps = 900;
-  int dpi_clock_mhz = 51;
-  int ldo_channel = 3;
-  int ldo_voltage_mv = 2500;
-  bool use_dma2d = true;
-  uint16_t hsync_pulse_width = 70, hsync_back_porch = 160, hsync_front_porch = 160;
-  uint16_t vsync_pulse_width = 10, vsync_back_porch = 23, vsync_front_porch = 12;
+  DsiController controller = DsiController::Ek79007;  // DSI panel controller
+  int lanes = 2;                  // DSI data lanes
+  int lane_bit_rate_mbps = 900;   // per-lane bit rate
+  int dpi_clock_mhz = 51;         // pixel clock
+  int ldo_channel = 3;            // internal LDO channel powering the DSI PHY
+  int ldo_voltage_mv = 2500;      // that channel's voltage
+  bool use_dma2d = true;          // DMA2D-assisted flush, falling back to a CPU copy
+  // Video timing; the P4's EK79007 panel's porches are wide.
+  int hsync_pulse_width = 70, hsync_back_porch = 160, hsync_front_porch = 160;
+  int vsync_pulse_width = 10, vsync_back_porch = 23, vsync_front_porch = 12;
 };
 
 enum class LcdController { St7789, Box3, CoreS3, St77916, Gc9a01, Sh8601 };
