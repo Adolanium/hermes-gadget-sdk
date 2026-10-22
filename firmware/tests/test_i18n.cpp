@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "check.hpp"
+#include "hg/canvas.hpp"
 #include "hg/font.hpp"
 #include "hg/i18n.hpp"
 #include "hg/ui.hpp"
@@ -87,21 +88,31 @@ TEST("i18n: each translation is complete and keeps the English placeholders") {
   }
 }
 
-TEST("i18n: drawn text is plain ASCII, the only characters the font has") {
+TEST("i18n: drawn text is in the font: ASCII and Latin-1, as written") {
   for (size_t l = 0; l < hg::i18n::kLangCount; ++l) {
     for (Msg m : all_messages()) {
-      for (const char* p = hg::i18n::text(static_cast<Lang>(l), m); *p; ++p) {
-        const unsigned char c = static_cast<unsigned char>(*p);
-        if (c != '\n' && (c < 0x20 || c > 0x7E)) {
-          check::fail(__FILE__, __LINE__, std::string("non-ASCII in \"") + hg::i18n::text(static_cast<Lang>(l), m) + "\"");
+      const std::string_view t = hg::i18n::text(static_cast<Lang>(l), m);
+      for (size_t i = 0; i < t.size();) {
+        const char32_t cp = hg::font::next(t, i);
+        if (cp != '\n' && !hg::font::drawable(cp)) {
+          check::fail(__FILE__, __LINE__, std::string("not in the font: \"") + std::string(t) + "\"");
           break;
         }
       }
     }
   }
-  // Written with its accents, read without them.
-  CHECK_EQ(std::string(hg::i18n::translation(Lang::Es, Msg::DeviceInfo)), std::string("Información"));
-  CHECK_EQ(std::string(hg::i18n::text(Lang::Es, Msg::DeviceInfo)), std::string("Informacion"));
+  // Written with its accents and drawn with them.
+  CHECK_EQ(std::string(hg::i18n::text(Lang::Es, Msg::DeviceInfo)), std::string("Información"));
+  CHECK_EQ(std::string(hg::i18n::text(Lang::Es, Msg::ToneFinished)), std::string("Tono terminado. ¿Lo oíste?"));
+}
+
+TEST("i18n: folding to the font keeps Latin-1 and replaces the rest") {
+  using hg::i18n::fold_to_font;
+  CHECK_EQ(fold_to_font("¿Cómo estás? ¡Sí! Ñandú"), std::string("¿Cómo estás? ¡Sí! Ñandú"));
+  CHECK_EQ(fold_to_font("“quoted” – it’s…"), std::string("\"quoted\" - it's..."));
+  CHECK_EQ(fold_to_font("日本 🙂"), std::string("?? ?"));
+  CHECK_EQ(fold_to_font("a\xC3"), std::string("a?"));
+  CHECK_EQ(fold_to_font("line\nbreak"), std::string("line\nbreak"));
 }
 
 TEST("i18n: folding keeps ASCII and finds the nearest letter for the rest") {
@@ -254,9 +265,10 @@ constexpr Panel kPanels[] = {
 
 void check_fits(Lang lang, Msg m, int cols, const Panel& p) {
   const std::string en = filled(Lang::En, m), t = filled(lang, m);
-  if (static_cast<int>(en.size()) <= cols && static_cast<int>(t.size()) > cols)
+  const int en_cols = static_cast<int>(hg::font::length(en)), t_cols = static_cast<int>(hg::font::length(t));
+  if (en_cols <= cols && t_cols > cols)
     check::fail(__FILE__, __LINE__,
-                std::string(hg::i18n::info(lang).code) + " \"" + t + "\" (" + std::to_string(t.size()) + ") is cut at " +
+                std::string(hg::i18n::info(lang).code) + " \"" + t + "\" (" + std::to_string(t_cols) + ") is cut at " +
                     std::to_string(cols) + " columns on " + std::to_string(p.w) + "x" + std::to_string(p.h) +
                     (p.round ? " round" : "") + ", where \"" + en + "\" fits");
 }
@@ -275,4 +287,64 @@ TEST("i18n: one-line text fits wherever the English fits") {
       for (Msg m : kDashValues) check_fits(lang, m, c.dash_value, p);
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// The font's Latin-1 half and UTF-8 text (hg/font.hpp)
+
+TEST("font: every Latin-1 code point has its own glyph") {
+  const std::string question(hg::font::glyph('?'));
+  std::set<std::string> seen;
+  for (char32_t cp = 0xA1; cp <= 0xFF; ++cp) {
+    CHECK(hg::font::drawable(cp));
+    const std::string g(hg::font::glyph(cp));
+    CHECK_EQ(g.size(), size_t(hg::font::kGlyphWidth * hg::font::kGlyphHeight));
+    if (cp == 0xAD) continue;  // a soft hyphen draws as a short dash
+    if (g == question) check::fail(__FILE__, __LINE__, "U+" + std::to_string(cp) + " draws as '?'");
+    if (!seen.insert(g).second) check::fail(__FILE__, __LINE__, "U+" + std::to_string(cp) + " repeats a glyph");
+  }
+  // An accented letter is not its base letter, and the accents differ from each other.
+  CHECK(std::string(hg::font::glyph(U'á')) != hg::font::glyph(U'a'));
+  CHECK(std::string(hg::font::glyph(U'á')) != hg::font::glyph(U'à'));
+  CHECK(std::string(hg::font::glyph(U'ñ')) != hg::font::glyph(U'n'));
+  CHECK(std::string(hg::font::glyph(U'Ñ')) != hg::font::glyph(U'N'));
+  // Outside ASCII and Latin-1: the '?' glyph.
+  CHECK_EQ(std::string(hg::font::glyph(0x20AC)), question);  // €
+  CHECK_EQ(std::string(hg::font::glyph(0x7F)), question);
+  CHECK(!hg::font::drawable(0x0101));
+}
+
+TEST("font: UTF-8 reads one code point at a time and survives malformed input") {
+  const std::string_view s = "añ€😀";
+  size_t i = 0;
+  CHECK(hg::font::next(s, i) == U'a' && i == 1);
+  CHECK(hg::font::next(s, i) == U'ñ' && i == 3);
+  CHECK(hg::font::next(s, i) == 0x20AC && i == 6);
+  CHECK(hg::font::next(s, i) == 0x1F600 && i == 10);
+  CHECK_EQ(hg::font::length(s), size_t(4));
+  CHECK_EQ(hg::font::prefix(s, 2), size_t(3));
+  CHECK_EQ(hg::font::prefix(s, 9), s.size());
+  // Truncated, overlong-lead and stray bytes each read as U+FFFD and advance one byte.
+  for (std::string_view bad : {std::string_view("\xC3"), std::string_view("\xE2\x82"), std::string_view("\x80"),
+                               std::string_view("\xC0\xAF"), std::string_view("\xFF")}) {
+    size_t j = 0;
+    CHECK(hg::font::next(bad, j) == 0xFFFD && j == 1);
+    CHECK_EQ(hg::font::length(bad), bad.size());
+  }
+}
+
+TEST("font: widths, wrapping and cuts count letters, not bytes") {
+  CHECK_EQ(hg::Canvas::text_width("ñandú", 1), hg::Canvas::text_width("nandu", 1));
+  const auto lines = hg::wrap_text("canción para el niño pequeño", 10);
+  CHECK_EQ(lines.size(), size_t(4));
+  if (lines.size() == 4) {
+    CHECK_EQ(lines[0], std::string("canción"));
+    CHECK_EQ(lines[1], std::string("para el"));
+    CHECK_EQ(lines[2], std::string("niño"));
+    CHECK_EQ(lines[3], std::string("pequeño"));  // 7 letters in 9 bytes: fits a 10-column line
+  }
+  // A word longer than the line splits between letters, never inside one.
+  const auto split = hg::wrap_text("ñññññññ", 3);
+  CHECK_EQ(split.size(), size_t(3));
+  for (const auto& l : split) CHECK(hg::font::length(l) <= 3 && hg::font::prefix(l, 99) == l.size());
 }
