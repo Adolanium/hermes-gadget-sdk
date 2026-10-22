@@ -188,6 +188,23 @@ namespace hg::i18n {
   X(SwipeDownForSessions,   "Swipe down for sessions") \
   X(ButtonShowsSessions,    "{0} shows sessions") \
   X(LowBattery,             "Low battery: connect USB") \
+  /* Hermes profiles */ \
+  X(ProfileSetting,         "Hermes profile") \
+  X(ProfileSettingNext,     "{0}\nSelect to switch to the next profile.") \
+  X(ProfileSettingChoose,   "{0}\nSelect to choose a profile.") \
+  X(ProfileCantSwitch,      "Can't switch now") \
+  X(ProfileGreeting,        "Hi, I'm {0}") \
+  X(ProfileTapName,         "Tap name to change") \
+  X(ProfileInSettings,      "Change in Settings") \
+  X(ProfileListTitle,       "Talk to") \
+  X(ProfileListHint,        "Swipe down to go back") \
+  X(ProfileListCurrent,     "NOW") \
+  X(ProfileListMore,        "More") \
+  X(ProfileSwitching,       "Switching to {0}...") \
+  X(ProfileSwitched,        "Now talking to {0}") \
+  X(ProfileRefusedBusy,     "Finish this turn first") \
+  X(ProfileRefusedUnknown,  "Profile unavailable") \
+  X(ProfileRefused,         "Switch not allowed") \
   /* Dashboard */ \
   X(HermesSessions,         "Hermes sessions") \
   X(NoSessions,             "No sessions") \

@@ -132,3 +132,6 @@ def make_sim(tmp_path):
     for sim in sims:
         sim.close()
     time.sleep(0.05)
+
+
+pytest_plugins = ["hermes_fixtures"]

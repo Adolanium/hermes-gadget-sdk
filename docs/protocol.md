@@ -56,7 +56,9 @@ Because the id is derived from the key, nobody can claim another device's id wit
    "mic": {"rate": 16000, "format": "pcm16"},
    "speaker": {"rate": 16000, "format": "pcm16"},
    "inputs": ["talk", "cancel", "up", "down"],
-   "talk_mode": "hold"},
+   "talk_mode": "hold",
+   "profiles": true},
+ "profile": "ops",
  "actions": [{"name": "led.set", "description": "Set the status LED colour.",
               "params": {"type": "object", "properties": {"color": {"type": "string"}},
                          "required": ["color"]}}],
@@ -68,6 +70,7 @@ Because the id is derived from the key, nobody can claim another device's id wit
 - `caps.ota` (`{"max_size": 2031616}`) means the device installs firmware updates over this connection, up to `max_size` bytes.
 - `caps.dashboard` (`{"v": 1, "rows": 6}`) means the device draws the [dashboard](#dashboard). `v` is the newest layout it draws, and `rows` is how many lines fit on its screen at once.
 - `actions` is the device's tool manifest. Each action has a JSON-Schema `params` object and a `description` written for the model.
+- `caps.profiles: true` means the device can switch Hermes profiles (see [Profiles](#profiles)). `profile` is the profile it used last; it is omitted for `default`.
 - `token` is required only when the host sets `GADGET_ACCESS_TOKEN`. A mismatch is rejected with error code `bad_token`.
 - `display_sleeping: true` means the screen is dark as the device connects; it is omitted while the screen is lit. See [Screen sleep](#screen-sleep).
 
@@ -99,6 +102,13 @@ If authentication fails, the server sends `{"type": "error", "code": "auth_faile
 
 `paired` reports whether Hermes will accept messages from this device. Authorization is enforced by Hermes itself on every message; the flag only drives the device UI.
 
+```json
+{"type": "welcome", "session": "3f2a9c1b7d4e", "paired": true, "heartbeat_s": 20, "server": "hermes", "proto": 1,
+ "profile": "ops", "profiles": [{"id": "default", "name": "Hermes"}, {"id": "ops", "name": "Ops"}]}
+```
+
+`profile` and `profiles` are present only when the device sent `caps.profiles` and the server offers profiles. The Hermes plugin offers the profiles a multiplexed gateway serves that `platforms.gadget.extra.profiles` lists (all of them for `all`), with `default` first; without that setting it offers none. The device keeps the first 8 entries of `profiles` and ignores the rest.
+
 ### Pairing
 
 | Message | Direction | Meaning |
@@ -106,6 +116,18 @@ If authentication fails, the server sends `{"type": "error", "code": "auth_faile
 | `{"type": "pairing", "code": "ABCD2345", "command": "hermes pairing approve gadget ABCD2345"}` | server → device | Show this code; the owner approves it on the Hermes host |
 | `{"type": "paired"}` | server → device | Approved (no reconnect needed) |
 | `{"type": "unpaired"}` | server → device | Approval was revoked |
+
+### Profiles
+
+A Hermes gateway can serve several profiles (each with its own memory, personality, skills and model). A device that sends `caps.profiles: true` gets the profiles it may use in `welcome.profiles` and the one answering it in `welcome.profile`, and can switch:
+
+| Message | Direction | Meaning |
+|---|---|---|
+| `{"type": "profile.select", "profile": "ops"}` | device → server | Ask to talk to another profile |
+| `{"type": "profile", "profile": "ops"}` | server → device | The profile now answering this device; the device stores it and sends it as `hello.profile` next time |
+| `{"type": "profile", "profile": "default", "error": "busy"}` | server → device | The request was refused; `profile` is unchanged. `error` is `unknown`, `busy` (a turn or question is pending), `unpaired` or `routed` |
+
+A refusal changes nothing on the device. `error` is `routed` when the server's configuration routes this device to a profile; such a device gets no `profiles` in `welcome`. The server may also send `profile` on its own, for example `default` after the device's approval is revoked. A device that does not send `caps.profiles` keeps the gateway's existing routing (normally the default profile).
 
 ## Conversation
 

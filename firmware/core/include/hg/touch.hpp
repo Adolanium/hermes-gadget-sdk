@@ -2,8 +2,10 @@
 // screen is the main input:
 //
 //   hold the title     local settings after one second
-//   hold elsewhere     TALK, held for as long as the finger stays down
-//   quick tap          a TALK press and release (answers "yes" to a question)
+//   hold elsewhere     TALK, held for as long as the finger stays down (on the name too)
+//   quick tap          a TALK press and release (answers "yes" to a question); on the
+//                      name under the mascot it opens the profile list instead
+//   tap a list row     asks Hermes for that profile
 //   swipe down         a CANCEL press and release (discard, close, stop, "no")
 //
 // Feed it raw touch samples; it calls App::on_button. Portable and clock-free,
@@ -38,7 +40,7 @@ class TouchGestures {
   void tick(uint32_t now_ms);
 
  private:
-  enum class State : uint8_t { Idle, Pending, Settings, Talk, Swipe, Ignored };
+  enum class State : uint8_t { Idle, Pending, Settings, Picker, PickerDrag, Talk, Swipe, Ignored };
   void press(Button b);
   void release(Button b);
 
@@ -46,6 +48,7 @@ class TouchGestures {
   Config cfg_;
   State state_ = State::Idle;
   int x0_ = 0, y0_ = 0;
+  bool on_name_ = false;  // a Pending touch that started on the profile name
   uint32_t t0_ = 0;
 };
 

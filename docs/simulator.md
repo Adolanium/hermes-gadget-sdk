@@ -64,7 +64,7 @@ A first session, start to finish:
 
 The simulated device registers two demo actions the agent can use: `led.set` (a virtual LED in the window) and `buzzer.beep`.
 
-The [device settings menu](using-gadget.md#device-settings-and-hardware-checks) runs in the native firmware core. On touch profiles, hold the device title bar to open it; on `sim-466x466-round`, hold the **SETTINGS** target under the status dot. You can also enter `settings` in the serial console. The desktop **Settings** dialog configures the simulator host; the device menu changes saved volume, brightness, and talk mode.
+The [device settings menu](using-gadget.md#device-settings-and-hardware-checks) runs in the native firmware core. On touch profiles, hold the device title bar to open it; on `sim-466x466-round`, hold the **SETTINGS** target under the status dot. You can also enter `settings` in the serial console. The desktop **Settings** dialog configures the simulator host; the device menu changes saved volume, brightness, talk mode, and (when Hermes offers several) the Hermes profile.
 
 State lives in `~/.hermes-gadget/sim/<name>/` (override with `--state-dir`):
 

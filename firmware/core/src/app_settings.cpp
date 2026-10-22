@@ -65,6 +65,7 @@ void App::settings_input(Button button, bool pressed) {
     // Steps over the items this board can't offer.
     const auto offered = [&](Menu item) {
       switch (item) {
+        case Menu::Profile: return agent_profiles_.size() > 1;
         case Menu::Power: return hal_.power != nullptr;
         case Menu::PowerOff: return can_power_off;
         case Menu::WifiSetup: return static_cast<bool>(on_wifi_setup);
@@ -99,6 +100,10 @@ void App::settings_input(Button button, bool pressed) {
       break;
     case Menu::TalkMode:
       if (hal_.mic) console(talk_mode_ == TalkMode::Hold ? "set talk_mode tap" : "set talk_mode hold");
+      break;
+    case Menu::Profile:
+      if (!(profile_.touch_screen ? open_profile_picker() : next_agent_profile()))
+        check_result_ = tr(i18n::Msg::ProfileCantSwitch);
       break;
     case Menu::Microphone:
       if (hal_.mic && hal_.mic->start(profile_.mic_rate)) hardware_check_ = HardwareCheck::Microphone;
@@ -202,6 +207,10 @@ void App::settings_model() {
     case Menu::TalkMode:
       m.detail = tr(Msg::TalkMode);
       m.body = tr(!hal_.mic ? Msg::NoMicDriver : talk_mode_ == TalkMode::Hold ? Msg::TalkModeHold : Msg::TalkModeTap);
+      break;
+    case Menu::Profile:
+      m.detail = tr(Msg::ProfileSetting);
+      m.body = tr(profile_.touch_screen ? Msg::ProfileSettingChoose : Msg::ProfileSettingNext, {agent_profile_name()});
       break;
     case Menu::Microphone:
       m.detail = tr(Msg::MicCheck);

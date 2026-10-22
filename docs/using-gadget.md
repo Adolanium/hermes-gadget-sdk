@@ -58,6 +58,7 @@ Tap CANCEL to move to the next item, then tap TALK to change it. On a touchscree
 | Speaker volume | Change volume in steps of 10 percent |
 | Screen brightness | Choose 10, 25, 50, 75, or 100 percent when the display supports it |
 | Talk mode | Choose hold-to-talk or tap-to-talk with silence detection |
+| Hermes profile | Choose the Hermes profile (touchscreens), or switch to the next one; shown only when Hermes offers more than one |
 | Microphone check | Show the live input level; nothing is saved or sent to Hermes |
 | Speaker check | Play a short, quiet tone at the current volume |
 | Display check | Show red, green, blue, white, and black bands |
@@ -69,6 +70,8 @@ Tap CANCEL to move to the next item, then tap TALK to change it. On a touchscree
 | Wi-Fi setup | Start [phone-based setup](setup-board.md#set-up-wi-fi-with-your-phone) on ESP32 boards, with a QR code for the temporary network where the screen has room |
 | Phone app | On boards with Bluetooth: pair a phone app for two minutes; the screen shows the six-digit code to type on the phone. Shows whether a phone is paired and connected |
 | Language | Step through the languages of the device's own text: English, Spanish |
+
+When Hermes offers several profiles (the host turns this on; see [Hermes integration](hermes-integration.md#running-against-a-profile-or-a-multiplexed-gateway)), the idle screen greets you with the current profile's name. The device shows at most 8 profiles, the default one first. On a touchscreen in hold-to-talk mode, tap the name for the list of profiles, then tap one; swipe down to close the list without choosing. A hold that starts on the name still talks. **Hermes profile** in settings opens the same list. Boards without a touchscreen, and tap-to-talk mode, show **Change in Settings**: there, **Hermes profile** switches to the next one. The device asks Hermes and changes only when Hermes confirms; if Hermes is busy, try again once the reply is done. The device keeps the profile across restarts.
 
 Volume, brightness, talk mode, battery indicator, screen timeout, and language survive restarts. Unavailable drivers show as unavailable. These checks help you test the hardware; a completed tone does not prove that a physical speaker produced sound.
 
