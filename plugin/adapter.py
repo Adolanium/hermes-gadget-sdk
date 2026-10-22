@@ -43,7 +43,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from agent.i18n import t
+from agent.i18n import get_language, t
 from gateway.config import Platform, PlatformConfig
 from gateway.platforms._shared import extra_or_secret, get_scoped_secret as _get_scoped_secret
 from gateway.platforms.base import (
@@ -199,6 +199,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._offer_all = isinstance(offered, str) and offered.strip().lower() == "all"
         self._offered: Optional[set] = None if offered is None or self._offer_all else {
             str(p).strip() for p in (offered if isinstance(offered, list) else []) if str(p).strip()}
+        # The language `welcome` names for devices left on auto: Hermes's own unless set here.
+        self._language = str(extra.get("language") or "auto").strip().lower() or "auto"
         self._tiles: Optional[dashboard.TileStore] = None
         self._dashboard_task: Optional[asyncio.Task] = None
         self._dashboard_wake: Optional[asyncio.Event] = None
@@ -427,6 +429,16 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         for prompt in prompts:
             await session.close_prompt(prompt.id)
         await session.send_profile()
+
+    def language(self, session: DeviceSession) -> Optional[str]:
+        # `platforms.gadget.extra.language`, else the profile's language (HERMES_LANGUAGE > display.language > en).
+        if self._language != "auto":
+            return self._language
+        try:
+            return get_language()
+        except Exception as exc:  # the gadget falls back to English; never block a connection on this
+            logger.debug("Could not read Hermes's language: %s", exc)
+            return None
 
     async def on_ready(self, session: DeviceSession) -> None:
         if session.paired:

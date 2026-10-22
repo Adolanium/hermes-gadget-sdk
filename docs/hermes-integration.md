@@ -39,6 +39,7 @@ platforms:
       # dashboard: true        # Hermes's sessions and status tiles on devices that draw them
       # profiles: [work, home] # profiles gadgets may switch to, or "all"; off without it (see below)
       # battery_log: true      # keep each device's battery readings in a CSV (see below)
+      # language: es           # the language devices on `auto` show; default: Hermes's own
       # tls_cert: /path/cert.pem   # serve wss://
       # tls_key: /path/key.pem
 ```

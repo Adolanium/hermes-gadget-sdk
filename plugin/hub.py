@@ -18,7 +18,7 @@ import secrets
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 from . import audio, opus, protocol
 from .store import DeviceStore
@@ -56,6 +56,10 @@ class HubDelegate:
     async def select_profile(self, session: "DeviceSession", profile: str) -> str | None:
         """Bind ``session`` to ``profile`` (set ``session.profile``); return None, or why not."""
         return "unknown"
+
+    def language(self, session: "DeviceSession") -> Optional[str]:
+        """The language id ``welcome`` names for a device left on ``auto`` (e.g. ``"es"``), or None."""
+        return None
 
     async def on_ready(self, session: "DeviceSession") -> None:
         pass
@@ -748,6 +752,9 @@ class DeviceHub:
                 self.store.confirm(session.device_id)
             welcome = dict(session=session.session_id, paired=session.paired, heartbeat_s=self.heartbeat_s,
                            server="hermes", proto=protocol.VERSION)
+            language = self.delegate.language(session)
+            if language:
+                welcome["language"] = language
             if session.caps.get("profiles") is True and (roster := self.delegate.profiles(session)):
                 wanted = hello.get("profile")
                 if isinstance(wanted, str) and wanted and wanted != session.profile:

@@ -94,8 +94,11 @@ If authentication fails, the server sends `{"type": "error", "code": "auth_faile
 ### `welcome` (server → device)
 
 ```json
-{"type": "welcome", "session": "3f2a9c1b7d4e", "paired": false, "heartbeat_s": 20, "server": "hermes", "proto": 1}
+{"type": "welcome", "session": "3f2a9c1b7d4e", "paired": false, "heartbeat_s": 20, "server": "hermes", "proto": 1,
+ "language": "es"}
 ```
+
+`language` is optional: the language id Hermes uses (`"es"`, `"pt-br"`, `"zh-hant"`), from the plugin's `language` setting or else Hermes's own (`HERMES_LANGUAGE`, then `display.language`). A device whose `language` setting is `auto` shows its own text in it: the id itself if the firmware has it, else its primary subtag (`es-mx` as `es`), else English. Other devices ignore it, as does older firmware.
 
 `paired` reports whether Hermes will accept messages from this device. Authorization is enforced by Hermes itself on every message; the flag only drives the device UI.
 

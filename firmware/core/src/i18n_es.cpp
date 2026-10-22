@@ -68,6 +68,7 @@ const Entry kSpanish[] = {
     {Msg::SelectToPairAnother, "Elige para vincular otro."},
     {Msg::Language, "Idioma"},
     {Msg::LanguageBody, "{0}\nElige para el siguiente idioma."},
+    {Msg::LanguageAuto, "Automático, como Hermes: {0}"},
     {Msg::BackToHermes, "Volver a Hermes"},
     {Msg::SelectToClose, "Elige para cerrar los ajustes."},
     {Msg::CheckStopped, "Prueba detenida"},

@@ -323,6 +323,9 @@ class App {
   std::string profile_pending_;
   uint32_t profile_pending_at_ = 0;
   int profile_page_ = 0;  // first profile on the list's page
+  // `language` is auto: follow the language Hermes sends in `welcome` (English until it does).
+  bool lang_auto_ = false;
+  std::optional<i18n::Lang> hermes_lang_;  // from the last `welcome` that named one this firmware has
   enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, Profile, Microphone, Speaker, Display, Inputs,
                               Info, Power, IdleTimer, PowerOff, WifiSetup, Phone, Language, Back };
   enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };

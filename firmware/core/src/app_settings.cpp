@@ -144,7 +144,13 @@ void App::settings_input(Button button, bool pressed) {
         check_result_ = tr(hal_.power->power_off() ? i18n::Msg::PowerOffRequested : i18n::Msg::PowerOffFailed);
       }
       break;
-    case Menu::Language: console(std::string("set language ") + i18n::info(i18n::next(lang_)).code); break;
+    case Menu::Language: {
+      // English, each translation, then auto (follow Hermes), then English again.
+      const bool last = static_cast<size_t>(lang_) + 1 >= i18n::kLangCount;
+      console(std::string("set language ") +
+              (lang_auto_ ? "en" : last ? "auto" : i18n::info(i18n::next(lang_)).code));
+      break;
+    }
     case Menu::Back: close_settings(); break;
     case Menu::WifiSetup: start_wifi_setup(); break;
     case Menu::Phone: start_phone_pairing(); break;
@@ -279,13 +285,15 @@ void App::settings_model() {
                                    : std::string(tr(phone_connected_ ? Msg::PhoneConnected : Msg::PhonePairedOffline)) +
                                          "\n" + tr(Msg::SelectToPairAnother);
       break;
-    case Menu::Language:
+    case Menu::Language: {
       // The English word stays beside the translation: someone who picked a
       // language they can't read can still find the way back.
       m.detail = lang_ == i18n::Lang::En ? std::string(tr(Msg::Language))
                                          : std::string(tr(Msg::Language)) + " / " + i18n::english(Msg::Language);
-      m.body = tr(Msg::LanguageBody, {i18n::info(lang_).name});
+      const std::string name = i18n::info(lang_).name;  // the font draws Latin-1 (#172)
+      m.body = tr(Msg::LanguageBody, {lang_auto_ ? tr(Msg::LanguageAuto, {name}) : name});
       break;
+    }
     case Menu::Back:
       m.detail = tr(Msg::BackToHermes);
       m.body = tr(Msg::SelectToClose);

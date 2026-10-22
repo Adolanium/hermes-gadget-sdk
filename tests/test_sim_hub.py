@@ -27,6 +27,27 @@ def test_open_device_reaches_ready_and_text_round_trips(devserver, make_sim):
     assert sim.wait_screen("ready", timeout=5)
 
 
+def test_welcome_names_the_language_and_an_auto_device_follows_it(devserver, make_sim):
+    _hub, _brain, url = devserver(language="es")
+    sim = make_sim(url)
+    assert sim.wait_screen("ready", timeout=10)
+    welcome = [m for m in sim.received if m.get("type") == "welcome"][-1]
+    assert welcome["language"] == "es"
+    assert sim.status()["language"] == "en"  # English by default: welcome doesn't change it
+    assert sim.console("set language auto") == "@ok language"
+    assert sim.status()["language"] == "es" and sim.status()["language_auto"] is True
+
+
+def test_welcome_names_no_language_when_the_server_has_none(devserver, make_sim):
+    _hub, _brain, url = devserver()
+    sim = make_sim(url)
+    assert sim.wait_screen("ready", timeout=10)
+    welcome = [m for m in sim.received if m.get("type") == "welcome"][-1]
+    assert "language" not in welcome
+    assert sim.console("set language auto") == "@ok language"
+    assert sim.status()["language"] == "en"
+
+
 def test_pairing_code_flow(loop_thread, devserver, make_sim):
     hub, brain, url = devserver(require_pairing=True)
     sim = make_sim(url)

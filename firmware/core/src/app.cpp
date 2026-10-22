@@ -48,11 +48,24 @@ std::string_view setting_storage_key(std::string_view key) {
 
 bool is_secret(std::string_view key) { return key == "token" || key == "wifi_pass"; }
 
-// " en es ...": the `language` setting's values.
+// " en es ... auto": the `language` setting's values.
 std::string language_codes() {
   std::string out;
   for (size_t i = 0; i < i18n::kLangCount; ++i) out += std::string(" ") + i18n::info(static_cast<i18n::Lang>(i)).code;
-  return out;
+  return out + " auto";
+}
+
+// The language Hermes names in `welcome` (its own ids: "es", "pt-br", "zh-hant"), as one this firmware
+// has: the id itself, else its primary subtag ("es-mx" -> "es"). None when it has neither.
+std::optional<i18n::Lang> hermes_language(std::string_view id) {
+  std::string lowered(id);
+  for (char& c : lowered) {
+    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    if (c == '_') c = '-';
+  }
+  if (auto exact = i18n::parse(lowered)) return exact;
+  const size_t dash = lowered.find('-');
+  return dash == std::string::npos ? std::nullopt : i18n::parse(std::string_view(lowered).substr(0, dash));
 }
 
 std::string trim(std::string_view s) {
@@ -126,7 +139,9 @@ void App::load_settings() {
                        : indicator == "percentage" ? BatteryIndicator::Percentage
                        : indicator == "both" ? BatteryIndicator::Both : BatteryIndicator::Off;
   battery_estimate_enabled_ = setting("battery_estimate", "off") == "liion";
-  lang_ = i18n::parse(setting("language", "en")).value_or(i18n::Lang::En);
+  const std::string language = setting("language", "en");
+  lang_auto_ = language == "auto";
+  lang_ = lang_auto_ ? hermes_lang_.value_or(i18n::Lang::En) : i18n::parse(language).value_or(i18n::Lang::En);
   activity_at_ = now();
   display_dimmed_ = display_sleeping_ = false;
 }
@@ -209,29 +224,30 @@ void App::begin() {
   if (hal_.display) {
     Action lang;
     lang.name = "screen.language";
-    lang.description = "Set the language of the device's own screen text (menus, hints, status). "
-                       "Replies are not affected.";
+    lang.description = "Set the language of the device's own screen text (menus, hints, status), "
+                       "or auto to follow Hermes's language. Replies are not affected.";
     json::Value props = json::Value::object();
     json::Value code = json::Value::object();
     json::Value codes = json::Value::array();
     for (size_t i = 0; i < i18n::kLangCount; ++i) codes.push(i18n::info(static_cast<i18n::Lang>(i)).code);
+    codes.push("auto");
     code.set("type", "string").set("enum", codes).set("description", "Language code");
     props.set("language", code);
     json::Value req = json::Value::array();
     req.push("language");
     lang.params.set("type", "object").set("properties", props).set("required", req);
     lang.handler = [this](const json::Value& args, json::Value& result, std::string& error) {
-      const auto chosen = args["language"].is_string() ? i18n::parse(args["language"].as_string()) : std::nullopt;
-      if (!chosen) {
+      const std::string code = args["language"].is_string() ? args["language"].as_string() : std::string();
+      if (code != "auto" && !i18n::parse(code)) {
         error = "language must be one of:" + language_codes();
         return false;
       }
-      const std::string reply = console(std::string("set language ") + i18n::info(*chosen).code);
+      const std::string reply = console("set language " + code);
       if (reply.rfind("@ok", 0) != 0) {
         error = reply.size() > 7 ? reply.substr(7) : "could not save the language";
         return false;
       }
-      result.set("language", i18n::info(*chosen).code);
+      result.set("language", code);
       return true;
     };
     add_action(std::move(lang));
@@ -472,6 +488,9 @@ void App::h_welcome(const json::Value& m) {
   online_since_ = now();
   attempts_ = 0;
   paired_ = m["paired"].as_bool();
+  // Hermes's language, for a device whose `language` is auto (docs/protocol.md#welcome-server--device).
+  hermes_lang_ = hermes_language(m["language"].str_or(""));
+  if (lang_auto_) lang_ = hermes_lang_.value_or(i18n::Lang::En);
   int hb = static_cast<int>(m["heartbeat_s"].as_int(20));
   heartbeat_ms_ = static_cast<uint32_t>(std::max(5, std::min(300, hb))) * 1000u;
   if (paired_) {
@@ -1904,6 +1923,8 @@ json::Value App::status_value() const {
       .set("server", server_url_)
       .set("network", network_up_);
   s.set("display_sleeping", display_sleeping_);
+  // The language the screen is in, and whether it follows Hermes's (`language` auto).
+  s.set("language", i18n::info(lang_).code).set("language_auto", lang_auto_);
   if (hal_.power) s.set("power", power_value());
   if (!pairing_code_.empty()) s.set("pairing_code", pairing_code_);
   if (!prompt_id_.empty()) s.set("prompt", prompt_id_);
@@ -2009,7 +2030,8 @@ std::string App::console(std::string_view raw) {
       return "@error battery_display must be icon, percentage, both or off";
     if (key == "battery_estimate" && !value.empty() && value != "off" && value != "liion")
       return "@error battery_estimate must be off or liion";
-    if (key == "language" && !value.empty() && !i18n::parse(value)) return "@error language must be one of:" + language_codes();
+    if (key == "language" && !value.empty() && value != "auto" && !i18n::parse(value))
+      return "@error language must be one of:" + language_codes();
     if (!hal_.storage) return "@error no storage";
     if (value.empty()) hal_.storage->erase(setting_storage_key(key));
     else if (!hal_.storage->set(setting_storage_key(key), value)) return "@error could not save " + key;
