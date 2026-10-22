@@ -220,6 +220,7 @@ std::string filled(Lang lang, Msg m) {
     case Msg::PairingCode: a = "ABCD1234"; break;
     case Msg::PhoneCode: a = "123456"; break;
     case Msg::ProfileGreeting: a = "Equipo de trabajo"; break;  // a long profile name
+    case Msg::TimerLeft: a = "24:00:00"; break;  // the longest timer: 86400 s
     default: break;
   }
   return hg::i18n::format(hg::i18n::text(lang, m), {a, b});
@@ -244,6 +245,7 @@ constexpr Msg kLines[] = {
     Msg::ReleaseToSend, Msg::Thinking, Msg::HermesAsks, Msg::Restarting, Msg::Updating, Msg::SetupNeeded,
     Msg::NoNetwork, Msg::Authenticating, Msg::ConnectingToHermes, Msg::PairingCode, Msg::PairThisDevice,
     Msg::ProfileTapName, Msg::ProfileInSettings,
+    Msg::TimerLeft, Msg::TapScreenToStop,
 };
 // A profile's greeting, in the name panel a touchscreen taps.
 constexpr Msg kNameLines[] = {Msg::ProfileGreeting};
@@ -268,6 +270,7 @@ constexpr Panel kPanels[] = {
     {240, 135, false}, {320, 170, false}, {240, 240, false}, {240, 240, true}, {320, 240, false},
     {360, 360, true},  {368, 432, false}, {410, 486, false}, {466, 466, true}, {480, 320, false},
     {480, 480, false}, {800, 480, false},
+    {480, 480, true},
 };
 
 void check_fits(Lang lang, Msg m, int cols, const Panel& p) {
@@ -294,6 +297,17 @@ TEST("i18n: one-line text fits wherever the English fits") {
       for (Msg m : kDashHeadings) check_fits(lang, m, c.dash_heading, p);
       for (Msg m : kDashValues) check_fits(lang, m, c.dash_value, p);
     }
+  }
+}
+
+// The timer's lines on the 128x128 panel (the AIPI Lite, the smallest board with a speaker), which the
+// panel list above does not run every message on.
+TEST("i18n: the timer's one-line texts fit the 128x128 panel in every language") {
+  const Panel p{128, 128, false};
+  const Columns c = columns(p.w, p.h, p.round);
+  for (Lang lang : translations()) {
+    check_fits(lang, Msg::TimerLeft, c.line, p);
+    check_fits(lang, Msg::TapScreenToStop, c.line, p);
   }
 }
 

@@ -38,6 +38,7 @@ enum class Screen : uint8_t {
   Setup,
   Dashboard,  // Hermes's sessions and the user's status tiles (docs/protocol.md#dashboard)
   Profiles,   // the Hermes profiles to choose from: rows in `dash` from `scroll`; `detail` labels More
+  Alarm,      // TIMER DONE: the whole panel until dismissed (App::start_alarm)
 };
 
 enum class Link : uint8_t { Offline, Network, Connecting, Online };
@@ -88,6 +89,10 @@ struct UiModel {
   const qr::Code* qr = nullptr;
   // Dashboard screen: its rows, drawn from `scroll` (0 = the top).
   std::vector<DashRow> dash;
+  // A running timer: thousandths of its length still to go, or -1 for none. The round
+  // panel's edge arc and the rectangular top bar's line show it.
+  int16_t timer_permille = -1;
+  bool flash = false;  // Screen::Alarm: the green half of a beep cycle
 };
 
 struct UiLayout {
@@ -98,6 +103,13 @@ struct UiLayout {
   int main_y = 0, main_h = 0;  // area between the bars (used for images)
   int hero_cols = 0;  // characters per hero caption line
   int name_cols = 0;  // hero headline characters in a name panel, clear of its marker
+};
+
+// The edge arc's sweep: the end direction, clockwise from 12 o'clock, as (sin, -cos) times
+// a fixed scale, plus the fraction it covers. permille -1 means no arc.
+struct ArcSweep {
+  int permille = -1;
+  int32_t ex = 0, ey = 0;
 };
 
 class Ui {
@@ -178,6 +190,10 @@ class Ui {
   void draw_hero(Canvas& c, const UiModel& m);
   // Rows [y0, y1) that hero animations may touch for this screen.
   void hero_anim_rows(const UiModel& m, int& y0, int& y1) const;
+  // Round panels: the edge arc, and the alarm screen (draw_alarm).
+  void paint_band(int y0, int y1);
+  void push_band_change(const ArcSweep& from, const ArcSweep& to);
+  void draw_alarm(const UiModel& m);
 
   Display& display_;
   DisplayInfo panel_;
@@ -197,6 +213,17 @@ class Ui {
   uint32_t bands_ = 0;
   uint64_t input_at_ = 0;
   bool input_pending_ = false;
+  // Round panels: the edge arc's band per panel row (up to two runs of pixels), the radii it
+  // spans, and the sweep push() paints it with. band_ is -1 while no arc shows.
+  struct BandRow {
+    int16_t x0[2] = {0, 0}, x1[2] = {0, 0};
+  };
+  std::vector<BandRow> band_rows_;
+  int band_out_ = 0, band_in_ = 0;
+  ArcSweep band_;
+  bool band_shown_ = false;  // the arc was on the last frame
+  bool alarm_shown_ = false;
+  uint32_t alarm_hash_ = 0;
 };
 
 }  // namespace hg

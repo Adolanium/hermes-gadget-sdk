@@ -47,6 +47,17 @@ if ping -c1 -W2 nas.lan >/dev/null; then hermes gadget tile set nas up --state o
 
 The device gets a new dashboard only when something on it changes. While the screen is dark, it gets the latest one when the screen lights up. To turn the dashboard off, set `dashboard: false` under `platforms.gadget.extra` ([configuration](hermes-integration.md#configuration)). Boards without a CANCEL button or a touchscreen don't show it.
 
+## Timers
+
+Ask Hermes for a timer, for example "set a pasta timer for nine minutes". Hermes starts it on the device with the `timer.start` action. Any gadget with a display or a speaker can run a timer. Hermes can also ask how much time is left, or cancel the timer.
+
+- **Time left:** every screen shows it. On a round screen, an arc runs around the edge and shrinks as the time runs out. On a rectangular screen, a line runs along the bottom of the top bar. The Ready screen also shows the time as text, for example "Timer 6:18".
+- **Alarm:** at zero, the screen shows TIMER DONE and the timer's name. A board with a speaker beeps twice every 1.5 seconds for one minute, and the screen flashes green with each beep. A board without a speaker shows the alarm without sound. The Knob 1.8, CrowPanel 2.1, CrowPanel 5.0 and T-Display-S3 have no speaker.
+- **Stop it:** press a button, tap the screen, or swipe down. The press only stops the alarm; it does not start a recording. Hermes can stop it with `timer.cancel`.
+- **Quiet alarm:** after one minute the beeps stop, but TIMER DONE stays on screen until you stop it. If the screen went dark, a press lights it and shows the alarm again.
+- **Other screens:** a card or an image from Hermes replaces the alarm. When Hermes starts to speak, the beeps stop and the alarm stays. A question from Hermes waits until you answer it. A timer that ends during a recording waits until the recording ends.
+- **Limits:** one timer runs at a time, and a new timer replaces it. The timer keeps counting when the connection to Hermes drops. It lives in the device's memory, so a restart or power cut forgets it. The end of a timer does not interrupt Hermes: the device sends a `timer.done` event that the plugin only logs.
+
 ## Device settings and hardware checks
 
 Hold TALK and CANCEL together for one second to open or close device settings. On a touchscreen, hold the title bar for one second. Round displays have no title bar; they show a **SETTINGS** target beneath the status dot instead. Hold it for one second. Touches in the target do not start recording. The target is hidden while a question, update or Wi-Fi setup is on screen, because holding it does nothing then. While settings is open, its label reads **BACK TO HERMES**; hold it again for one second to return. Settings also work while the device is offline. Opening settings stops the current recording or reply.

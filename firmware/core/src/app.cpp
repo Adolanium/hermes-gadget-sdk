@@ -253,6 +253,7 @@ void App::begin() {
     add_action(std::move(lang));
   }
 
+  add_timer_actions();  // timer.start/status/cancel, beside the built-in actions
   if (hal_.display) ui_ = std::make_unique<Ui>(*hal_.display);
   if (ui_ && profile_.touch_screen)  // about 7 mm: 7 * ppi / 25.4, rounded up
     ui_->set_touch_px((70 * (profile_.touch_ppi ? profile_.touch_ppi : DeviceProfile::kDefaultTouchPpi) + 253) / 254);
@@ -705,6 +706,7 @@ void App::h_reply(const json::Value& m) {
 }
 
 void App::h_audio_start(const json::Value& m) {
+  alarm_ringing_ = false;  // Hermes speaks now: the alarm stays on screen, quiet
   close_setup_screens();
   wake_display();
   if (settings_open()) close_settings();
@@ -806,6 +808,7 @@ void App::on_transport_binary(const uint8_t* data, size_t len) {
 }
 
 void App::h_display(const json::Value& m) {
+  if (alarm_) dismiss_alarm();  // a card replaces the alarm
   wake_display();
   card_title_ = m["title"].as_string();
   card_body_ = m["body"].as_string();
@@ -859,6 +862,7 @@ void App::h_dashboard(const json::Value& m) {
 }
 
 void App::h_image_start(const json::Value& m) {
+  if (alarm_) dismiss_alarm();  // an image draws straight into the screen as it arrives
   close_setup_screens();
   wake_display();
   if (settings_open()) close_settings();
@@ -1000,6 +1004,12 @@ void App::on_button(Button button, bool pressed) {
     if (!pressed) wake_buttons_ &= static_cast<uint8_t>(~bit);
     return;
   }
+  // The alarm: a press dismisses it, and its release is swallowed above, so nothing records.
+  if (alarm_ && model_.screen == Screen::Alarm && pressed) {
+    dismiss_alarm();
+    wake_buttons_ |= bit;
+    return;
+  }
   if (button == Button::Talk) {
     talk_held_ = pressed;
     if (pressed) talk_down_at_ = now();
@@ -1093,6 +1103,7 @@ void App::on_button(Button button, bool pressed) {
 void App::start_listening(bool hands_free) {
   stop_playback();
   dismiss_overlay();
+  if (alarm_) dismiss_alarm();
   if (!hal_.mic || !hal_.mic->start(profile_.mic_rate)) {
     set_hint_flash(tr(i18n::Msg::MicUnavailable));
     return;
@@ -1450,6 +1461,7 @@ void App::h_ota_begin(const json::Value& m) {
     return;
   }
   ota_ = Ota::Receiving;
+  if (alarm_) dismiss_alarm();  // the Updating screen and its hint must show; no beep over the install
   close_setup_screens();
   close_settings();
   ota_received_ = ota_acked_ = 0;
@@ -1637,6 +1649,7 @@ void App::tick() {
 
   flush_sensors();
   flush_display_state();
+  timer_tick();
   perf_tick();
 
   if (t - frame_at_ >= kFrameMs) {
@@ -1665,6 +1678,8 @@ void App::update_model() {
   m.speaking = speaking();
   m.color_test = false;
   m.settings_hold = settings_hold_live();
+  m.timer_permille = timer_permille();
+  m.flash = false;
   m.battery = -1;
   m.battery_charging = m.battery_low = false;
   m.battery_icon = battery_display_ != BatteryIndicator::Percentage;
@@ -1750,6 +1765,15 @@ void App::update_model() {
       m.detail = tr(Msg::UpdateProgress, {version, std::to_string(pct), std::to_string((ota_size_ + 1023) / 1024)});
     }
     m.hint = tr(Msg::KeepPowerOn);
+  } else if (alarm_) {
+    m.screen = Screen::Alarm;
+    m.headline = tr(Msg::TimerDone);
+    m.detail = timer_label_;
+    m.hint = profile_.touch_screen ? std::string(tr(Msg::TapScreenToStop)) : tr(Msg::ButtonToStop, {talk});
+    m.flash = alarm_flash();
+    // Its own return, as the settings branch has: the tail below must not overwrite the label or hint.
+    if (!display_sleeping_) render(m);
+    return;
   } else if (!fatal_.empty()) {
     m.screen = Screen::Error;
     m.hero = true;
@@ -1878,11 +1902,14 @@ void App::update_model() {
       const bool sessions = dashboard_ready_ && can_open_dashboard() && reply_.empty();
       if (sessions)
         m.detail = profile_.touch_screen ? std::string(tr(Msg::SwipeDownForSessions)) : tr(Msg::ButtonShowsSessions, {cancel});
+      // A running timer's time left is the caption's line (after the profile hint, when there is one).
+      const bool timing = timer_running_;
+      if (timing) m.detail = tr(Msg::TimerLeft, {timer_left_text()});
       if (switching) {
         // In tap-to-talk mode a tap records, so the name is no target there.
         m.name_target = profile_.touch_screen && talk_mode_ == TalkMode::Hold;
         m.detail = tr(m.name_target ? Msg::ProfileTapName : Msg::ProfileInSettings) +
-                   (sessions ? "\n" + m.detail : "");
+                   ((sessions || timing) ? "\n" + m.detail : "");
         m.caption_lines = 2;
       }
     }
@@ -1928,6 +1955,7 @@ json::Value App::status_value() const {
   if (hal_.power) s.set("power", power_value());
   if (!pairing_code_.empty()) s.set("pairing_code", pairing_code_);
   if (!prompt_id_.empty()) s.set("prompt", prompt_id_);
+  if (timer_active()) s.set("timer", timer_value());
   if (on_phone_pair) s.set("phone", phone_value());
   if (!fatal_.empty()) s.set("error", fatal_);
   if (ota_ != Ota::Idle) {

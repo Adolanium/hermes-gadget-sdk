@@ -9,7 +9,7 @@
 namespace hg {
 
 bool App::settings_hold_live() const {
-  return !prompt_showing() && !ota_busy() && !wifi_setup_open() && !phone_pairing_;
+  return !prompt_showing() && !ota_busy() && !wifi_setup_open() && !phone_pairing_ && !alarm_;
 }
 
 bool App::settings_title_hit(int x, int y) const {

@@ -631,3 +631,57 @@ def test_a_server_without_profiles_sends_no_roster(devserver, make_sim):
     welcome = sim.last_received("welcome")
     assert "profile" not in welcome and "profiles" not in welcome
     assert hub.get(sim.status()["device_id"]).profile == "default"
+
+
+def _timer_events(brain):
+    """Records the device's events the hub passes to the brain; returns the list."""
+    events = []
+
+    async def on_event(session, name, data, notify):
+        events.append((name, data, notify))
+
+    brain.on_event = on_event
+    return events
+
+
+def test_timer_runs_and_rings_through_the_hub(loop_thread, devserver, make_sim):
+    import asyncio
+
+    hub, brain, url = devserver()
+    events = _timer_events(brain)
+    sim = make_sim(url, board="sim-466x466-round")
+    assert sim.wait_screen("ready", timeout=10)
+    session = next(iter(hub.sessions.values()))
+    assert {"timer.start", "timer.status", "timer.cancel"} <= set(session.action_names())
+
+    # The device answers on its own thread, so step the simulator while the hub waits.
+    started = asyncio.run_coroutine_threadsafe(session.invoke_action("timer.start", {"seconds": 1, "label": "Pasta"}),
+                                               loop_thread.loop)
+    assert sim.wait_for(started.done, timeout=5)
+    assert started.result() == {"seconds": 1, "label": "Pasta"}
+    assert sim.wait_for(lambda: any(name == "timer.done" for name, _, _ in events), timeout=5)
+    name, data, notify = next(e for e in events if e[0] == "timer.done")
+    assert data == {"label": "Pasta"} and notify is False
+    assert sim.wait_screen("alarm", timeout=3)
+
+    sim.tap("talk")  # a press stops the alarm; it records nothing
+    assert sim.wait_screen("ready", timeout=3)
+    assert not any(m.get("type") == "audio.start" for m in sim.sent[-5:])
+
+
+@pytest.mark.parametrize("board", ["sim-360x360-knob", "sim-480x480-round-nospeaker"])
+def test_timer_on_a_board_without_a_speaker_shows_the_alarm_silently(loop_thread, devserver, make_sim, board):
+    import asyncio
+
+    hub, brain, url = devserver()
+    events = _timer_events(brain)
+    sim = make_sim(url, board=board)
+    assert sim.wait_screen("ready", timeout=10)
+    session = next(iter(hub.sessions.values()))
+    assert {"timer.start", "timer.status", "timer.cancel"} <= set(session.action_names())
+    assert session.has_speaker is False
+
+    started = asyncio.run_coroutine_threadsafe(session.invoke_action("timer.start", {"seconds": 1}), loop_thread.loop)
+    assert sim.wait_for(started.done, timeout=5)
+    assert sim.wait_screen("alarm", timeout=5)
+    assert sim.wait_for(lambda: any(name == "timer.done" for name, _, _ in events), timeout=5)

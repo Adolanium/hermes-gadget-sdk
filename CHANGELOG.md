@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Firmware
+
+- Timers: Hermes can start, check and cancel one countdown timer with the device actions `timer.start`, `timer.status` and `timer.cancel`, on any board with a display or a speaker. The time left shows on every screen: an arc around the edge of round screens, a line under the top bar of rectangular ones, and "Timer 6:18" on the Ready screen. At zero the screen shows TIMER DONE with the timer's name, and a board with a speaker beeps for a minute. A press, a tap or swipe, or `timer.cancel` stops the alarm.
+
 ## 0.3.0
 
 Hermes Gadget 0.3.0 adds twelve board profiles, among them the first ESP32-P4 board (the Elecrow CrowPanel Advanced 10.1"), Opus speaker audio, device text in Spanish with a Latin-1 font that can follow Hermes's own language, switching Hermes profiles from the gadget, and a session dashboard. It also brings many reliability fixes for audio, Wi-Fi, power and the plugin. Details by area follow.
