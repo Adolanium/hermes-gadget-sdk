@@ -905,15 +905,16 @@ BoardConfig make() {
   b.lcd.dsi.vsync_pulse_width = 4;
   b.lcd.dsi.vsync_back_porch = 12;
   b.lcd.dsi.vsync_front_porch = 24;
-  // I2C on port 1 (GPIO7/8).
-  b.i2c = {7, 8, 400000, /*port=*/1, /*glitch=*/-1, /*internal_pullup=*/true};
+  // Shared I2C bus on GPIO7/8: touch, both codecs.
+  b.i2c = {7, 8, 400000};
   // Touch: GT911, reset/int not bonded.
   b.touch.enabled = true;
   b.touch.controller = TouchController::Gt911;
   b.touch.width = 800;
   b.touch.height = 800;
+  b.touch.ppi = 235;  // estimate (see TouchConfig::ppi)
   b.touch.rst = -1;
-  b.touch.int_pin = -1;
+  b.touch.int_gpio = -1;
   // Audio: ES8311 speaker + ES7210 mic.
   b.codec.enabled = true;
   b.codec.mclk = 13;
