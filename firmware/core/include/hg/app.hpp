@@ -292,6 +292,9 @@ class App {
   uint8_t volume_ = 70;
   uint8_t brightness_ = 100;
   i18n::Lang lang_ = i18n::Lang::En;
+  // `language` is auto: follow the language Hermes sends in `welcome` (English until it does).
+  bool lang_auto_ = false;
+  std::optional<i18n::Lang> hermes_lang_;  // from the last `welcome` that named one this firmware has
   enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, Microphone, Speaker, Display, Inputs, Info,
                               Power, IdleTimer, PowerOff, WifiSetup, Phone, Language, Back };
   enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };

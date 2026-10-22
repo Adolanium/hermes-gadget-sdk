@@ -782,6 +782,28 @@ def test_battery_log_records_paired_state_readings_only_when_enabled(loop_thread
         loop_thread.run(adapter.disconnect())
 
 
+def test_welcome_language_is_the_configured_one_else_hermes_language(monkeypatch):
+    import hermes_gadget_plugin.adapter as adapter_module
+    from gateway.config import PlatformConfig
+    from hermes_gadget_plugin.adapter import GadgetAdapter
+
+    session = types.SimpleNamespace(device_id="hg-0123456789abcdef")
+    monkeypatch.setattr(adapter_module, "get_language", lambda: "pt-br")
+
+    def language(**extra):
+        return GadgetAdapter(PlatformConfig(enabled=True, extra={"host": "127.0.0.1", "port": 0, **extra})).language(session)
+
+    assert language() == "pt-br"  # Hermes's own (HERMES_LANGUAGE > display.language > en)
+    assert language(language="auto") == "pt-br"
+    assert language(language="ES") == "es"  # set for the gadget alone
+
+    def broken():
+        raise RuntimeError("no config")
+
+    monkeypatch.setattr(adapter_module, "get_language", broken)
+    assert language() is None  # the device falls back to English; the connection goes on
+
+
 @pytest.fixture
 def board():
     from hermes_gadget_plugin import dashboard

@@ -18,7 +18,7 @@ import secrets
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 from . import audio, opus, protocol
 from .store import DeviceStore
@@ -48,6 +48,10 @@ class HubDelegate:
 
     async def is_paired(self, session: "DeviceSession") -> bool:
         return True
+
+    def language(self, session: "DeviceSession") -> Optional[str]:
+        """The language id ``welcome`` names for a device left on ``auto`` (e.g. ``"es"``), or None."""
+        return None
 
     async def on_ready(self, session: "DeviceSession") -> None:
         pass
@@ -733,9 +737,13 @@ class DeviceHub:
             session.paired = bool(await self.delegate.is_paired(session))
             if session.paired:
                 self.store.confirm(session.device_id)
-            await session.send_json(protocol.message(
+            welcome = protocol.message(
                 "welcome", session=session.session_id, paired=session.paired,
-                heartbeat_s=self.heartbeat_s, server="hermes", proto=protocol.VERSION))
+                heartbeat_s=self.heartbeat_s, server="hermes", proto=protocol.VERSION)
+            language = self.delegate.language(session)
+            if language:
+                welcome["language"] = language
+            await session.send_json(welcome)
             log.info("device %s (%s) online, paired=%s", session.device_id, session.name, session.paired)
             await self.delegate.on_ready(session)
             if not session.display_sleeping:

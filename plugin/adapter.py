@@ -39,7 +39,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from agent.i18n import t
+from agent.i18n import get_language, t
 from gateway.config import Platform, PlatformConfig
 from gateway.platforms._shared import extra_or_secret, get_scoped_secret as _get_scoped_secret
 from gateway.platforms.base import (
@@ -189,6 +189,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._auto_home = _flag(extra.get("auto_home"), True)
         self._battery_log_on = _flag(extra.get("battery_log"), False)
         self._dashboard_on = _flag(extra.get("dashboard"), True)
+        # The language `welcome` names for devices left on auto: Hermes's own unless set here.
+        self._language = str(extra.get("language") or "auto").strip().lower() or "auto"
         self._tiles: Optional[dashboard.TileStore] = None
         self._dashboard_task: Optional[asyncio.Task] = None
         self._dashboard_wake: Optional[asyncio.Event] = None
@@ -288,6 +290,16 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     async def is_paired(self, session: DeviceSession) -> bool:
         # None means no runner check is installed (unit harness): nothing to gate on.
         return self._authorized(session.device_id) is not False
+
+    def language(self, session: DeviceSession) -> Optional[str]:
+        # `platforms.gadget.extra.language`, else the profile's language (HERMES_LANGUAGE > display.language > en).
+        if self._language != "auto":
+            return self._language
+        try:
+            return get_language()
+        except Exception as exc:  # the gadget falls back to English; never block a connection on this
+            logger.debug("Could not read Hermes's language: %s", exc)
+            return None
 
     async def on_ready(self, session: DeviceSession) -> None:
         if session.paired:
