@@ -9,6 +9,7 @@
 ### Firmware
 
 - Audio written right after a speaker stream starts is no longer thrown away on boards whose speaker task empties its queue after an abort: I2S speakers, and codec speakers without `codec.speaker_pa`. `begin()` aborts the stream before it, and the task emptied the queue on its next pass, so audio queued in between, such as a short tone written at once, could go with it. When `begin()` replaces a stream it now waits for that reset, at most 6 ticks (about 60 ms), as the P4 speaker also waits in `begin()`, so `write()` stays non-blocking, and an idle speaker starts at once. The task drops what it received while a reset was pending, and a codec cuts a stream's silent tail short when the next stream waits. A codec stream that closes with nothing played also no longer leaves `busy()` true until the next stream, which kept the screen from sleeping.
+- Timers: Hermes can start, check and cancel one countdown timer with the device actions `timer.start`, `timer.status` and `timer.cancel`, on any board with a display or a speaker. The time left shows on every screen: an arc around the edge of round screens, a line under the top bar of rectangular ones, and "Timer 6:18" on the Ready screen. At zero the screen shows TIMER DONE with the timer's name, and a board with a speaker beeps for a minute. A press, a tap or swipe, or `timer.cancel` stops the alarm.
 
 ## 0.3.0
 

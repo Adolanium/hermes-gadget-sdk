@@ -35,7 +35,8 @@ DEVICES_SCHEMA = {
 
 DISPLAY_SCHEMA = {
     "name": "gadget_display",
-    "description": "Show a short card (title and text) on a gadget's screen, e.g. a timer, list or note. "
+    "description": "Show a short card (title and text) on a gadget's screen, e.g. a list or note. "
+                   "For timers use the device's timer.* actions through gadget_action when it lists them. "
                    "Screens are small: keep text brief and plain (no Markdown). While the screen is off "
                    "the card waits and appears when it lights up.",
     "parameters": {
