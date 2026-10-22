@@ -380,9 +380,13 @@ void App::send_hello() {
     if (ui_) {
       const UiLayout& l = ui_->layout();
       d.set("text_cols", l.body_cols).set("text_rows", l.body_rows);
-      json::Value img = json::Value::object();
-      img.set("width", ui_->area().width).set("height", l.main_h).set("format", "rgb565");
-      d.set("image", img);
+      // A display that holds only a band of rows refuses images (h_image_start),
+      // so it doesn't offer them: the host then shows its unsupported-image notice.
+      if (hal_.display->framebuffer_rows() == 0) {
+        json::Value img = json::Value::object();
+        img.set("width", ui_->area().width).set("height", l.main_h).set("format", "rgb565");
+        d.set("image", img);
+      }
     }
     caps.set("display", d);
   }
