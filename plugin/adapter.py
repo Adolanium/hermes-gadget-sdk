@@ -478,6 +478,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             session, msg_id, "", message_type=MessageType.VOICE, media_urls=[path], media_types=["audio/wav"]))
 
     async def on_cancel(self, session: DeviceSession) -> None:
+        if session.device_id not in self._turns:
+            # No turn is running (the reply may still be playing after turn.end): the hub
+            # already stopped the audio, and a "/stop" now would start a turn of its own.
+            return
         await self.handle_message(self._event(session, "cancel", "/stop", message_type=MessageType.TEXT))
 
     async def on_new_session(self, session: DeviceSession) -> None:
