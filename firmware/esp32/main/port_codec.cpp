@@ -282,7 +282,13 @@ bool CodecSpeaker::begin(uint32_t sample_rate) {
     ESP_LOGW(TAG, "speaker runs at %u Hz only", static_cast<unsigned>(CodecAudio::kRate));
     return false;
   }
-  abort();
+  // A stream still open, draining, queued or being reset is aborted first. Without the PA
+  // queue the speaker task empties the queue for that abort() on its next pass, and audio
+  // written before then would go with the old: wait for that reset, at most 6 ticks, so
+  // write() stays non-blocking. The P4 speaker waits in begin() too, and as there, an idle
+  // speaker has nothing to drop and starts at once. The PA queue resets inside abort().
+  if (pa_ || busy() || flush_) abort();
+  for (int i = 0; !pa_ && flush_ && i < 6; ++i) vTaskDelay(1);
   power_up();  // a reply can start before the doze that powered it down ends
   open_ = true;
   draining_ = false;
@@ -344,7 +350,7 @@ void CodecSpeaker::task(void* arg) {
   uint64_t stream_bytes = 0;
   hg::SpeakerUnderruns gaps;
   for (;;) {
-    if (self->flush_.exchange(false)) {
+    if (self->flush_) {
       stream_t0 = 0;
       stream_bytes = 0;
       self->drop_bytes_ = 0;
@@ -356,10 +362,14 @@ void CodecSpeaker::task(void* arg) {
       } else {
         xStreamBufferReset(self->buffer_);
       }
+      self->flush_ = false;  // only after the reset: a write() waiting for it is not wiped
     }
     uint32_t generation = 0;
     size_t got = pa ? pa->receive(chunk, sizeof(chunk), generation)
                     : xStreamBufferReceive(self->buffer_, chunk, sizeof(chunk), pdMS_TO_TICKS(20));
+    // Received while an abort() waits for its reset: audio from before it. Drop it;
+    // the reset comes next. (The PA queue drops such a chunk by its generation.)
+    if (!pa && self->flush_) continue;
     if (got == 0) {
       if (playing && self->open_) gaps.ran_dry(speaker_now_ms());
       if (playing && !self->open_) {
@@ -375,14 +385,14 @@ void CodecSpeaker::task(void* arg) {
         if (self->stereo32_) {
           // Convert silence through the same width path as real audio: 1KB of
           // int16 mono becomes 4KB of int32 stereo; 3 writes = 12288 B > 11520 B.
-          for (int i = 0; i < 3; i++) {
+          for (int i = 0; i < 3 && !self->flush_; i++) {  // a new stream waits: stop early
             memset(self->stereo_, 0, kSpeakerChunk * 2 * sizeof(int32_t));
             int rc = esp_codec_dev_write(self->dev_, self->stereo_, kSpeakerChunk * 2 * sizeof(int32_t));
             if (rc != ESP_CODEC_DEV_OK) { errs++; if (!first_rc) first_rc = rc; }
           }
         } else {
           memset(chunk, 0, sizeof(chunk));  // got == 0, so nothing in it is unplayed
-          for (int i = 0; i < 3; i++) {
+          for (int i = 0; i < 3 && !self->flush_; i++) {  // a new stream waits: stop early
             int rc = esp_codec_dev_write(self->dev_, chunk, sizeof(chunk));
             if (rc != ESP_CODEC_DEV_OK) { errs++; if (!first_rc) first_rc = rc; }
           }
@@ -405,6 +415,10 @@ void CodecSpeaker::task(void* arg) {
         stream_t0 = 0;
         stream_bytes = 0;
         playing = false;
+      } else if (!self->open_ && self->draining_) {
+        // Closed with nothing played (its audio was dropped, or none came): nothing
+        // is left to drain, so busy() must not stay true until the next stream.
+        self->draining_ = false;
       }
       // Idle on a light-sleep board: wait for write()/abort() instead of waking
       // every 20 ms, so a doze can light-sleep. Draining, and other boards, keep

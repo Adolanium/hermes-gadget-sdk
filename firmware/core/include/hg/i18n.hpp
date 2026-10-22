@@ -188,6 +188,10 @@ namespace hg::i18n {
   X(SwipeDownForSessions,   "Swipe down for sessions") \
   X(ButtonShowsSessions,    "{0} shows sessions") \
   X(LowBattery,             "Low battery: connect USB") \
+  /* Timers */ \
+  X(TimerLeft,              "Timer {0}") \
+  X(TimerDone,              "TIMER DONE") \
+  X(TapScreenToStop,        "Tap the screen to stop") \
   /* Hermes profiles */ \
   X(ProfileSetting,         "Hermes profile") \
   X(ProfileSettingNext,     "{0}\nSelect to switch to the next profile.") \

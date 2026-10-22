@@ -181,7 +181,7 @@ The server resamples to the device's declared speaker rate. It also paces frames
 
 | Message | Meaning |
 |---|---|
-| `{"type": "display", "title": "Timer", "body": "Pasta: 9 min", "ttl_s": 15}` | Show a card; `ttl_s: 0` keeps it until dismissed |
+| `{"type": "display", "title": "Shopping", "body": "Milk, eggs, bread", "ttl_s": 15}` | Show a card; `ttl_s: 0` keeps it until dismissed |
 | `{"type": "image.start", "stream": 9, "width": 196, "height": 196, "format": "rgb565", "ttl_s": 30}` | Image rows follow on binary channel 2, then `image.end` |
 | `{"type": "image.end", "stream": 9}` | End of image data |
 
@@ -249,6 +249,7 @@ Devices must answer every `action` exactly once. The server times out after abou
 | `{"type": "state", "sensors": {"battery_pct": 80, "temperature_c": 21.5}}` | Latest readings (rate limited by the device) |
 | `{"type": "state", "display_sleeping": true}` | The screen went dark (`false`: it lit up); see [Screen sleep](#screen-sleep) |
 | `{"type": "event", "name": "button.long_press", "data": {...}, "notify": false}` | With `notify: true`, the event is delivered to the agent as a message |
+| `{"type": "event", "name": "timer.done", "data": {"label": "Pasta"}, "notify": false}` | The device's timer ran out (the label is empty when none was set). It always has `notify: false`: the alarm is the device's own, and Hermes is not interrupted. Dropped while the device is offline |
 
 ### Firmware updates
 

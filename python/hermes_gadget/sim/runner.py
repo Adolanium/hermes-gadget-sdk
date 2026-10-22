@@ -65,6 +65,9 @@ BOARDS = {
     "sim-410x486": Board("sim-410x486", 410, 486, scroll_buttons=False, touch=True),
     # A 2.16" square 480x480 AMOLED touch board (e.g. ESP32-S3-Touch-AMOLED-2.16).
     "sim-480x480": Board("sim-480x480", 480, 480, scroll_buttons=False, touch=True),
+    # A round 480x480 touch board with no microphone or speaker (the CrowPanel 2.1): timers show, silently.
+    "sim-480x480-round-nospeaker": Board("sim-480x480-round-nospeaker", 480, 480, mic=False, speaker=False,
+                                         scroll_buttons=False, round=True, touch=True),
     # A 1.9" 320x170 board with no audio hardware (e.g. LilyGO T-Display-S3).
     "sim-320x170-nospeaker": Board("sim-320x170-nospeaker", 320, 170, mic=False, speaker=False,
                                    scroll_buttons=False),

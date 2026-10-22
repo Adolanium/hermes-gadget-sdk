@@ -2524,6 +2524,19 @@ static void same_screens_banded(int width, int height, bool round, int band_rows
     r.advance(300);
   }, "the prompt closing");
   CHECK(banded.app.screen() != hg::Screen::Prompt);
+  both([](Rig& r) {
+    r.server(R"({"type":"action","id":"t1","name":"timer.start","args":{"seconds":3,"label":"Pasta"}})");
+    r.advance(1500);
+  }, "a running timer");
+  both([](Rig& r) { r.advance(1700); }, "the alarm");
+  CHECK(banded.app.screen() == hg::Screen::Alarm);
+  both([](Rig& r) { r.advance(400); }, "the alarm flashing");
+  both([](Rig& r) {
+    r.app.on_button(hg::Button::Talk, true);  // dismisses it
+    r.app.on_button(hg::Button::Talk, false);
+    r.advance(300);
+  }, "the alarm dismissed");
+  CHECK(banded.app.screen() != hg::Screen::Alarm);
   both([](Rig& r) { wifi_setup_with_code(r); r.advance(300); }, "Wi-Fi setup");
   CHECK(banded.app.screen() == hg::Screen::Setup);
   CHECK_EQ(full.fake.stray_flushes, 0);

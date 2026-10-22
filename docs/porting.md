@@ -105,7 +105,8 @@ Boards like the ESP32-S3-BOX family and the ESP32-S3-Touch-AMOLED-1.75 route aud
   - `write()` must not block: buffer about 1.5 s; the server keeps 0.5 s of lead.
   - `end()` drains the buffer.
   - `abort()` drops it immediately.
-  - `busy()` stays true until the buffered audio has played out.
+  - `busy()` stays true until the buffered audio has played out, and no longer once a closed stream has nothing left to play.
+  - Audio written right after `begin()` must survive the previous stream's `abort()`: a port whose task empties its queue later waits for that in `begin()`, as `I2sSpeaker` does.
 
 `I2sMic` and `I2sSpeaker` in `port_audio.cpp` are the reference implementations. The device declares its rates in `DeviceProfile`, and the server resamples to the speaker rate, so a 24 kHz or 48 kHz codec works without host changes.
 
@@ -147,6 +148,8 @@ app.add_action(std::move(relay));
 The device declares its actions in `hello`. Hermes's model discovers them through the per-device context and `gadget_devices`, and calls them with `gadget_action`. No Hermes or plugin change is needed. Handlers run on the app task: keep them short, and post long work to another task and report completion with an event.
 
 The firmware ships `speaker.volume` and `screen.brightness` when the hardware allows, and `screen.language` on every board with a display. The simulator adds `led.set` and `buzzer.beep` as examples.
+
+The firmware also ships `timer.start`, `timer.status` and `timer.cancel` on every board with a display or a speaker. The alarm beeps only where the board has a speaker. See [timers](using-gadget.md#timers) for what the device shows.
 
 For runnable Linux examples, see [Home Assistant and MQTT](home-automation.md). They expose fixed lamp targets, report temperature availability and return a job ID for work that completes asynchronously.
 
