@@ -28,6 +28,13 @@ def _make_sim(args):
 def cmd_sim(args) -> int:
     from .sim.native import SimLibraryError
 
+    if args.live_audio:
+        from .sim.audio_io import sounddevice_available
+
+        if not sounddevice_available():
+            print('error: --live-audio needs the audio extra: python -m pip install -e ".[audio]"',
+                  file=sys.stderr)
+            return 2
     try:
         sim = _make_sim(args)
     except SimLibraryError as exc:
