@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from . import runtime, textfmt
+from . import textfmt
 
 VERSION = 1                # the dashboard message layout this plugin sends
 MAX_SESSIONS = 8
@@ -136,9 +136,7 @@ class SessionBoard:
                 for sid, rec in rows[:MAX_SESSIONS]]
 
 
-# This process's sessions. Every profile's copy of the plugin registers its hooks on this one board,
-# so the default profile's adapter also shows turns that run in a routed or switched-to profile.
-BOARD: SessionBoard = runtime.shared("dashboard_board", SessionBoard)
+BOARD = SessionBoard()  # this process's sessions; the plugin registers its hooks
 
 
 class TileStore:

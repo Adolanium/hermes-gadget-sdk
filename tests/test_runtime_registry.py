@@ -8,7 +8,6 @@ find the adapter the default profile registered, or the gadget tools hide themse
 
 from __future__ import annotations
 
-import importlib
 import importlib.util
 import sys
 from pathlib import Path
@@ -53,22 +52,3 @@ def test_a_profile_with_its_own_adapter_still_gets_its_own(copies):
     assert default.active("lab") is mine
     assert routed.active("default") is theirs
     assert routed.active("nina") is theirs  # several running: an unrouted profile falls back to default
-
-
-def test_every_profiles_plugin_copy_feeds_one_dashboard(monkeypatch):
-    import types
-
-    monkeypatch.delitem(sys.modules, "hermes_gadget_runtime_registry", raising=False)
-    boards = []
-    for name in ("hgcopy_default", "hgcopy_ops__home_0123456789ab"):  # as Hermes names the copies
-        package = types.ModuleType(name)
-        package.__path__ = [str(RUNTIME.parent)]  # the plugin directory, without running its __init__
-        monkeypatch.setitem(sys.modules, name, package)
-        for sub in ("runtime", "textfmt", "dashboard"):
-            monkeypatch.delitem(sys.modules, f"{name}.{sub}", raising=False)
-        boards.append(importlib.import_module(f"{name}.dashboard").BOARD)
-    default, ops = boards
-    seen = []
-    default.subscribe(lambda: seen.append(True))  # the default profile's adapter
-    ops.pre_llm_call(session_id="s-ops1", platform="gadget")  # a turn in ops fires ops' hooks
-    assert seen and [row["state"] for row in default.sessions()] == ["busy"]
