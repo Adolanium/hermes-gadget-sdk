@@ -54,7 +54,7 @@ from gateway.platforms.base import (
 from gateway.platforms.event import MessageEvent, MessageType
 
 from . import audio as gaudio
-from . import dashboard, imaging, ota, runtime, textfmt
+from . import compat, dashboard, imaging, ota, runtime, textfmt
 from .battery_log import BatteryLog
 from .hub import DeviceHub, DeviceSession, HubDelegate
 from .store import DeviceStore
@@ -116,7 +116,7 @@ class _Prompt:
     created: float = field(default_factory=time.monotonic)
 
     def expired(self) -> bool:
-        return self.kind == "slash" and time.monotonic() - self.created > SLASH_CONFIRM_TTL_S
+        return self.ttl_s is not None and time.monotonic() - self.created > self.ttl_s
 
 
 def spoken_question(question: str, choices: Optional[list]) -> str:
@@ -478,6 +478,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             session, msg_id, "", message_type=MessageType.VOICE, media_urls=[path], media_types=["audio/wav"]))
 
     async def on_cancel(self, session: DeviceSession) -> None:
+        if session.device_id not in self._turns:
+            # No turn is running (the reply may still be playing after turn.end): the hub
+            # already stopped the audio, and a "/stop" now would start a turn of its own.
+            return
         await self.handle_message(self._event(session, "cancel", "/stop", message_type=MessageType.TEXT))
 
     async def on_new_session(self, session: DeviceSession) -> None:
@@ -616,13 +620,14 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         command = shown_command(prompt.command, session.display)
         if command is None:
             question = _Prompt(id=uuid.uuid4().hex[:8], kind="approval", session_key=prompt.session_key,
-                               title="Can't show this command", text=HOST_ONLY_TEXT, host_only=True)
+                               title="Can't show this command", text=HOST_ONLY_TEXT, host_only=True,
+                               ttl_s=compat.approval_timeout_s())
         else:
             text = command
             if prompt.description:
                 text = f"{text}\n{textfmt.for_device(prompt.description, session.charset)}"
             question = _Prompt(id=uuid.uuid4().hex[:8], kind="approval", session_key=prompt.session_key,
-                               title="Allow this command?", text=text)
+                               title="Allow this command?", text=text, ttl_s=compat.approval_timeout_s())
         return await self._ask(session, question)
 
     async def _ask(self, session: DeviceSession, prompt: _Prompt) -> SendResult:
