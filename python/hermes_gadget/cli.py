@@ -28,6 +28,13 @@ def _make_sim(args):
 def cmd_sim(args) -> int:
     from .sim.native import SimLibraryError
 
+    if args.live_audio:
+        from .sim.audio_io import sounddevice_available
+
+        if not sounddevice_available():
+            print('error: --live-audio needs the audio extra: python -m pip install -e ".[audio]"',
+                  file=sys.stderr)
+            return 2
     try:
         sim = _make_sim(args)
     except SimLibraryError as exc:
@@ -110,7 +117,7 @@ def cmd_devserver(args) -> int:
     state = Path(args.state_dir) if args.state_dir else paths.default_state_dir() / "devserver"
     try:
         asyncio.run(devserver.serve(args.host, args.port, args.path, state, require_pairing=args.pairing,
-                                    loopback=not args.no_loopback, token=args.token))
+                                    loopback=not args.no_loopback, token=args.token, language=args.language))
     except KeyboardInterrupt:
         pass
     return 0
@@ -405,6 +412,8 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--pairing", action="store_true", help="Require pairing codes (approve from the console)")
     d.add_argument("--no-loopback", action="store_true", help="Do not play recorded voice back")
     d.add_argument("--token", help="Require this access token from devices")
+    d.add_argument("--language", help="Name this language in welcome, as Hermes does (e.g. es); "
+                   "devices whose language is auto follow it")
     d.add_argument("--state-dir")
     d.set_defaults(func=cmd_devserver)
 

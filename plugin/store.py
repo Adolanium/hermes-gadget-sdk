@@ -177,3 +177,29 @@ class DeviceStore:
             self._load()
             if self._data["pairing"].pop(device_id, None) is not None:
                 self._save()
+
+    # -- owner binding ----------------------------------------------------------
+    # One empty file per device this plugin may approve in other profiles. It lives outside
+    # devices.json, whose records 'forget' and pending expiry delete and whose writers in two
+    # processes share no lock, and nothing deletes it: revoking the device on the default profile
+    # is what removes its access.
+
+    def bind_to_owner(self, device_id: str) -> None:
+        """Durably mark ``device_id``; raises ``OSError`` when that cannot be guaranteed."""
+        directory = self._dir / "owner-bound"
+        directory.mkdir(parents=True, exist_ok=True)
+        fd = os.open(directory / device_id, os.O_WRONLY | os.O_CREAT, 0o600)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        if hasattr(os, "O_DIRECTORY"):  # POSIX: make the new names durable too
+            for parent in (directory, self._dir):
+                fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+
+    def owner_bound(self, device_id: str) -> bool:
+        return (self._dir / "owner-bound" / device_id).exists()

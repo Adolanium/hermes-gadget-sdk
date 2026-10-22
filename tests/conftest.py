@@ -101,8 +101,8 @@ def devserver(loop_thread, tmp_path):
     from hermes_gadget_plugin.hub import DeviceHub
     from hermes_gadget_plugin.store import DeviceStore
 
-    def make(require_pairing: bool = False, token: str | None = None):
-        brain = EchoBrain(require_pairing=require_pairing, word_delay=0.0)
+    def make(require_pairing: bool = False, token: str | None = None, language: str | None = None):
+        brain = EchoBrain(require_pairing=require_pairing, word_delay=0.0, language=language)
         hub = DeviceHub(DeviceStore(tmp_path / "server"), brain, host="127.0.0.1", port=0,
                         access_token=token, heartbeat_s=5)
         brain.hub = hub
@@ -132,3 +132,6 @@ def make_sim(tmp_path):
     for sim in sims:
         sim.close()
     time.sleep(0.05)
+
+
+pytest_plugins = ["hermes_fixtures"]

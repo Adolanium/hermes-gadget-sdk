@@ -39,7 +39,7 @@ constexpr uint32_t kOtaRestartMs = 1000;    // time for ota.done to leave before
 constexpr uint32_t kBackoffMs[] = {1000, 2000, 4000, 8000, 15000, 30000};
 constexpr size_t kBackoffSteps = sizeof(kBackoffMs) / sizeof(kBackoffMs[0]);
 
-const char* const kSettingKeys[] = {"name", "server", "token", "talk_mode", "volume", "brightness", "screen_timeout", "battery_display", "battery_estimate", "wifi_ssid", "wifi_pass"};
+const char* const kSettingKeys[] = {"name", "server", "token", "talk_mode", "volume", "brightness", "screen_timeout", "battery_display", "battery_estimate", "language", "wifi_ssid", "wifi_pass"};
 
 // NVS limits storage keys to 15 characters; keep the public setting name unchanged.
 std::string_view setting_storage_key(std::string_view key) {
@@ -47,6 +47,26 @@ std::string_view setting_storage_key(std::string_view key) {
 }
 
 bool is_secret(std::string_view key) { return key == "token" || key == "wifi_pass"; }
+
+// " en es ... auto": the `language` setting's values.
+std::string language_codes() {
+  std::string out;
+  for (size_t i = 0; i < i18n::kLangCount; ++i) out += std::string(" ") + i18n::info(static_cast<i18n::Lang>(i)).code;
+  return out + " auto";
+}
+
+// The language Hermes names in `welcome` (its own ids: "es", "pt-br", "zh-hant"), as one this firmware
+// has: the id itself, else its primary subtag ("es-mx" -> "es"). None when it has neither.
+std::optional<i18n::Lang> hermes_language(std::string_view id) {
+  std::string lowered(id);
+  for (char& c : lowered) {
+    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    if (c == '_') c = '-';
+  }
+  if (auto exact = i18n::parse(lowered)) return exact;
+  const size_t dash = lowered.find('-');
+  return dash == std::string::npos ? std::nullopt : i18n::parse(std::string_view(lowered).substr(0, dash));
+}
 
 std::string trim(std::string_view s) {
   size_t a = 0, b = s.size();
@@ -87,6 +107,7 @@ const App::Route App::kRoutes[] = {
     {"prompt.close", &App::h_prompt_close}, {"ota.offer", &App::h_ota_offer},
     {"ota.begin", &App::h_ota_begin},     {"ota.end", &App::h_ota_end},
     {"ota.abort", &App::h_ota_abort},     {"dashboard", &App::h_dashboard},
+    {"profile", &App::h_profile},
 };
 
 App::App(Hal& hal, DeviceProfile profile) : hal_(hal), profile_(std::move(profile)) {}
@@ -118,6 +139,9 @@ void App::load_settings() {
                        : indicator == "percentage" ? BatteryIndicator::Percentage
                        : indicator == "both" ? BatteryIndicator::Both : BatteryIndicator::Off;
   battery_estimate_enabled_ = setting("battery_estimate", "off") == "liion";
+  const std::string language = setting("language", "en");
+  lang_auto_ = language == "auto";
+  lang_ = lang_auto_ ? hermes_lang_.value_or(i18n::Lang::En) : i18n::parse(language).value_or(i18n::Lang::En);
   activity_at_ = now();
   display_dimmed_ = display_sleeping_ = false;
 }
@@ -144,6 +168,7 @@ void App::begin() {
   }
   device_id_ = proto::device_id_for_key(key_.data(), key_.size());
   load_settings();
+  agent_profile_ = setting("profile", "default");  // shown until Hermes confirms it; not a console setting
 
   if (hal_.speaker) {
     Action vol;
@@ -196,8 +221,41 @@ void App::begin() {
     };
     add_action(std::move(bl));
   }
+  if (hal_.display) {
+    Action lang;
+    lang.name = "screen.language";
+    lang.description = "Set the language of the device's own screen text (menus, hints, status), "
+                       "or auto to follow Hermes's language. Replies are not affected.";
+    json::Value props = json::Value::object();
+    json::Value code = json::Value::object();
+    json::Value codes = json::Value::array();
+    for (size_t i = 0; i < i18n::kLangCount; ++i) codes.push(i18n::info(static_cast<i18n::Lang>(i)).code);
+    codes.push("auto");
+    code.set("type", "string").set("enum", codes).set("description", "Language code");
+    props.set("language", code);
+    json::Value req = json::Value::array();
+    req.push("language");
+    lang.params.set("type", "object").set("properties", props).set("required", req);
+    lang.handler = [this](const json::Value& args, json::Value& result, std::string& error) {
+      const std::string code = args["language"].is_string() ? args["language"].as_string() : std::string();
+      if (code != "auto" && !i18n::parse(code)) {
+        error = "language must be one of:" + language_codes();
+        return false;
+      }
+      const std::string reply = console("set language " + code);
+      if (reply.rfind("@ok", 0) != 0) {
+        error = reply.size() > 7 ? reply.substr(7) : "could not save the language";
+        return false;
+      }
+      result.set("language", code);
+      return true;
+    };
+    add_action(std::move(lang));
+  }
 
   if (hal_.display) ui_ = std::make_unique<Ui>(*hal_.display);
+  if (ui_ && profile_.touch_screen)  // about 7 mm: 7 * ppi / 25.4, rounded up
+    ui_->set_touch_px((70 * (profile_.touch_ppi ? profile_.touch_ppi : DeviceProfile::kDefaultTouchPpi) + 253) / 254);
   if (profile_.frame_stats) set_frame_stats(true);
   phase_ = Phase::Boot;
   phase_since_ = now();
@@ -279,6 +337,7 @@ void App::drop_session(std::string_view reason) {
   // What the dashboard showed is stale now; the next connection sends it afresh.
   dashboard_ready_ = false;
   dash_rows_.clear();
+  profile_pending_.clear();
   clear_prompt();
   transport_active_ = false;
   schedule_reconnect();
@@ -316,7 +375,7 @@ void App::send_hello() {
   if (hal_.display) {
     DisplayInfo di = hal_.display->info();
     json::Value d = json::Value::object();
-    d.set("width", di.width).set("height", di.height).set("color", true).set("charset", "ascii");
+    d.set("width", di.width).set("height", di.height).set("color", true).set("charset", "latin1");
     if (di.round) d.set("shape", "round");
     if (ui_) {
       const UiLayout& l = ui_->layout();
@@ -356,6 +415,7 @@ void App::send_hello() {
     dash.set("v", kDashboardVersion).set("rows", ui_->dash_rows());
     caps.set("dashboard", dash);
   }
+  caps.set("profiles", true);
   if (hal_.updater) {
     json::Value ota = json::Value::object();
     ota.set("max_size", hal_.updater->capacity());
@@ -380,6 +440,8 @@ void App::send_hello() {
       .set("caps", caps)
       .set("actions", acts)
       .set("sensors", sensors);
+  const std::string stored = setting("profile", "");  // only what Hermes confirmed, never what it showed
+  if (!stored.empty()) hello.set("profile", stored);
   if (!access_token_.empty()) hello.set("token", access_token_);
   if (display_sleeping_) hello.set("display_sleeping", true);
   send(hello);
@@ -426,6 +488,9 @@ void App::h_welcome(const json::Value& m) {
   online_since_ = now();
   attempts_ = 0;
   paired_ = m["paired"].as_bool();
+  // Hermes's language, for a device whose `language` is auto (docs/protocol.md#welcome-server--device).
+  hermes_lang_ = hermes_language(m["language"].str_or(""));
+  if (lang_auto_) lang_ = hermes_lang_.value_or(i18n::Lang::En);
   int hb = static_cast<int>(m["heartbeat_s"].as_int(20));
   heartbeat_ms_ = static_cast<uint32_t>(std::max(5, std::min(300, hb))) * 1000u;
   if (paired_) {
@@ -433,10 +498,111 @@ void App::h_welcome(const json::Value& m) {
     pairing_command_.clear();
   }
   log(LogLevel::Info, paired_ ? "online (paired)" : "online (waiting for pairing approval)");
+  agent_profiles_.clear();
+  for (const auto& p : m["profiles"].elements()) {
+    if (agent_profiles_.size() >= 8) break;
+    const std::string& id = p["id"].as_string();
+    if (id.empty()) continue;
+    const std::string& name = p["name"].as_string();
+    agent_profiles_.push_back({id, (name.empty() ? id : name).substr(0, 24)});
+  }
+  if (m["profile"].is_string()) set_agent_profile(m["profile"].as_string());
+  profile_pending_.clear();  // the welcome says which profile answers
   // A freshly installed firmware has reached Hermes, so it can take the next update: keep it.
   if (hal_.updater && hal_.updater->pending_verify()) {
     hal_.updater->confirm();
     log(LogLevel::Info, "new firmware " + profile_.firmware + " reached Hermes; keeping it");
+  }
+}
+
+void App::h_profile(const json::Value& m) {
+  const std::string& error = m["error"].as_string();
+  const std::string& profile = m["profile"].as_string();
+  if (error.empty()) set_agent_profile(profile);  // a refusal changes nothing
+  // Only the answer to a pending switch (its profile, or a refusal) ends the wait; a profile Hermes
+  // sends on its own, such as a reset to default, does not.
+  if (!profile_pending_.empty() && error.empty() && profile != profile_pending_) return;
+  profile_pending_.clear();
+  profile_notice(error.empty() ? tr(i18n::Msg::ProfileSwitched, {agent_profile_name()})
+                 : tr(error == "busy"      ? i18n::Msg::ProfileRefusedBusy
+                      : error == "unknown" ? i18n::Msg::ProfileRefusedUnknown
+                                           : i18n::Msg::ProfileRefused));
+}
+
+// The notice line and the open settings item; not the hint bar, which settings hides.
+void App::profile_notice(std::string text) {
+  if (menu_ == Menu::Profile) check_result_ = text;
+  notice_ = std::move(text);
+  notice_until_ = now() + 4000;
+}
+
+void App::set_agent_profile(const std::string& id) {
+  if (id.empty()) return;
+  agent_profile_ = id;
+  if (!hal_.storage || setting("profile", "default") == id) return;
+  if (id == "default") hal_.storage->erase("profile");
+  else if (!hal_.storage->set("profile", id)) log(LogLevel::Warn, "could not save profile");
+}
+
+std::string App::agent_profile_name() const {
+  for (const auto& p : agent_profiles_)
+    if (p.id == agent_profile_) return p.name;
+  return agent_profile_;
+}
+
+bool App::can_switch_profile() const {
+  return phase_ == Phase::Online && paired_ && agent_profiles_.size() > 1 && mode_ == Mode::Idle && !prompt_showing() &&
+         !ota_busy() && !wifi_setup_open() && profile_pending_.empty();
+}
+
+bool App::next_agent_profile() {
+  size_t i = 0;
+  while (i < agent_profiles_.size() && agent_profiles_[i].id != agent_profile_) ++i;
+  return select_agent_profile(i < agent_profiles_.size() ? (i + 1) % agent_profiles_.size() : 0);
+}
+
+bool App::select_agent_profile(size_t index) {
+  if (!can_switch_profile() || index >= agent_profiles_.size()) return false;
+  if (profile_picker_open()) dismiss_overlay();
+  const AgentProfile& next = agent_profiles_[index];
+  if (next.id != agent_profile_) {
+    json::Value msg = proto::message("profile.select");
+    msg.set("profile", next.id);
+    if (send(msg)) {
+      profile_pending_ = next.id;
+      profile_pending_at_ = now();
+      profile_notice(tr(i18n::Msg::ProfileSwitching, {next.name}));
+      notice_until_ = now() + kProfileReplyMs;  // shown until the answer replaces it
+    } else {
+      profile_notice(tr(i18n::Msg::ProfileCantSwitch));
+    }
+  }
+  update_model();
+  return true;
+}
+
+bool App::profile_name_hit(int x, int y) const { return ui_ && !display_sleeping_ && ui_->name_hit(model_, x, y); }
+
+bool App::open_profile_picker() {
+  if (!profile_.touch_screen || !can_switch_profile()) return false;
+  if (settings_open()) close_settings();
+  overlay_ = Overlay::Profiles;
+  overlay_until_ = 0;
+  profile_page_ = 0;
+  notice_.clear();
+  update_model();
+  return true;
+}
+
+int App::profile_row_hit(int x, int y) const { return ui_ ? ui_->profile_row_hit(model_, x, y) : -1; }
+
+void App::profile_tap(int x, int y) {
+  const int row = profile_row_hit(x, y);
+  if (row >= 0) {
+    select_agent_profile(static_cast<size_t>(row));
+  } else if (row == Ui::kMoreRow) {
+    profile_page_ = ui_->profile_next_page(model_);
+    update_model();
   }
 }
 
@@ -450,7 +616,7 @@ void App::h_paired(const json::Value&) {
   paired_ = true;
   pairing_code_.clear();
   pairing_command_.clear();
-  set_hint_flash("Paired with Hermes");
+  set_hint_flash(tr(i18n::Msg::PairedWithHermes));
 }
 
 void App::h_unpaired(const json::Value&) {
@@ -487,7 +653,7 @@ void App::h_turn_end(const json::Value& m) {
   turn_done_ = true;
   last_turn_rx_ = now();
   if (m["outcome"].as_string() == "failure" && reply_.empty()) {
-    notice_ = "Hermes could not complete that request";
+    notice_ = tr(i18n::Msg::RequestFailed);
     notice_until_ = now() + 8000;
   }
   if (mode_ == Mode::Thinking) {
@@ -665,25 +831,29 @@ void App::h_dashboard(const json::Value& m) {
   std::vector<DashRow> rows;
   int busy = 0, waiting = 0;
   const json::Value& sessions = m["sessions"];
-  rows.push_back({"Hermes sessions", "", DashRow::Tone::Dim, true});
+  rows.push_back({tr(i18n::Msg::HermesSessions), "", DashRow::Tone::Dim, true});
   for (size_t i = 0; i < sessions.size() && i < kDashMaxEach; ++i) {
     const json::Value& s = sessions[i];
     const std::string state(s["state"].str_or("idle"));
     busy += state == "busy";
     waiting += state == "waiting";
-    rows.push_back({s["label"].as_string(), state == "waiting" ? "approval" : state, tone(state), false});
+    const std::string shown = state == "waiting" ? tr(i18n::Msg::DashApproval)
+                              : state == "busy"  ? tr(i18n::Msg::DashBusy)
+                              : state == "idle"  ? tr(i18n::Msg::DashIdle)
+                                                 : state;
+    rows.push_back({s["label"].as_string(), shown, tone(state), false});
   }
-  if (rows.size() == 1) rows.push_back({"No sessions", "", DashRow::Tone::Dim, false});
+  if (rows.size() == 1) rows.push_back({tr(i18n::Msg::NoSessions), "", DashRow::Tone::Dim, false});
   const json::Value& tiles = m["tiles"];
-  if (tiles.size()) rows.push_back({"Status", "", DashRow::Tone::Dim, true});
+  if (tiles.size()) rows.push_back({tr(i18n::Msg::DashStatus), "", DashRow::Tone::Dim, true});
   for (size_t i = 0; i < tiles.size() && i < kDashMaxEach; ++i) {
     const json::Value& t = tiles[i];
     rows.push_back({t["label"].as_string(), t["value"].as_string(), tone(t["state"].str_or("")), false});
   }
   dash_rows_ = std::move(rows);
-  dash_headline_ = waiting ? std::to_string(waiting) + " waiting"
-                   : busy  ? std::to_string(busy) + " busy"
-                           : "All idle";
+  dash_headline_ = waiting ? tr(i18n::Msg::NWaiting, {std::to_string(waiting)})
+                   : busy  ? tr(i18n::Msg::NBusy, {std::to_string(busy)})
+                           : std::string(tr(i18n::Msg::AllIdle));
   dashboard_ready_ = true;
   if (ui_) dash_scroll_ = std::min(dash_scroll_, std::max(0, static_cast<int>(dash_rows_.size()) - ui_->dash_rows()));
 }
@@ -761,7 +931,7 @@ void App::answer_prompt(bool yes) {
   send(reply);
   clear_prompt();
   last_turn_rx_ = now();  // Hermes resumes the turn from here
-  set_hint_flash(yes ? "Answered: yes" : "Answered: no");
+  set_hint_flash(tr(yes ? i18n::Msg::AnsweredYes : i18n::Msg::AnsweredNo));
 }
 
 void App::clear_prompt() {
@@ -860,7 +1030,7 @@ void App::on_button(Button button, bool pressed) {
       if (pressed) {
         if (cancel_held_) return;  // wait for the local settings chord
         if (!can_talk()) {
-          set_hint_flash(phase_ == Phase::Online ? "Approve pairing first" : "Not connected to Hermes");
+          set_hint_flash(tr(phase_ == Phase::Online ? i18n::Msg::ApprovePairingFirst : i18n::Msg::NotConnected));
           return;
         }
         if (mode_ == Mode::Listening) {
@@ -875,8 +1045,8 @@ void App::on_button(Button button, bool pressed) {
       } else if (mode_ == Mode::Listening && !hands_free_) {
         if (now() - mode_since_ < kMinUtteranceMs) {
           cancel_listening("too short");
-          set_hint_flash(profile_.touch_screen ? "Hold the screen while speaking"
-                                               : "Hold " + profile_.talk_label + " while speaking");
+          set_hint_flash(profile_.touch_screen ? std::string(tr(i18n::Msg::HoldScreenWhileSpeaking))
+                                               : tr(i18n::Msg::HoldButtonWhileSpeaking, {control(profile_.talk_label)}));
         } else {
           finish_listening();
         }
@@ -906,7 +1076,7 @@ void App::on_button(Button button, bool pressed) {
         dash_scroll_ = 0;
         page_at_ = now() + page_dwell_ms();
       }
-      if (hint_flash_.rfind("New session in", 0) == 0) hint_flash_until_ = now();
+      if (hint_countdown_) hint_flash_until_ = now();
       break;
     case Button::Up:
     case Button::Down:
@@ -931,7 +1101,7 @@ void App::start_listening(bool hands_free) {
   stop_playback();
   dismiss_overlay();
   if (!hal_.mic || !hal_.mic->start(profile_.mic_rate)) {
-    set_hint_flash("Microphone unavailable");
+    set_hint_flash(tr(i18n::Msg::MicUnavailable));
     return;
   }
   hands_free_ = hands_free;
@@ -970,14 +1140,14 @@ void App::finish_listening() {
     // Hermes would wait for the rest of the recording and never answer.
     mode_ = Mode::Idle;
     mode_since_ = now();
-    notice_ = "Couldn't send the recording";
+    notice_ = tr(i18n::Msg::CouldntSendRecording);
     notice_until_ = now() + 8000;
     return;
   }
   mode_ = Mode::Thinking;
   mode_since_ = now();
   last_turn_rx_ = now();
-  status_ = "Sending...";
+  status_ = tr(i18n::Msg::Sending);
 }
 
 void App::cancel_listening(std::string_view why) {
@@ -991,7 +1161,7 @@ void App::cancel_listening(std::string_view why) {
 
 void App::start_new_session() {
   if (!can_talk()) {
-    set_hint_flash("Not connected to Hermes");
+    set_hint_flash(tr(i18n::Msg::NotConnected));
     return;
   }
   if (mode_ == Mode::Listening) cancel_listening("new session");
@@ -1001,12 +1171,12 @@ void App::start_new_session() {
   send(proto::message("session.new"));
   reply_.clear();
   user_echo_.clear();
-  status_ = "Starting a new session";
+  status_ = tr(i18n::Msg::StartingNewSession);
   scroll_ = -1;
   mode_ = Mode::Thinking;
   mode_since_ = now();
   last_turn_rx_ = now();
-  set_hint_flash("New session");
+  set_hint_flash(tr(i18n::Msg::NewSession));
 }
 
 void App::cancel_turn() {
@@ -1014,7 +1184,7 @@ void App::cancel_turn() {
   send(proto::message("cancel"));
   mode_ = Mode::Idle;
   mode_since_ = now();
-  set_hint_flash("Cancelled");
+  set_hint_flash(tr(i18n::Msg::Cancelled));
 }
 
 void App::on_mic_samples(const int16_t* samples, size_t count) {
@@ -1041,7 +1211,7 @@ void App::on_mic_samples(const int16_t* samples, size_t count) {
       update_model();
     } else if (r == Vad::Result::NoSpeech) {
       cancel_listening("no speech");
-      set_hint_flash("Didn't hear anything");
+      set_hint_flash(tr(i18n::Msg::DidntHearAnything));
       update_model();
     }
   }
@@ -1054,7 +1224,7 @@ void App::submit_text(std::string_view text) {
   std::string t = trim(text);
   if (t.empty()) return;
   if (!can_talk()) {
-    set_hint_flash("Not connected to Hermes");
+    set_hint_flash(tr(i18n::Msg::NotConnected));
     update_model();
     return;
   }
@@ -1066,7 +1236,7 @@ void App::submit_text(std::string_view text) {
   send(msg);
   user_echo_ = t;
   reply_.clear();
-  status_ = "Sending...";
+  status_ = tr(i18n::Msg::Sending);
   scroll_ = -1;
   mode_ = Mode::Thinking;
   mode_since_ = now();
@@ -1139,6 +1309,7 @@ void App::dismiss_overlay() {
 void App::set_hint_flash(std::string text) {
   hint_flash_ = std::move(text);
   hint_flash_until_ = now() + 2500;
+  hint_countdown_ = false;
 }
 
 // --------------------------------------------------------------------------
@@ -1230,7 +1401,7 @@ void App::ota_fail(std::string_view code, std::string_view message) {
   err.set("code", code).set("message", message);
   send(err);
   log(LogLevel::Warn, std::string("firmware update failed: ") + std::string(message));
-  notice_ = "Update failed: " + std::string(message);
+  notice_ = tr(i18n::Msg::UpdateFailed, {message});
   notice_until_ = now() + 10000;
 }
 
@@ -1394,6 +1565,11 @@ void App::tick() {
     hal_.transport->close();
     drop_session("server silent");
     update_model();
+  } else if (!profile_pending_.empty() && t - profile_pending_at_ > kProfileReplyMs) {
+    // The switch may still have happened: reconnect, and the welcome says which profile answers.
+    hal_.transport->close();
+    drop_session("no answer to the profile switch");
+    update_model();
   }
 
   if (ota_busy() && t - ota_last_rx_ > kOtaIdleMs) {
@@ -1413,7 +1589,7 @@ void App::tick() {
   if (!prompt_id_.empty()) last_turn_rx_ = t;  // Hermes is waiting for the user, not stuck
   if (mode_ == Mode::Thinking && t - last_turn_rx_ > kThinkingTimeoutMs) {
     mode_ = Mode::Idle;
-    notice_ = "No reply from Hermes";
+    notice_ = tr(i18n::Msg::NoReplyFromHermes);
     notice_until_ = t + 8000;
     update_model();
   }
@@ -1447,9 +1623,10 @@ void App::tick() {
       update_model();
     } else if (held >= kNewSessionHintMs && can_talk()) {
       uint32_t left = (kNewSessionHoldMs - held + 999) / 1000;
-      std::string hint = "New session in " + std::to_string(left) + "s";
+      std::string hint = tr(i18n::Msg::NewSessionIn, {std::to_string(left)});
       if (hint != hint_flash_) {
         set_hint_flash(std::move(hint));
+        hint_countdown_ = true;
         update_model();
       }
     }
@@ -1479,6 +1656,7 @@ void App::tick() {
 void App::update_model() {
   UiModel& m = model_;
   m.title = name_;
+  m.lang = lang_;
   m.code.clear();
   m.detail.clear();
   m.body.clear();
@@ -1487,6 +1665,7 @@ void App::update_model() {
   m.qr = nullptr;
   m.dash.clear();
   m.hero = false;
+  m.name_target = false;
   m.caption_lines = 1;
   m.scroll = scroll_;
   m.level = level_;
@@ -1521,14 +1700,17 @@ void App::update_model() {
     case Phase::Online: m.link = Link::Online; break;
   }
   if (m.link == Link::Offline && network_up_) m.link = Link::Network;
+  using i18n::Msg;
+  const std::string talk = control(profile_.talk_label);
+  const std::string cancel = control(profile_.cancel_label);
   if (!wifi_setup_text_.empty()) {
     m.screen = Screen::Setup;
-    m.headline = "Wi-Fi setup";
-    m.detail = "Connect your phone";
+    m.headline = tr(Msg::WifiSetup);
+    m.detail = tr(Msg::ConnectYourPhone);
     m.body = wifi_setup_text_;
     m.qr = wifi_setup_qr_.ok() ? &wifi_setup_qr_ : nullptr;
     m.scroll = 0;
-    m.hint = profile_.touch_screen ? "Swipe down to close" : profile_.cancel_label + " to close";
+    m.hint = profile_.touch_screen ? std::string(tr(Msg::SwipeDownToClose)) : tr(Msg::ButtonToClose, {cancel});
     render(m);
     return;
   }
@@ -1536,16 +1718,15 @@ void App::update_model() {
     m.screen = Screen::Setup;
     m.scroll = 0;
     if (phone_passkey_.empty()) {
-      m.headline = "Pair a phone";
-      m.detail = "Bluetooth: " + name_;
-      m.body = "On your phone, open the Hermes app and choose " + name_ +
-               ". This device then shows a code to type on the phone.";
+      m.headline = tr(Msg::PairAPhone);
+      m.detail = tr(Msg::BluetoothName, {name_});
+      m.body = tr(Msg::PhonePairIntro, {name_});
     } else {
-      m.headline = "Code " + phone_passkey_;
-      m.detail = "Type this code on your phone";
-      m.body = "Only a phone in front of you should ask for it.";
+      m.headline = tr(Msg::PhoneCode, {phone_passkey_});
+      m.detail = tr(Msg::TypeCodeOnPhone);
+      m.body = tr(Msg::OnlyPhoneInFront);
     }
-    m.hint = profile_.touch_screen ? "Swipe down to cancel" : profile_.cancel_label + " to cancel";
+    m.hint = profile_.touch_screen ? std::string(tr(Msg::SwipeDownToCancel)) : tr(Msg::ButtonToCancel, {cancel});
     render(m);
     return;
   }
@@ -1555,100 +1736,110 @@ void App::update_model() {
     return;
   }
 
-  const std::string talk = profile_.talk_label;
   if (phase_ == Phase::Boot) {
     m.screen = Screen::Boot;
     m.hero = true;
     m.headline = "Hermes";
-    m.detail = "starting - fw " + profile_.firmware;
+    m.detail = tr(Msg::StartingFirmware, {profile_.firmware});
     m.hint = device_id_;
   } else if (ota_ == Ota::Receiving || ota_ == Ota::Restarting) {
     m.screen = Screen::Updating;
     m.hero = true;
     m.caption_lines = 2;
-    const std::string version = ota_version_.empty() ? std::string("new firmware") : "firmware " + ota_version_;
+    const std::string version =
+        ota_version_.empty() ? std::string(tr(Msg::NewFirmware)) : tr(Msg::FirmwareVersion, {ota_version_});
     if (ota_ == Ota::Restarting) {
-      m.headline = "Restarting";
-      m.detail = "Installed " + version;
+      m.headline = tr(Msg::Restarting);
+      m.detail = tr(Msg::Installed, {version});
     } else {
-      m.headline = "Updating";
+      m.headline = tr(Msg::Updating);
       unsigned pct = ota_size_ ? static_cast<unsigned>(static_cast<uint64_t>(ota_received_) * 100 / ota_size_) : 0;
-      m.detail = version + ": " + std::to_string(pct) + "% of " + std::to_string((ota_size_ + 1023) / 1024) + " KB";
+      m.detail = tr(Msg::UpdateProgress, {version, std::to_string(pct), std::to_string((ota_size_ + 1023) / 1024)});
     }
-    m.hint = "keep the power on";
+    m.hint = tr(Msg::KeepPowerOn);
   } else if (!fatal_.empty()) {
     m.screen = Screen::Error;
     m.hero = true;
     m.caption_lines = kCaptionLines;
-    m.headline = "Setup needed";
-    m.detail = fatal_ + "\n" + (server_url_.empty() ? "Serial console: set server ws://<host>:8765/gadget"
-                                                     : "Server: " + server_url_);
-    m.hint = "see docs/getting-started.md";
+    m.headline = tr(Msg::SetupNeeded);
+    // The status report keeps the English reason; the screen shows it translated.
+    const std::string reason = fatal_ == i18n::english(Msg::NoServerConfigured) ? tr(Msg::NoServerConfigured) : fatal_;
+    m.detail = reason + "\n" + (server_url_.empty() ? std::string(tr(Msg::SerialSetServer)) : tr(Msg::ServerUrl, {server_url_}));
+    m.hint = tr(Msg::SeeDocs);
   } else if (phase_ == Phase::NoNetwork) {
     m.screen = Screen::Offline;
     m.hero = true;
     m.caption_lines = 2;
-    m.headline = "No network";
-    m.detail = network_detail_.empty() ? "Waiting for Wi-Fi" : network_detail_;
-    m.hint = "configure Wi-Fi via serial";
+    m.headline = tr(Msg::NoNetwork);
+    m.detail = network_detail_.empty() ? std::string(tr(Msg::WaitingForWifi)) : network_detail_;
+    m.hint = tr(Msg::ConfigureWifiSerial);
   } else if (phase_ == Phase::Connecting || phase_ == Phase::Handshake) {
     m.screen = Screen::Connecting;
     m.hero = true;
     m.caption_lines = kCaptionLines;
-    m.headline = phase_ == Phase::Handshake ? "Authenticating" : "Connecting to Hermes";
+    m.headline = tr(phase_ == Phase::Handshake ? Msg::Authenticating : Msg::ConnectingToHermes);
     m.detail = server_url_;
-    if (!last_close_.empty() && attempts_ > 1) m.detail += "\nError: " + last_close_;
-    char buf[48];
+    if (!last_close_.empty() && attempts_ > 1) m.detail += "\n" + tr(Msg::ConnectError, {last_close_});
     if (reconnect_pending_) {
       uint32_t wait = static_cast<int32_t>(reconnect_at_ - now()) > 0 ? (reconnect_at_ - now() + 999) / 1000 : 0;
-      std::snprintf(buf, sizeof(buf), "retry in %lus", static_cast<unsigned long>(wait));
+      m.hint = tr(Msg::RetryIn, {std::to_string(wait)});
     } else {
-      std::snprintf(buf, sizeof(buf), "attempt %d", attempts_);
+      m.hint = tr(Msg::Attempt, {std::to_string(attempts_)});
     }
-    m.hint = buf;
   } else if (!paired_) {
     m.screen = Screen::Pairing;
     m.hero = true;
     m.caption_lines = kCaptionLines;
     if (!pairing_code_.empty()) {
       m.code = pairing_code_;
-      m.headline = "Pairing code " + pairing_code_;
-      m.detail = "On the Hermes host, run: " + pairing_command_;
+      m.headline = tr(Msg::PairingCode, {pairing_code_});
+      m.detail = tr(Msg::RunOnHost, {pairing_command_});
     } else {
-      m.headline = "Pair this device";
-      m.detail = "Asking Hermes for a pairing code...";
+      m.headline = tr(Msg::PairThisDevice);
+      m.detail = tr(Msg::AskingForCode);
     }
-    m.hint = "waiting for approval";
+    m.hint = tr(Msg::WaitingForApproval);
   } else if (mode_ == Mode::Listening) {
     m.screen = Screen::Listening;
     m.hero = true;
-    m.headline = "Listening";
-    m.detail = hands_free_ ? "Speak now - pause to send"
-               : profile_.touch_screen ? "Lift your finger to send" : "Release " + talk + " to send";
-    m.hint = profile_.cancel_label + " to discard";
+    m.headline = tr(Msg::Listening);
+    m.detail = hands_free_              ? std::string(tr(Msg::SpeakNowPause))
+               : profile_.touch_screen ? std::string(tr(Msg::LiftFingerToSend))
+                                       : tr(Msg::ReleaseToSend, {talk});
+    m.hint = tr(Msg::ButtonToDiscard, {cancel});
   } else if (!prompt_id_.empty()) {
     m.screen = Screen::Prompt;
     m.hero = true;
     m.caption_lines = kPromptLines;
-    m.headline = prompt_title_.empty() ? "Hermes asks" : prompt_title_;
+    m.headline = prompt_title_.empty() ? std::string(tr(Msg::HermesAsks)) : prompt_title_;
     m.detail = prompt_text_;
-    m.yes = profile_.touch_screen ? "Tap: Yes" : talk + ": Yes";
-    if (profile_.has_cancel_button) m.no = profile_.touch_screen ? "Swipe: No" : profile_.cancel_label + ": No";
-    m.hint = "Hermes is waiting for you";
+    m.yes = profile_.touch_screen ? std::string(tr(Msg::TapYes)) : tr(Msg::ButtonYes, {talk});
+    if (profile_.has_cancel_button)
+      m.no = profile_.touch_screen ? std::string(tr(Msg::SwipeNo)) : tr(Msg::ButtonNo, {cancel});
+    m.hint = tr(Msg::HermesWaiting);
   } else if (overlay_ == Overlay::Image) {
     m.screen = Screen::Image;
-    m.headline = "Image";
-    m.hint = profile_.cancel_label + " to close";
+    m.headline = tr(Msg::Image);
+    m.hint = tr(Msg::ButtonToClose, {cancel});
+  } else if (overlay_ == Overlay::Profiles) {
+    m.screen = Screen::Profiles;
+    m.headline = tr(Msg::ProfileListTitle);
+    for (const auto& p : agent_profiles_)
+      m.dash.push_back({p.name, p.id == agent_profile_ ? tr(Msg::ProfileListCurrent) : ">",
+                        p.id == agent_profile_ ? DashRow::Tone::Waiting : DashRow::Tone::Dim});
+    m.hint = tr(Msg::ProfileListHint);
+    m.detail = tr(Msg::ProfileListMore);
+    m.scroll = profile_page_;
   } else if (overlay_ == Overlay::Dashboard) {
     m.screen = Screen::Dashboard;
     m.headline = dash_headline_;
     m.dash = dash_rows_;
     m.scroll = dash_scroll_;
-    m.hint = profile_.touch_screen ? "Swipe down to close" : profile_.cancel_label + " to close";
+    m.hint = profile_.touch_screen ? std::string(tr(Msg::SwipeDownToClose)) : tr(Msg::ButtonToClose, {cancel});
   } else if (overlay_ == Overlay::Card) {
     m.screen = Screen::Card;
     m.headline = card_title_.empty() ? "Hermes" : card_title_;
-    m.hint = profile_.cancel_label + " to close";
+    m.hint = tr(Msg::ButtonToClose, {cancel});
     // A short card is a caption under the mascot; a long one gets the text layout and pages.
     m.hero = !ui_ || static_cast<int>(wrap_text(card_body_, ui_->layout().hero_cols).size()) <= kCaptionLines;
     if (m.hero) {
@@ -1661,42 +1852,54 @@ void App::update_model() {
   } else if (mode_ == Mode::Thinking) {
     m.screen = Screen::Thinking;
     m.hero = true;
-    m.headline = "Thinking";
+    m.headline = tr(Msg::Thinking);
     // The live status phrase when Hermes sends one, else what speech-to-text heard.
     m.detail = status_;
     if (!user_echo_.empty()) {
       m.body = "\"" + user_echo_ + "\"";
       if (m.detail.empty()) m.detail = m.body;
     }
-    m.hint = profile_.cancel_label + " to stop";
+    m.hint = tr(Msg::ButtonToStop, {cancel});
   } else if (mode_ == Mode::Responding) {
     m.screen = Screen::Responding;
-    m.headline = m.speaking ? "Speaking" : "Hermes";
+    m.headline = m.speaking ? tr(Msg::Speaking) : "Hermes";
     m.detail = status_;
     m.body = reply_;
-    m.hint = profile_.touch_screen ? "Hold to reply" : talk + " to reply";
+    m.hint = profile_.touch_screen ? std::string(tr(Msg::HoldToReply)) : tr(Msg::ButtonToReply, {talk});
     // Spoken audio can start before the text arrives: let the mascot talk meanwhile.
     m.hero = reply_.empty();
   } else {
     m.screen = Screen::Ready;
-    m.headline = "Ready";
+    m.headline = tr(Msg::Ready);
     m.body = reply_;
-    m.hint = profile_.touch_screen ? (talk_mode_ == TalkMode::Tap ? "Tap the screen to talk" : "Hold the screen to talk")
-                                   : (talk_mode_ == TalkMode::Tap ? "tap " : "hold ") + talk + " to talk";
+    const bool tap = talk_mode_ == TalkMode::Tap;
+    m.hint = profile_.touch_screen ? std::string(tr(tap ? Msg::TapScreenToTalk : Msg::HoldScreenToTalk))
+                                   : tr(tap ? Msg::TapButtonToTalk : Msg::HoldButtonToTalk, {talk});
     bool showing_reply = !reply_.empty() && static_cast<int32_t>(reply_until_ - now()) > 0;
     m.hero = !showing_reply;
     if (m.hero) {
-      m.headline = "Hi, I'm Hermes";
-      m.detail = reply_.empty() || !profile_.has_scroll_buttons ? "Ask me anything" : "UP shows my last reply";
-      if (dashboard_ready_ && can_open_dashboard() && reply_.empty())
-        m.detail = profile_.touch_screen ? "Swipe down for sessions" : profile_.cancel_label + " shows sessions";
+      const bool switching = agent_profiles_.size() > 1;
+      m.headline = switching && agent_profile_ != "default" ? tr(Msg::ProfileGreeting, {agent_profile_name()})
+                                                            : std::string(tr(Msg::HiImHermes));
+      m.detail = tr(reply_.empty() || !profile_.has_scroll_buttons ? Msg::AskMeAnything : Msg::UpShowsLastReply);
+      const bool sessions = dashboard_ready_ && can_open_dashboard() && reply_.empty();
+      if (sessions)
+        m.detail = profile_.touch_screen ? std::string(tr(Msg::SwipeDownForSessions)) : tr(Msg::ButtonShowsSessions, {cancel});
+      if (switching) {
+        // In tap-to-talk mode a tap records, so the name is no target there.
+        m.name_target = profile_.touch_screen && talk_mode_ == TalkMode::Hold;
+        m.detail = tr(m.name_target ? Msg::ProfileTapName : Msg::ProfileInSettings) +
+                   (sessions ? "\n" + m.detail : "");
+        m.caption_lines = 2;
+      }
     }
   }
-  bool keeps_detail = m.screen == Screen::Pairing || m.screen == Screen::Boot || m.screen == Screen::Prompt;
+  bool keeps_detail = m.screen == Screen::Pairing || m.screen == Screen::Boot || m.screen == Screen::Prompt ||
+                      m.screen == Screen::Profiles;
   if (!notice_.empty() && !keeps_detail) m.detail = notice_;
   if (m.screen == Screen::Ready && m.hero && power_status_ && power_status_->battery_percent &&
       *power_status_->battery_percent <= 10 && power_status_->external_power == false)
-    m.detail = "Low battery: connect USB";
+    m.detail = tr(Msg::LowBattery);
   if (!hint_flash_.empty()) m.hint = hint_flash_;
   if (!display_sleeping_) render(m);
 }
@@ -1723,9 +1926,12 @@ json::Value App::status_value() const {
       .set("phase", phase)
       .set("screen", screen_name(model_.screen))
       .set("paired", paired_)
+      .set("profile", agent_profile_)
       .set("server", server_url_)
       .set("network", network_up_);
   s.set("display_sleeping", display_sleeping_);
+  // The language the screen is in, and whether it follows Hermes's (`language` auto).
+  s.set("language", i18n::info(lang_).code).set("language_auto", lang_auto_);
   if (hal_.power) s.set("power", power_value());
   if (!pairing_code_.empty()) s.set("pairing_code", pairing_code_);
   if (!prompt_id_.empty()) s.set("prompt", prompt_id_);
@@ -1831,6 +2037,8 @@ std::string App::console(std::string_view raw) {
       return "@error battery_display must be icon, percentage, both or off";
     if (key == "battery_estimate" && !value.empty() && value != "off" && value != "liion")
       return "@error battery_estimate must be off or liion";
+    if (key == "language" && !value.empty() && value != "auto" && !i18n::parse(value))
+      return "@error language must be one of:" + language_codes();
     if (!hal_.storage) return "@error no storage";
     if (value.empty()) hal_.storage->erase(setting_storage_key(key));
     else if (!hal_.storage->set(setting_storage_key(key), value)) return "@error could not save " + key;
@@ -1899,6 +2107,7 @@ std::string App::console(std::string_view raw) {
     hal_.storage->erase("device_key");
     if (cmd == "factory-reset") {
       for (const char* k : kSettingKeys) hal_.storage->erase(setting_storage_key(k));
+      hal_.storage->erase("profile");
       for (const auto& k : profile_.extra_settings) hal_.storage->erase(k);
       hal_.storage->erase("wifi_nets");
       hal_.storage->erase("wifi_fast");  // where the last access point was (drivers/wifi_fast.hpp)

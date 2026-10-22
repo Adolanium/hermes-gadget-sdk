@@ -103,6 +103,7 @@ BoardConfig make() {
   b.codec.din = 10;
   b.codec.pa = 46;
   b.touch.enabled = true;
+  b.touch.ppi = 266;  // estimate (see TouchConfig::ppi)
   b.touch.addr = 0x5A;
   b.touch.rst = 40;
   b.touch.width = 466;
@@ -162,6 +163,7 @@ BoardConfig make() {
   b.codec.pa = 46;
   b.codec.mic = MicCodec::Es8311;  // analog electret microphone into the ES8311 ADC
   b.touch.enabled = true;
+  b.touch.ppi = 322;  // estimate (see TouchConfig::ppi)
   b.touch.controller = TouchController::Cst816;  // the CST820 sends the same report
   b.touch.addr = 0x15;
   b.touch.width = 368;
@@ -218,6 +220,7 @@ BoardConfig make() {
   b.codec.mic_gain_db = 30.0f;
   b.codec.vad_min_rms = 200.0f;
   b.touch.enabled = true;
+  b.touch.ppi = 315;  // estimate (see TouchConfig::ppi)
   b.touch.controller = TouchController::Ft5x06;  // the FT3168 sends the same report
   b.touch.addr = 0x38;
   b.touch.rst = 9;
@@ -268,6 +271,7 @@ BoardConfig make() {
   b.codec.pa = 46;
   b.codec.speaker_pa = true;  // the amplifier draws power only while sound plays
   b.touch.enabled = true;
+  b.touch.ppi = 314;  // estimate (see TouchConfig::ppi)
   b.touch.controller = TouchController::Cst9217;  // the CST9220 sends the same report
   b.touch.addr = 0x5A;
   b.touch.rst = 40;
@@ -319,6 +323,7 @@ BoardConfig make() {
   b.codec.dac_mclk = false;     // the factory demo clocks the ES8311 from BCLK
   b.codec.es7210_mics = 0x0f;   // MIC1 playback reference, MIC2/MIC4 microphones
   b.touch.enabled = true;
+  b.touch.ppi = 195;  // estimate (see TouchConfig::ppi)
   b.touch.controller = TouchController::Cst816;
   b.touch.addr = 0x15;
   b.touch.width = b.touch.height = 360;
@@ -354,6 +359,7 @@ BoardConfig make() {
   b.i2c = {11, 12, 400000};
   b.mic = {true, 45, -1, 46, true};  // PDM mic: CLK 45, DATA 46 (sck=45 sd=46, ws unused)
   b.touch.enabled = true;
+  b.touch.ppi = 200;  // estimate (see TouchConfig::ppi)
   b.touch.controller = TouchController::Cst816;
   b.touch.addr = 0x15;
   b.touch.rst = 10;
@@ -408,6 +414,7 @@ BoardConfig make() {
   // reset on GPIO47 (Waveshare's factory demo). On the non-touch SKUs nothing
   // answers at 0x15 and the touchscreen is reported absent.
   b.touch.enabled = true;
+  b.touch.ppi = 220;  // estimate (see TouchConfig::ppi)
   b.touch.controller = TouchController::Cst816;
   b.touch.addr = 0x15;
   b.touch.rst = 47;
@@ -440,6 +447,7 @@ BoardConfig make() {
   b.i2c = {8, 18, 400000};
   b.codec = {true, 2, 17, 45, 15, 16, 46};
   b.touch.enabled = true;
+  b.touch.ppi = 167;  // estimate (see TouchConfig::ppi)
   b.touch.controller = TouchController::Box3;
   b.touch.int_gpio = 3;  // Box3 wires the touch IRQ to GPIO3
   b.touch.width = 320;
@@ -471,6 +479,7 @@ BoardConfig make() {
   b.codec = {true, 0, 34, 33, 13, 14, -1};
   b.codec.speaker = SpeakerCodec::Aw88298;
   b.touch.enabled = true;
+  b.touch.ppi = 200;  // estimate (see TouchConfig::ppi)
   b.touch.controller = TouchController::Ft5x06;
   b.touch.addr = 0x38;
   b.touch.width = 320;
@@ -603,6 +612,7 @@ BoardConfig make() {
   b.codec.din = 3;
   b.codec.pa = 15;
   b.touch.enabled = true;
+  b.touch.ppi = 195;  // estimate (see TouchConfig::ppi)
   b.touch.controller = TouchController::Cst816;
   b.touch.addr = 0x15;  // INT on GPIO 10; the CST816 driver polls
   b.touch.width = b.touch.height = 360;
@@ -647,6 +657,7 @@ BoardConfig make() {
   // The touch controller sits on a second I2C bus. Only the touch version has
   // it; the driver reports the touchscreen absent when nothing answers.
   b.touch.enabled = true;
+  b.touch.ppi = 220;  // estimate (see TouchConfig::ppi)
   b.touch.controller = TouchController::Cst816;
   b.touch.addr = 0x15;
   b.touch.bus = {11, 7, 400000};
@@ -702,6 +713,7 @@ BoardConfig make() {
   b.codec.pa = 46;
   b.codec.mic = MicCodec::Es8311;
   b.touch.enabled = true;
+  b.touch.ppi = 188;  // estimate (see TouchConfig::ppi)
   b.touch.controller = TouchController::Cst816;
   b.touch.addr = 0x15;
   b.touch.bus = {11, 7, 400000};
@@ -748,6 +760,7 @@ BoardConfig make() {
   b.lcd.rgb.pclk_hz = 12000000;
   b.i2c = {38, 39, 400000};
   b.touch.enabled = true;
+  b.touch.ppi = 229;  // estimate (see TouchConfig::ppi)
   b.touch.controller = TouchController::Cst816;  // its CST826 sends the same report
   b.touch.addr = 0x15;
   b.touch.width = 480;
@@ -802,6 +815,7 @@ BoardConfig make() {
   b.lcd.rgb.timings.pclk_active_neg = true;
   b.i2c = {19, 20, 400000};
   b.touch.enabled = true;
+  b.touch.ppi = 187;  // estimate (see TouchConfig::ppi)
   b.touch.controller = TouchController::Box3;  // managed GT911/TT21100 driver
   b.touch.int_gpio = -1;  // touch INT not wired; the driver polls
   b.touch.width = 800;
@@ -847,6 +861,7 @@ BoardConfig make() {
   b.i2c = {45, 46, 400000};
   b.stc8_battery = true;
   b.touch.enabled = true;
+  b.touch.ppi = 118;  // estimate (see TouchConfig::ppi)
   b.touch.controller = TouchController::Gt911;
   b.touch.addr = 0x14;
   b.touch.width = 1024;

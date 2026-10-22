@@ -37,7 +37,9 @@ platforms:
       # max_utterance_s: 60
       # opus_bitrate: 24000    # Opus speaker audio for devices that decode it; 0 = PCM16 only
       # dashboard: true        # Hermes's sessions and status tiles on devices that draw them
+      # profiles: [work, home] # profiles gadgets may switch to, or "all"; off without it (see below)
       # battery_log: true      # keep each device's battery readings in a CSV (see below)
+      # language: es           # the language devices on `auto` show; default: Hermes's own
       # tls_cert: /path/cert.pem   # serve wss://
       # tls_key: /path/key.pem
 ```
@@ -84,12 +86,12 @@ After the restart, run `hermes gadget info` and use the new URL to update each d
 | Turn boundaries | `on_processing_start` / `on_processing_complete` | Become `turn.start` / `turn.end` |
 | Live status | `supports_status_text = True` + `set_status_text()` | Becomes `status` frames |
 | Streaming text | `supports_draft_streaming()` + `send_draft()`; `edit_message()` | Used when streaming is enabled; becomes `reply.delta` |
-| Final replies | `send()` | Markdown stripped and folded to ASCII for small screens |
+| Final replies | `send()` | Markdown stripped and folded to the device's `charset` (`ascii` or `latin1`) for small screens |
 | Whole-file TTS | `play_tts()` / `send_voice()` | WAV decoded in Python; other formats through ffmpeg; resampled to the device rate |
 | Streaming TTS | `supports_streaming_tts` / `begin_` / `write_` / `finish_` / `abort_streaming_tts` | PCM chunks forwarded as they are generated, for TTS providers Hermes can stream |
 | Images from the agent | `send_image_file()` / `send_image()` | Converted to RGB565 to fit the screen (needs Pillow) |
 | Confirmations (`/new`, `/undo`, model switches) | `send_slash_confirm()` + `tools.slash_confirm.resolve()` | Shown as a `prompt`; TALK resolves `once`, CANCEL `cancel`. The handler's reply goes back with `send()` |
-| Dangerous-command approvals | `_send_exec_approval_prompt(ExecApprovalPrompt)` + `tools.approval.resolve_gateway_approval()` | Shown as a `prompt`; TALK resolves `once`, CANCEL `deny`. On timeout Hermes calls `edit_message()` on the prompt, which withdraws it |
+| Dangerous-command approvals | `_send_exec_approval_prompt(ExecApprovalPrompt)` + `tools.approval.resolve_gateway_approval()` | Shown as a `prompt`; TALK resolves `once`, CANCEL `deny`. The prompt's `ttl_s` is Hermes's approval timeout (`approvals.timeout`, read by `compat.approval_timeout_s()`), so the device and the adapter both drop it when that time passes. On timeout Hermes calls `edit_message()` on the prompt, which withdraws it |
 | Agent questions (the `clarify` tool) | `send_clarify()` | Hermes's text fallback (the question with numbered choices; the next message, spoken or typed, is the answer), also spoken with Hermes's text-to-speech when the device speaks replies. The device has no multiple-choice prompt |
 | Pairing | Hermes DM pairing (`gateway/pairing.py`, `hermes pairing approve`; `hermes gadget pair` approves through the same `PairingStore`) | See below |
 | Authorization state | `BasePlatformAdapter._is_sender_authorized()` | The runner-installed check; used to mirror approval and revocation to the device |
@@ -138,7 +140,7 @@ Hermes asks before destructive commands (`/new`, `/undo`), costly model switches
 
 - **Holding CANCEL** sends `session.new`, which the adapter turns into `/new`. Hermes then asks "Confirm /new". The hold already was a deliberate confirmation, so when the confirmation for `new` arrives within 15 s of the device's own request, the adapter resolves it with `once` and forwards the reset reply. A `/new` typed or spoken any other way still asks.
 - **Everything else** goes to the device as a question. The adapter keeps only the header and detail of Hermes's message, dropping the choice list and typed-reply instructions meant for chat apps.
-- **Dangerous commands** are shown exactly as they will run, never reshaped: no Markdown stripping, folding or dropped characters. The device shows only printable ASCII, collapses runs of spaces and keeps one line of a question on its smallest screens, so a command is shown only when it fits one line of the device's `text_cols`, less two columns for the `..` the device writes when it cuts the description below. Any other command (longer, multi-line, with a tab, double space or non-ASCII character, or for a device that reports no `text_cols`) is shown as "Can't show this command": CANCEL still denies it, and TALK does nothing, so it must be approved on the host.
+- **Dangerous commands** are shown exactly as they will run, never reshaped: no Markdown stripping, folding or dropped characters. Only a command in printable ASCII is shown; the device collapses runs of spaces and keeps one line of a question on its smallest screens, so a command is shown only when it fits one line of the device's `text_cols`, less two columns for the `..` the device writes when it cuts the description below. Any other command (longer, multi-line, with a tab, double space or non-ASCII character, or for a device that reports no `text_cols`) is shown as "Can't show this command": CANCEL still denies it, and TALK does nothing, so it must be approved on the host.
 - **Paired devices only:** a device that is unpaired, or that reconnects unpaired, loses its open questions, and an answer from an unpaired session is ignored.
 - **One at a time:** questions queue per device in arrival order, which matches Hermes's first-in, first-out approval queue. A question asked while the device was offline is shown when it reconnects.
 - **Elsewhere:** answering with `/approve` or `/deny` from another chat still works; the device's copy then reports "That question has expired" if pressed.
@@ -201,9 +203,21 @@ Each would replace a workaround above with a small, generic hook that every plat
    - *Upstream status (October 2026):* an open pull request, [NousResearch/hermes-agent#65576](https://github.com/NousResearch/hermes-agent/pull/65576), adds `reasoning_effort` to `channel_overrides`, which is per chat (per device). A platform-wide default would be a small follow-up to it rather than a separate change.
    - *SDK change afterwards:* document a `platforms.gadget.reasoning_effort: low` default.
 
+6. **Approve a user directly.**
+   - *What:* a public `PairingStore.approve_user(platform, user_id, name)`.
+   - *Why:* the plugin approves a device in each profile it switches to, and today it has to mint a pairing code and redeem it (`plugin/adapter.py`, `_grant`).
+   - *SDK change afterwards:* `_grant` calls it.
+
 ## Running against a profile or a multiplexed gateway
 
-The adapter binds its own port, so give each profile that serves gadgets a different `platforms.gadget.extra.port`.
+A multiplexed gateway runs every profile in one process. Enable the gadget platform in the default profile only: that one adapter serves every profile. When you turn profile switching on, each device chooses which profile answers it from its settings ([protocol](protocol.md#profiles)). A gateway that is not multiplexed offers no profiles, and its devices talk to the profile it was started with.
+
+- **Turn it on.** Switching is off by default, and devices talk to the default profile as before. Set `platforms.gadget.extra.profiles` in the default profile's `config.yaml`. A list, such as `profiles: [work, home]`, offers those profiles and the default one. `profiles: all` offers every profile the gateway serves. A device shows at most 8 of them: the default profile and the next 7. Parked profiles and those with `gateway.standalone: true` are never offered. The plugin reads the key only from the default profile's config, so a profile cannot add itself. A profile that is parked or deleted while a device uses it, or that you take off the list, sends the device back to the default profile at the next pairing check.
+- **Pair once.** A device authorized in the default profile (an approved pairing code, `GADGET_ALLOWED_USERS`, or an allow-all setting) may use every offered profile. When it first switches to a profile, the plugin approves it in that profile's pairing store, so `hermes -p <profile> pairing list` shows it there. Approving it also adds it to that profile's `GADGET_ALLOWED_USERS`, as `hermes pairing approve` does.
+- **Revoke.** Remove the device's authorization in the default profile: `hermes pairing revoke gadget <id>`, and take it out of `GADGET_ALLOWED_USERS` or turn allow-all off if that is how it was let in. Within a few seconds it is moved back to the default profile, its pending questions are dropped, and it cannot switch again. Its approvals in other profiles stay on disk but cannot be used while the default profile refuses it. Before the plugin approves a device in another profile, it marks the device as bound to the default profile (an empty file in `plugin-data/gadget/owner-bound/`). A marked device is checked against the default profile before every message for another profile, even if it later connects with firmware that cannot switch. Nothing deletes the mark, `hermes gadget forget` included. To remove the other approvals, run `hermes -p <profile> pairing revoke gadget <id>`. `hermes gadget forget <id>` only resets the device's enrolled key so it can enroll again; it is not a revocation.
+- **Before you enable a gadget listener in another profile,** revoke the approvals the plugin made there (`hermes -p <profile> pairing revoke gadget <id>`, and remove the id from that profile's `GADGET_ALLOWED_USERS`). The mark lives in the default profile's plugin data, so a listener in the other profile does not see it and accepts those approvals, from firmware that cannot switch too.
+- **Keep the plugin enabled in every profile** a gadget may use, with only its gadget listener off (see the first item under [One profile per gadget](#one-profile-per-gadget)). The profile needs the plugin for the gadget tools. The device's dashboard lists the default profile's sessions only.
+- **Switching.** A switch is refused, and can be tried again, while the device has a turn running or a question pending. A reply that was already on its way from the old profile may still appear. Each profile keeps its own conversation, memory and personality, so switching does not carry the chat over.
 
 Device keys and pending pairing codes live in the plugin data directory. It is resolved with `plugin_data_dir("gadget")` when the adapter connects, so it follows whichever Hermes home the adapter is started under. The gateway re-reads `devices.json` before each lookup or change, so `hermes gadget forget` and `hermes gadget pair` from another terminal take effect without a restart.
 
@@ -232,3 +246,7 @@ Then, in each routed profile:
 Hermes's tool search can keep plugin tools out of the model's tool list until the model searches for them. A model that answers without searching then says it can't change the volume or brightness. If the gadget tools are listed as available but the agent never calls them, turn tool search off in that profile with `hermes -p kitchen config set tools.tool_search.enabled off` and start a new session, so the earlier refusals aren't in its history.
 
 Tried with three devices routed to three profiles on one gateway: the turns from the two devices used so far each ran in their own profile's session.
+
+### Profile switching and profile routes
+
+`gateway.profile_routes` and `profiles` do different jobs. A route pins one device to one profile, chosen on the host. The plugin offers a routed device no profiles, so its settings have no **Hermes profile** item, and it keeps the routed profile's pairing. `profiles` lets every device without a route pick its own profile, from the ones you list. To let a routed device switch, remove its route; it then needs approval in the default profile.

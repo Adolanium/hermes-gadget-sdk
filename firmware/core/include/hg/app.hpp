@@ -17,6 +17,7 @@
 #include "hg/crypto.hpp"
 #include "hg/frame_stats.hpp"
 #include "hg/hal.hpp"
+#include "hg/i18n.hpp"
 #include "hg/json.hpp"
 #include "hg/ui.hpp"
 #include "hg/vad.hpp"
@@ -48,6 +49,9 @@ struct DeviceProfile {
   // The screen stands in for the buttons (hold to talk, tap to answer yes,
   // swipe to cancel); on-screen hints are worded for touch.
   bool touch_screen = false;
+  // The touchscreen's pixels per inch, so tap targets are about 7 mm tall; 0 assumes kDefaultTouchPpi.
+  uint16_t touch_ppi = 0;
+  static constexpr uint16_t kDefaultTouchPpi = 200;
   // Board-specific settings the console accepts besides the core ones. Changes
   // reach the port through App::on_setting_changed.
   std::vector<std::string> extra_settings;
@@ -106,6 +110,21 @@ class App {
   void close_settings();
   bool settings_open() const { return menu_ != Menu::Closed; }
   bool settings_title_hit(int x, int y) const;
+  // Hermes profiles: which one answers this device. Switching asks the server; the
+  // device keeps a profile only once Hermes confirms it, and asks again only after an answer.
+  bool next_agent_profile();
+  bool select_agent_profile(size_t index);
+  // Touch: a quick tap on the name under the mascot opens the list of profiles;
+  // a tap on a row asks for that profile; CANCEL (swipe down) closes it.
+  bool profile_name_hit(int x, int y) const;
+  bool open_profile_picker();
+  bool profile_picker_open() const { return overlay_ == Overlay::Profiles; }
+  bool profile_switch_pending() const { return !profile_pending_.empty(); }
+  static constexpr uint32_t kProfileReplyMs = 15000;
+  int profile_row_hit(int x, int y) const;
+  void profile_tap(int x, int y);
+  const std::string& agent_profile() const { return agent_profile_; }
+  std::string agent_profile_name() const;
   // Returns true when this input only wakes a sleeping display.
   bool wake_display();
   // A short press of the PMIC's power key: turns the screen off, or back on.
@@ -207,6 +226,10 @@ class App {
   void h_ota_begin(const json::Value& m);
   void h_ota_end(const json::Value& m);
   void h_ota_abort(const json::Value& m);
+  void h_profile(const json::Value& m);
+  bool can_switch_profile() const;
+  void set_agent_profile(const std::string& id);
+  void profile_notice(std::string text);
 
   // firmware updates
   void ota_chunk(uint8_t stream, uint16_t seq, const uint8_t* data, size_t len);
@@ -263,6 +286,13 @@ class App {
   // Tells Hermes when the screen goes dark or lights up (docs/protocol.md#screen-sleep).
   void flush_display_state();
   void set_hint_flash(std::string text);
+  // The device's own text in the chosen language (hg/i18n.hpp).
+  const char* tr(i18n::Msg id) const { return i18n::text(lang_, id); }
+  std::string tr(i18n::Msg id, std::initializer_list<std::string_view> args) const {
+    return i18n::format(tr(id), args);
+  }
+  // A board's control name (DeviceProfile talk_label, cancel_label) in that language.
+  std::string control(const std::string& label) const { return i18n::control_name(lang_, label); }
   void update_model();
   void log(LogLevel level, std::string_view msg);
   uint32_t now() const { return hal_.system->now_ms(); }
@@ -283,8 +313,21 @@ class App {
   TalkMode talk_mode_ = TalkMode::Hold;
   uint8_t volume_ = 70;
   uint8_t brightness_ = 100;
-  enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, Microphone, Speaker, Display, Inputs, Info,
-                              Power, IdleTimer, PowerOff, WifiSetup, Phone, Back };
+  i18n::Lang lang_ = i18n::Lang::En;
+  struct AgentProfile {
+    std::string id, name;
+  };
+  std::vector<AgentProfile> agent_profiles_;  // offered in welcome; empty = no switching
+  std::string agent_profile_ = "default";
+  // A profile.select awaiting Hermes's answer; one at a time (empty: none).
+  std::string profile_pending_;
+  uint32_t profile_pending_at_ = 0;
+  int profile_page_ = 0;  // first profile on the list's page
+  // `language` is auto: follow the language Hermes sends in `welcome` (English until it does).
+  bool lang_auto_ = false;
+  std::optional<i18n::Lang> hermes_lang_;  // from the last `welcome` that named one this firmware has
+  enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, Profile, Microphone, Speaker, Display, Inputs,
+                              Info, Power, IdleTimer, PowerOff, WifiSetup, Phone, Language, Back };
   enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };
   Menu menu_ = Menu::Closed;
   HardwareCheck hardware_check_ = HardwareCheck::None;
@@ -374,7 +417,7 @@ class App {
   uint32_t id_counter_ = 0;
 
   // overlays
-  enum class Overlay : uint8_t { None, Card, Image, Dashboard };
+  enum class Overlay : uint8_t { None, Card, Image, Dashboard, Profiles };
   Overlay overlay_ = Overlay::None;
   uint32_t overlay_until_ = 0;  // 0 = until dismissed
   std::string card_title_, card_body_;
@@ -400,6 +443,7 @@ class App {
   std::string notice_;
   uint32_t notice_until_ = 0;
   std::string hint_flash_;
+  bool hint_countdown_ = false;  // hint_flash_ counts down to a new session
   uint32_t hint_flash_until_ = 0;
 
   // actions & telemetry

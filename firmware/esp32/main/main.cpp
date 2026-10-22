@@ -412,6 +412,7 @@ extern "C" void app_main(void) {
   profile.cancel_label = board.cancel_label;
   if (touch && board.touch.enabled) {
     profile.touch_screen = true;
+    profile.touch_ppi = board.touch.ppi;
     profile.extra_settings = {"touch_cancel"};
   }
 #if !CONFIG_HG_BOARD_ESP32_CYD
