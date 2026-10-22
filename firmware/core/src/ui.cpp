@@ -728,7 +728,9 @@ Ui::HeroGeom Ui::hero_geom(const UiModel& m) const {
   if (static_cast<int>(g.detail.size()) > max_lines) {
     g.detail.resize(static_cast<size_t>(max_lines));
     std::string& last = g.detail.back();
-    if (static_cast<int>(last.size()) + 2 > cols) last.resize(static_cast<size_t>(std::max(0, cols - 2)));
+    // Columns are letters, not bytes: an accented line must not be cut early or mid-letter.
+    if (static_cast<int>(font::length(last)) + 2 > cols)
+      last.resize(font::prefix(last, static_cast<size_t>(std::max(0, cols - 2))));
     last += "..";
   }
   // Reserve one detail line even when there is none, so the mascot keeps its size.
