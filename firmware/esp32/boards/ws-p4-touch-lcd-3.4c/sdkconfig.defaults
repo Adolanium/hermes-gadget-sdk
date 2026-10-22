@@ -52,5 +52,3 @@ CONFIG_ESP_HOSTED_IDF_SLAVE_TARGET="esp32c6"
 CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y
 
 CONFIG_HG_BOARD_WS_P4_TOUCH_LCD_3_4C=y
-path">
-/home/rahlquist/hermes-gadget-sdk/firmware/esp32/boards/ws-p4-touch-lcd-3.4c/sdkconfig.defaults

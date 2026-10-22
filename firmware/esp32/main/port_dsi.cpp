@@ -70,9 +70,11 @@ bool DsiDisplay::on_color_done(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_d
 }
 
 // JD9365 800x800 panel init sequence (Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C).
-// Sourced from Waveshare BSP (esp32_p4_wifi6_touch_lcd_xc, 800x800 branch).
+// The values and their order follow Waveshare's board support package
+// waveshare/esp32_p4_wifi6_touch_lcd_xc 2.0.0 (the CONFIG_BSP_LCD_TYPE_800_800_3_4_INCH
+// table in esp32_p4_wifi6_touch_lcd_xc.c), Apache License 2.0; see NOTICE. Unchanged.
 static const jd9365_lcd_init_cmd_t kJd9365InitCmds[] = {
-{0xE0, (uint8_t[]){0x00}, 1, 0},
+    {0xE0, (uint8_t[]){0x00}, 1, 0},
 
     {0xE1, (uint8_t[]){0x93}, 1, 0},
     {0xE2, (uint8_t[]){0x65}, 1, 0},

@@ -771,9 +771,11 @@ idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/ws-p4-touch-lcd-3.4c/sdk
     set-target esp32p4 build
 ```
 
-Experimental: not yet flashed on hardware. Touch orientation and audio levels need verification.
+Releases don't include this board yet, so the browser installer doesn't list it. CI builds the profile on every change.
 
-Wi-Fi caveat: the ESP32-C6 companion on this board does not ship with an esp_hosted slave image that this host (2.7.0) can talk to — `g_wifi.begin()` times out after ~10 s and the gadget runs offline until the C6 is flashed. Flash `network_adapter.bin` (CrowPanel C6 firmware, V2.12.3, in `CrowPanel_Advance_ESP32-P4 Display_Firmware_Upgrade_Guide/.../`) to the C6 via its SH1.0 UART header with esptool before expecting Wi-Fi.
+Experimental. The owner confirmed the display, C6-hosted Wi-Fi, pairing, reconnect after restart, factory reset and a one-hour run; touch coordinates, the microphone, the speaker, network recovery and OTA are not verified. See the [partial physical report](hardware-validation.md#waveshare-p4-touch-lcd-34c-partial-physical-report).
+
+Wi-Fi caveat: the ESP32-C6 companion on this board does not ship with an esp_hosted slave image that this host (esp_hosted 2.12.6) can talk to. `g_wifi.begin()` times out after about 10 s and the gadget runs offline until the C6 is flashed. Flash `network_adapter.bin` (CrowPanel C6 firmware, V2.12.3, in `CrowPanel_Advance_ESP32-P4 Display_Firmware_Upgrade_Guide/.../`) to the C6 through its SH1.0 UART header with esptool before expecting Wi-Fi. The [report](hardware-validation.md#getting-the-c6-working-on-this-board) lists every step that was needed.
 
 ## Build and flash
 
