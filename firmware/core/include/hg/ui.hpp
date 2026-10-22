@@ -143,6 +143,14 @@ class Ui {
   // whole panel (Display::framebuffer_rows) the band is drawn once per window it
   // spans, so the caller needs no idea of the windowing.
   void draw_bands(int y0, int y1, void (Ui::*draw)(Canvas&, const UiModel&), const UiModel& m);
+  // Calls draw(a, b) for each framebuffer window panel rows [y0, y1) cross, with
+  // the window mapped and [a, b) the panel rows of the range inside it, then
+  // pushes those rows. One call for the whole range when the framebuffer holds
+  // the panel.
+  template <typename Draw>
+  void each_window(int y0, int y1, Draw&& draw);
+  // A canvas over the whole panel (not just the UI area) for the current window.
+  Canvas panel_canvas();
   // Sends panel rows [y0, y1) to the display, timed while measuring.
   void push(int y0, int y1);
   void draw_top(Canvas& c, const UiModel& m);

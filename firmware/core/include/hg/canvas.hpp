@@ -60,7 +60,7 @@ class Canvas {
   // rows the buffer holds. `true` when the window is empty.
   bool row_window(int& y0, int& y1) const {
     y0 = std::max(clip_y0_, base_y_);
-    y1 = std::min(clip_y1_, base_y_ + rows_);
+    y1 = std::min(std::min(clip_y1_, h_), base_y_ + rows_);
     return y0 >= y1;
   }
 

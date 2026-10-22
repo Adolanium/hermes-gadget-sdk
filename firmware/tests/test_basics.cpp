@@ -156,6 +156,37 @@ TEST("canvas: drawing respects the row clip") {
   CHECK_EQ(lit, 20);
 }
 
+TEST("canvas: a band canvas writes only the rows its framebuffer holds") {
+  // A 10x10 canvas over a buffer that holds rows [4, 7), with a guard row on
+  // either side: every primitive stays inside the rows it holds.
+  constexpr int kBase = 4, kRows = 3;
+  std::vector<uint16_t> px(10 * (kRows + 2), 0x1234);
+  hg::Canvas c(px.data() + 10, 10, 10, false, 0, kBase, kRows);
+  c.fill_rect(0, 0, 10, 10, 0xFFFF);
+  for (int y = 0; y < 10; ++y) c.pixel(y, y, 0x0F0F);
+  const uint8_t bits[1] = {0xFF};
+  for (int y = 0; y < 10; ++y) c.bitmap1(0, y, 8, 1, bits, 0x00F0);
+  c.text(0, 0, "Hermes", 2, 0x0F00);
+  const std::vector<uint16_t> block(10 * 10, 0x0001);
+  c.blit(0, 0, 10, 10, block.data());
+  for (int x = 0; x < 10; ++x) {
+    CHECK_EQ(px[static_cast<size_t>(x)], uint16_t(0x1234));
+    CHECK_EQ(px[static_cast<size_t>((kRows + 1) * 10 + x)], uint16_t(0x1234));
+  }
+  // Row y lands at buffer row y - base, and the row clip still applies.
+  std::vector<uint16_t> band(10 * kRows, 0);
+  hg::Canvas b(band.data(), 10, 10, false, 0, kBase, kRows);
+  b.set_clip_rows(5, 6);
+  b.fill_rect(0, 0, 10, 10, 0xFFFF);
+  b.pixel(3, 6, 0x0F0F);  // held, but outside the clip
+  b.pixel(3, 5, 0x0F0F);
+  for (int y = 0; y < kRows; ++y)
+    for (int x = 0; x < 10; ++x) {
+      const uint16_t want = y + kBase != 5 ? 0 : x == 3 ? 0x0F0F : 0xFFFF;
+      CHECK_EQ(band[static_cast<size_t>(y * 10 + x)], want);
+    }
+}
+
 TEST("vad: speech followed by silence ends the utterance") {
   hg::Vad vad;
   hg::Vad::Config cfg;

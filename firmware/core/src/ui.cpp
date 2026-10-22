@@ -206,25 +206,38 @@ Canvas Ui::canvas() {
 
 void Ui::flush(int y0, int y1) { push(y0 + oy_, y1 + oy_); }
 
-void Ui::draw_bands(int y0, int y1, void (Ui::*draw)(Canvas&, const UiModel&), const UiModel& m) {
+Canvas Ui::panel_canvas() {
+  const int rows = display_.framebuffer_rows();
+  return Canvas(display_.framebuffer(), panel_.width, panel_.height, panel_.swap_bytes, 0, frame_origin_,
+                rows > 0 ? rows : panel_.height);
+}
+
+template <typename Draw>
+void Ui::each_window(int y0, int y1, Draw&& draw) {
   // Windows tile the panel, `step` rows at a time (the whole panel when the
-  // framebuffer holds it). UI row y sits at panel row y + oy_, so a window
-  // covers UI rows [top - oy_, top + step - oy_).
+  // framebuffer holds it).
   const int win = display_.framebuffer_rows();
-  const int ui_h = static_cast<int>(info_.height);
-  const int panel_h = panel_.height;
-  const int step = win > 0 ? win : panel_h;
-  for (int top = 0; top < panel_h; top += step) {
-    const int a = std::max(y0, top - oy_);
-    const int b = std::min(y1, std::min(ui_h, top + step - oy_));
+  const int step = win > 0 ? win : panel_.height;
+  for (int top = 0; top < panel_.height; top += step) {
+    const int a = std::max(y0, top), b = std::min(y1, top + step);
     if (a >= b) continue;
     frame_origin_ = top;
     display_.set_frame_origin(frame_origin_);
-    Canvas c = canvas();
-    c.set_clip_rows(a, b);  // the canvas drops anything past the window as well
-    (this->*draw)(c, m);
-    push(a + oy_, b + oy_);
+    draw(a, b);
+    push(a, b);
   }
+}
+
+void Ui::draw_bands(int y0, int y1, void (Ui::*draw)(Canvas&, const UiModel&), const UiModel& m) {
+  // UI row y sits at panel row y + oy_. Off a round panel's UI square only the
+  // background is ever drawn, so a window that last held other rows already
+  // has the right pixels beside the square.
+  y1 = std::min<int>(y1, info_.height);
+  each_window(y0 + oy_, y1 + oy_, [&](int a, int b) {
+    Canvas c = canvas();
+    c.set_clip_rows(a - oy_, b - oy_);  // the canvas drops anything past the window as well
+    (this->*draw)(c, m);
+  });
 }
 
 void Ui::push(int y0, int y1) {
@@ -275,9 +288,7 @@ void Ui::draw_frame(const UiModel& m) {
   const int h = info_.height;
   if (!valid_ && (ox_ || oy_)) {
     // Round panel: everything outside the UI area stays the background colour.
-    Canvas panel(display_.framebuffer(), panel_.width, panel_.height, panel_.swap_bytes);
-    panel.fill_rect(0, 0, panel_.width, panel_.height, bg_);
-    push(0, panel_.height);
+    each_window(0, panel_.height, [&](int, int) { panel_canvas().fill_rect(0, 0, panel_.width, panel_.height, bg_); });
   }
   if (panel_.round) draw_round_battery(m);
   const int y_header = layout_.top_h;
@@ -411,11 +422,12 @@ void Ui::draw_round_battery(const UiModel& m) {
                            .val(m.battery_text).val(y0).get();
   if (valid_ && key == battery_hash_) return;
   battery_hash_ = key;
-  Canvas panel(display_.framebuffer(), panel_.width, panel_.height, panel_.swap_bytes);
-  // Clear the band the strip can occupy at any level, so a shorter or hidden strip leaves nothing behind.
-  panel.fill_rect(0, 0, panel_.width, oy_, bg_);
-  if (m.battery >= 0) draw_battery(panel, m, (panel_.width - battery_width(m)) / 2, (y0 + y1) / 2);
-  push(0, oy_);
+  each_window(0, oy_, [&](int, int) {
+    Canvas panel = panel_canvas();
+    // Clear the band the strip can occupy at any level, so a shorter or hidden strip leaves nothing behind.
+    panel.fill_rect(0, 0, panel_.width, oy_, bg_);
+    if (m.battery >= 0) draw_battery(panel, m, (panel_.width - battery_width(m)) / 2, (y0 + y1) / 2);
+  });
 }
 
 int Ui::battery_width(const UiModel& m) const {
