@@ -309,11 +309,16 @@ void SpiDisplay::flush(uint16_t y0, uint16_t y1) {
   // Flush takes panel rows; the band flush counts from the framebuffer's first row.
   const hg::BandFlush::Event event =
       bands_->flush(static_cast<int>(y0) - frame_origin_, static_cast<int>(y1) - frame_origin_);
-  if (frame_rows_ < cfg_.height &&
-      (event == hg::BandFlush::Event::TimedOut || event == hg::BandFlush::Event::Resumed)) {
+  if (frame_rows_ < cfg_.height) {
     // A banded framebuffer holds no rows to resend, so the next frame repaints
-    // the whole screen rather than leave a band behind on the panel.
-    repaint_.store(true, std::memory_order_relaxed);
+    // the whole screen rather than leave a band behind on the panel. While the
+    // late transfer is pending every flush is dropped, that repaint included, so
+    // keep asking until flushes reach the panel again. The resend on resuming
+    // pushes the whole band, and only the rows just drawn in it are current, so
+    // that asks for one more repaint as well.
+    if (event == hg::BandFlush::Event::TimedOut) paused_ = true;
+    if (event == hg::BandFlush::Event::Resumed) paused_ = false;
+    if (paused_ || event == hg::BandFlush::Event::Resumed) repaint_.store(true, std::memory_order_relaxed);
   }
   report_band_event(TAG, event);
 }

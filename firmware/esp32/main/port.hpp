@@ -267,6 +267,7 @@ class SpiDisplay final : public hg::Display {
   int frame_rows_ = 0;  // panel rows fb_ holds (the whole panel unless it is banded)
   int frame_origin_ = 0;  // panel row the first framebuffer row maps to
   std::atomic<bool> repaint_{false};  // a transfer was lost: redraw the screen
+  bool paused_ = false;  // a banded flush timed out and its transfer is still pending
 };
 
 // I2S MEMS microphone: a reader task posts 20 ms PCM16 chunks while capturing.
