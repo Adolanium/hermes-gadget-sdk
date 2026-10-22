@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
+
+Hermes Gadget 0.3.0 adds twelve board profiles, among them the first ESP32-P4 board (the Elecrow CrowPanel Advanced 10.1"), Opus speaker audio, device text in Spanish with a Latin-1 font that can follow Hermes's own language, switching Hermes profiles from the gadget, and a session dashboard. It also brings many reliability fixes for audio, Wi-Fi, power and the plugin. Details by area follow.
 
 ### Hardware and setup
 
@@ -99,6 +101,16 @@
 - CI pins every action to a commit and PlatformIO to a version, gives every job a timeout, and checks that each pull request adds a changelog line (or carries the `no-changelog` label). A release now requires successful CI and Hermes runs on the tagged commit and a `CHANGELOG.md` section for the version, which opens the release notes. The security policy covers `linux/`.
 - The Linux guide names the real approval command, `hermes gadget pair`. A test now checks that every `hermes gadget` and `hermes-gadget` command in the guides exists in the CLIs.
 - CI installs libopus on the Ubuntu Python jobs and sets `HG_REQUIRE_LIBOPUS=1`, so the Opus encode/decode round trip and bitrate tests run there and fail, not skip, if the library can't load.
+
+### Upgrade and verification
+
+Use the [browser installer](https://adolanium.github.io/hermes-gadget-sdk/installer.html) for USB installation. Existing devices can use `hermes gadget update <device> --latest`. Install the matching plugin using the commit-pinned command in the release notes, and update the copy in every cloned Hermes profile too (see [One profile per gadget](docs/hermes-integration.md#one-profile-per-gadget)). Old firmware keeps working with this plugin, and this firmware with the 0.2.0 plugin. Opus audio, accented text, Hermes's language and profile switching need both updated. Profile switching stays off until `profiles` is set in the default profile's gadget config.
+
+Hardware ports remain experimental until a complete physical report is recorded for the exact revision; see [hardware capabilities and verification](docs/hardware-validation.md). Software tests and successful builds do not establish physical hardware verification.
+
+### Contributors
+
+Thanks to [Antonio Lourenco (@tozes)](https://github.com/tozes), [Luiz Gustavo Saraiva (@luizgustavosaraiva)](https://github.com/luizgustavosaraiva), [Richard Ahlquist (@rahlquist)](https://github.com/rahlquist), [Alberto Espinosa (@AlbertoEJ)](https://github.com/AlbertoEJ), [@momoshamiko](https://github.com/momoshamiko), [@mforce](https://github.com/mforce), [@MacroAnarchy](https://github.com/MacroAnarchy), [Don F. Irwin (@0xdfi)](https://github.com/0xdfi), [@timbrinded](https://github.com/timbrinded), [@prisme](https://github.com/prisme), [@iacker](https://github.com/iacker), [@dreamhunter02](https://github.com/dreamhunter02), [@burndown](https://github.com/burndown), [Pablo Musaber (@PabloMusaber)](https://github.com/PabloMusaber), [Joerg Peetz (@JPeetz)](https://github.com/JPeetz), [Geo (@Geofresh)](https://github.com/Geofresh) and [@Delphus123](https://github.com/Delphus123) for their pull requests, and to [@Taxgab](https://github.com/Taxgab), [@dcentgeo](https://github.com/dcentgeo) and [@Silexperience210](https://github.com/Silexperience210) for their reports.
 
 ## 0.2.0
 
