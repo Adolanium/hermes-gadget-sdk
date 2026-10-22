@@ -13,6 +13,7 @@ import inspect
 import json
 import math
 import struct
+import time
 import types
 
 import pytest
@@ -496,6 +497,44 @@ def test_command_approvals_queue_on_the_device(gadget, make_sim, monkeypatch):
     assert sim.wait_screen("ready", timeout=5)
     assert sim.last_received("notice")["text"] == "Approval timed out."
     assert resolved == [("sk", "once")]
+
+
+def test_approval_cards_carry_the_hermes_approval_timeout(gadget, make_sim, monkeypatch):
+    import gateway.platforms.base_exec_approval as exec_approval
+    from hermes_gadget_plugin.adapter import _Prompt
+
+    monkeypatch.setattr(exec_approval, "approval_timeout_seconds", lambda: 42)
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+    result = gadget.run(gadget.adapter.send_exec_approval(
+        chat_id=device_id, command="rm -rf build", session_key="sk"))
+    assert result.success and sim.wait_screen("prompt", timeout=5)
+    assert sim.last_received("prompt")["ttl_s"] == 42
+
+    # Every question expires with its time limit, not only slash confirmations.
+    stale = _Prompt(id="q", kind="approval", session_key="sk", title="t", text="x", ttl_s=60,
+                    created=time.monotonic() - 61)
+    fresh = _Prompt(id="q", kind="approval", session_key="sk", title="t", text="x", ttl_s=60)
+    assert stale.expired() and not fresh.expired()
+
+
+def test_an_approval_withdrawn_while_the_device_was_away_stays_gone(gadget, make_sim, monkeypatch):
+    import gateway.platforms.base_exec_approval as exec_approval
+
+    monkeypatch.setattr(exec_approval, "approval_timeout_seconds", lambda: 42)
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+    result = gadget.run(gadget.adapter.send_exec_approval(
+        chat_id=device_id, command="rm -rf build", session_key="sk"))
+    assert result.success and sim.wait_screen("prompt", timeout=5)
+
+    # The device goes away, and Hermes's approval times out while it is gone.
+    sim.close()
+    gadget.adapter._prompts[device_id][0].created -= 43
+    again = make_sim(gadget.url)
+    assert again.wait_screen("ready", timeout=10)
+    again.run_for(0.5)
+    assert again.last_received("prompt") is None
 
 
 def _recording_approvals(monkeypatch):
