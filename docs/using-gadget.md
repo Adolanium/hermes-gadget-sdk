@@ -55,7 +55,7 @@ Ask Hermes for a timer, for example "set a pasta timer for nine minutes". Hermes
 - **Alarm:** at zero, the screen shows TIMER DONE and the timer's name. A board with a speaker beeps twice every 1.5 seconds for one minute, and the screen flashes green with each beep. A board without a speaker shows the alarm without sound. The Knob 1.8, CrowPanel 2.1, CrowPanel 5.0 and T-Display-S3 have no speaker.
 - **Stop it:** press a button, tap the screen, or swipe down. The press only stops the alarm; it does not start a recording. Hermes can stop it with `timer.cancel`.
 - **Quiet alarm:** after one minute the beeps stop, but TIMER DONE stays on screen until you stop it. If the screen went dark, a press lights it and shows the alarm again.
-- **Other screens:** a card or an image from Hermes replaces the alarm. When Hermes starts to speak, the beeps stop and the alarm stays. A question from Hermes waits until you answer it. A timer that ends during a recording waits until the recording ends.
+- **Other screens:** a card or an image from Hermes replaces the alarm. When Hermes starts to speak, the beeps stop and the alarm stays. A question from Hermes goes first: the alarm steps back and returns, ringing, once you answer the question or it expires. A timer that ends during a recording waits until the recording ends.
 - **Limits:** one timer runs at a time, and a new timer replaces it. The timer keeps counting when the connection to Hermes drops. It lives in the device's memory, so a restart or power cut forgets it. The end of a timer does not interrupt Hermes: the device sends a `timer.done` event that the plugin only logs.
 
 ## Device settings and hardware checks

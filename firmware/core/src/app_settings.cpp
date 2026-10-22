@@ -17,7 +17,9 @@ bool App::settings_title_hit(int x, int y) const {
 }
 
 bool App::open_settings() {
-  if (prompt_showing() || ota_busy() || ota_ == Ota::Restarting || !wifi_setup_text_.empty() || phone_pairing_)
+  // The alarm too: a hold that began just before it rang must not cover it and silence it.
+  if (prompt_showing() || ota_busy() || ota_ == Ota::Restarting || !wifi_setup_text_.empty() || phone_pairing_ ||
+      alarm_)
     return false;
   wake_display();
   if (settings_open()) { close_settings(); return true; }

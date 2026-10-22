@@ -907,6 +907,11 @@ void App::h_prompt(const json::Value& m) {
   prompt_since_ = now();
   double ttl = m["ttl_s"].as_number(0);
   prompt_until_ = ttl <= 0 ? 0 : now() + static_cast<uint32_t>(ttl * 1000);
+  // The question goes first: a showing alarm steps back and rings again once the question is gone.
+  if (alarm_) {
+    dismiss_alarm();
+    timer_due_ = true;
+  }
 }
 
 void App::h_prompt_close(const json::Value& m) {

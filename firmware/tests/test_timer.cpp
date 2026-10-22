@@ -442,6 +442,44 @@ TEST("timer: a question from Hermes delays the alarm until it is answered") {
   CHECK(r.app.screen() == Screen::Alarm);
 }
 
+TEST("timer: a question that arrives while the alarm rings shows first, and the alarm comes back after it") {
+  Rig r;
+  r.online();
+  r.action("timer.start", R"({"seconds":1})");
+  r.idle(1100);
+  CHECK(r.app.screen() == Screen::Alarm);
+  r.server(R"({"type":"prompt","id":"q1","title":"Go on?","text":"Keep going?","ttl_s":30})");
+  CHECK(r.app.screen() == Screen::Prompt);
+  CHECK(!r.timer_status()["ringing"].as_bool());
+  CHECK(r.timer_status()["done"].as_bool());
+  const size_t beeps = r.fake.writes;
+  r.idle(3000);
+  CHECK_EQ(r.fake.writes, beeps);  // no beeps over the question
+  r.app.on_button(hg::Button::Talk, true);  // the press answers the question, not the alarm
+  r.app.on_button(hg::Button::Talk, false);
+  const Value* reply = r.fake.last("prompt.reply");
+  CHECK(reply != nullptr);
+  if (reply) CHECK_EQ((*reply)["answer"].as_string(), std::string("yes"));
+  r.advance(100);
+  CHECK(r.app.screen() == Screen::Alarm);
+  CHECK(r.timer_status()["ringing"].as_bool());
+  CHECK(r.fake.writes > beeps);
+}
+
+TEST("timer: settings do not open over the alarm") {
+  Rig r;
+  r.online();
+  r.action("timer.start", R"({"seconds":1})");
+  r.idle(1100);
+  CHECK(r.app.screen() == Screen::Alarm);
+  CHECK(!r.app.open_settings());  // a hold that began before the alarm completes now
+  CHECK(r.app.screen() == Screen::Alarm);
+  const size_t beeps = r.fake.writes;
+  r.advance(1600);
+  CHECK(r.timer_status()["ringing"].as_bool());
+  CHECK(r.fake.writes > beeps);
+}
+
 TEST("timer: an alarm shows over a dropped connection and rings") {
   Rig r;
   r.online();
