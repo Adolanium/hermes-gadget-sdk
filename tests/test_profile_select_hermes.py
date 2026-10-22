@@ -58,6 +58,12 @@ def test_switching_is_refused_when_unknown_unpaired_or_busy(hermes_home, gadget,
     gadget.authorized.add(session.device_id)
     assert sim.wait_screen("ready", timeout=10)
     assert run(adapter.select_profile(session, "nosuch")) == "unknown"
+    # A device that never said it can switch (no caps.profiles) is refused, whatever it asks for.
+    caps = dict(session.caps)
+    session.caps.pop("profiles", None)
+    assert run(adapter.select_profile(session, "ops")) == "unknown"
+    assert session.profile != "ops"
+    session.caps.update(caps)
     assert run(adapter.select_profile(session, "old")) == "unknown"  # parked
     adapter._turns[session.device_id] = "t1"
     assert run(adapter.select_profile(session, "ops")) == "busy"

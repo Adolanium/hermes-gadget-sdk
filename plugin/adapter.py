@@ -372,6 +372,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     async def select_profile(self, session: DeviceSession, profile: str) -> Optional[str]:
         if self._routed(session):
             return "routed"
+        if not self._switches(session):
+            return "unknown"  # switching is off, or the device never said it can switch (caps.profiles)
         if profile not in {p["id"] for p in self.profiles()}:
             return "unknown"  # Hermes would quietly run an unknown profile as the default one
         if not self._still_trusted(session):
