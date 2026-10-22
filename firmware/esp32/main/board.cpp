@@ -861,9 +861,10 @@ BoardConfig make() {
 #elif CONFIG_HG_BOARD_ESP32_CYD
 // ESP32-2432S028 "Cheap Yellow Display" (CYD): a classic ESP32-WROOM-32 with
 // 4 MB flash and no PSRAM, a 2.8" 240x320 ST7789 panel in landscape, plus a
-// resistor-touch XPT2046, microSD and an amplifier that share the same SPI bus.
-// Only the panel and the BOOT key are wired here; touch, microphone and the DAC
-// speaker are not brought up yet.
+// resistor-touch XPT2046, microSD and an SC8002B amplifier that share the same
+// SPI bus. The panel, the BOOT key, the amplifier (through the chip's DAC) and a
+// PDM microphone on the 4-pin header are wired here; touch and microSD are not
+// brought up yet.
 // Pins: Espressif ESP32-2432S028 schematic, cross-checked with LovyanGFX
 // (Panel_ST7789 on HSPI: SCLK=14 MOSI=13 MISO=12 DC=2 CS=15, backlight GPIO21).
 BoardConfig make() {
@@ -888,6 +889,12 @@ BoardConfig make() {
   b.lcd.rst = -1;         // no reset line; the panel resets on power-up
   b.lcd.backlight = 21;
   b.lcd.spi_mhz = 40;
+  b.speaker_dac = 26;     // SC8002B amplifier input on DAC channel 1 (GPIO26)
+  // A PDM MEMS microphone on the 4-pin header: IO22 carries the PDM clock and
+  // IO27 the data, so nothing else is needed (SELECT is tied to ground on the
+  // module). ESP32's only PDM-to-PCM converter is on I2S0, and I2sMic picks that
+  // port for a PDM mic; the board has no I2S speaker, so the port is free.
+  b.mic = {true, 22, -1, 27, true};
   b.buttons = {0, -1, -1, -1};  // BOOT, the only key on the board
   b.talk_label = "BOOT";
   return b;

@@ -290,6 +290,12 @@ class I2sMic final : public hg::AudioIn {
 uint32_t speaker_now_ms();
 void log_underruns(const char* tag, const hg::SpeakerUnderruns::Totals& t);
 
+// Three short beeps from the chip's own DAC, on the pin the board's amplifier
+// input hangs off (BoardConfig::speaker_dac), so the amplifier and speaker can be
+// checked before the gadget can play a reply. Blocks for about 0.6 s; a board
+// whose pin is not a DAC output does nothing. port_dac.cpp.
+bool dac_beep(int gpio);
+
 class I2sSpeaker final : public hg::AudioOut {
  public:
   bool begin(const I2sSpeakerConfig& cfg);

@@ -34,6 +34,7 @@ idf_component_register(
         "port_cores3.cpp"
         "port_tca9554.cpp"
         "port_console.cpp"
+        "port_dac.cpp"
         "port_diag.cpp"
         "port_display.cpp"
         "port_events.cpp"
@@ -54,14 +55,15 @@ idf_component_register(
     INCLUDE_DIRS "." "../../drivers" "${CMAKE_CURRENT_BINARY_DIR}"
     REQUIRES core
     # "driver" pulls in GPIO, I2S, LEDC and SPI on every ESP-IDF 5.x release.
-    # ESP-IDF 6.x dropped I2S and LEDC from that catch-all, so name them too;
-    # both components exist in 5.x as well, where this is a no-op.
+    # ESP-IDF 6.x dropped I2S, LEDC and the DAC from that catch-all, so name them
+    # too; all three components exist in 5.x as well, where this is a no-op.
     PRIV_REQUIRES
         app_update
         bt
         driver
         esp_driver_i2s
         esp_driver_ledc
+        esp_driver_dac
         esp_app_format
         esp_adc
         esp_event

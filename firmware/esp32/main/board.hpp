@@ -278,6 +278,11 @@ struct BoardConfig {
   bool bluetooth = false;
   LatchPowerConfig latch_power;
   int status_led = -1;
+  // A speaker driven by the chip's own DAC, with no I2S and no codec: the pin the
+  // board's amplifier input hangs off (25 = DAC channel 0, 26 = DAC channel 1),
+  // e.g. the CYD's SC8002B on GPIO26. It plays the boot beeps (port_dac.cpp); the
+  // gadget's replies are not routed there yet.
+  int speaker_dac = -1;
   const char* talk_label = "TALK";
   const char* cancel_label = "CANCEL";
 };

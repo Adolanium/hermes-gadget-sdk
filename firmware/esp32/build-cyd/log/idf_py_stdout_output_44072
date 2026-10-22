@@ -1,0 +1,117 @@
+Command: C:\Espressif\tools\python\v6.1\venv\Scripts\python.exe C:\esp\v6.1\esp-idf\tools/idf_monitor.py -p COM14 -b 115200 --toolchain-prefix xtensa-esp32-elf- --target esp32 --revision 0 E:\Trae\hermes-gadget-sdk\firmware\esp32\build-cyd\hermes_gadget.elf E:\Trae\hermes-gadget-sdk\firmware\esp32\build-cyd\bootloader\bootloader.elf --force-color -m 'C:\Espressif\tools\python\v6.1\venv\Scripts\python.exe' 'C:\esp\v6.1\esp-idf\tools\idf.py' '-B' 'build-cyd' '-D' 'IDF_TARGET=esp32'
+ets Jul 29 2019 12:21:46
+
+rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0040,len:6272
+load:0x40078000,len:15896
+load:0x40080400,len:3988
+entry 0x40080644
+[0;32mI (27) boot: ESP-IDF v6.1 2nd stage bootloader[0m
+[0;32mI (27) boot: compile time Oct 21 2026 16:37:19[0m
+[0;32mI (28) boot: Multicore bootloader[0m
+[0;32mI (29) boot: chip revision: v3.1[0m
+[0;32mI (31) boot.esp32: SPI Speed      : 40MHz[0m
+[0;32mI (35) boot.esp32: SPI Mode       : DIO[0m
+[0;32mI (39) boot.esp32: SPI Flash Size : 4MB[0m
+[0;32mI (42) boot: Enabling RNG early entropy source...[0m
+[0;32mI (47) boot: Partition Table:[0m
+[0;32mI (49) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (56) boot:  0 nvs              WiFi data        01 02 00009000 00006000[0m
+[0;32mI (62) boot:  1 otadata          OTA data         01 00 0000f000 00002000[0m
+[0;32mI (69) boot:  2 phy_init         RF data          01 01 00011000 00001000[0m
+[0;32mI (75) boot:  3 ota_0            OTA app          00 10 00020000 001f0000[0m
+[0;32mI (82) boot:  4 ota_1            OTA app          00 11 00210000 001f0000[0m
+[0;32mI (88) boot: End of partition table[0m
+[0;32mI (92) esp_image: segment 0: paddr=00020020 vaddr=3f400020 size=48030h (294960) map[0m
+[0;32mI (204) esp_image: segment 1: paddr=00068058 vaddr=3ffb0000 size=049c4h ( 18884) load[0m
+[0;32mI (212) esp_image: segment 2: paddr=0006ca24 vaddr=40080000 size=035f4h ( 13812) load[0m
+[0;32mI (218) esp_image: segment 3: paddr=00070020 vaddr=400d0020 size=cbc0ch (834572) map[0m
+[0;32mI (515) esp_image: segment 4: paddr=0013bc34 vaddr=400835f4 size=13670h ( 79472) load[0m
+[0;32mI (548) esp_image: segment 5: paddr=0014f2ac vaddr=50000000 size=00028h (    40) load[0m
+[0;32mI (560) boot: Loaded app from partition at offset 0x20000[0m
+[0;32mI (560) boot: Disabling RNG early entropy source...[0m
+[0;32mI (570) cpu_start: Multicore app[0m
+[0;32mI (578) cpu_start: GPIO 3 and 1 are used as console UART I/O pins[0m
+[0;32mI (579) cpu_start: Pro cpu start user code[0m
+[0;32mI (579) cpu_start: cpu freq: 160000000 Hz[0m
+[0;32mI (581) app_init: Application information:[0m
+[0;32mI (584) app_init: Project name:     hermes_gadget[0m
+[0;32mI (589) app_init: App version:      0.2.0[0m
+[0;32mI (593) app_init: Compile time:     Oct 21 2026 21:43:48[0m
+[0;32mI (598) app_init: ELF file SHA256:  7d933c18f...[0m
+[0;32mI (602) app_init: ESP-IDF:          v6.1[0m
+[0;32mI (606) efuse_init: Min chip rev:     v0.0[0m
+[0;32mI (609) efuse_init: Max chip rev:     v3.99 [0m
+[0;32mI (613) efuse_init: Chip rev:         v3.1[0m
+[0;32mI (618) heap_init: Initializing. RAM available for dynamic allocation:[0m
+[0;32mI (624) heap_init: At 3FFAE6E0 len 00001920 (6 KiB): DRAM[0m
+[0;32mI (629) heap_init: At 3FFBAA28 len 000255D8 (149 KiB): DRAM[0m
+[0;32mI (634) heap_init: At 3FFE0440 len 00003AE0 (14 KiB): D/IRAM[0m
+[0;32mI (639) heap_init: At 3FFE4350 len 0001BCB0 (111 KiB): D/IRAM[0m
+[0;32mI (645) heap_init: At 40096C64 len 0000939C (36 KiB): IRAM[0m
+[0;32mI (652) spi_flash: detected chip: generic[0m
+[0;32mI (654) spi_flash: flash io: dio[0m
+[0;32mI (659) main_task: Started on CPU0[0m
+[0;32mI (659) main_task: Calling app_main()[0m
+[0;32mI (679) hg.main: Hermes Gadget 0.2.0 on esp32-2432s028-cyd[0m
+[0;32mI (699) wifi:wifi driver task: 3ffdb810, prio:23, stack:6656, core=0[0m
+[0;32mI (709) wifi:wifi firmware version: e12a754[0m
+[0;32mI (709) wifi:wifi certification version: v7.0[0m
+[0;32mI (709) wifi:config NVS flash: enabled[0m
+[0;32mI (709) wifi:config nano formatting: disabled[0m
+[0;32mI (709) wifi:Init data frame dynamic rx buffer num: 32[0m
+[0;32mI (719) wifi:Init static rx mgmt buffer num: 5[0m
+[0;32mI (719) wifi:Init management short buffer num: 32[0m
+[0;32mI (729) wifi:Init dynamic tx buffer num: 32[0m
+[0;32mI (729) wifi:Init static rx buffer size: 1600[0m
+[0;32mI (739) wifi:Init static rx buffer num: 10[0m
+[0;32mI (739) wifi:Init dynamic rx buffer num: 32[0m
+[0;32mI (739) wifi_init: rx ba win: 6[0m
+[0;32mI (749) wifi_init: accept mbox: 6[0m
+[0;32mI (749) wifi_init: tcpip mbox: 32[0m
+[0;32mI (749) wifi_init: udp mbox: 6[0m
+[0;32mI (749) wifi_init: tcp mbox: 6[0m
+[0;32mI (759) wifi_init: tcp tx win: 5760[0m
+[0;32mI (759) wifi_init: tcp rx win: 5760[0m
+[0;32mI (759) wifi_init: tcp mss: 1440[0m
+[0;32mI (769) wifi_init: WiFi IRAM OP enabled[0m
+[0;32mI (769) wifi_init: WiFi RX IRAM OP enabled[0m
+[0;32mI (779) phy_init: phy_version 4863,a3a4459,Oct 28 2025,14:30:06[0m
+[0;32mI (869) wifi:mode : sta (7c:d5:44:3c:2b:f8)[0m
+[0;32mI (869) wifi:enable tsf[0m
+[0;32mI (989) hg.lcd: st7789 320x240 ready[0m
+[0;32mI (989) hg.diag: reset reason: power-on; built Oct 21 2026 21:43:48 with ESP-IDF v6.1[0m
+[0;32mI (989) hg.diag: memory: internal 146 KB free (largest block 108 KB), DMA 110 KB, PSRAM 0 KB of 0 KB[0m
+[0;32mI (999) hg.diag: parts: display st7789, microphone none, speaker none, touch no, key no[0m
+[0;32mI (1059) hg: device hg-fad933394502a263 ready (board esp32-2432s028-cyd, fw 0.2.0)[0m
+[5n
+Type 'help' to get the list of commands.
+Use UP/DOWN arrows to navigate through command history.
+Press TAB when typing command name to auto-complete.
+
+Your terminal application does not support escape sequences.
+
+Line editing and history features are disabled.
+
+On Windows, try using Windows Terminal or Putty instead.
+gadget> I (2069) hg.console: console ready (type: help)
+[0;32mI (2099) wifi:Set ps type: 0, coexist: 0[0m
+
+[0;32mI (2109) wifi:state: init -> auth (0xb0)[0m
+[0;32mI (2119) wifi:state: auth -> assoc (0x0)[0m
+[0;32mI (2129) wifi:state: assoc -> run (0x10)[0m
+[0;32mI (2289) wifi:connected with OrangePiVietnam, aid = 34, channel 1, BW20, bssid = c4:70:ab:06:d1:b6[0m
+[0;32mI (2299) wifi:security: WPA2-PSK, phy: bgn, rssi: -18, cipher(pairwise:0x3, group:0x3), pmf:0[0m
+[0;32mI (2309) wifi:pm start, type: 0[0m
+
+[0;32mI (2309) wifi:dp: 1, bi: 102400, li: 3, scale listen interval from 307200 us to 307200 us[0m
+[0;32mI (2319) wifi:<ba-add>idx:0 (ifx:0, c4:70:ab:06:d1:b6), tid:0, ssn:0, winSize:64[0m
+[0;32mI (2389) wifi:AP's beacon interval = 102400 us, DTIM period = 1[0m
+[0;32mI (3329) esp_netif_handlers: sta ip: 192.168.88.125, mask: 255.255.255.0, gw: 192.168.88.1[0m
+[0;32mI (3329) hg.wifi: connected, ip 192.168.88.125[0m
+[0;32mI (3379) hg: connecting to ws://192.168.88.5:8765/gadget[0m
+[0;32mI (3389) websocket_client: Started[0m
+[0;32mI (6639) hg: online (waiting for pairing approval)[0m

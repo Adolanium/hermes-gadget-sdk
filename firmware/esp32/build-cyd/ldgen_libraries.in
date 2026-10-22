@@ -217,6 +217,7 @@ $<TARGET_FILE:idf::espressif__esp_lcd_touch_tt21100>
 $<TARGET_FILE:idf::main>
 $<TARGET_FILE:__idf_core>
 $<TARGET_FILE:__idf_esp_driver_ledc>
+$<TARGET_FILE:__idf_esp_driver_dac>
 $<TARGET_FILE:__idf_espressif__esp_websocket_client>
 $<TARGET_FILE:__idf_78__esp-opus>
 $<TARGET_FILE:__idf_espressif__esp_codec_dev>

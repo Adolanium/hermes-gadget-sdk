@@ -217,6 +217,7 @@ E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/esp-idf/espressif__esp_lcd_to
 E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/esp-idf/main/libmain.a
 E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/esp-idf/core/libcore.a
 E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/esp-idf/esp_driver_ledc/libesp_driver_ledc.a
+E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/esp-idf/esp_driver_dac/libesp_driver_dac.a
 E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/esp-idf/espressif__esp_websocket_client/libespressif__esp_websocket_client.a
 E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/esp-idf/78__esp-opus/lib78__esp-opus.a
 E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/esp-idf/espressif__esp_codec_dev/libespressif__esp_codec_dev.a

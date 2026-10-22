@@ -751,17 +751,19 @@ For physical results and explicit untested items, see the [CrowPanel P4 validati
 
 ## ESP32-2432S028 CYD (Cheap Yellow Display)
 
-Board option `esp32-2432s028-cyd`, for the ESP32-2432S028 "Cheap Yellow Display": a **classic ESP32-WROOM-32** with 4 MB flash and **no PSRAM**, a 2.8" 240×320 ST7789 panel driven in landscape, and the BOOT key. **This board has no microphone, speaker or touchscreen**, so it works as a text gadget: Hermes replies, cards and prompts appear on the screen and typed messages go out through the USB console. It is the only classic-ESP32 profile, so the RGB, i80-parallel, DSI and codec drivers are compiled out; the panel uses the same SPI `SpiDisplay` path as the S3 boards, with ESP-IDF's built-in ST7789 driver.
+Board option `esp32-2432s028-cyd`, for the ESP32-2432S028 "Cheap Yellow Display": a **classic ESP32-WROOM-32** with 4 MB flash and **no PSRAM**, a 2.8" 240×320 ST7789 panel driven in landscape, the BOOT key, and an SC8002B amplifier fed by the chip's own DAC on GPIO26. The board ships with **no microphone and no touchscreen**, but if you fit a **PDM MEMS microphone** on the 4-pin header (IO22 carries the PDM clock, IO27 the data, SELECT tied to ground) the profile drives it: the ESP32's PDM-to-PCM converter on I2S0 turns its bitstream into the 16 kHz PCM the app records, and the amplifier lets the beeps and later replies be heard. Without a microphone it works as a text gadget: Hermes replies, cards and prompts appear on the screen and typed messages go out through the USB console. Only a two-wire PDM part fits this header — an I²S microphone such as the INMP441 or ICS-43434 needs three signal lines and does not. On boot the speaker header plays three short beeps through that DAC (`port_dac.cpp`), which shows the amplifier and a connected speaker work; replies are not routed there yet. It is the only classic-ESP32 profile, so the RGB, i80-parallel, DSI and codec drivers are compiled out; the panel uses the same SPI `SpiDisplay` path as the S3 boards, with ESP-IDF's built-in ST7789 driver.
 
 Without PSRAM the full 320×240 framebuffer (150 KB) does not fit: about 137 KB of internal DRAM is free at boot, and Wi-Fi and the app need their share too. The port therefore holds a **band of 120 rows** (75 KB) instead, reserved in an early constructor before the heap fragments (`port_display.cpp`), and flushes through a four-row bounce buffer. The UI detects the band through `Display::framebuffer_rows()` and draws each band once per 120-row window, moving the window with `set_frame_origin()`, so the screen looks the same; a flush that times out asks the UI to repaint the whole screen because the band keeps no rows to resend. An `image.start` overlay is refused on this board for the same reason. If Wi-Fi cannot start for lack of heap, lower `kCydFrameRows` in `port_display.cpp`.
 
 | Part | Chip | Connection |
 |---|---|---|
-| Display | ST7789, SPI2 | SCLK 14, MOSI 13, MISO 12, CS 15, DC 2; no reset line (the panel resets on power-up); 320×240, swapped axes and mirrored x |
+| Display | ST7789, SPI2 | SCLK 14, MOSI 13, MISO 12, CS 15, DC 2; no reset line (the panel resets on power-up); 320×240, swapped axes, both axes mirrored |
 | Backlight | PWM | GPIO 21, active-high |
+| Speaker | SC8002B amplifier | the chip's own DAC, channel 1 on GPIO 26; the speaker connects to the board's two-pin header |
+| Microphone | PDM MEMS (optional, not fitted) | I2S0: PDM clock on GPIO 22, data on GPIO 27, on the 4-pin header |
 | Button | BOOT | GPIO 0 (TALK) |
 
-The variant also carries a resistor-touch XPT2046, a microSD slot and a small amplifier that share the same SPI bus; this profile does not bring them up. Probe your own board before assuming it: the CYD ships in several revisions whose backlight pin, panel controller and colour order differ.
+The variant also carries a resistor-touch XPT2046 and a microSD slot that share the same SPI bus; this profile does not bring them up. The amplifier plays the three boot beeps only, and the microphone header is wired for a PDM part but the stock board has none fitted, so a recording without one captures silence. Probe your own board before assuming it: the CYD ships in several revisions whose backlight pin, panel controller and colour order differ.
 
 **Build and flash** it with PlatformIO:
 
@@ -776,13 +778,14 @@ Or with `idf.py set-target esp32` followed by `idf.py -D SDKCONFIG_DEFAULTS="sdk
 
 The pin map and panel settings follow a LovyanGFX test sketch known to work on this board (`Panel_ST7789` on HSPI). On the first flash:
 
-1. **Boot log:** `st7789 320x240 ready` and the `parts:` line naming the display and no touch.
-2. **Memory:** no `the reserved 120-row band does not fit` error, and `diag` reports a plausible free heap. The band is reserved before Wi-Fi starts, so a Wi-Fi failure to allocate is the signal to lower `kCydFrameRows`.
-3. **Screen:** the mascot renders in landscape and colours are right (amber accents, not blue). A red/blue swap means `b.lcd.bgr` in this board's `board.cpp` entry needs flipping; an inverted picture means `b.lcd.invert` does.
-4. **Brightness:** cycle 10 → 100 in settings; brightness must rise with the number. The backlight is active-high — do not set `backlight_invert`.
-5. **Orientation:** the picture should not be mirrored or upside down; adjust `b.lcd.swap_xy`, `mirror_x` and `mirror_y` if it is.
-6. **Button:** holding BOOT records a voice turn; without audio, replies are text only.
-7. **Text:** `say hello` over the console should render on the display.
+1. **Boot log:** `st7789 320x240 ready` and the `parts:` line naming the display, the microphone (`pdm` once a PDM mic is fitted, `none` without one) and no touch.
+2. **Sound:** about a second into boot the speaker header plays three short beeps, and the log shows `three beeps on GPIO26 (DAC channel 1)`. Silence points at the amplifier wiring or the speaker, not the panel; a log line about GPIO26 not being a DAC output means `b.speaker_dac` in `board.cpp` is wrong.
+3. **Memory:** no `the reserved 120-row band does not fit` error, and `diag` reports a plausible free heap. The band is reserved before Wi-Fi starts, so a Wi-Fi failure to allocate is the signal to lower `kCydFrameRows`.
+4. **Screen:** the mascot renders in landscape and colours are right (amber accents, not blue). A red/blue swap means `b.lcd.bgr` in this board's `board.cpp` entry needs flipping; an inverted picture means `b.lcd.invert` does.
+5. **Brightness:** cycle 10 → 100 in settings; brightness must rise with the number. The backlight is active-high — do not set `backlight_invert`.
+6. **Orientation:** the picture should not be mirrored or upside down; adjust `b.lcd.swap_xy`, `mirror_x` and `mirror_y` if it is.
+7. **Button and microphone:** holding BOOT records a voice turn. With a PDM mic on the header the log shows `microphone ready (pdm)` and speaking into it shows in the level meter; `microphone did not start: not enough internal RAM for its buffers` means the I2S0 DMA did not fit beside the framebuffer band, so lower `kCydFrameRows`. Without a microphone the recording is silent and replies are text only.
+8. **Text:** `say hello` over the console should render on the display.
 
 LovyanGFX is used only as a reference for the pin map and register settings; no LovyanGFX code is copied. This port has been built and smoke-checked by its contributor but has no complete physical report; see the [verification table](hardware-validation.md).
 

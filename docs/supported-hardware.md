@@ -31,7 +31,7 @@ Hardware ports remain experimental until the [verification table](hardware-valid
 
 | Board | Controls | Audio |
 |---|---|---|
-| [ESP32-2432S028 CYD (Cheap Yellow Display)](hardware.md#esp32-2432s028-cyd-cheap-yellow-display) | BOOT to talk; send text through the USB console | No onboard microphone or speaker; no touchscreen |
+| [ESP32-2432S028 CYD (Cheap Yellow Display)](hardware.md#esp32-2432s028-cyd-cheap-yellow-display) | BOOT to talk; send text through the USB console | No microphone fitted; a PDM MEMS part on the 4-pin header (PDM clock GPIO 22, data GPIO 27) is driven by the profile. The SC8002B amplifier behind the speaker header plays three boot beeps. No touchscreen |
 
 ## ESP32-P4 boards
 

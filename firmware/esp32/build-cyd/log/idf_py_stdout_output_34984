@@ -1,0 +1,130 @@
+Command: ninja all
+[0/1] Re-running CMake...
+-- Minimal build - OFF
+-- ccache will be used for faster recompilation
+-- Building ESP-IDF components for target esp32
+NOTE: Skipping optional dependency: espressif/esp_hosted
+NOTE: Skipping optional dependency: espressif/esp_wifi_remote
+NOTE: Skipping optional dependency: espressif/esp_lcd_st7701
+NOTE: Skipping optional dependency: espressif/esp_lcd_panel_io_additions
+NOTE: Skipping optional dependency: espressif/esp_lcd_ek79007
+NOTE: Processing 13 dependencies:
+NOTE: [1/13] 78/esp-opus (1.0.5)
+NOTE: [2/13] espressif/cmake_utilities (0.5.3)
+NOTE: [3/13] espressif/esp_codec_dev (1.5.11)
+NOTE: [4/13] espressif/esp_lcd_gc9a01 (2.0.4)
+NOTE: [5/13] espressif/esp_lcd_ili9341 (2.1.0)
+NOTE: [6/13] espressif/esp_lcd_sh8601 (1.0.0)
+NOTE: [7/13] espressif/esp_lcd_st77916 (2.0.2)
+NOTE: [8/13] espressif/esp_lcd_touch (1.2.1)
+NOTE: [9/13] espressif/esp_lcd_touch_ft5x06 (1.1.1)
+NOTE: [10/13] espressif/esp_lcd_touch_gt911 (1.2.1)
+NOTE: [11/13] espressif/esp_lcd_touch_tt21100 (1.2.1)
+NOTE: [12/13] espressif/esp_websocket_client (1.8.0)
+NOTE: [13/13] idf (6.1.0)
+NOTE: Skipping optional dependency: espressif/esp_hosted
+NOTE: Skipping optional dependency: espressif/esp_wifi_remote
+NOTE: Skipping optional dependency: espressif/esp_lcd_st7701
+NOTE: Skipping optional dependency: espressif/esp_lcd_panel_io_additions
+NOTE: Skipping optional dependency: espressif/esp_lcd_ek79007
+-- KCONFIG_REPORT_VERBOSITY not set, using default
+-- Project sdkconfig file E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/sdkconfig
+-- Compiler supported targets: xtensa-esp-elf
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- App "hermes_gadget" version: 0.2.0
+-- Setting up mbedtls configuration
+-- Linkage type is PUBLIC
+-- Adding linker script C:/esp/v6.1/esp-idf/components/esp_system/ld/esp32/memory.ld.in
+--   -> Preprocessing .in script: C:/esp/v6.1/esp-idf/components/esp_system/ld/esp32/memory.ld.in
+-- Adding linker script C:/esp/v6.1/esp-idf/components/esp_system/ld/esp32/sections.ld.in
+--   -> Preprocessing .in script: C:/esp/v6.1/esp-idf/components/esp_system/ld/esp32/sections.ld.in
+--   -> Applying ldgen processing: E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/esp-idf/esp_system/ld/sections.ld.in
+-- Adding linker script C:/esp/v6.1/esp-idf/components/esp_rom/esp32/ld/esp32.rom.ld
+-- Adding linker script C:/esp/v6.1/esp-idf/components/esp_rom/esp32/ld/esp32.rom.api.ld
+-- Adding linker script C:/esp/v6.1/esp-idf/components/esp_rom/esp32/ld/esp32.rom.libgcc.ld
+-- Adding linker script C:/esp/v6.1/esp-idf/components/esp_rom/esp32/ld/esp32.rom.libc-funcs.ld
+-- Adding linker script C:/esp/v6.1/esp-idf/components/soc/esp32/ld/esp32.peripherals.ld
+-- Adding linker script C:/esp/v6.1/esp-idf/components/esp_hal_regi2c/esp32/rom.regi2c.ld
+-- ESP_LCD_GC9A01: 2.0.4
+-- ESP_LCD_ILI9341: 2.1.0
+-- ESP_LCD_SH8601: 1.0.0
+-- ESP_LCD_ST77916: 2.0.2
+-- Component idf::esp_trace will be linked with -Wl,--whole-archive
+-- Components: 78__esp-opus app_trace app_update bootloader bootloader_support bt cmock console core cxx driver efuse esp-tls esp_adc esp_app_format esp_asrc_adapter esp_blockdev esp_blockdev_util esp_bootloader_format esp_coex esp_common esp_driver_ana_cmpr esp_driver_bitscrambler esp_driver_cam esp_driver_cordic esp_driver_dac esp_driver_dma esp_driver_gpio esp_driver_gptimer esp_driver_i2c esp_driver_i2s esp_driver_i3c esp_driver_isp esp_driver_jpeg esp_driver_ledc esp_driver_mcpwm esp_driver_parlio esp_driver_pcnt esp_driver_ppa esp_driver_rmt esp_driver_sd_intf esp_driver_sdio esp_driver_sdm esp_driver_sdmmc esp_driver_sdspi esp_driver_spi esp_driver_touch_sens esp_driver_tsens esp_driver_twai esp_driver_uart esp_driver_usb_serial_jtag esp_eth esp_event esp_gdbstub esp_hal_ana_cmpr esp_hal_ana_conv esp_hal_asrc esp_hal_cam esp_hal_clock esp_hal_cordic esp_hal_dma esp_hal_emac esp_hal_gpio esp_hal_gpspi esp_hal_i2c esp_hal_i2s esp_hal_i3c esp_hal_ieee802154 esp_hal_jpeg esp_hal_lcd esp_hal_ledc esp_hal_mcpwm esp_hal_mspi esp_hal_parlio esp_hal_pcnt esp_hal_pmu esp_hal_ppa esp_hal_regi2c esp_hal_rmt esp_hal_rtc_timer esp_hal_sd esp_hal_security esp_hal_systimer esp_hal_timg esp_hal_touch_sens esp_hal_twai esp_hal_uart esp_hal_usb esp_hal_wdt esp_hid esp_http_client esp_http_server esp_https_ota esp_https_server esp_hw_support esp_lcd esp_libc esp_local_ctrl esp_mm esp_netif esp_netif_stack esp_partition esp_phy esp_pm esp_psram esp_ringbuf esp_rom esp_security esp_stdio esp_system esp_timer esp_trace esp_usb_cdc_rom_console esp_wifi espcoredump espressif__cmake_utilities espressif__esp_codec_dev espressif__esp_lcd_gc9a01 espressif__esp_lcd_ili9341 espressif__esp_lcd_sh8601 espressif__esp_lcd_st77916 espressif__esp_lcd_touch espressif__esp_lcd_touch_ft5x06 espressif__esp_lcd_touch_gt911 espressif__esp_lcd_touch_tt21100 espressif__esp_websocket_client esptool_py fatfs freertos hal heap http_parser ieee802154 log lwip main mbedtls nvs_flash nvs_sec_provider openthread partition_table perfmon protobuf-c protocomm pthread rt sdmmc soc spi_flash spiffs tcp_transport ulp unity vfs wear_levelling wpa_supplicant xtensa
+-- Component paths: E:/Trae/hermes-gadget-sdk/firmware/esp32/managed_components/78__esp-opus C:/esp/v6.1/esp-idf/components/app_trace C:/esp/v6.1/esp-idf/components/app_update C:/esp/v6.1/esp-idf/components/bootloader C:/esp/v6.1/esp-idf/components/bootloader_support C:/esp/v6.1/esp-idf/components/bt C:/esp/v6.1/esp-idf/components/cmock C:/esp/v6.1/esp-idf/components/console E:/Trae/hermes-gadget-sdk/firmware/core C:/esp/v6.1/esp-idf/components/cxx C:/esp/v6.1/esp-idf/components/driver C:/esp/v6.1/esp-idf/components/efuse C:/esp/v6.1/esp-idf/components/esp-tls C:/esp/v6.1/esp-idf/components/esp_adc C:/esp/v6.1/esp-idf/components/esp_app_format C:/esp/v6.1/esp-idf/components/esp_asrc_adapter C:/esp/v6.1/esp-idf/components/esp_blockdev C:/esp/v6.1/esp-idf/components/esp_blockdev_util C:/esp/v6.1/esp-idf/components/esp_bootloader_format C:/esp/v6.1/esp-idf/components/esp_coex C:/esp/v6.1/esp-idf/components/esp_common C:/esp/v6.1/esp-idf/components/esp_driver_ana_cmpr C:/esp/v6.1/esp-idf/components/esp_driver_bitscrambler C:/esp/v6.1/esp-idf/components/esp_driver_cam C:/esp/v6.1/esp-idf/components/esp_driver_cordic C:/esp/v6.1/esp-idf/components/esp_driver_dac C:/esp/v6.1/esp-idf/components/esp_driver_dma C:/esp/v6.1/esp-idf/components/esp_driver_gpio C:/esp/v6.1/esp-idf/components/esp_driver_gptimer C:/esp/v6.1/esp-idf/components/esp_driver_i2c C:/esp/v6.1/esp-idf/components/esp_driver_i2s C:/esp/v6.1/esp-idf/components/esp_driver_i3c C:/esp/v6.1/esp-idf/components/esp_driver_isp C:/esp/v6.1/esp-idf/components/esp_driver_jpeg C:/esp/v6.1/esp-idf/components/esp_driver_ledc C:/esp/v6.1/esp-idf/components/esp_driver_mcpwm C:/esp/v6.1/esp-idf/components/esp_driver_parlio C:/esp/v6.1/esp-idf/components/esp_driver_pcnt C:/esp/v6.1/esp-idf/components/esp_driver_ppa C:/esp/v6.1/esp-idf/components/esp_driver_rmt C:/esp/v6.1/esp-idf/components/esp_driver_sd_intf C:/esp/v6.1/esp-idf/components/esp_driver_sdio C:/esp/v6.1/esp-idf/components/esp_driver_sdm C:/esp/v6.1/esp-idf/components/esp_driver_sdmmc C:/esp/v6.1/esp-idf/components/esp_driver_sdspi C:/esp/v6.1/esp-idf/components/esp_driver_spi C:/esp/v6.1/esp-idf/components/esp_driver_touch_sens C:/esp/v6.1/esp-idf/components/esp_driver_tsens C:/esp/v6.1/esp-idf/components/esp_driver_twai C:/esp/v6.1/esp-idf/components/esp_driver_uart C:/esp/v6.1/esp-idf/components/esp_driver_usb_serial_jtag C:/esp/v6.1/esp-idf/components/esp_eth C:/esp/v6.1/esp-idf/components/esp_event C:/esp/v6.1/esp-idf/components/esp_gdbstub C:/esp/v6.1/esp-idf/components/esp_hal_ana_cmpr C:/esp/v6.1/esp-idf/components/esp_hal_ana_conv C:/esp/v6.1/esp-idf/components/esp_hal_asrc C:/esp/v6.1/esp-idf/components/esp_hal_cam C:/esp/v6.1/esp-idf/components/esp_hal_clock C:/esp/v6.1/esp-idf/components/esp_hal_cordic C:/esp/v6.1/esp-idf/components/esp_hal_dma C:/esp/v6.1/esp-idf/components/esp_hal_emac C:/esp/v6.1/esp-idf/components/esp_hal_gpio C:/esp/v6.1/esp-idf/components/esp_hal_gpspi C:/esp/v6.1/esp-idf/components/esp_hal_i2c C:/esp/v6.1/esp-idf/components/esp_hal_i2s C:/esp/v6.1/esp-idf/components/esp_hal_i3c C:/esp/v6.1/esp-idf/components/esp_hal_ieee802154 C:/esp/v6.1/esp-idf/components/esp_hal_jpeg C:/esp/v6.1/esp-idf/components/esp_hal_lcd C:/esp/v6.1/esp-idf/components/esp_hal_ledc C:/esp/v6.1/esp-idf/components/esp_hal_mcpwm C:/esp/v6.1/esp-idf/components/esp_hal_mspi C:/esp/v6.1/esp-idf/components/esp_hal_parlio C:/esp/v6.1/esp-idf/components/esp_hal_pcnt C:/esp/v6.1/esp-idf/components/esp_hal_pmu C:/esp/v6.1/esp-idf/components/esp_hal_ppa C:/esp/v6.1/esp-idf/components/esp_hal_regi2c C:/esp/v6.1/esp-idf/components/esp_hal_rmt C:/esp/v6.1/esp-idf/components/esp_hal_rtc_timer C:/esp/v6.1/esp-idf/components/esp_hal_sd C:/esp/v6.1/esp-idf/components/esp_hal_security C:/esp/v6.1/esp-idf/components/esp_hal_systimer C:/esp/v6.1/esp-idf/components/esp_hal_timg C:/esp/v6.1/esp-idf/components/esp_hal_touch_sens C:/esp/v6.1/esp-idf/components/esp_hal_twai C:/esp/v6.1/esp-idf/components/esp_hal_uart C:/esp/v6.1/esp-idf/components/esp_hal_usb C:/esp/v6.1/esp-idf/components/esp_hal_wdt C:/esp/v6.1/esp-idf/components/esp_hid C:/esp/v6.1/esp-idf/components/esp_http_client C:/esp/v6.1/esp-idf/components/esp_http_server C:/esp/v6.1/esp-idf/components/esp_https_ota C:/esp/v6.1/esp-idf/components/esp_https_server C:/esp/v6.1/esp-idf/components/esp_hw_support C:/esp/v6.1/esp-idf/components/esp_lcd C:/esp/v6.1/esp-idf/components/esp_libc C:/esp/v6.1/esp-idf/components/esp_local_ctrl C:/esp/v6.1/esp-idf/components/esp_mm C:/esp/v6.1/esp-idf/components/esp_netif C:/esp/v6.1/esp-idf/components/esp_netif_stack C:/esp/v6.1/esp-idf/components/esp_partition C:/esp/v6.1/esp-idf/components/esp_phy C:/esp/v6.1/esp-idf/components/esp_pm C:/esp/v6.1/esp-idf/components/esp_psram C:/esp/v6.1/esp-idf/components/esp_ringbuf C:/esp/v6.1/esp-idf/components/esp_rom C:/esp/v6.1/esp-idf/components/esp_security C:/esp/v6.1/esp-idf/components/esp_stdio C:/esp/v6.1/esp-idf/components/esp_system C:/esp/v6.1/esp-idf/components/esp_timer C:/esp/v6.1/esp-idf/components/esp_trace C:/esp/v6.1/esp-idf/components/esp_usb_cdc_rom_console C:/esp/v6.1/esp-idf/components/esp_wifi C:/esp/v6.1/esp-idf/components/espcoredump E:/Trae/hermes-gadget-sdk/firmware/esp32/managed_components/espressif__cmake_utilities E:/Trae/hermes-gadget-sdk/firmware/esp32/managed_components/espressif__esp_codec_dev E:/Trae/hermes-gadget-sdk/firmware/esp32/managed_components/espressif__esp_lcd_gc9a01 E:/Trae/hermes-gadget-sdk/firmware/esp32/managed_components/espressif__esp_lcd_ili9341 E:/Trae/hermes-gadget-sdk/firmware/esp32/managed_components/espressif__esp_lcd_sh8601 E:/Trae/hermes-gadget-sdk/firmware/esp32/managed_components/espressif__esp_lcd_st77916 E:/Trae/hermes-gadget-sdk/firmware/esp32/managed_components/espressif__esp_lcd_touch E:/Trae/hermes-gadget-sdk/firmware/esp32/managed_components/espressif__esp_lcd_touch_ft5x06 E:/Trae/hermes-gadget-sdk/firmware/esp32/managed_components/espressif__esp_lcd_touch_gt911 E:/Trae/hermes-gadget-sdk/firmware/esp32/managed_components/espressif__esp_lcd_touch_tt21100 E:/Trae/hermes-gadget-sdk/firmware/esp32/managed_components/espressif__esp_websocket_client C:/esp/v6.1/esp-idf/components/esptool_py C:/esp/v6.1/esp-idf/components/fatfs C:/esp/v6.1/esp-idf/components/freertos C:/esp/v6.1/esp-idf/components/hal C:/esp/v6.1/esp-idf/components/heap C:/esp/v6.1/esp-idf/components/http_parser C:/esp/v6.1/esp-idf/components/ieee802154 C:/esp/v6.1/esp-idf/components/log C:/esp/v6.1/esp-idf/components/lwip E:/Trae/hermes-gadget-sdk/firmware/esp32/main C:/esp/v6.1/esp-idf/components/mbedtls C:/esp/v6.1/esp-idf/components/nvs_flash C:/esp/v6.1/esp-idf/components/nvs_sec_provider C:/esp/v6.1/esp-idf/components/openthread C:/esp/v6.1/esp-idf/components/partition_table C:/esp/v6.1/esp-idf/components/perfmon C:/esp/v6.1/esp-idf/components/protobuf-c C:/esp/v6.1/esp-idf/components/protocomm C:/esp/v6.1/esp-idf/components/pthread C:/esp/v6.1/esp-idf/components/rt C:/esp/v6.1/esp-idf/components/sdmmc C:/esp/v6.1/esp-idf/components/soc C:/esp/v6.1/esp-idf/components/spi_flash C:/esp/v6.1/esp-idf/components/spiffs C:/esp/v6.1/esp-idf/components/tcp_transport C:/esp/v6.1/esp-idf/components/ulp C:/esp/v6.1/esp-idf/components/unity C:/esp/v6.1/esp-idf/components/vfs C:/esp/v6.1/esp-idf/components/wear_levelling C:/esp/v6.1/esp-idf/components/wpa_supplicant C:/esp/v6.1/esp-idf/components/xtensa
+-- Configuring done (93.7s)
+-- Generating done (7.5s)
+-- Build files have been written to: E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd
+[1/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/board.cpp.obj
+[2/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_buttons.cpp.obj
+[3/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_events.cpp.obj
+[4/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_cores3.cpp.obj
+[5/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_amoled.cpp.obj
+[6/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_tca9554.cpp.obj
+[7/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_audio.cpp.obj
+[8/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_dac.cpp.obj
+[9/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_display.cpp.obj
+[10/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/main.cpp.obj
+[11/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_codec.cpp.obj
+[12/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_diag.cpp.obj
+[13/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_ble.cpp.obj
+[14/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_console.cpp.obj
+[15/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/E_/Trae/hermes-gadget-sdk/firmware/drivers/cores3.cpp.obj
+[16/37] Performing build step for 'bootloader'
+[1/1] C:\Windows\system32\cmd.exe /C "cd /D E:\Trae\hermes-gadget-sdk\firmware\esp32\build-cyd\bootloader && C:\Espressif\tools\python\v6.1\venv\Scripts\python.exe C:/esp/v6.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x1000 E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/bootloader/bootloader.bin"
+Bootloader binary size 0x6680 bytes. 0x980 bytes (8%) free.
+[17/37] No install step for 'bootloader'
+[18/37] Completed 'bootloader'
+[19/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_ota.cpp.obj
+[20/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/E_/Trae/hermes-gadget-sdk/firmware/drivers/axp2101.cpp.obj
+[21/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_power.cpp.obj
+[22/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_storage.cpp.obj
+[23/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_system.cpp.obj
+[24/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_touch.cpp.obj
+E:/Trae/hermes-gadget-sdk/firmware/esp32/main/port_touch.cpp: In member function 'bool hgp::TouchInput::read_touch(hgp::TouchSample&)':
+E:/Trae/hermes-gadget-sdk/firmware/esp32/main/port_touch.cpp:136:52: warning: 'bool esp_lcd_touch_get_coordinates(esp_lcd_touch_handle_t, uint16_t*, uint16_t*, uint16_t*, uint8_t*, uint8_t)' is deprecated: This API will be removed in version 2.0.0. Use esp_lcd_touch_get_data instead! [-Wdeprecated-declarations]
+  136 |     const bool down = esp_lcd_touch_get_coordinates(managed_touch_, &x, &y, nullptr, &points, 1);
+      |                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from E:/Trae/hermes-gadget-sdk/firmware/esp32/main/port.hpp:50,
+                 from E:/Trae/hermes-gadget-sdk/firmware/esp32/main/port_touch.cpp:5:
+E:/Trae/hermes-gadget-sdk/firmware/esp32/managed_components/espressif__esp_lcd_touch/include/esp_lcd_touch.h:317:6: note: declared here
+  317 | bool esp_lcd_touch_get_coordinates(esp_lcd_touch_handle_t tp, uint16_t *x, uint16_t *y, uint16_t *strength, uint8_t *point_num, uint8_t max_point_num);
+      |      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[25/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_rgb.cpp.obj
+[26/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_wifi.cpp.obj
+[27/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_latch_power.cpp.obj
+[28/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_wifi_setup.cpp.obj
+[29/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_opus.cpp.obj
+[30/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_parallel.cpp.obj
+[31/37] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/port_ws.cpp.obj
+[32/37] Linking C static library esp-idf\main\libmain.a
+[33/37] Generating esp-idf/esp_system/ld/sections.ld
+NOTE: C:/esp/v6.1/esp-idf/components/bt/host/nimble/Kconfig.in:1428: 
+BT_NIMBLE_MESH_PROVISIONER: 'default 0' is not a valid bool value (only 'y' and
+'n' are allowed). Value is treated as 'n'.
+NOTE: C:/esp/v6.1/esp-idf/components/bt/controller/esp32/Kconfig.in:177: 
+BTDM_CTRL_LEGACY_AUTH_VENDOR_EVT_EFF: 'default 0' is not a valid bool value 
+(only 'y' and 'n' are allowed). Value is treated as 'n'.
+NOTE: C:/esp/v6.1/esp-idf/components/fatfs/Kconfig:240: FATFS_PRINT_LLI: 
+'default 0' is not a valid bool value (only 'y' and 'n' are allowed). Value is 
+treated as 'n'.
+NOTE: C:/esp/v6.1/esp-idf/components/fatfs/Kconfig:245: FATFS_PRINT_FLOAT: 
+'default 0' is not a valid bool value (only 'y' and 'n' are allowed). Value is 
+treated as 'n'.
+Skipping linker fragment parsing, fragment files unchanged
+[34/37] Linking CXX executable hermes_gadget.elf
+[35/37] Generating binary image from built executable
+esptool v5.3.1
+Creating ESP32 image...
+Merged 3 ELF sections.
+Successfully created ESP32 image.
+Generated E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/hermes_gadget.bin
+[36/37] C:\Windows\system32\cmd.exe /C "cd /D E:\Trae\hermes-gadget-sdk\firmware\esp32\build-cyd && C:\Espressif\tools\python\v6.1\venv\Scripts\python.exe C:/esp/v6.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/partition_table/partition-table.bin E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/hermes_gadget.bin"
+hermes_gadget.bin binary size 0x1302f0 bytes. Smallest app partition is 0x1f0000 bytes. 0xbfd10 bytes (39%) free.

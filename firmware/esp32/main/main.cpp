@@ -43,6 +43,9 @@ hgp::EspSystem g_system;
 hgp::NvsStorage g_storage;
 hgp::WsTransport g_transport;
 hgp::SpiDisplay g_display;
+// The microphone object holds handles and no buffers, so the CYD uses it too:
+// its PDM mic runs on I2S0, the one port with the PDM-to-PCM converter.
+hgp::I2sMic g_mic;
 #if !CONFIG_HG_BOARD_ESP32_CYD
 // The CYD has no PSRAM: its 320x240 framebuffer takes all but a few KiB of
 // internal RAM, so only the drivers a board profile can select are
@@ -55,7 +58,6 @@ hgp::DsiDisplay g_dsi;
 hgp::P4I2sSpeaker g_p4_speaker;
 hgp::Stc8Power g_stc8_power;
 #endif
-hgp::I2sMic g_mic;
 hgp::I2sSpeaker g_speaker;
 hgp::CodecAudio g_codec;
 hgp::CodecMic g_codec_mic;
@@ -241,6 +243,11 @@ extern "C" void app_main(void) {
   ESP_ERROR_CHECK(g_storage.begin() ? ESP_OK : ESP_FAIL);
   const hgp::BoardConfig& board = hgp::board_config();
   power_rails_on(board);
+  // A board whose amplifier hangs off the chip's own DAC (the CYD's SC8002B on
+  // GPIO26) gets three boot beeps: they show the amplifier and speaker work
+  // before any reply is routed there (port_dac.cpp). Boards without a DAC
+  // speaker do nothing. Blocks for about 0.6 s.
+  if (board.speaker_dac >= 0) hgp::dac_beep(board.speaker_dac);
 #if !CONFIG_HG_BOARD_ESP32_CYD
   const bool latch_power = board.latch_power.enabled && g_latch_power.begin(board.latch_power);
 #endif
@@ -286,12 +293,21 @@ extern "C" void app_main(void) {
 #endif
   if (g_updater.capacity()) hal.updater = &g_updater;
 #if CONFIG_HG_BOARD_ESP32_CYD
-  // The CYD's only peripherals are the panel and the BOOT key: no I2C bus,
-  // expander, codec, touch controller or PMIC to bring up.
+  // The CYD's peripherals are the panel, the BOOT key and a PDM microphone on
+  // the 4-pin header: no I2C bus, expander, codec, touch controller or PMIC to
+  // bring up.
   if (board.lcd.enabled && g_display.begin(board.lcd, nullptr)) hal.display = &g_display;
+  if (board.mic.enabled && g_mic.begin(board.mic)) {
+    hal.mic = &g_mic;
+  } else if (board.mic.enabled) {
+    // The PDM mic's I2S0 DMA and task stack did not fit next to the reserved
+    // framebuffer band: lower kCydFrameRows in port_display.cpp if this appears.
+    ESP_LOGE(TAG, "microphone did not start: not enough internal RAM for its buffers");
+  }
   constexpr bool touch = false;
   hgp::diag::Parts parts;
   parts.display = hal.display ? g_display.controller_name() : "none";
+  parts.mic = hal.mic == &g_mic ? (board.mic.pdm ? "pdm" : "i2s") : "none";
 #else
   bool io_rail_ready = true;
 #if SOC_MIPI_DSI_SUPPORTED
