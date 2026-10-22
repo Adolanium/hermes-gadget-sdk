@@ -749,6 +749,34 @@ python tools/package_release.py --board crowpanel-p4-101 --out dist
 
 For physical results and explicit untested items, see the [CrowPanel P4 validation record](hardware-validation.md#crowpanel-advanced-p4-partial-physical-test-record). Resolution reference: [Elecrow product page](https://www.elecrow.com/crowpanel-advanced-10-1inch-esp32-p4-hmi-ai-display-1024x600-ips-touch-screen-wifi-6.html).
 
+## Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C
+
+Board option `ws-p4-touch-lcd-3.4c`, for Waveshare's ESP32-P4-WIFI6-Touch-LCD-3.4C (SKU 31523): a round 800x800 IPS panel on a MIPI-DSI bus (JD9365 controller), GT911 capacitive touch, ES8311 speaker codec plus ES7210 microphone ADC, and an ESP32-C6 companion for Wi-Fi 6 over a 4-bit SDIO link.
+
+| Part | Chip | Connection |
+|---|---|---|
+| Display | JD9365, 800x800 MIPI-DSI | 2 data lanes @ 1500 Mbps, DPI clock 80 MHz, RGB565; DSI PHY from internal LDO channel 3 @ 2500 mV |
+| Backlight | PWM | GPIO 26, active-high |
+| Touch | GT911 | I2C SDA 7, SCL 8 (port 1), reset/int not bonded |
+| Microphone | ES7210 ADC (dual mic) | I2S MCLK 13, BCLK 12, WS 10, DIN 11 |
+| Speaker | ES8311 codec + amp | I2S DOUT 9; amplifier enable GPIO 53 (active high) |
+| Wi-Fi / BLE | ESP32-C6 companion | standard P4 function-board SDIO pins |
+| LCD reset | | GPIO 27 |
+
+Build with `idf.py` (no PlatformIO env):
+
+```bash
+cd firmware/esp32
+idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/ws-p4-touch-lcd-3.4c/sdkconfig.defaults" \
+    set-target esp32p4 build
+```
+
+Releases don't include this board yet, so the browser installer doesn't list it. CI builds the profile on every change.
+
+Experimental. The owner confirmed the display, C6-hosted Wi-Fi, pairing, reconnect after restart, factory reset and a one-hour run; touch coordinates, the microphone, the speaker, network recovery and OTA are not verified. See the [partial physical report](hardware-validation.md#waveshare-p4-touch-lcd-34c-partial-physical-report).
+
+Wi-Fi caveat: the ESP32-C6 companion on this board does not ship with an esp_hosted slave image that this host (esp_hosted 2.12.6) can talk to. `g_wifi.begin()` times out after about 10 s and the gadget runs offline until the C6 is flashed. Flash `network_adapter.bin` (CrowPanel C6 firmware, V2.12.3, in `CrowPanel_Advance_ESP32-P4 Display_Firmware_Upgrade_Guide/.../`) to the C6 through its SH1.0 UART header with esptool before expecting Wi-Fi. The [report](hardware-validation.md#getting-the-c6-working-on-this-board) lists every step that was needed.
+
 ## Build and flash
 
 **No toolchain needed:** the [browser installer](https://adolanium.github.io/hermes-gadget-sdk/) flashes each release's prebuilt firmware from Chrome or Edge, then sets up Wi-Fi and pairing. The release files are also on the [releases page](https://github.com/Adolanium/hermes-gadget-sdk/releases), for `esptool.py write_flash 0x0 hermes-gadget-<board>-<version>.bin`, which also erases the board's settings.

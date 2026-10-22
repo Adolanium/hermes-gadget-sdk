@@ -32,6 +32,7 @@ Hardware ports remain experimental until the [verification table](hardware-valid
 | Board | Controls | Audio |
 |---|---|---|
 | [Elecrow CrowPanel Advanced 10.1-inch ESP32-P4](hardware.md#elecrow-crowpanel-advanced-101-inch-esp32-p4) | Hold the touch screen to talk; BOOT is configured as TALK | Onboard PDM microphone and I²S speaker output; STC8 battery/charger reporting |
+| [Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C](hardware.md#waveshare-esp32-p4-wifi6-touch-lcd-34c) | Hold the touch screen to talk; BOOT is TALK. Touch and audio aren't verified on the board yet | ES7210 microphones and ES8311 speaker; USB power, no battery. Source build only; the C6 needs its own firmware first |
 
 Check the exact model and connections in [Hardware and wiring](hardware.md), then follow [Set up a board](setup-board.md). The browser installer lists profiles included in the latest published release. Newly merged profiles may need a [source build](development.md) until the next release.
 

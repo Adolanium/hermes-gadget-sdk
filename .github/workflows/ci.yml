@@ -219,3 +219,11 @@ jobs:
           name: firmware-crowpanel-p4-101
           path: firmware/esp32/dist/
           if-no-files-found: error
+      - name: Build Waveshare P4 Touch-LCD-3.4C
+        # Built, not released: the board is experimental and not in IDF_BOARDS.
+        shell: bash
+        working-directory: firmware/esp32
+        run: |
+          source /opt/esp/idf/export.sh
+          idf.py -B build/ws-p4-touch-lcd-3.4c -D SDKCONFIG=build/ws-p4-touch-lcd-3.4c/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/ws-p4-touch-lcd-3.4c/sdkconfig.defaults" set-target esp32p4
+          idf.py -B build/ws-p4-touch-lcd-3.4c -D SDKCONFIG=build/ws-p4-touch-lcd-3.4c/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/ws-p4-touch-lcd-3.4c/sdkconfig.defaults" build

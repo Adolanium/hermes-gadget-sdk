@@ -44,6 +44,8 @@ namespace {
 #define HG_BOARD_NAME "crowpanel-5.0"
 #elif CONFIG_HG_BOARD_CROWPANEL_P4_101
 #define HG_BOARD_NAME "crowpanel-advance-p4-10.1"
+#elif CONFIG_HG_BOARD_WS_P4_TOUCH_LCD_3_4C
+#define HG_BOARD_NAME "waveshare-esp32-p4-touch-lcd-3.4c"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154
 #define HG_BOARD_NAME "waveshare-esp32s3-lcd-154"
 #else
@@ -867,6 +869,68 @@ BoardConfig make() {
   b.touch.rst = 40;
   b.touch.int_gpio = 42;
   b.buttons = {35, -1, -1, -1};
+  b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
+  return b;
+}
+#elif CONFIG_HG_BOARD_WS_P4_TOUCH_LCD_3_4C
+// Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C (SKU 31523): 800x800 round MIPI-DSI
+// JD9365 panel, GT911 touch, ES8311 speaker codec + ES7210 mic ADC, C6 Wi-Fi.
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  // 800x800 MIPI-DSI JD9365 panel.
+  b.lcd.enabled = true;
+  b.lcd.width = 800;
+  b.lcd.height = 800;
+  b.lcd.swap_xy = false;
+  b.lcd.mirror_x = false;
+  b.lcd.mirror_y = false;
+  b.lcd.invert = false;
+  b.lcd.round = true;
+  b.lcd.backlight = 26;          // active-high PWM
+  b.lcd.backlight_invert = true;
+  b.lcd.rst = 27;               // LCD reset (active low)
+  b.lcd.bus.type = LcdBus::Type::Dsi;
+  b.lcd.dsi.controller = DsiController::Jd9365;
+  b.lcd.dsi.lanes = 2;
+  b.lcd.dsi.lane_bit_rate_mbps = 1500;
+  b.lcd.dsi.dpi_clock_mhz = 80;
+  b.lcd.dsi.ldo_channel = 3;
+  b.lcd.dsi.ldo_voltage_mv = 2500;
+  b.lcd.dsi.use_dma2d = true;
+  b.lcd.dsi.hsync_pulse_width = 20;
+  b.lcd.dsi.hsync_back_porch = 20;
+  b.lcd.dsi.hsync_front_porch = 40;
+  b.lcd.dsi.vsync_pulse_width = 4;
+  b.lcd.dsi.vsync_back_porch = 12;
+  b.lcd.dsi.vsync_front_porch = 24;
+  // Shared I2C bus on GPIO7/8: touch, both codecs.
+  b.i2c = {7, 8, 400000};
+  // Touch: GT911, reset/int not bonded.
+  b.touch.enabled = true;
+  b.touch.controller = TouchController::Gt911;
+  b.touch.width = 800;
+  b.touch.height = 800;
+  b.touch.ppi = 235;  // estimate (see TouchConfig::ppi)
+  b.touch.rst = -1;
+  b.touch.int_gpio = -1;
+  // Audio: ES8311 speaker + ES7210 mic.
+  b.codec.enabled = true;
+  b.codec.mclk = 13;
+  b.codec.bclk = 12;
+  b.codec.ws = 10;
+  b.codec.dout = 9;
+  b.codec.din = 11;
+  b.codec.pa = 53;
+  b.codec.speaker_pa = false;
+  b.codec.mic = MicCodec::Es7210;
+  b.codec.speaker = SpeakerCodec::Es8311;
+  b.codec.dac_mclk = true;
+  b.codec.rmnm_mics = false;
+  b.codec.es7210_mics = 0x03;
+  // Wi-Fi via C6 over SDIO (standard P4 function board pins).
+  b.buttons = {0, -1, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";
   return b;

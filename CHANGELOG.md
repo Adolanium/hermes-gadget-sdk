@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Hardware and setup
+
+- Experimental support for the Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C (SKU 31523): round 800×800 MIPI-DSI JD9365 panel, GT911 touch, ES8311 speaker with ES7210 microphones, and Wi-Fi 6 through the ESP32-C6 companion over 4-bit SDIO. The DSI driver now selects its panel controller (EK79007 or JD9365) from the board config instead of hardcoding the CrowPanel's EK79007. The profile builds with `idf.py`, since PlatformIO has no ESP32-P4 target (CI builds it; releases don't include it yet), and needs `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG` for the console, plus an esp_hosted slave image flashed to the C6 over its own UART header. Experimental: owner-confirmed display, C6-hosted Wi-Fi, pairing, reconnect after restart, factory reset and a one-hour run; touch, microphone, speaker and the full checklist are not verified. Contributed by Richard Ahlquist (@rahlquist).
+
 ### Firmware
 
 - Audio written right after a speaker stream starts is no longer thrown away on boards whose speaker task empties its queue after an abort: I2S speakers, and codec speakers without `codec.speaker_pa`. `begin()` aborts the stream before it, and the task emptied the queue on its next pass, so audio queued in between, such as a short tone written at once, could go with it. When `begin()` replaces a stream it now waits for that reset, at most 6 ticks (about 60 ms), as the P4 speaker also waits in `begin()`, so `write()` stays non-blocking, and an idle speaker starts at once. The task drops what it received while a reset was pending, and a codec cuts a stream's silent tail short when the next stream waits. A codec stream that closes with nothing played also no longer leaves `busy()` true until the next stream, which kept the screen from sleeping.
