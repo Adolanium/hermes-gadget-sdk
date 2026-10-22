@@ -43,6 +43,8 @@ hermes gadget pair
 
 Check the device name and code before approving it. You can also run `hermes pairing approve gadget <CODE>` with the code shown on the device.
 
+Approve devices in the default profile. If you turn on profile switching, an approved device can then switch to your other Hermes profiles from its settings; see [Hermes integration](hermes-integration.md#running-against-a-profile-or-a-multiplexed-gateway).
+
 **You know it worked when:** the device reaches Ready. Type a message in the simulator or use TALK on a board. Replies now come from your Hermes.
 
 ## 4. Enable speech

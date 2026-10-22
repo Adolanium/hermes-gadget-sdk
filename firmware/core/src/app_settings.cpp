@@ -65,6 +65,7 @@ void App::settings_input(Button button, bool pressed) {
     // Steps over the items this board can't offer.
     const auto offered = [&](Menu item) {
       switch (item) {
+        case Menu::Profile: return agent_profiles_.size() > 1;
         case Menu::Power: return hal_.power != nullptr;
         case Menu::PowerOff: return can_power_off;
         case Menu::WifiSetup: return static_cast<bool>(on_wifi_setup);
@@ -99,6 +100,10 @@ void App::settings_input(Button button, bool pressed) {
       break;
     case Menu::TalkMode:
       if (hal_.mic) console(talk_mode_ == TalkMode::Hold ? "set talk_mode tap" : "set talk_mode hold");
+      break;
+    case Menu::Profile:
+      if (!(profile_.touch_screen ? open_profile_picker() : next_agent_profile()))
+        check_result_ = tr(i18n::Msg::ProfileCantSwitch);
       break;
     case Menu::Microphone:
       if (hal_.mic && hal_.mic->start(profile_.mic_rate)) hardware_check_ = HardwareCheck::Microphone;
@@ -139,7 +144,13 @@ void App::settings_input(Button button, bool pressed) {
         check_result_ = tr(hal_.power->power_off() ? i18n::Msg::PowerOffRequested : i18n::Msg::PowerOffFailed);
       }
       break;
-    case Menu::Language: console(std::string("set language ") + i18n::info(i18n::next(lang_)).code); break;
+    case Menu::Language: {
+      // English, each translation, then auto (follow Hermes), then English again.
+      const bool last = static_cast<size_t>(lang_) + 1 >= i18n::kLangCount;
+      console(std::string("set language ") +
+              (lang_auto_ ? "en" : last ? "auto" : i18n::info(i18n::next(lang_)).code));
+      break;
+    }
     case Menu::Back: close_settings(); break;
     case Menu::WifiSetup: start_wifi_setup(); break;
     case Menu::Phone: start_phone_pairing(); break;
@@ -196,6 +207,10 @@ void App::settings_model() {
     case Menu::TalkMode:
       m.detail = tr(Msg::TalkMode);
       m.body = tr(!hal_.mic ? Msg::NoMicDriver : talk_mode_ == TalkMode::Hold ? Msg::TalkModeHold : Msg::TalkModeTap);
+      break;
+    case Menu::Profile:
+      m.detail = tr(Msg::ProfileSetting);
+      m.body = tr(profile_.touch_screen ? Msg::ProfileSettingChoose : Msg::ProfileSettingNext, {agent_profile_name()});
       break;
     case Menu::Microphone:
       m.detail = tr(Msg::MicCheck);
@@ -270,13 +285,15 @@ void App::settings_model() {
                                    : std::string(tr(phone_connected_ ? Msg::PhoneConnected : Msg::PhonePairedOffline)) +
                                          "\n" + tr(Msg::SelectToPairAnother);
       break;
-    case Menu::Language:
+    case Menu::Language: {
       // The English word stays beside the translation: someone who picked a
       // language they can't read can still find the way back.
       m.detail = lang_ == i18n::Lang::En ? std::string(tr(Msg::Language))
                                          : std::string(tr(Msg::Language)) + " / " + i18n::english(Msg::Language);
-      m.body = tr(Msg::LanguageBody, {i18n::fold_ascii(i18n::info(lang_).name)});
+      const std::string name = i18n::info(lang_).name;  // the font draws Latin-1 (#172)
+      m.body = tr(Msg::LanguageBody, {lang_auto_ ? tr(Msg::LanguageAuto, {name}) : name});
       break;
+    }
     case Menu::Back:
       m.detail = tr(Msg::BackToHermes);
       m.body = tr(Msg::SelectToClose);

@@ -48,11 +48,24 @@ std::string_view setting_storage_key(std::string_view key) {
 
 bool is_secret(std::string_view key) { return key == "token" || key == "wifi_pass"; }
 
-// " en es ...": the `language` setting's values.
+// " en es ... auto": the `language` setting's values.
 std::string language_codes() {
   std::string out;
   for (size_t i = 0; i < i18n::kLangCount; ++i) out += std::string(" ") + i18n::info(static_cast<i18n::Lang>(i)).code;
-  return out;
+  return out + " auto";
+}
+
+// The language Hermes names in `welcome` (its own ids: "es", "pt-br", "zh-hant"), as one this firmware
+// has: the id itself, else its primary subtag ("es-mx" -> "es"). None when it has neither.
+std::optional<i18n::Lang> hermes_language(std::string_view id) {
+  std::string lowered(id);
+  for (char& c : lowered) {
+    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    if (c == '_') c = '-';
+  }
+  if (auto exact = i18n::parse(lowered)) return exact;
+  const size_t dash = lowered.find('-');
+  return dash == std::string::npos ? std::nullopt : i18n::parse(std::string_view(lowered).substr(0, dash));
 }
 
 std::string trim(std::string_view s) {
@@ -94,6 +107,7 @@ const App::Route App::kRoutes[] = {
     {"prompt.close", &App::h_prompt_close}, {"ota.offer", &App::h_ota_offer},
     {"ota.begin", &App::h_ota_begin},     {"ota.end", &App::h_ota_end},
     {"ota.abort", &App::h_ota_abort},     {"dashboard", &App::h_dashboard},
+    {"profile", &App::h_profile},
 };
 
 App::App(Hal& hal, DeviceProfile profile) : hal_(hal), profile_(std::move(profile)) {}
@@ -125,7 +139,9 @@ void App::load_settings() {
                        : indicator == "percentage" ? BatteryIndicator::Percentage
                        : indicator == "both" ? BatteryIndicator::Both : BatteryIndicator::Off;
   battery_estimate_enabled_ = setting("battery_estimate", "off") == "liion";
-  lang_ = i18n::parse(setting("language", "en")).value_or(i18n::Lang::En);
+  const std::string language = setting("language", "en");
+  lang_auto_ = language == "auto";
+  lang_ = lang_auto_ ? hermes_lang_.value_or(i18n::Lang::En) : i18n::parse(language).value_or(i18n::Lang::En);
   activity_at_ = now();
   display_dimmed_ = display_sleeping_ = false;
 }
@@ -152,6 +168,7 @@ void App::begin() {
   }
   device_id_ = proto::device_id_for_key(key_.data(), key_.size());
   load_settings();
+  agent_profile_ = setting("profile", "default");  // shown until Hermes confirms it; not a console setting
 
   if (hal_.speaker) {
     Action vol;
@@ -207,35 +224,38 @@ void App::begin() {
   if (hal_.display) {
     Action lang;
     lang.name = "screen.language";
-    lang.description = "Set the language of the device's own screen text (menus, hints, status). "
-                       "Replies are not affected.";
+    lang.description = "Set the language of the device's own screen text (menus, hints, status), "
+                       "or auto to follow Hermes's language. Replies are not affected.";
     json::Value props = json::Value::object();
     json::Value code = json::Value::object();
     json::Value codes = json::Value::array();
     for (size_t i = 0; i < i18n::kLangCount; ++i) codes.push(i18n::info(static_cast<i18n::Lang>(i)).code);
+    codes.push("auto");
     code.set("type", "string").set("enum", codes).set("description", "Language code");
     props.set("language", code);
     json::Value req = json::Value::array();
     req.push("language");
     lang.params.set("type", "object").set("properties", props).set("required", req);
     lang.handler = [this](const json::Value& args, json::Value& result, std::string& error) {
-      const auto chosen = args["language"].is_string() ? i18n::parse(args["language"].as_string()) : std::nullopt;
-      if (!chosen) {
+      const std::string code = args["language"].is_string() ? args["language"].as_string() : std::string();
+      if (code != "auto" && !i18n::parse(code)) {
         error = "language must be one of:" + language_codes();
         return false;
       }
-      const std::string reply = console(std::string("set language ") + i18n::info(*chosen).code);
+      const std::string reply = console("set language " + code);
       if (reply.rfind("@ok", 0) != 0) {
         error = reply.size() > 7 ? reply.substr(7) : "could not save the language";
         return false;
       }
-      result.set("language", i18n::info(*chosen).code);
+      result.set("language", code);
       return true;
     };
     add_action(std::move(lang));
   }
 
   if (hal_.display) ui_ = std::make_unique<Ui>(*hal_.display);
+  if (ui_ && profile_.touch_screen)  // about 7 mm: 7 * ppi / 25.4, rounded up
+    ui_->set_touch_px((70 * (profile_.touch_ppi ? profile_.touch_ppi : DeviceProfile::kDefaultTouchPpi) + 253) / 254);
   if (profile_.frame_stats) set_frame_stats(true);
   phase_ = Phase::Boot;
   phase_since_ = now();
@@ -317,6 +337,7 @@ void App::drop_session(std::string_view reason) {
   // What the dashboard showed is stale now; the next connection sends it afresh.
   dashboard_ready_ = false;
   dash_rows_.clear();
+  profile_pending_.clear();
   clear_prompt();
   transport_active_ = false;
   schedule_reconnect();
@@ -354,7 +375,7 @@ void App::send_hello() {
   if (hal_.display) {
     DisplayInfo di = hal_.display->info();
     json::Value d = json::Value::object();
-    d.set("width", di.width).set("height", di.height).set("color", true).set("charset", "ascii");
+    d.set("width", di.width).set("height", di.height).set("color", true).set("charset", "latin1");
     if (di.round) d.set("shape", "round");
     if (ui_) {
       const UiLayout& l = ui_->layout();
@@ -394,6 +415,7 @@ void App::send_hello() {
     dash.set("v", kDashboardVersion).set("rows", ui_->dash_rows());
     caps.set("dashboard", dash);
   }
+  caps.set("profiles", true);
   if (hal_.updater) {
     json::Value ota = json::Value::object();
     ota.set("max_size", hal_.updater->capacity());
@@ -418,6 +440,8 @@ void App::send_hello() {
       .set("caps", caps)
       .set("actions", acts)
       .set("sensors", sensors);
+  const std::string stored = setting("profile", "");  // only what Hermes confirmed, never what it showed
+  if (!stored.empty()) hello.set("profile", stored);
   if (!access_token_.empty()) hello.set("token", access_token_);
   if (display_sleeping_) hello.set("display_sleeping", true);
   send(hello);
@@ -464,6 +488,9 @@ void App::h_welcome(const json::Value& m) {
   online_since_ = now();
   attempts_ = 0;
   paired_ = m["paired"].as_bool();
+  // Hermes's language, for a device whose `language` is auto (docs/protocol.md#welcome-server--device).
+  hermes_lang_ = hermes_language(m["language"].str_or(""));
+  if (lang_auto_) lang_ = hermes_lang_.value_or(i18n::Lang::En);
   int hb = static_cast<int>(m["heartbeat_s"].as_int(20));
   heartbeat_ms_ = static_cast<uint32_t>(std::max(5, std::min(300, hb))) * 1000u;
   if (paired_) {
@@ -471,10 +498,111 @@ void App::h_welcome(const json::Value& m) {
     pairing_command_.clear();
   }
   log(LogLevel::Info, paired_ ? "online (paired)" : "online (waiting for pairing approval)");
+  agent_profiles_.clear();
+  for (const auto& p : m["profiles"].elements()) {
+    if (agent_profiles_.size() >= 8) break;
+    const std::string& id = p["id"].as_string();
+    if (id.empty()) continue;
+    const std::string& name = p["name"].as_string();
+    agent_profiles_.push_back({id, (name.empty() ? id : name).substr(0, 24)});
+  }
+  if (m["profile"].is_string()) set_agent_profile(m["profile"].as_string());
+  profile_pending_.clear();  // the welcome says which profile answers
   // A freshly installed firmware has reached Hermes, so it can take the next update: keep it.
   if (hal_.updater && hal_.updater->pending_verify()) {
     hal_.updater->confirm();
     log(LogLevel::Info, "new firmware " + profile_.firmware + " reached Hermes; keeping it");
+  }
+}
+
+void App::h_profile(const json::Value& m) {
+  const std::string& error = m["error"].as_string();
+  const std::string& profile = m["profile"].as_string();
+  if (error.empty()) set_agent_profile(profile);  // a refusal changes nothing
+  // Only the answer to a pending switch (its profile, or a refusal) ends the wait; a profile Hermes
+  // sends on its own, such as a reset to default, does not.
+  if (!profile_pending_.empty() && error.empty() && profile != profile_pending_) return;
+  profile_pending_.clear();
+  profile_notice(error.empty() ? tr(i18n::Msg::ProfileSwitched, {agent_profile_name()})
+                 : tr(error == "busy"      ? i18n::Msg::ProfileRefusedBusy
+                      : error == "unknown" ? i18n::Msg::ProfileRefusedUnknown
+                                           : i18n::Msg::ProfileRefused));
+}
+
+// The notice line and the open settings item; not the hint bar, which settings hides.
+void App::profile_notice(std::string text) {
+  if (menu_ == Menu::Profile) check_result_ = text;
+  notice_ = std::move(text);
+  notice_until_ = now() + 4000;
+}
+
+void App::set_agent_profile(const std::string& id) {
+  if (id.empty()) return;
+  agent_profile_ = id;
+  if (!hal_.storage || setting("profile", "default") == id) return;
+  if (id == "default") hal_.storage->erase("profile");
+  else if (!hal_.storage->set("profile", id)) log(LogLevel::Warn, "could not save profile");
+}
+
+std::string App::agent_profile_name() const {
+  for (const auto& p : agent_profiles_)
+    if (p.id == agent_profile_) return p.name;
+  return agent_profile_;
+}
+
+bool App::can_switch_profile() const {
+  return phase_ == Phase::Online && paired_ && agent_profiles_.size() > 1 && mode_ == Mode::Idle && !prompt_showing() &&
+         !ota_busy() && !wifi_setup_open() && profile_pending_.empty();
+}
+
+bool App::next_agent_profile() {
+  size_t i = 0;
+  while (i < agent_profiles_.size() && agent_profiles_[i].id != agent_profile_) ++i;
+  return select_agent_profile(i < agent_profiles_.size() ? (i + 1) % agent_profiles_.size() : 0);
+}
+
+bool App::select_agent_profile(size_t index) {
+  if (!can_switch_profile() || index >= agent_profiles_.size()) return false;
+  if (profile_picker_open()) dismiss_overlay();
+  const AgentProfile& next = agent_profiles_[index];
+  if (next.id != agent_profile_) {
+    json::Value msg = proto::message("profile.select");
+    msg.set("profile", next.id);
+    if (send(msg)) {
+      profile_pending_ = next.id;
+      profile_pending_at_ = now();
+      profile_notice(tr(i18n::Msg::ProfileSwitching, {next.name}));
+      notice_until_ = now() + kProfileReplyMs;  // shown until the answer replaces it
+    } else {
+      profile_notice(tr(i18n::Msg::ProfileCantSwitch));
+    }
+  }
+  update_model();
+  return true;
+}
+
+bool App::profile_name_hit(int x, int y) const { return ui_ && !display_sleeping_ && ui_->name_hit(model_, x, y); }
+
+bool App::open_profile_picker() {
+  if (!profile_.touch_screen || !can_switch_profile()) return false;
+  if (settings_open()) close_settings();
+  overlay_ = Overlay::Profiles;
+  overlay_until_ = 0;
+  profile_page_ = 0;
+  notice_.clear();
+  update_model();
+  return true;
+}
+
+int App::profile_row_hit(int x, int y) const { return ui_ ? ui_->profile_row_hit(model_, x, y) : -1; }
+
+void App::profile_tap(int x, int y) {
+  const int row = profile_row_hit(x, y);
+  if (row >= 0) {
+    select_agent_profile(static_cast<size_t>(row));
+  } else if (row == Ui::kMoreRow) {
+    profile_page_ = ui_->profile_next_page(model_);
+    update_model();
   }
 }
 
@@ -1430,6 +1558,11 @@ void App::tick() {
     hal_.transport->close();
     drop_session("server silent");
     update_model();
+  } else if (!profile_pending_.empty() && t - profile_pending_at_ > kProfileReplyMs) {
+    // The switch may still have happened: reconnect, and the welcome says which profile answers.
+    hal_.transport->close();
+    drop_session("no answer to the profile switch");
+    update_model();
   }
 
   if (ota_busy() && t - ota_last_rx_ > kOtaIdleMs) {
@@ -1525,6 +1658,7 @@ void App::update_model() {
   m.qr = nullptr;
   m.dash.clear();
   m.hero = false;
+  m.name_target = false;
   m.caption_lines = 1;
   m.scroll = scroll_;
   m.level = level_;
@@ -1680,6 +1814,15 @@ void App::update_model() {
     m.screen = Screen::Image;
     m.headline = tr(Msg::Image);
     m.hint = tr(Msg::ButtonToClose, {cancel});
+  } else if (overlay_ == Overlay::Profiles) {
+    m.screen = Screen::Profiles;
+    m.headline = tr(Msg::ProfileListTitle);
+    for (const auto& p : agent_profiles_)
+      m.dash.push_back({p.name, p.id == agent_profile_ ? tr(Msg::ProfileListCurrent) : ">",
+                        p.id == agent_profile_ ? DashRow::Tone::Waiting : DashRow::Tone::Dim});
+    m.hint = tr(Msg::ProfileListHint);
+    m.detail = tr(Msg::ProfileListMore);
+    m.scroll = profile_page_;
   } else if (overlay_ == Overlay::Dashboard) {
     m.screen = Screen::Dashboard;
     m.headline = dash_headline_;
@@ -1728,13 +1871,24 @@ void App::update_model() {
     bool showing_reply = !reply_.empty() && static_cast<int32_t>(reply_until_ - now()) > 0;
     m.hero = !showing_reply;
     if (m.hero) {
-      m.headline = tr(Msg::HiImHermes);
+      const bool switching = agent_profiles_.size() > 1;
+      m.headline = switching && agent_profile_ != "default" ? tr(Msg::ProfileGreeting, {agent_profile_name()})
+                                                            : std::string(tr(Msg::HiImHermes));
       m.detail = tr(reply_.empty() || !profile_.has_scroll_buttons ? Msg::AskMeAnything : Msg::UpShowsLastReply);
-      if (dashboard_ready_ && can_open_dashboard() && reply_.empty())
+      const bool sessions = dashboard_ready_ && can_open_dashboard() && reply_.empty();
+      if (sessions)
         m.detail = profile_.touch_screen ? std::string(tr(Msg::SwipeDownForSessions)) : tr(Msg::ButtonShowsSessions, {cancel});
+      if (switching) {
+        // In tap-to-talk mode a tap records, so the name is no target there.
+        m.name_target = profile_.touch_screen && talk_mode_ == TalkMode::Hold;
+        m.detail = tr(m.name_target ? Msg::ProfileTapName : Msg::ProfileInSettings) +
+                   (sessions ? "\n" + m.detail : "");
+        m.caption_lines = 2;
+      }
     }
   }
-  bool keeps_detail = m.screen == Screen::Pairing || m.screen == Screen::Boot || m.screen == Screen::Prompt;
+  bool keeps_detail = m.screen == Screen::Pairing || m.screen == Screen::Boot || m.screen == Screen::Prompt ||
+                      m.screen == Screen::Profiles;
   if (!notice_.empty() && !keeps_detail) m.detail = notice_;
   if (m.screen == Screen::Ready && m.hero && power_status_ && power_status_->battery_percent &&
       *power_status_->battery_percent <= 10 && power_status_->external_power == false)
@@ -1765,9 +1919,12 @@ json::Value App::status_value() const {
       .set("phase", phase)
       .set("screen", screen_name(model_.screen))
       .set("paired", paired_)
+      .set("profile", agent_profile_)
       .set("server", server_url_)
       .set("network", network_up_);
   s.set("display_sleeping", display_sleeping_);
+  // The language the screen is in, and whether it follows Hermes's (`language` auto).
+  s.set("language", i18n::info(lang_).code).set("language_auto", lang_auto_);
   if (hal_.power) s.set("power", power_value());
   if (!pairing_code_.empty()) s.set("pairing_code", pairing_code_);
   if (!prompt_id_.empty()) s.set("prompt", prompt_id_);
@@ -1873,7 +2030,8 @@ std::string App::console(std::string_view raw) {
       return "@error battery_display must be icon, percentage, both or off";
     if (key == "battery_estimate" && !value.empty() && value != "off" && value != "liion")
       return "@error battery_estimate must be off or liion";
-    if (key == "language" && !value.empty() && !i18n::parse(value)) return "@error language must be one of:" + language_codes();
+    if (key == "language" && !value.empty() && value != "auto" && !i18n::parse(value))
+      return "@error language must be one of:" + language_codes();
     if (!hal_.storage) return "@error no storage";
     if (value.empty()) hal_.storage->erase(setting_storage_key(key));
     else if (!hal_.storage->set(setting_storage_key(key), value)) return "@error could not save " + key;
@@ -1942,6 +2100,7 @@ std::string App::console(std::string_view raw) {
     hal_.storage->erase("device_key");
     if (cmd == "factory-reset") {
       for (const char* k : kSettingKeys) hal_.storage->erase(setting_storage_key(k));
+      hal_.storage->erase("profile");
       for (const auto& k : profile_.extra_settings) hal_.storage->erase(k);
       hal_.storage->erase("wifi_nets");
       hal_.storage->erase("wifi_fast");  // where the last access point was (drivers/wifi_fast.hpp)

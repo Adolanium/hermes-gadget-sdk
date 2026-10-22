@@ -18,7 +18,7 @@ import secrets
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 from . import audio, opus, protocol
 from .store import DeviceStore
@@ -35,11 +35,31 @@ MAX_PENDING_DEVICES = 16     # unapproved devices the store keeps, in total...
 MAX_PENDING_PER_ADDRESS = 4  # ...and from one network address
 
 
+def short_utterance_notice(session: "DeviceSession") -> str:
+    """The retry hint, worded for how this device takes speech."""
+    if "touch" in (session.caps.get("inputs") or []):
+        return ("Didn't catch that - tap and speak" if session.caps.get("talk_mode") == "tap"
+                else "Didn't catch that - hold the screen while speaking")
+    return "Didn't catch that - hold the button while speaking"
+
+
 class HubDelegate:
     """Decides what device traffic means. Every method has a no-op default."""
 
     async def is_paired(self, session: "DeviceSession") -> bool:
         return True
+
+    def profiles(self, session: "DeviceSession | None" = None) -> list[dict]:
+        """Hermes profiles ``session`` may switch between, as ``[{"id", "name"}]``; empty disables switching."""
+        return []
+
+    async def select_profile(self, session: "DeviceSession", profile: str) -> str | None:
+        """Bind ``session`` to ``profile`` (set ``session.profile``); return None, or why not."""
+        return "unknown"
+
+    def language(self, session: "DeviceSession") -> Optional[str]:
+        """The language id ``welcome`` names for a device left on ``auto`` (e.g. ``"es"``), or None."""
+        return None
 
     async def on_ready(self, session: "DeviceSession") -> None:
         pass
@@ -235,6 +255,7 @@ class DeviceSession:
         # doesn't counts as always lit, so nothing is held back for it.
         self.display_sleeping: bool = hello.get("display_sleeping") is True
         self.paired = False
+        self.profile = "default"  # the Hermes profile that answers this device
         self.connected_at = time.time()
         self.last_rx = time.monotonic()
         self.closed = False
@@ -353,6 +374,9 @@ class DeviceSession:
 
     async def close_prompt(self, prompt_id: str) -> None:
         await self.send_json(protocol.message("prompt.close", id=prompt_id))
+
+    async def send_profile(self, error: str | None = None) -> None:
+        await self.send_json(protocol.message("profile", profile=self.profile, error=error))
 
     async def show_card(self, title: str, body: str, ttl_s: float = 15) -> bool:
         """Show a card. False when it is held until the screen lights up."""
@@ -515,6 +539,7 @@ class DeviceSession:
             "board": self.board,
             "firmware": self.firmware,
             "paired": self.paired,
+            "profile": self.profile,
             "connected_for_s": int(time.time() - self.connected_at),
             "screen": {k: disp[k] for k in ("width", "height", "text_cols", "text_rows") if k in disp} or None,
             "speaker": self.has_speaker,
@@ -725,9 +750,17 @@ class DeviceHub:
             session.paired = bool(await self.delegate.is_paired(session))
             if session.paired:
                 self.store.confirm(session.device_id)
-            await session.send_json(protocol.message(
-                "welcome", session=session.session_id, paired=session.paired,
-                heartbeat_s=self.heartbeat_s, server="hermes", proto=protocol.VERSION))
+            welcome = dict(session=session.session_id, paired=session.paired, heartbeat_s=self.heartbeat_s,
+                           server="hermes", proto=protocol.VERSION)
+            language = self.delegate.language(session)
+            if language:
+                welcome["language"] = language
+            if session.caps.get("profiles") is True and (roster := self.delegate.profiles(session)):
+                wanted = hello.get("profile")
+                if isinstance(wanted, str) and wanted and wanted != session.profile:
+                    await self.delegate.select_profile(session, wanted)  # a refusal leaves "default"
+                welcome.update(profile=session.profile, profiles=roster)
+            await session.send_json(protocol.message("welcome", **welcome))
             log.info("device %s (%s) online, paired=%s", session.device_id, session.name, session.paired)
             await self.delegate.on_ready(session)
             if not session.display_sleeping:
@@ -821,13 +854,15 @@ class DeviceHub:
     async def _h_audio_end(self, session: DeviceSession, msg: dict) -> None:
         up = session._upload
         session._upload = None
-        if up is None or int(msg.get("stream") or 0) != up.stream:
-            return
-        seconds = audio.duration_s(bytes(up.pcm), up.rate)
-        if up.gaps:
+        if up is not None and int(msg.get("stream") or 0) != up.stream:
+            up = None  # an end for a stream this session never started still settles the device
+        if up is not None and up.gaps:
             log.debug("[%s] utterance had %d sequence gaps", session.device_id, up.gaps)
-        if seconds < MIN_UTTERANCE_S:
-            await session.send_notice("Didn't catch that - hold the button while speaking")
+        seconds = audio.duration_s(bytes(up.pcm), up.rate) if up is not None else 0.0
+        if up is None or seconds < MIN_UTTERANCE_S:
+            # An empty-id turn.end settles the device; without it the device waits on "Sending..." for minutes.
+            await session.send_notice(short_utterance_notice(session))
+            await session.turn_end("", outcome="cancelled")
             return
         wav = audio.wav_bytes(bytes(up.pcm), up.rate)
         session.spawn(self.delegate.on_utterance(session, up.id, wav, seconds))
@@ -887,6 +922,11 @@ class DeviceHub:
         if session._ota_inbox is not None:
             session._ota_inbox.put_nowait(msg)
 
+    async def _h_profile_select(self, session: DeviceSession, msg: dict) -> None:
+        wanted = msg.get("profile")
+        error = await self.delegate.select_profile(session, wanted) if isinstance(wanted, str) and wanted else "unknown"
+        await session.send_profile(error)
+
     _routes = {
         "text": _h_text,
         "audio.start": _h_audio_start,
@@ -904,4 +944,5 @@ class DeviceHub:
         "ota.ack": _h_ota,
         "ota.done": _h_ota,
         "ota.error": _h_ota,
+        "profile.select": _h_profile_select,
     }

@@ -22,7 +22,7 @@ assets/mascot/          The mascot master image and its attribution
 |---|---|---|
 | Core (C++) | `hermes-gadget build-sim --test`, or `ctest --test-dir build/host -C Release` | CMake + compiler |
 | Plugin units, simulator ↔ hub, desktop controls | `pytest` | Built simulator library; a desktop or Xvfb for window tests |
-| Adapter on real Hermes classes | `HERMES_AGENT_DIR=../hermes-agent ../hermes-agent/.venv/bin/python -m pytest tests/test_adapter_hermes.py` | A Hermes checkout and its virtualenv |
+| Adapter on real Hermes classes | `HERMES_AGENT_DIR=../hermes-agent ../hermes-agent/.venv/bin/python -m pytest tests/test_adapter_hermes.py tests/test_profile_select_hermes.py tests/test_profile_gateway_hermes.py` | A Hermes checkout and its virtualenv |
 | Full gateway end to end | `HERMES_GADGET_E2E=1 pytest tests/test_gateway_e2e.py` | The above; spawns `hermes gateway run` with a temporary `HERMES_HOME` |
 | Browser installer | `npm ci && npm test` in `site/` | Node.js 22 |
 | Home Assistant / MQTT examples | `pytest tests/test_automation_examples.py` | Built native library and the `mqtt` extra; local peers need no external accounts |
@@ -134,7 +134,7 @@ Simulator numbers measure the core on your computer, not the board's CPU or pane
 
 The text the device shows by itself is listed once, with its English, in `firmware/core/include/hg/i18n.hpp` (`HG_I18N_MESSAGES`). Each other language is a table in `firmware/core/src/i18n_<code>.cpp` that maps message ids to text; `i18n_es.cpp` is the example to copy. To add a language:
 
-1. Copy `i18n_es.cpp` to `i18n_<code>.cpp`, rename its table, and translate each line. Keep `{0}`, `{1}` and the rest: the device fills them with a button name, a number or a code, in the order the sentence needs. Write the text in UTF-8 with its accents; until the font has them, the device shows the nearest ASCII letter.
+1. Copy `i18n_es.cpp` to `i18n_<code>.cpp`, rename its table, and translate each line. Keep `{0}`, `{1}` and the rest: the device fills them with a button name, a number or a code, in the order the sentence needs. Write the text in UTF-8 with its accents. The font draws ASCII and Latin-1 (U+00A0 to U+00FF); a letter outside them shows as `?`, so a language that needs one waits for the font to grow.
 2. Add the language to `Lang` in `i18n.hpp`, and its code, its name in that language and its table to `kLangs` and `table_for()` in `i18n.cpp`.
 3. Add the file to `HG_CORE_SOURCES` in `firmware/core/CMakeLists.txt`.
 4. Run `hermes-gadget build-sim --test`. The tests fail when a message has no translation, when a translation drops or adds a placeholder, and when a hint or headline no longer fits on a screen where the English fits. Shorten it until it does: a hint cut with `..` on a small screen is worse than a terser phrase.

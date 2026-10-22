@@ -185,6 +185,9 @@ struct TouchConfig {
   bool mirror_x = false, mirror_y = false;
   bool swap_xy = false;  // CST9217 report: exchange x and y after mirroring (esp_lcd_touch order)
   int16_t offset_y = 0;  // subtracted from y when the UI starts below the panel's first row
+  // Pixels per inch of the glass, so touch targets come out about 7 mm tall (hg::DeviceProfile::touch_ppi).
+  // Estimates from the panel's nominal diagonal (diameter if round) and resolution, not measurements.
+  uint16_t ppi = 0;
   TouchController controller = TouchController::Cst9217;
   // The touch controller's own I2C bus; unset = the board's shared bus. When set,
   // an expander key (pwr_key) is read on this bus too.

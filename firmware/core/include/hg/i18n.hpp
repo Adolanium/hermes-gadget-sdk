@@ -5,7 +5,7 @@
 // message ids to text; a message it leaves out is shown in English. Text with
 // {0}, {1}... is filled in by format(), so a translation can put the pieces in
 // its own order. Translations are written in UTF-8 with their accents; until
-// the font draws them, text() folds them to the nearest ASCII (fold_ascii).
+// text() keeps what the font draws (ASCII and Latin-1) and folds the rest (fold_to_font).
 //
 // Replies, cards and questions come from Hermes in the user's language and are
 // not translated here.
@@ -81,6 +81,7 @@ namespace hg::i18n {
   X(SelectToPairAnother,    "Select to pair another.") \
   X(Language,               "Language") \
   X(LanguageBody,           "{0}\nSelect for the next language.") \
+  X(LanguageAuto,           "Automatic, as Hermes: {0}") \
   X(BackToHermes,           "Back to Hermes") \
   X(SelectToClose,          "Select to close settings.") \
   X(CheckStopped,           "Check stopped") \
@@ -187,6 +188,23 @@ namespace hg::i18n {
   X(SwipeDownForSessions,   "Swipe down for sessions") \
   X(ButtonShowsSessions,    "{0} shows sessions") \
   X(LowBattery,             "Low battery: connect USB") \
+  /* Hermes profiles */ \
+  X(ProfileSetting,         "Hermes profile") \
+  X(ProfileSettingNext,     "{0}\nSelect to switch to the next profile.") \
+  X(ProfileSettingChoose,   "{0}\nSelect to choose a profile.") \
+  X(ProfileCantSwitch,      "Can't switch now") \
+  X(ProfileGreeting,        "Hi, I'm {0}") \
+  X(ProfileTapName,         "Tap name to change") \
+  X(ProfileInSettings,      "Change in Settings") \
+  X(ProfileListTitle,       "Talk to") \
+  X(ProfileListHint,        "Swipe down to go back") \
+  X(ProfileListCurrent,     "NOW") \
+  X(ProfileListMore,        "More") \
+  X(ProfileSwitching,       "Switching to {0}...") \
+  X(ProfileSwitched,        "Now talking to {0}") \
+  X(ProfileRefusedBusy,     "Finish this turn first") \
+  X(ProfileRefusedUnknown,  "Profile unavailable") \
+  X(ProfileRefused,         "Switch not allowed") \
   /* Dashboard */ \
   X(HermesSessions,         "Hermes sessions") \
   X(NoSessions,             "No sessions") \
@@ -238,7 +256,7 @@ std::optional<Lang> parse(std::string_view code);
 // The language after `lang`, wrapping: the settings menu steps through them.
 Lang next(Lang lang);
 
-// The message in `lang`, folded to what the font draws; English where the
+// The message in `lang`, as the font draws it (fold_to_font); English where the
 // translation leaves it out. Valid for the life of the program.
 const char* text(Lang lang, Msg id);
 // The English text, as listed above.
@@ -250,6 +268,9 @@ std::string format(std::string_view text, std::initializer_list<std::string_view
 // The nearest ASCII for UTF-8 text: accents dropped, ¿ and ¡ left out,
 // typographic punctuation replaced; anything else becomes '?'.
 std::string fold_ascii(std::string_view utf8);
+// UTF-8 text the font can draw: ASCII and Latin-1 kept as they are,
+// typographic punctuation replaced, anything else '?'.
+std::string fold_to_font(std::string_view utf8);
 
 // A board's control name in `lang`: the words above are translated, a button's
 // printed name (BOOT, PWR, TALK, ...) is kept.

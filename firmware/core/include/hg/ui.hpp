@@ -37,6 +37,7 @@ enum class Screen : uint8_t {
   Settings,
   Setup,
   Dashboard,  // Hermes's sessions and the user's status tiles (docs/protocol.md#dashboard)
+  Profiles,   // the Hermes profiles to choose from: rows in `dash` from `scroll`; `detail` labels More
 };
 
 enum class Link : uint8_t { Offline, Network, Connecting, Online };
@@ -80,6 +81,7 @@ struct UiModel {
   // instead of the header + text layout.
   bool hero = false;
   uint8_t caption_lines = 1;  // hero: lines the detail may wrap to (then "..")
+  bool name_target = false;   // hero: the caption sits in a panel that a tap opens the profile list from
   // Wi-Fi setup: a scannable code for the temporary network, drawn centred in
   // the content band. Null on every other screen. Borrowed, not owned: the app
   // keeps the matrix so it is encoded once, not on every model update.
@@ -95,6 +97,7 @@ struct UiLayout {
   int body_cols = 0, body_rows = 0;
   int main_y = 0, main_h = 0;  // area between the bars (used for images)
   int hero_cols = 0;  // characters per hero caption line
+  int name_cols = 0;  // hero headline characters in a name panel, clear of its marker
 };
 
 class Ui {
@@ -121,6 +124,14 @@ class Ui {
   int body_rows(const UiModel& m) const;
   // Dashboard rows that fit the content band.
   int dash_rows() const;
+  // Touch targets (the name panel, list rows) are at least this many pixels tall.
+  void set_touch_px(int px) { touch_px_ = px; }
+  // Panel coordinates: the hero caption's panel (name_target), and the item of the Profiles row
+  // there (-1: none, kMoreRow: the next page). profile_next_page gives that page's first item.
+  static constexpr int kMoreRow = -2;
+  bool name_hit(const UiModel& m, int x, int y) const;
+  int profile_row_hit(const UiModel& m, int x, int y) const;
+  int profile_next_page(const UiModel& m) const;
   bool title_hit(int x, int y) const {
     const int left = ox_ + (info_.width - layout_.title_w) / 2;
     return x >= left && x < left + layout_.title_w && y >= oy_ && y < oy_ + layout_.top_h;
@@ -135,6 +146,22 @@ class Ui {
   void draw_content(Canvas& c, const UiModel& m);
   bool draw_qr(Canvas& c, const UiModel& m, int y0, int y1);
   void draw_dashboard(Canvas& c, const UiModel& m, int y0, int y1);
+  void draw_profiles(Canvas& c, const UiModel& m);
+  struct Rect {
+    int x = 0, y = 0, w = 0, h = 0;
+    bool has(int px, int py) const { return px >= x && px < x + w && py >= y && py < y + h; }
+  };
+  // Area coordinates. The name panel is empty unless the model has one.
+  Rect name_rect(const UiModel& m) const;
+  // The left edge of the name panel's "v" marker, at the panel's right end.
+  int name_marker_x() const;
+  struct ProfilePage {
+    int first = 0, count = 0, row = 0, top = 0;
+    bool more = false;
+    Rect slot(const Ui& ui, int i) const;
+  };
+  ProfilePage profile_page(const UiModel& m) const;
+  int touch_px_ = 0;
   void draw_bottom(Canvas& c, const UiModel& m);
   void draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r);
   // Draws the battery icon and percent from x, vertically centred on cy.
@@ -144,6 +171,7 @@ class Ui {
   struct HeroGeom {
     int size = 0, x = 0, y = 0;  // mascot
     int caption_y = 0, buttons_y = 0;
+    int name_h = 0;  // the name panel around the headline and first detail line (0: none)
     std::vector<std::string> detail;  // wrapped, already truncated
   };
   HeroGeom hero_geom(const UiModel& m) const;

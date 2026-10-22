@@ -32,7 +32,7 @@ endif()
 # The firmware version: reported to Hermes and written into the image, where
 # `hermes gadget update` reads it. Override with -DPROJECT_VER=...
 if(NOT DEFINED PROJECT_VER)
-    set(PROJECT_VER "0.2.0")
+    set(PROJECT_VER "0.3.0")
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)

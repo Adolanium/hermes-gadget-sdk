@@ -8,106 +8,19 @@ Run with a Python that can import Hermes, e.g.:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import struct
+import time
 import types
 
 import pytest
 
 from conftest import requires_hermes, requires_sim
+from hermes_fixtures import PAIRING_TEXT, _paired_sim
 
-pytestmark = [requires_hermes, requires_sim]
-
-PAIRING_TEXT = ("Hi! I don't recognise you yet. Your pairing code is ABCD2345 (valid for 1 hour). "
-                "Ask the owner to run: hermes pairing approve gadget ABCD2345")
-
-
-class _Ctx:
-    """The slice of Hermes's PluginContext that ``register(ctx)`` uses; registers the platform for
-    real (PlatformEntry rejects unknown keyword arguments, so this also pins our register() call)."""
-
-    def __init__(self):
-        self.tools, self.cli, self.hooks = [], [], []
-
-    def register_platform(self, name, label, adapter_factory, check_fn, validate_config=None,
-                          required_env=None, install_hint="", **kw):
-        from gateway.platform_registry import PlatformEntry, platform_registry
-
-        platform_registry.register(PlatformEntry(
-            name=name, label=label, adapter_factory=adapter_factory, check_fn=check_fn,
-            validate_config=validate_config, required_env=required_env or [], install_hint=install_hint,
-            source="builtin", **kw))
-
-    def register_tool(self, **kw):
-        self.tools.append(kw["name"])
-
-    def register_cli_command(self, **kw):
-        self.cli.append(kw["name"])
-
-    def register_hook(self, name, callback):
-        from hermes_cli.plugins import VALID_HOOKS
-
-        assert name in VALID_HOOKS, name  # a hook this Hermes doesn't fire would never be called
-        self.hooks.append(name)
-
-
-@pytest.fixture(scope="module", autouse=True)
-def registered_platform():
-    import hermes_gadget_plugin
-
-    ctx = _Ctx()
-    hermes_gadget_plugin.register(ctx)
-    assert set(ctx.tools) == {"gadget_devices", "gadget_display", "gadget_action"}
-    assert ctx.cli == ["gadget"]
-    assert "pre_llm_call" in ctx.hooks and "pre_approval_request" in ctx.hooks
-    return ctx
-
-
-@pytest.fixture
-def gadget(loop_thread, tmp_path, monkeypatch):
-    import plugins.plugin_storage as storage
-    from gateway.config import PlatformConfig
-    from hermes_gadget_plugin.adapter import GadgetAdapter
-
-    monkeypatch.setattr(storage, "plugin_data_dir", lambda name: tmp_path / "plugin-data" / name)
-    import gateway.config as gateway_config
-
-    saved_homes = []  # never write the developer's real config.yaml
-    monkeypatch.setattr(gateway_config, "persist_home_channel", lambda home, **kw: saved_homes.append(home))
-    monkeypatch.delenv("GADGET_HOME_CHANNEL", raising=False)
-    adapter = GadgetAdapter(PlatformConfig(enabled=True, extra={"host": "127.0.0.1", "port": 0}))
-    state = types.SimpleNamespace(adapter=adapter, authorized=set(), events=[], reply=lambda e: f"echo: {e.text}",
-                                  saved_homes=saved_homes)
-
-    adapter.set_authorization_check(
-        lambda user_id, chat_type=None, chat_id=None, **kw: user_id in state.authorized)
-
-    async def handler(event):
-        # Stands in for the gateway runner: unauthorized senders get a pairing code.
-        state.events.append(event)
-        if event.source.user_id not in state.authorized:
-            await adapter.send(event.source.chat_id, PAIRING_TEXT)
-            return None
-        return state.reply(event)
-
-    adapter.set_message_handler(handler)
-    assert loop_thread.run(adapter.connect())
-    state.url = f"ws://127.0.0.1:{adapter.hub.bound_port}/gadget"
-    state.run = loop_thread.run
-    state.loop = loop_thread.loop
-    yield state
-    loop_thread.run(adapter.cancel_background_tasks())  # as the gateway does on shutdown
-    loop_thread.run(adapter.disconnect())
-
-
-def _paired_sim(gadget, make_sim, **kw):
-    sim = make_sim(gadget.url, **kw)
-    assert sim.wait_screen("pairing", "ready", timeout=10)
-    gadget.authorized.add(sim.status()["device_id"])
-    assert sim.wait_screen("ready", timeout=10)
-    return sim
-
+pytestmark = [requires_hermes, requires_sim, pytest.mark.usefixtures("registered_platform")]
 
 def test_unknown_device_gets_a_pairing_code_then_is_approved(gadget, make_sim):
     sim = make_sim(gadget.url)
@@ -150,12 +63,33 @@ def test_voice_arrives_as_a_cached_wav_voice_message(gadget, make_sim):
 
 def test_cancel_button_sends_stop(gadget, make_sim):
     sim = _paired_sim(gadget, make_sim)
-    gadget.reply = lambda e: None
+
+    async def still_working(event):  # the turn is still running when the cancel comes
+        if event.text == "long task":
+            await asyncio.sleep(10)
+
+    gadget.reply = still_working
     gadget.events.clear()
+    starts = lambda: sum(1 for m in sim.received if m["type"] == "turn.start")
+    before = starts()
     sim.type_text("long task")
     assert sim.wait_screen("thinking", timeout=5)
+    # The device thinks as soon as it sends; the cancel must come once the server's turn runs.
+    assert sim.wait_for(lambda: starts() > before, timeout=5)
     sim.tap("cancel")
     assert sim.wait_for(lambda: any(e.text == "/stop" for e in gadget.events), timeout=5)
+
+
+def test_cancel_after_the_reply_sends_no_stop(gadget, make_sim):
+    sim = _paired_sim(gadget, make_sim)
+    session = gadget.adapter.hub.sessions[sim.status()["device_id"]]
+    sim.type_text("what's up")
+    assert sim.wait_for(lambda: sim.last_received("turn.end") is not None, timeout=10)
+    gadget.events.clear()
+    # The reply may still be playing after turn.end: a cancel then only stops the audio.
+    gadget.run(gadget.adapter.on_cancel(session))
+    sim.run_for(0.5)
+    assert not any(e.text == "/stop" for e in gadget.events)
 
 
 def test_new_session_maps_to_slash_new(gadget, make_sim):
@@ -474,6 +408,44 @@ def test_command_approvals_queue_on_the_device(gadget, make_sim, monkeypatch):
     assert resolved == [("sk", "once")]
 
 
+def test_approval_cards_carry_the_hermes_approval_timeout(gadget, make_sim, monkeypatch):
+    import gateway.platforms.base_exec_approval as exec_approval
+    from hermes_gadget_plugin.adapter import _Prompt
+
+    monkeypatch.setattr(exec_approval, "approval_timeout_seconds", lambda: 42)
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+    result = gadget.run(gadget.adapter.send_exec_approval(
+        chat_id=device_id, command="rm -rf build", session_key="sk"))
+    assert result.success and sim.wait_screen("prompt", timeout=5)
+    assert sim.last_received("prompt")["ttl_s"] == 42
+
+    # Every question expires with its time limit, not only slash confirmations.
+    stale = _Prompt(id="q", kind="approval", session_key="sk", title="t", text="x", ttl_s=60,
+                    created=time.monotonic() - 61)
+    fresh = _Prompt(id="q", kind="approval", session_key="sk", title="t", text="x", ttl_s=60)
+    assert stale.expired() and not fresh.expired()
+
+
+def test_an_approval_withdrawn_while_the_device_was_away_stays_gone(gadget, make_sim, monkeypatch):
+    import gateway.platforms.base_exec_approval as exec_approval
+
+    monkeypatch.setattr(exec_approval, "approval_timeout_seconds", lambda: 42)
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+    result = gadget.run(gadget.adapter.send_exec_approval(
+        chat_id=device_id, command="rm -rf build", session_key="sk"))
+    assert result.success and sim.wait_screen("prompt", timeout=5)
+
+    # The device goes away, and Hermes's approval times out while it is gone.
+    sim.close()
+    gadget.adapter._prompts[device_id][0].created -= 43
+    again = make_sim(gadget.url)
+    assert again.wait_screen("ready", timeout=10)
+    again.run_for(0.5)
+    assert again.last_received("prompt") is None
+
+
 def _recording_approvals(monkeypatch):
     import tools.approval as approval
 
@@ -717,6 +689,28 @@ def test_battery_log_records_paired_state_readings_only_when_enabled(loop_thread
             assert log.read_text().splitlines()[1].split(",")[2:5] == ["3950", "72", "0"]
     finally:
         loop_thread.run(adapter.disconnect())
+
+
+def test_welcome_language_is_the_configured_one_else_hermes_language(monkeypatch):
+    import hermes_gadget_plugin.adapter as adapter_module
+    from gateway.config import PlatformConfig
+    from hermes_gadget_plugin.adapter import GadgetAdapter
+
+    session = types.SimpleNamespace(device_id="hg-0123456789abcdef")
+    monkeypatch.setattr(adapter_module, "get_language", lambda: "pt-br")
+
+    def language(**extra):
+        return GadgetAdapter(PlatformConfig(enabled=True, extra={"host": "127.0.0.1", "port": 0, **extra})).language(session)
+
+    assert language() == "pt-br"  # Hermes's own (HERMES_LANGUAGE > display.language > en)
+    assert language(language="auto") == "pt-br"
+    assert language(language="ES") == "es"  # set for the gadget alone
+
+    def broken():
+        raise RuntimeError("no config")
+
+    monkeypatch.setattr(adapter_module, "get_language", broken)
+    assert language() is None  # the device falls back to English; the connection goes on
 
 
 @pytest.fixture

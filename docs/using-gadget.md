@@ -58,6 +58,7 @@ Tap CANCEL to move to the next item, then tap TALK to change it. On a touchscree
 | Speaker volume | Change volume in steps of 10 percent |
 | Screen brightness | Choose 10, 25, 50, 75, or 100 percent when the display supports it |
 | Talk mode | Choose hold-to-talk or tap-to-talk with silence detection |
+| Hermes profile | Choose the Hermes profile (touchscreens), or switch to the next one; shown only when Hermes offers more than one |
 | Microphone check | Show the live input level; nothing is saved or sent to Hermes |
 | Speaker check | Play a short, quiet tone at the current volume |
 | Display check | Show red, green, blue, white, and black bands |
@@ -69,6 +70,8 @@ Tap CANCEL to move to the next item, then tap TALK to change it. On a touchscree
 | Wi-Fi setup | Start [phone-based setup](setup-board.md#set-up-wi-fi-with-your-phone) on ESP32 boards, with a QR code for the temporary network where the screen has room |
 | Phone app | On boards with Bluetooth: pair a phone app for two minutes; the screen shows the six-digit code to type on the phone. Shows whether a phone is paired and connected |
 | Language | Step through the languages of the device's own text: English, Spanish |
+
+When Hermes offers several profiles (the host turns this on; see [Hermes integration](hermes-integration.md#running-against-a-profile-or-a-multiplexed-gateway)), the idle screen greets you with the current profile's name. The device shows at most 8 profiles, the default one first. On a touchscreen in hold-to-talk mode, tap the name for the list of profiles, then tap one; swipe down to close the list without choosing. A hold that starts on the name still talks. **Hermes profile** in settings opens the same list. Boards without a touchscreen, and tap-to-talk mode, show **Change in Settings**: there, **Hermes profile** switches to the next one. The device asks Hermes and changes only when Hermes confirms; if Hermes is busy, try again once the reply is done. The device keeps the profile across restarts.
 
 Volume, brightness, talk mode, battery indicator, screen timeout, and language survive restarts. Unavailable drivers show as unavailable. These checks help you test the hardware; a completed tone does not prove that a physical speaker produced sound.
 
@@ -91,14 +94,16 @@ On the AMOLED-1.75C, a short press of PWR puts the screen to sleep the same way,
 
 ## Language
 
-The device's own text (the Ready screen, hints, status, settings and errors) is English unless you choose another language. Hermes's replies, cards and questions come in whatever language Hermes writes them, whatever this setting says.
+The device's own text (the Ready screen, hints, status, settings and errors) is English unless you choose another language, or choose **auto** to follow Hermes's. Hermes's replies, cards and questions come in whatever language Hermes writes them, whatever this setting says.
 
 Choose it in one of three ways:
 
-- Select **Language** in device settings until the one you want shows. Each language is shown in its own name (Español), and the item keeps the English word beside its translation (Idioma / Language), so you can find it again in a language you can't read.
+- Select **Language** in device settings until the one you want shows. After the last language comes **Automatic, as Hermes**. Each language is shown in its own name (Español), and the item keeps the English word beside its translation (Idioma / Language), so you can find it again in a language you can't read.
 - Ask Hermes, for example "put the screen in Spanish". The firmware offers the agent a `screen.language` action.
-- On the USB console, `set language es`; `set language` with no value goes back to English.
+- On the USB console, `set language es` or `set language auto`; `set language` with no value goes back to English.
 
-The languages are English (`en`) and Spanish (`es`). The font has no accented letters yet, so translated text shows them without accents ("Informacion"). To add a language, see [Translate the device text](development.md#translate-the-device-text).
+With **auto**, the device takes the language Hermes names when it connects: Hermes's own language (`HERMES_LANGUAGE`, else `display.language`), or the gadget plugin's `language` setting if you set one ([configuration](hermes-integration.md#configuration)). A language the firmware doesn't have, or none, shows as English.
+
+The languages are English (`en`) and Spanish (`es`). The font draws Latin-1, so translations and Hermes's replies keep their accents, ñ, ¿ and ¡; letters from other alphabets show without their marks, or as `?`. To add a language, see [Translate the device text](development.md#translate-the-device-text).
 
 Incoming confirmation prompts and firmware updates close settings. You cannot open settings during a prompt or update. The USB console also accepts `settings`, `settings close`, and `set brightness 50`.
