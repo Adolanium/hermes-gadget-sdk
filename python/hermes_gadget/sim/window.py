@@ -561,6 +561,7 @@ class SimulatorWindow:
         self.ready_var.set({"ready":"Ready for your next question.", "listening":"Listening. Release to send.",
                             "thinking":"Waiting for your Hermes...", "responding":"Your Hermes is replying.",
                             "pairing":"Approve the code on the device.", "prompt":"TALK for yes · CANCEL for no.",
+                            "alarm":"Timer done. Press TALK to stop it.",
                             "error":"Check the device screen for the error."}.get(st.get("screen"), "Connect your Hermes to begin."))
         self.status_var.set(f"{st.get('device_id')}  ·  {st.get('screen')}\n{st.get('server')}")
         self.net_var.set(self.sim.network_up)

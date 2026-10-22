@@ -31,9 +31,12 @@
 |---|---|
 | `hal.hpp` | `Display`, `AudioIn`, `AudioOut`, `Transport`, `Storage`, `System`, and the optional `Updater` (the firmware update slot): implemented per port |
 | `app.hpp/.cpp` | `hg::App`, the single-threaded application. Connection phases (boot → network → connecting → handshake → online) × interaction modes (idle, listening, thinking, responding) × overlays (card, image, question). It also authorizes and checks firmware updates and confirms a new firmware once it reaches Hermes |
+| `app_timer.cpp` | The timer: the three device actions (`timer.start`, `timer.status`, `timer.cancel`), the countdown and the alarm with its beeps. Registered from `App::begin()` on boards with a display or a speaker. The alarm is not an overlay: it has its own screen, survives a dropped connection, and stops on a press, a tap or swipe, `timer.cancel`, `timer.start`, a recording, or a new card or image |
 | `protocol.*`, `json.*`, `crypto.*` | Message helpers, a small JSON parser/serializer, SHA-256/HMAC/Base64 for authentication and update checks |
 | `ui.*`, `canvas.*`, `font5x7.cpp` | Deterministic renderer: a `UiModel` is drawn in four horizontal bands (top bar, header, content, hint bar). Only bands whose inputs changed are redrawn and flushed |
 | `vad.*` | Energy VAD that ends hands-free (tap) utterances on silence |
+
+The round panel's edge arc lies in the ring around the UI square, which no band owns. Every flush repaints the arc's pixels for the rows it sends, so no band or battery strip can erase it. The alarm takes the whole panel and is drawn before the bands.
 
 ### Threading model
 
@@ -67,6 +70,7 @@ Every screen that isn't showing reply text uses a **hero layout**: the Hermes Ag
   - a moving mouth and amber waves while speaking.
 - **Partial redraws:** the hero band tracks static content (screen, caption) separately from animation state. When only the animation changes, it redraws and flushes just the rows that animation can touch: the eye rows for a blink, the wave rows while listening. A blink therefore costs about 25 rows of SPI traffic, not a full screen.
 - **Reply text:** a finished reply stays on screen for 20 s before the mascot returns. On boards with scroll buttons, UP brings it back.
+- **Timer:** the alarm is a full-panel screen with its own layout, not a hero. While a timer runs, the Ready caption shows the time left.
 
 ### Interaction
 

@@ -298,6 +298,18 @@ class App {
   uint32_t now() const { return hal_.system->now_ms(); }
   bool speaking() const;
   std::string next_id(char prefix);
+  // timers (app_timer.cpp)
+  void add_timer_actions();
+  void timer_tick();
+  bool timer_active() const;
+  uint32_t timer_left_ms() const;
+  int16_t timer_permille() const;       // thousandths of the total left; -1 when no timer runs
+  std::string timer_left_text() const;  // m:ss, or h:mm:ss from an hour
+  json::Value timer_value() const;      // the `timer` object of status and timer.status
+  void start_alarm();
+  void dismiss_alarm();
+  bool alarm_flash() const;
+  void beep_pattern();
 
   Hal& hal_;
   DeviceProfile profile_;
@@ -465,6 +477,18 @@ class App {
   crypto::Sha256 ota_hash_;
 
   uint32_t frame_at_ = 0;
+
+  // timers (app_timer.cpp): RAM only, one at a time
+  bool timer_running_ = false;  // counting down
+  bool timer_due_ = false;      // reached zero; the alarm starts once the device is free
+  bool alarm_ = false;          // TIMER DONE is on screen
+  bool alarm_ringing_ = false;  // beeping, for a minute at most
+  uint32_t timer_end_ = 0;      // the clock value at zero
+  uint32_t timer_total_ms_ = 0;
+  uint32_t ring_since_ = 0;     // ages are signed: see timer_tick()
+  uint32_t next_beep_at_ = 0;
+  std::string timer_label_;
+  std::vector<int16_t> beep_pcm_;  // built on the first beep
 
   // frame timing: the running statistics while `perf` is on, and the bench
   std::unique_ptr<FrameStats> frame_stats_;

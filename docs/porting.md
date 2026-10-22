@@ -144,6 +144,8 @@ The device declares its actions in `hello`. Hermes's model discovers them throug
 
 The firmware ships `speaker.volume` and `screen.brightness` when the hardware allows, and `screen.language` on every board with a display. The simulator adds `led.set` and `buzzer.beep` as examples.
 
+The firmware also ships `timer.start`, `timer.status` and `timer.cancel` on every board with a display or a speaker. The alarm beeps only where the board has a speaker. See [timers](using-gadget.md#timers) for what the device shows.
+
 For runnable Linux examples, see [Home Assistant and MQTT](home-automation.md). They expose fixed lamp targets, report temperature availability and return a job ID for work that completes asynchronously.
 
 ## A non-ESP32 device

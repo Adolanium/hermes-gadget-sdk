@@ -175,6 +175,10 @@ const Entry kSpanish[] = {
     {Msg::SwipeDownForSessions, "Desliza abajo: sesiones"},
     {Msg::ButtonShowsSessions, "{0}: sesiones"},
     {Msg::LowBattery, "Batería baja: conecta USB"},
+    // Timers
+    {Msg::TimerLeft, "Quedan {0}"},
+    {Msg::TimerDone, "TIEMPO AGOTADO"},
+    {Msg::TapScreenToStop, "Toca la pantalla: detener"},
     // Hermes profiles
     {Msg::ProfileSetting, "Perfil de Hermes"},
     {Msg::ProfileSettingNext, "{0}\nSelecciona para pasar al siguiente perfil."},

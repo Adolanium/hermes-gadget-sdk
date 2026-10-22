@@ -74,12 +74,17 @@ void App::power_tick() {
     const bool busy = mode_ != Mode::Idle || speaking() || talk_held_ || cancel_held_ || prompt_showing() ||
                       !wifi_setup_text_.empty() || phone_pairing_ || ota_busy() || ota_ == Ota::Restarting || overlay_ != Overlay::None;
     const bool settled = phase_ == Phase::NoNetwork || (phase_ == Phase::Online && paired_);
-    const bool idle = !busy && settled;
+    // A ringing alarm keeps the screen lit without counting as activity itself, so once it is
+    // quiet the screen dims and sleeps on the normal timeout.
+    const bool ringing = alarm_ringing_;
+    const bool idle = !busy && !ringing && settled;
     // Something for the user wakes the screen. A connection still settling keeps a
     // lit screen lit, but leaves a dark one dark: Wi-Fi coming and going (a commute)
     // must not turn the screen on and leave it on.
     if (busy || (!settled && !display_sleeping_)) {
       wake_display();
+    } else if (ringing) {
+      if (display_sleeping_ || display_dimmed_) wake_display();
     } else if (idle && screen_timeout_ms_) {
       const uint32_t elapsed = now() - activity_at_;
       if (elapsed >= screen_timeout_ms_ && !display_sleeping_) {
