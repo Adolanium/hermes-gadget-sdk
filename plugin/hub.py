@@ -35,6 +35,14 @@ MAX_PENDING_DEVICES = 16     # unapproved devices the store keeps, in total...
 MAX_PENDING_PER_ADDRESS = 4  # ...and from one network address
 
 
+def short_utterance_notice(session: "DeviceSession") -> str:
+    """The retry hint, worded for how this device takes speech."""
+    if "touch" in (session.caps.get("inputs") or []):
+        return ("Didn't catch that - tap and speak" if session.caps.get("talk_mode") == "tap"
+                else "Didn't catch that - hold the screen while speaking")
+    return "Didn't catch that - hold the button while speaking"
+
+
 class HubDelegate:
     """Decides what device traffic means. Every method has a no-op default."""
 
@@ -839,13 +847,15 @@ class DeviceHub:
     async def _h_audio_end(self, session: DeviceSession, msg: dict) -> None:
         up = session._upload
         session._upload = None
-        if up is None or int(msg.get("stream") or 0) != up.stream:
-            return
-        seconds = audio.duration_s(bytes(up.pcm), up.rate)
-        if up.gaps:
+        if up is not None and int(msg.get("stream") or 0) != up.stream:
+            up = None  # an end for a stream this session never started still settles the device
+        if up is not None and up.gaps:
             log.debug("[%s] utterance had %d sequence gaps", session.device_id, up.gaps)
-        if seconds < MIN_UTTERANCE_S:
-            await session.send_notice("Didn't catch that - hold the button while speaking")
+        seconds = audio.duration_s(bytes(up.pcm), up.rate) if up is not None else 0.0
+        if up is None or seconds < MIN_UTTERANCE_S:
+            # An empty-id turn.end settles the device; without it the device waits on "Sending..." for minutes.
+            await session.send_notice(short_utterance_notice(session))
+            await session.turn_end("", outcome="cancelled")
             return
         wav = audio.wav_bytes(bytes(up.pcm), up.rate)
         session.spawn(self.delegate.on_utterance(session, up.id, wav, seconds))

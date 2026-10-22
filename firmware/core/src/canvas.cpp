@@ -97,8 +97,8 @@ void Canvas::bitmap1(int x, int y, int w, int h, const uint8_t* bits, uint16_t c
 
 int Canvas::text(int x, int y, std::string_view s, int scale, uint16_t color) {
   if (scale < 1) scale = 1;
-  for (char ch : s) {
-    const char* g = font::glyph(ch);
+  for (size_t i = 0; i < s.size();) {
+    const char* g = font::glyph(font::next(s, i));
     for (int row = 0; row < font::kGlyphHeight; ++row) {
       for (int col = 0; col < font::kGlyphWidth; ++col) {
         if (g[row * font::kGlyphWidth + col] == '#') {
@@ -113,7 +113,7 @@ int Canvas::text(int x, int y, std::string_view s, int scale, uint16_t color) {
 
 int Canvas::text_width(std::string_view s, int scale) {
   if (s.empty()) return 0;
-  return static_cast<int>(s.size()) * font::kCellWidth * scale - scale;
+  return static_cast<int>(font::length(s)) * font::kCellWidth * scale - scale;
 }
 
 int Canvas::line_height(int scale) { return font::kCellHeight * scale; }
@@ -130,8 +130,10 @@ void Canvas::blit(int x, int y, int w, int h, const uint16_t* src) {
   }
 }
 
+// Widths are in code points (font::length): a UTF-8 letter is one column.
 std::vector<std::string> wrap_text(std::string_view text, int max_chars) {
   std::vector<std::string> lines;
+  const size_t max = static_cast<size_t>(max_chars < 1 ? 1 : max_chars);
   if (max_chars < 1) max_chars = 1;
   size_t i = 0;
   while (i <= text.size()) {
@@ -146,17 +148,19 @@ std::vector<std::string> wrap_text(std::string_view text, int max_chars) {
       std::string_view word = para.substr(p, end - p);
       p = end;
       if (word.empty()) continue;
-      while (static_cast<int>(word.size()) > max_chars) {
+      while (font::length(word) > max) {
         if (!line.empty()) {
           lines.push_back(line);
           line.clear();
         }
-        lines.emplace_back(word.substr(0, static_cast<size_t>(max_chars)));
-        word.remove_prefix(static_cast<size_t>(max_chars));
+        const size_t cut = font::prefix(word, max);
+        lines.emplace_back(word.substr(0, cut));
+        word.remove_prefix(cut);
       }
       if (word.empty()) continue;
-      size_t needed = line.empty() ? word.size() : line.size() + 1 + word.size();
-      if (static_cast<int>(needed) > max_chars) {
+      const size_t words = font::length(word);
+      size_t needed = line.empty() ? words : font::length(line) + 1 + words;
+      if (needed > max) {
         lines.push_back(line);
         line.assign(word);
       } else {

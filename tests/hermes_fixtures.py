@@ -1,4 +1,5 @@
 """Hermes registration and adapter fixtures, shared by the adapter suites."""
+import inspect
 import types
 
 import pytest
@@ -78,7 +79,8 @@ def gadget(registered_platform, loop_thread, tmp_path, monkeypatch, request):
         if event.source.user_id not in state.authorized:
             await adapter.send(event.source.chat_id, PAIRING_TEXT)
             return None
-        return state.reply(event)
+        reply = state.reply(event)
+        return await reply if inspect.isawaitable(reply) else reply  # an async reply keeps the turn running
 
     adapter.set_message_handler(handler)
     assert loop_thread.run(adapter.connect())

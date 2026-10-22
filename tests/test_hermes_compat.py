@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 import types
 
 import pytest
@@ -86,3 +87,8 @@ def test_the_adapter_only_uses_listed_private_hooks():
 @requires_hermes
 def test_the_checked_out_hermes_is_compatible():
     assert compat.missing() == []
+
+
+def test_approval_timeout_falls_back_to_the_default_without_hermes(monkeypatch):
+    monkeypatch.setitem(sys.modules, "gateway.platforms.base_exec_approval", None)  # its import now fails
+    assert compat.approval_timeout_s() == 300

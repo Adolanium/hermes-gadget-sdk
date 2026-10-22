@@ -284,7 +284,7 @@ void App::settings_model() {
       // language they can't read can still find the way back.
       m.detail = lang_ == i18n::Lang::En ? std::string(tr(Msg::Language))
                                          : std::string(tr(Msg::Language)) + " / " + i18n::english(Msg::Language);
-      m.body = tr(Msg::LanguageBody, {i18n::fold_ascii(i18n::info(lang_).name)});
+      m.body = tr(Msg::LanguageBody, {i18n::info(lang_).name});
       break;
     case Menu::Back:
       m.detail = tr(Msg::BackToHermes);

@@ -8,9 +8,11 @@ Run with a Python that can import Hermes, e.g.:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import struct
+import time
 import types
 
 import pytest
@@ -61,12 +63,33 @@ def test_voice_arrives_as_a_cached_wav_voice_message(gadget, make_sim):
 
 def test_cancel_button_sends_stop(gadget, make_sim):
     sim = _paired_sim(gadget, make_sim)
-    gadget.reply = lambda e: None
+
+    async def still_working(event):  # the turn is still running when the cancel comes
+        if event.text == "long task":
+            await asyncio.sleep(10)
+
+    gadget.reply = still_working
     gadget.events.clear()
+    starts = lambda: sum(1 for m in sim.received if m["type"] == "turn.start")
+    before = starts()
     sim.type_text("long task")
     assert sim.wait_screen("thinking", timeout=5)
+    # The device thinks as soon as it sends; the cancel must come once the server's turn runs.
+    assert sim.wait_for(lambda: starts() > before, timeout=5)
     sim.tap("cancel")
     assert sim.wait_for(lambda: any(e.text == "/stop" for e in gadget.events), timeout=5)
+
+
+def test_cancel_after_the_reply_sends_no_stop(gadget, make_sim):
+    sim = _paired_sim(gadget, make_sim)
+    session = gadget.adapter.hub.sessions[sim.status()["device_id"]]
+    sim.type_text("what's up")
+    assert sim.wait_for(lambda: sim.last_received("turn.end") is not None, timeout=10)
+    gadget.events.clear()
+    # The reply may still be playing after turn.end: a cancel then only stops the audio.
+    gadget.run(gadget.adapter.on_cancel(session))
+    sim.run_for(0.5)
+    assert not any(e.text == "/stop" for e in gadget.events)
 
 
 def test_new_session_maps_to_slash_new(gadget, make_sim):
@@ -383,6 +406,44 @@ def test_command_approvals_queue_on_the_device(gadget, make_sim, monkeypatch):
     assert sim.wait_screen("ready", timeout=5)
     assert sim.last_received("notice")["text"] == "Approval timed out."
     assert resolved == [("sk", "once")]
+
+
+def test_approval_cards_carry_the_hermes_approval_timeout(gadget, make_sim, monkeypatch):
+    import gateway.platforms.base_exec_approval as exec_approval
+    from hermes_gadget_plugin.adapter import _Prompt
+
+    monkeypatch.setattr(exec_approval, "approval_timeout_seconds", lambda: 42)
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+    result = gadget.run(gadget.adapter.send_exec_approval(
+        chat_id=device_id, command="rm -rf build", session_key="sk"))
+    assert result.success and sim.wait_screen("prompt", timeout=5)
+    assert sim.last_received("prompt")["ttl_s"] == 42
+
+    # Every question expires with its time limit, not only slash confirmations.
+    stale = _Prompt(id="q", kind="approval", session_key="sk", title="t", text="x", ttl_s=60,
+                    created=time.monotonic() - 61)
+    fresh = _Prompt(id="q", kind="approval", session_key="sk", title="t", text="x", ttl_s=60)
+    assert stale.expired() and not fresh.expired()
+
+
+def test_an_approval_withdrawn_while_the_device_was_away_stays_gone(gadget, make_sim, monkeypatch):
+    import gateway.platforms.base_exec_approval as exec_approval
+
+    monkeypatch.setattr(exec_approval, "approval_timeout_seconds", lambda: 42)
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+    result = gadget.run(gadget.adapter.send_exec_approval(
+        chat_id=device_id, command="rm -rf build", session_key="sk"))
+    assert result.success and sim.wait_screen("prompt", timeout=5)
+
+    # The device goes away, and Hermes's approval times out while it is gone.
+    sim.close()
+    gadget.adapter._prompts[device_id][0].created -= 43
+    again = make_sim(gadget.url)
+    assert again.wait_screen("ready", timeout=10)
+    again.run_for(0.5)
+    assert again.last_received("prompt") is None
 
 
 def _recording_approvals(monkeypatch):

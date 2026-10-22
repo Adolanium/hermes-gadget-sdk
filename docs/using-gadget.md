@@ -102,6 +102,6 @@ Choose it in one of three ways:
 - Ask Hermes, for example "put the screen in Spanish". The firmware offers the agent a `screen.language` action.
 - On the USB console, `set language es`; `set language` with no value goes back to English.
 
-The languages are English (`en`) and Spanish (`es`). The font has no accented letters yet, so translated text shows them without accents ("Informacion"). To add a language, see [Translate the device text](development.md#translate-the-device-text).
+The languages are English (`en`) and Spanish (`es`). The font draws Latin-1, so translations and Hermes's replies keep their accents, ñ, ¿ and ¡; letters from other alphabets show without their marks, or as `?`. To add a language, see [Translate the device text](development.md#translate-the-device-text).
 
 Incoming confirmation prompts and firmware updates close settings. You cannot open settings during a prompt or update. The USB console also accepts `settings`, `settings close`, and `set brightness 50`.

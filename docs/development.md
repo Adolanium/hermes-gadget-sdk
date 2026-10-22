@@ -134,7 +134,7 @@ Simulator numbers measure the core on your computer, not the board's CPU or pane
 
 The text the device shows by itself is listed once, with its English, in `firmware/core/include/hg/i18n.hpp` (`HG_I18N_MESSAGES`). Each other language is a table in `firmware/core/src/i18n_<code>.cpp` that maps message ids to text; `i18n_es.cpp` is the example to copy. To add a language:
 
-1. Copy `i18n_es.cpp` to `i18n_<code>.cpp`, rename its table, and translate each line. Keep `{0}`, `{1}` and the rest: the device fills them with a button name, a number or a code, in the order the sentence needs. Write the text in UTF-8 with its accents; until the font has them, the device shows the nearest ASCII letter.
+1. Copy `i18n_es.cpp` to `i18n_<code>.cpp`, rename its table, and translate each line. Keep `{0}`, `{1}` and the rest: the device fills them with a button name, a number or a code, in the order the sentence needs. Write the text in UTF-8 with its accents. The font draws ASCII and Latin-1 (U+00A0 to U+00FF); a letter outside them shows as `?`, so a language that needs one waits for the font to grow.
 2. Add the language to `Lang` in `i18n.hpp`, and its code, its name in that language and its table to `kLangs` and `table_for()` in `i18n.cpp`.
 3. Add the file to `HG_CORE_SOURCES` in `firmware/core/CMakeLists.txt`.
 4. Run `hermes-gadget build-sim --test`. The tests fail when a message has no translation, when a translation drops or adds a placeholder, and when a hint or headline no longer fits on a screen where the English fits. Shorten it until it does: a hint cut with `..` on a small screen is worse than a terser phrase.

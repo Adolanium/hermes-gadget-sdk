@@ -50,7 +50,7 @@ Because the id is derived from the key, nobody can claim another device's id wit
  "name": "Kitchen Gadget", "board": "esp32s3-breadboard", "firmware": "0.1.0",
  "token": "<optional access token>",
  "caps": {
-   "display": {"width": 320, "height": 240, "color": true, "charset": "ascii",
+   "display": {"width": 320, "height": 240, "color": true, "charset": "latin1",
                "text_cols": 25, "text_rows": 8,
                "image": {"width": 320, "height": 196, "format": "rgb565"}},
    "mic": {"rate": 16000, "format": "pcm16"},
@@ -136,11 +136,11 @@ A refusal changes nothing on the device. `error` is `routed` when the server's c
 | `{"type": "audio.start", "id": "a4", "stream": 4, "rate": 16000, "format": "pcm16", "mode": "hold"}` | An utterance begins; binary audio frames follow on `stream` |
 | `{"type": "audio.end", "id": "a4", "stream": 4, "duration_ms": 2100}` | Utterance complete; the server turns it into a WAV voice message |
 | `{"type": "audio.cancel", "id": "a4", "stream": 4, "reason": "too short"}` | Discard the utterance |
-| `{"type": "cancel"}` | Stop the current turn (Hermes `/stop`) |
+| `{"type": "cancel"}` | Stop the current turn (Hermes `/stop`). With no turn running it only stops the reply audio the server is still sending, and no `/stop` is sent |
 | `{"type": "session.new"}` | Start a fresh conversation (Hermes `/new`). The reference firmware sends it when CANCEL is held for 2 s |
 | `{"type": "prompt.reply", "id": "q1", "answer": "yes"}` | The answer (`yes` or `no`) to a `prompt` |
 
-- Utterances shorter than 0.25 s are dropped with a `notice`.
+- Utterances shorter than 0.25 s are dropped with a `notice`, and the server then sends a `turn.end` with an empty `turn` and outcome `cancelled`, so the device stops waiting.
 - The server caps an utterance at `max_utterance_s` (60 s by default).
 
 ### Server → device
@@ -152,13 +152,13 @@ A refusal changes nothing on the device. `error` is `routed` when the server's c
 | `{"type": "status", "text": "Searching the web"}` | Live working-state phrase (empty clears it) |
 | `{"type": "reply.delta", "turn": "...", "text": "partial..."}` | Streaming preview; `text` is cumulative |
 | `{"type": "reply", "turn": "...", "text": "...", "interim": true}` | A reply. With `interim`, it is progress commentary rather than the answer |
-| `{"type": "turn.end", "turn": "...", "outcome": "success\|failure\|cancelled"}` | The turn is over |
+| `{"type": "turn.end", "turn": "...", "outcome": "success\|failure\|cancelled"}` | The turn is over. An empty `turn` ends whatever the device is waiting for; the server sends one, as `cancelled`, after dropping a too-short utterance |
 | `{"type": "notice", "text": "...", "ttl_s": 8}` | Transient one-line message |
 | `{"type": "prompt", "id": "q1", "title": "Confirm /new", "text": "...", "ttl_s": 300}` | A yes/no question; see [Questions](#questions) |
 | `{"type": "prompt.close", "id": "q1"}` | The question was withdrawn (timed out or answered elsewhere) |
 | `{"type": "error", "code": "...", "message": "..."}` | Protocol or auth error; the server usually closes the connection next |
 
-Reply text is already shaped for the device: Markdown is stripped and the text is folded to ASCII when `charset` is `"ascii"`. Devices render it as-is.
+Reply text is already shaped for the device: Markdown is stripped and the text is folded to what its `charset` draws. `"ascii"` gets printable ASCII only. `"latin1"` gets ASCII and Latin-1 (U+00A1 to U+00FF, so accented letters, ¿ ¡ and the like), with no-break spaces as plain spaces; anything else is folded to the nearest letter or dropped. Text is UTF-8 either way, and devices render it as-is. The reference firmware reports `"latin1"` since its font gained Latin-1; older firmware reports `"ascii"`.
 
 ### Audio to the device
 
@@ -225,7 +225,7 @@ A device that advertises `caps.dashboard` gets a live summary of Hermes: the age
 Hermes asks before some actions: destructive commands such as `/new`, a costly model switch, or a dangerous shell command the agent wants to run. The server turns each one into a `prompt`:
 
 - The device shows the title and text with two answers. The reference firmware maps TALK to yes and CANCEL to no, and ignores presses in the first 0.6 s so a press meant for something else doesn't answer it.
-- The device answers with `prompt.reply` exactly once, or not at all if the question expires (`ttl_s`, when present) or is withdrawn with `prompt.close`.
+- The device answers with `prompt.reply` exactly once, or not at all if the question expires (`ttl_s`, when present) or is withdrawn with `prompt.close`. A command approval carries Hermes's approval timeout (`approvals.timeout`, 300 s by default) as its `ttl_s`.
 - The server sends one question at a time. A question asked while a device was offline is sent again when it reconnects.
 - Text is shaped like replies: short, plain and already folded to the device's charset. A dangerous-command approval is the exception: its text is the command as it will run, unchanged, or a notice to approve on the host when the command doesn't fit one line of `text_cols`, less two columns, as-is. The server ignores a yes to that notice.
 
