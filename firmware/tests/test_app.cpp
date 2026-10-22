@@ -100,6 +100,20 @@ struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Stor
     fb.assign(static_cast<size_t>(w * h), 0);
   }
   uint16_t* framebuffer() override { return fb.data(); }
+  // A port with no PSRAM: fb holds `band_rows` panel rows starting at `origin`
+  // (0 rows: the whole panel). make_banded comes after make_panel or make_round.
+  int band_rows = 0, origin = 0;
+  void make_banded(int rows) {
+    band_rows = rows;
+    fb.assign(static_cast<size_t>(width * rows), 0);
+    keep_panel = true;
+  }
+  int framebuffer_rows() const override { return band_rows; }
+  void set_frame_origin(int y) override { origin = y; }
+  // With keep_panel, every flush copies its rows into `panel`: what the screen shows.
+  bool keep_panel = false;
+  std::vector<uint16_t> panel;
+  int stray_flushes = 0;  // flushes of rows the framebuffer window does not hold
   bool lit_while_dozing = false;  // the screen was turned on before the port woke
   void set_backlight(uint8_t percent) override {
     brightness = percent;
@@ -108,6 +122,15 @@ struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Stor
   void flush(uint16_t y0, uint16_t y1) override {
     ++flushes;
     flushed_rows += y1 - y0;
+    if (!keep_panel) return;
+    panel.resize(static_cast<size_t>(width * height), 0);
+    const int top = band_rows ? origin : 0, rows = band_rows ? band_rows : height;
+    if (y0 < top || y1 > top + rows || y1 > height) {
+      ++stray_flushes;
+      return;
+    }
+    std::copy(fb.begin() + static_cast<long>((y0 - top) * width), fb.begin() + static_cast<long>((y1 - top) * width),
+              panel.begin() + static_cast<long>(y0 * width));
   }
 
   // Mic
@@ -2449,6 +2472,117 @@ TEST("Wi-Fi setup: a code that does not fit beside the instructions leaves the t
   // 240x240 and the 466 round panel fit the code beside every instruction line.
   CHECK(setup_screen(240, 240, false, &code) != setup_screen(240, 240, false, nullptr));
   CHECK(setup_screen(466, 466, true, &code) != setup_screen(466, 466, true, nullptr));
+}
+
+// A banded framebuffer (a board with no PSRAM) must put the same pixels on the
+// panel as a whole-panel one. Both rigs run the same session; after each step the
+// rows each display has flushed are compared.
+static void wifi_setup_with_code(Rig& r) {
+  r.app.on_wifi_setup = [] { return "Network: Hermes-test\nPassword: private-setup-key"; };
+  r.app.on_wifi_setup_ap = [] {
+    hg::WifiSetupAp ap;
+    ap.ssid = "Hermes-test";
+    ap.password = "private-setup-key";
+    return ap;
+  };
+  CHECK(r.app.start_wifi_setup());
+}
+
+static void same_screens_banded(int width, int height, bool round, int band_rows) {
+  Rig full(Rig::touch_profile()), banded(Rig::touch_profile());
+  for (Rig* r : {&full, &banded}) {
+    if (round) r->fake.make_round(width);
+    else r->fake.make_panel(width, height);
+    r->fake.keep_panel = true;
+  }
+  banded.fake.make_banded(band_rows);
+  auto both = [&](void (*act)(Rig&), const char* what) {
+    act(full);
+    act(banded);
+    const bool same = full.fake.panel == banded.fake.panel;
+    if (!same)
+      std::printf("  %dx%d%s in %d-row bands: the panels differ after %s\n", width, height, round ? " round" : "",
+                  band_rows, what);
+    CHECK(same);
+    CHECK(full.app.screen() == banded.app.screen());
+  };
+  both([](Rig& r) { r.bring_online(true); r.advance(300); }, "ready");
+  CHECK(banded.app.screen() == hg::Screen::Ready);
+  both([](Rig& r) { r.app.on_button(hg::Button::Talk, true); r.advance(300); }, "listening");
+  both([](Rig& r) {
+    r.app.on_button(hg::Button::Talk, false);
+    r.server(R"({"type":"reply","text":"A reply long enough to wrap over several lines, so the content band fills up."})");
+    r.advance(300);
+  }, "a reply");
+  both([](Rig& r) {
+    r.server(R"({"type":"prompt","id":"q1","title":"Allow command?","text":"rm -rf build"})");
+    r.advance(300);
+  }, "a prompt");
+  CHECK(banded.app.screen() == hg::Screen::Prompt);
+  both([](Rig& r) {
+    r.server(R"({"type":"prompt.close","id":"q1"})");
+    r.advance(300);
+  }, "the prompt closing");
+  CHECK(banded.app.screen() != hg::Screen::Prompt);
+  both([](Rig& r) {
+    r.server(R"({"type":"action","id":"t1","name":"timer.start","args":{"seconds":3,"label":"Pasta"}})");
+    r.advance(1500);
+  }, "a running timer");
+  both([](Rig& r) { r.advance(1700); }, "the alarm");
+  CHECK(banded.app.screen() == hg::Screen::Alarm);
+  both([](Rig& r) { r.advance(400); }, "the alarm flashing");
+  both([](Rig& r) {
+    r.app.on_button(hg::Button::Talk, true);  // dismisses it
+    r.app.on_button(hg::Button::Talk, false);
+    r.advance(300);
+  }, "the alarm dismissed");
+  CHECK(banded.app.screen() != hg::Screen::Alarm);
+  both([](Rig& r) { wifi_setup_with_code(r); r.advance(300); }, "Wi-Fi setup");
+  CHECK(banded.app.screen() == hg::Screen::Setup);
+  CHECK_EQ(full.fake.stray_flushes, 0);
+  CHECK_EQ(banded.fake.stray_flushes, 0);
+  // Something was drawn, so equal panels mean something.
+  int lit = 0;
+  for (uint16_t p : banded.fake.panel) lit += p != banded.fake.panel[0];
+  CHECK(lit > 1000);
+}
+
+TEST("display: a banded framebuffer shows the same screens as a whole-panel one") {
+  same_screens_banded(320, 240, false, 120);  // the CYD: two windows
+  same_screens_banded(320, 240, false, 70);   // windows that cut through bands, the last one short
+  same_screens_banded(240, 240, false, 100);  // room for the Wi-Fi code beside the instructions
+  same_screens_banded(466, 466, true, 120);   // round: the UI square starts inside a window
+}
+
+TEST("display: the Wi-Fi code reaches the panel from a banded framebuffer") {
+  Rig r(Rig::touch_profile());
+  r.fake.make_panel(240, 240);
+  r.fake.make_banded(100);
+  r.bring_online(true);
+  wifi_setup_with_code(r);
+  r.advance(300);
+  CHECK(r.app.model().qr != nullptr);
+  int black = 0;
+  for (uint16_t p : r.fake.panel) black += p == 0x0000;
+  CHECK(black > 100);  // the modules
+}
+
+TEST("display: a banded framebuffer doesn't offer images, and refuses one sent anyway") {
+  Rig full, banded;
+  banded.fake.make_banded(120);
+  full.bring_online(true);
+  banded.bring_online(true);
+  const Value* hello = full.fake.last("hello");
+  CHECK(hello && (*hello)["caps"]["display"]["image"]["format"].as_string() == "rgb565");
+  hello = banded.fake.last("hello");
+  CHECK(hello && (*hello)["caps"]["display"].is_object());
+  CHECK(hello && !(*hello)["caps"]["display"]["image"].is_object());
+  CHECK(hello && (*hello)["caps"]["display"]["text_cols"].as_int() > 0);  // text still is offered
+  banded.server(R"({"type":"image.start","stream":3,"width":64,"height":64,"format":"rgb565"})");
+  bool refused = false;
+  for (const auto& l : banded.fake.logs) refused |= l.find("rejecting image") != std::string::npos;
+  CHECK(refused);
+  CHECK_EQ(banded.fake.stray_flushes, 0);
 }
 
 TEST("Wi-Fi setup: opening from USB releases an active talk button") {

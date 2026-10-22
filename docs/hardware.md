@@ -6,7 +6,7 @@ Start with [Supported hardware](supported-hardware.md) for a board comparison, t
 
 ## Requirements
 
-- **Chip:** the release profiles target ESP32-S3. Other ESP32 variants need their own configuration and validation. On a board without PSRAM, the framebuffer (width × height × 2 bytes) must fit in internal RAM next to Wi-Fi and audio buffers.
+- **Chip:** the release profiles target ESP32-S3. Other ESP32 variants need their own configuration and validation. On a board without PSRAM, either the whole-panel framebuffer (width × height × 2 bytes) fits in internal RAM next to Wi-Fi and audio buffers, or the board holds a band of rows and lets the UI render in bands (see `Display::framebuffer_rows()` and the CYD below).
 - **Display:** an SPI ST7789 panel (240×320, 240×240 or 240×135). Other controllers need a different `esp_lcd` panel driver.
 - **Microphone:** an I2S MEMS microphone (INMP441, ICS-43434, SPH0645 style).
 - **Speaker (optional):** an I2S class-D amplifier (MAX98357A) and a 4–8 Ω speaker.
@@ -748,6 +748,46 @@ python tools/package_release.py --board crowpanel-p4-101 --out dist
 ```
 
 For physical results and explicit untested items, see the [CrowPanel P4 validation record](hardware-validation.md#crowpanel-advanced-p4-partial-physical-test-record). Resolution reference: [Elecrow product page](https://www.elecrow.com/crowpanel-advanced-10-1inch-esp32-p4-hmi-ai-display-1024x600-ips-touch-screen-wifi-6.html).
+
+## ESP32-2432S028 CYD (Cheap Yellow Display)
+
+Board option `esp32-2432s028-cyd`, for the ESP32-2432S028 "Cheap Yellow Display" revision with **two USB ports** (micro-USB and USB-C) and an **ST7789** panel. The original CYD, with only a micro-USB port, has an ILI9341 panel; this profile does not drive it. The two-USB board is a **classic ESP32-WROOM-32** with 4 MB flash and **no PSRAM**, a 2.8" 240×320 ST7789 panel driven in landscape, the BOOT key, and an SC8002B amplifier fed by the chip's own DAC on GPIO26. The board ships with **no microphone**, and this profile does not use its resistive touchscreen, but if you fit a **PDM MEMS microphone** on the 4-pin header (IO22 carries the PDM clock, IO27 the data, SELECT tied to ground) the profile drives it: the ESP32's PDM-to-PCM converter on I2S0 turns its bitstream into the 16 kHz PCM the app records, and the amplifier lets the beeps and later replies be heard. Without a microphone it works as a text gadget: Hermes replies, cards and prompts appear on the screen and typed messages go out through the USB console. Only a two-wire PDM part fits this header — an I²S microphone such as the INMP441 or ICS-43434 needs three signal lines and does not. On boot the speaker header plays three short beeps through that DAC (`port_dac.cpp`), which shows the amplifier and a connected speaker work; replies are not routed there yet. It is the only classic-ESP32 profile, so the RGB, i80-parallel, DSI and codec drivers are compiled out; the panel uses the same SPI `SpiDisplay` path as the S3 boards, with ESP-IDF's built-in ST7789 driver.
+
+Without PSRAM the full 320×240 framebuffer (150 KB) does not fit: about 137 KB of internal DRAM is free at boot, and Wi-Fi and the app need their share too. The port therefore holds a **band of 120 rows** (75 KB) instead, reserved in an early constructor before the heap fragments (`port_display.cpp`), and flushes through a four-row bounce buffer. The UI detects the band through `Display::framebuffer_rows()` and draws each band once per 120-row window, moving the window with `set_frame_origin()`, so the screen looks the same; a flush that times out asks the UI to repaint the whole screen, and keeps asking until a repaint reaches the panel, because the band keeps no rows to resend. For the same reason the board doesn't offer images: Hermes shows its unsupported-image notice instead, and an `image.start` sent anyway is refused. If Wi-Fi cannot start for lack of heap, lower `kCydFrameRows` in `port_display.cpp`.
+
+| Part | Chip | Connection |
+|---|---|---|
+| Display | ST7789, SPI2 | SCLK 14, MOSI 13, MISO 12, CS 15, DC 2; no reset line (the panel resets on power-up); 320×240, swapped axes, both axes mirrored |
+| Backlight | PWM | GPIO 21, active-high |
+| Speaker | SC8002B amplifier | the chip's own DAC, channel 1 on GPIO 26; the speaker connects to the board's two-pin header |
+| Microphone | PDM MEMS (optional, not fitted) | I2S0: PDM clock on GPIO 22, data on GPIO 27, on the 4-pin header |
+| Button | BOOT | GPIO 0 (TALK) |
+
+The board also carries a resistive XPT2046 touchscreen on its own pins (CLK 25, MOSI 32, MISO 39, CS 33, IRQ 36), a microSD slot on VSPI (SS 5, SCK 18, MISO 19, MOSI 23), an RGB LED on GPIO 4, 16 and 17 and a light sensor on GPIO 34; this profile does not use them. The amplifier plays the three boot beeps only, and the microphone header is wired for a PDM part but the stock board has none fitted, so a recording without one captures silence. Probe your own board before assuming it: the CYD ships in several revisions whose backlight pin, panel controller and colour order differ.
+
+**Build and flash** it with PlatformIO:
+
+```bash
+cd firmware/esp32
+pio run -e esp32-2432s028-cyd -t upload -t monitor
+```
+
+Or with `idf.py set-target esp32` followed by `idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp32-2432s028-cyd/sdkconfig.defaults" build`. The micro-USB port reaches UART0 through a USB-UART bridge (usually CH340), so flashing and the serial console (115200 baud) both use it.
+
+### First flash: what to check
+
+The pin map comes from the community [ESP32-Cheap-Yellow-Display](https://github.com/witnessmenow/ESP32-Cheap-Yellow-Display/tree/0564a140c76de76ef34a8b7115044e7c6c852695) reference (`PINS.md`, and `DisplayConfig/CYD2USB/User_Setup.h` for the two-USB revision's ST7789). Nobody has run this profile on a board yet, so the colour order, inversion and mirroring are the contributor's settings and still unchecked. On the first flash:
+
+1. **Boot log:** `st7789 320x240 ready` and the `parts:` line naming the display, the microphone (`pdm` once a PDM mic is fitted, `none` without one) and no touch.
+2. **Sound:** about a second into boot the speaker header plays three short beeps, and the log shows `three beeps on GPIO26 (DAC channel 1)`. Silence points at the amplifier wiring or the speaker, not the panel; a log line about GPIO26 not being a DAC output means `b.speaker_dac` in `board.cpp` is wrong.
+3. **Memory:** no `the reserved 120-row band does not fit` error, and `diag` reports a plausible free heap. The band is reserved before Wi-Fi starts, so a Wi-Fi failure to allocate is the signal to lower `kCydFrameRows`.
+4. **Screen:** the mascot renders in landscape and colours are right (amber accents, not blue). A red/blue swap means `b.lcd.bgr` in this board's `board.cpp` entry needs flipping; an inverted picture means `b.lcd.invert` does.
+5. **Brightness:** cycle 10 → 100 in settings; brightness must rise with the number. The backlight is active-high — do not set `backlight_invert`.
+6. **Orientation:** the picture should not be mirrored or upside down; adjust `b.lcd.swap_xy`, `mirror_x` and `mirror_y` if it is.
+7. **Button and microphone:** holding BOOT records a voice turn. With a PDM mic on the header the log shows `microphone ready (pdm)` and speaking into it shows in the level meter; `microphone did not start: not enough internal RAM for its buffers` means the I2S0 DMA did not fit beside the framebuffer band, so lower `kCydFrameRows`. Without a microphone the recording is silent and replies are text only.
+8. **Text:** `say hello` over the console should render on the display.
+
+Only hardware facts (pin numbers and panel settings) come from that reference; no code is copied. The firmware builds, but it has not been run on a board and has no physical report; see the [verification table](hardware-validation.md).
 
 ## Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C
 

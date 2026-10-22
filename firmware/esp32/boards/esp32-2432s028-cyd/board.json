@@ -1,0 +1,6 @@
+{
+  "title": "ESP32-2432S028 CYD (Cheap Yellow Display), two-USB revision",
+  "summary": "The CYD with micro-USB and USB-C ports and an ST7789 panel; not the micro-USB-only ILI9341 revision. 320x240 screen, BOOT as the only button; the touchscreen is not used. A PDM microphone on the 4-pin header (clock GPIO 22, data GPIO 27) is driven, but the stock board has none fitted, so otherwise text only. The speaker header plays three boot beeps. Experimental: builds, not run on a board.",
+  "docs": "docs/hardware.md#esp32-2432s028-cyd-cheap-yellow-display",
+  "ready_made": true
+}

@@ -381,9 +381,13 @@ void App::send_hello() {
     if (ui_) {
       const UiLayout& l = ui_->layout();
       d.set("text_cols", l.body_cols).set("text_rows", l.body_rows);
-      json::Value img = json::Value::object();
-      img.set("width", ui_->area().width).set("height", l.main_h).set("format", "rgb565");
-      d.set("image", img);
+      // A display that holds only a band of rows refuses images (h_image_start),
+      // so it doesn't offer them: the host then shows its unsupported-image notice.
+      if (hal_.display->framebuffer_rows() == 0) {
+        json::Value img = json::Value::object();
+        img.set("width", ui_->area().width).set("height", l.main_h).set("format", "rgb565");
+        d.set("image", img);
+      }
     }
     caps.set("display", d);
   }
@@ -871,6 +875,13 @@ void App::h_image_start(const json::Value& m) {
   const DisplayInfo& di = ui_->area();
   image_w_ = static_cast<int>(m["width"].as_int(0));
   image_h_ = static_cast<int>(m["height"].as_int(0));
+  // An image is composed in the framebuffer over several packets, so a panel
+  // that only holds a band of rows (no PSRAM) has nowhere to keep it.
+  if (hal_.display->framebuffer_rows() > 0) {
+    log(LogLevel::Warn, "rejecting image: this display has no full framebuffer");
+    image_stream_ = -1;
+    return;
+  }
   if (image_w_ <= 0 || image_h_ <= 0 || image_w_ > di.width || image_h_ > l.main_h ||
       m["format"].str_or("rgb565") != "rgb565") {
     log(LogLevel::Warn, "rejecting image with unsupported geometry");

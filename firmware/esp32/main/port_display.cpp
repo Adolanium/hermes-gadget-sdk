@@ -26,8 +26,31 @@ namespace {
 
 const char* TAG = "hg.lcd";
 constexpr spi_host_device_t kHost = SPI2_HOST;
+#if CONFIG_HG_BOARD_ESP32_CYD
+// The CYD has no PSRAM, so every byte counts. Keep the DMA bounce buffer to four
+// rows (2.5 KiB).
+constexpr int kBounceRows = 4;
+// A 320x240x2 = 150 KiB framebuffer does not fit: about 137 KiB of internal RAM
+// is free at boot, and it has to leave room for Wi-Fi and the audio codec as
+// well. Hold a 320x120x2 = 75 KiB band of rows instead and let the UI draw the
+// screen in bands of that size (Display::framebuffer_rows).
+constexpr int kCydFrameRows = 120;
+constexpr size_t kCydFrameBytes = 320 * kCydFrameRows * 2;
+#else
 constexpr int kBounceRows = 20;
+#endif
 constexpr ledc_channel_t kBlChannel = LEDC_CHANNEL_0;
+
+#if CONFIG_HG_BOARD_ESP32_CYD
+uint16_t* cyd_framebuffer = nullptr;
+// Reserve the band from an early constructor: by the time the display starts,
+// Wi-Fi and the task stacks have already fragmented the heap, and a block this
+// size would no longer fit as one allocation. LovyanGFX proves the panel itself
+// needs no PSRAM.
+__attribute__((constructor(101))) void reserve_cyd_framebuffer() {
+  cyd_framebuffer = static_cast<uint16_t*>(heap_caps_malloc(kCydFrameBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+}
+#endif
 
 }  // namespace
 
@@ -84,31 +107,48 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
     cores3_e = version == 0x12;
     controller_name_ = cores3_e ? "ili9342e" : "ili9342c";
   }
+  frame_rows_ = cfg.height;
+#if CONFIG_HG_BOARD_ESP32_CYD
+  // Reuse the band reserved at boot; a late allocation this large would fail.
+  frame_rows_ = std::min<int>(cfg.height, kCydFrameRows);
+  fb_ = cyd_framebuffer;
+  if (!fb_ || static_cast<size_t>(cfg.width) * frame_rows_ * 2 != kCydFrameBytes) {
+    ESP_LOGE(TAG, "the reserved %d-row band does not fit the %ux%u panel", kCydFrameRows, cfg.width, cfg.height);
+    fb_ = nullptr;
+  }
+#else
   const size_t px = static_cast<size_t>(cfg.width) * cfg.height;
   fb_ = static_cast<uint16_t*>(heap_caps_malloc(px * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (!fb_) fb_ = static_cast<uint16_t*>(heap_caps_malloc(px * 2, MALLOC_CAP_8BIT));
+#endif
   bounce_ = static_cast<uint16_t*>(heap_caps_malloc(static_cast<size_t>(cfg.width) * kBounceRows * 2, MALLOC_CAP_DMA));
   if (!fb_ || !bounce_) {
     ESP_LOGE(TAG, "not enough memory for a %ux%u framebuffer", cfg.width, cfg.height);
     return false;
   }
-  std::memset(fb_, 0, px * 2);
+  std::memset(fb_, 0, static_cast<size_t>(cfg.width) * frame_rows_ * 2);
   done_ = xSemaphoreCreateBinary();
+  if (!done_) {
+    ESP_LOGE(TAG, "could not create the flush-completion semaphore");
+    return false;
+  }
   // A band takes about 2.6 ms on a 320-px panel at 40 MHz. Allow ten times the
   // band at the configured clock, and never less than 100 ms.
   const uint32_t band_ms = static_cast<uint32_t>(cfg.width) * kBounceRows * 16 / (std::max(1, cfg.spi_mhz) * 1000u) + 1;
+  // BandFlush counts in framebuffer rows, so the whole-panel resend it does after
+  // a timeout stays inside the buffer. On a banded panel that is one band.
   bands_.emplace(
-      cfg.height, kBounceRows, std::max<uint32_t>(100, 10 * band_ms),
+      frame_rows_, kBounceRows, std::max<uint32_t>(100, 10 * band_ms),
       [this](int y, int rows) {
-        const int w = cfg_.width;
+        const int w = cfg_.width, top = frame_origin_ + y;
         std::memcpy(bounce_, fb_ + static_cast<size_t>(y) * w, static_cast<size_t>(rows) * w * 2);
-        return esp_lcd_panel_draw_bitmap(panel_, 0, y, w, y + rows, bounce_) == ESP_OK;
+        return esp_lcd_panel_draw_bitmap(panel_, 0, top, w, top + rows, bounce_) == ESP_OK;
       },
       [this](uint32_t ms) { return xSemaphoreTake(done_, pdMS_TO_TICKS(ms)) == pdTRUE; });
 
   spi_bus_config_t bus = {};
   bus.mosi_io_num = cfg.mosi;
-  bus.miso_io_num = -1;
+  bus.miso_io_num = cfg.miso;
   bus.sclk_io_num = cfg.sclk;
   bus.quadwp_io_num = -1;
   bus.quadhd_io_num = -1;
@@ -264,7 +304,24 @@ hg::DisplayInfo SpiDisplay::info() const {
   return di;
 }
 
-void SpiDisplay::flush(uint16_t y0, uint16_t y1) { report_band_event(TAG, bands_->flush(y0, y1)); }
+void SpiDisplay::flush(uint16_t y0, uint16_t y1) {
+  if (!bands_) return;
+  // Flush takes panel rows; the band flush counts from the framebuffer's first row.
+  const hg::BandFlush::Event event =
+      bands_->flush(static_cast<int>(y0) - frame_origin_, static_cast<int>(y1) - frame_origin_);
+  if (frame_rows_ < cfg_.height) {
+    // A banded framebuffer holds no rows to resend, so the next frame repaints
+    // the whole screen rather than leave a band behind on the panel. While the
+    // late transfer is pending every flush is dropped, that repaint included, so
+    // keep asking until flushes reach the panel again. The resend on resuming
+    // pushes the whole band, and only the rows just drawn in it are current, so
+    // that asks for one more repaint as well.
+    if (event == hg::BandFlush::Event::TimedOut) paused_ = true;
+    if (event == hg::BandFlush::Event::Resumed) paused_ = false;
+    if (paused_ || event == hg::BandFlush::Event::Resumed) repaint_.store(true, std::memory_order_relaxed);
+  }
+  report_band_event(TAG, event);
+}
 
 void SpiDisplay::set_backlight(uint8_t percent) {
   if (board_backlight) { board_backlight(percent); return; }

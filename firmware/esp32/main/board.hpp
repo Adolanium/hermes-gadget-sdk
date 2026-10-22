@@ -103,6 +103,9 @@ struct LcdConfig {
   int d1 = -1, d2 = -1, d3 = -1;  // QSPI data0 uses mosi
   bool round = false;
   uint8_t font_scale = 1;  // UI text scale multiplier, clamped so the scale stays 1..4 (hg::DisplayInfo)
+  // SPI data-in (the CYD wires its panel's SDO to GPIO 12); -1 when unused.
+  // Last, so positional initializers written before it existed keep their meaning.
+  int miso = -1;
 };
 
 struct I2sMicConfig {
@@ -287,6 +290,11 @@ struct BoardConfig {
   bool bluetooth = false;
   LatchPowerConfig latch_power;
   int status_led = -1;
+  // A speaker driven by the chip's own DAC, with no I2S and no codec: the pin the
+  // board's amplifier input hangs off (25 = DAC channel 0, 26 = DAC channel 1),
+  // e.g. the CYD's SC8002B on GPIO26. It plays the boot beeps (port_dac.cpp); the
+  // gadget's replies are not routed there yet.
+  int speaker_dac = -1;
   const char* talk_label = "TALK";
   const char* cancel_label = "CANCEL";
 };

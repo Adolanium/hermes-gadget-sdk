@@ -111,6 +111,12 @@ spotpear/sp-esp32-s3-1.28-box board,
 https://github.com/78/xiaozhi-esp32/tree/d91d6824309d12df5fc3db5edf8145ee829135d7/main/boards/spotpear/sp-esp32-s3-1.28-box,
 MIT License. Only these hardware facts are used.
 
+The ESP32-2432S028 (CYD, two-USB revision) pin map and panel settings in
+firmware/esp32/main/board.cpp follow Brian Lough's ESP32-Cheap-Yellow-Display
+reference, https://github.com/witnessmenow/ESP32-Cheap-Yellow-Display/tree/0564a140c76de76ef34a8b7115044e7c6c852695,
+files PINS.md and DisplayConfig/CYD2USB/User_Setup.h, Copyright (c) 2023 Brian
+Lough, MIT License. Only these hardware facts are used.
+
 The BOX-3 panel initialization register values in
 firmware/esp32/main/panel_box3.hpp follow Espressif's ESP32-S3-BOX-3 BSP,
 https://github.com/espressif/esp-bsp/tree/master/bsp/esp-box-3,

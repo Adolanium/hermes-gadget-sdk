@@ -23,14 +23,22 @@ dependencies:
   espressif/esp_lcd_touch_gt911: "^1"
   espressif/esp_lcd_touch_ft5x06: "^1"
   # 1.1.0 is what the CrowPanel 2.1 was tested with; its MIPI source only builds
-  # for the P4 (which needs it as well) on ESP-IDF 6.1 from 2.x.
+  # for the P4 (which needs it as well) on ESP-IDF 6.1 from 2.x. The component
+  # only publishes for esp32s3/esp32p4, so a classic-ESP32 build must not pull it
+  # in at all.
   espressif/esp_lcd_st7701:
+    rules:
+      - if: target in [esp32s3, esp32p4]
     matches:
       - if: target in [esp32p4]
         version: "2.0.2"
       - if: target not in [esp32p4]
         version: "1.1.0"
-  espressif/esp_lcd_panel_io_additions: "1.0.1"
+  # RGB panels also use the 3-wire/expander panel IO helper (CrowPanel 2.1).
+  espressif/esp_lcd_panel_io_additions:
+    version: "1.0.1"
+    rules:
+      - if: target in [esp32s3, esp32p4]
   # EK79007 MIPI-DSI panel bridge (CrowPanel Advanced P4).
   espressif/esp_lcd_ek79007:
     version: "2.0.2"

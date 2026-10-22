@@ -3,6 +3,9 @@
 // timings and power sequencing follow Elecrow's official Arduino examples.
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h
 
+// RgbDisplay exists on every target so main.cpp can reference it, but only a
+// chip with an LCD_CAM RGB scanout (ESP32-S3/P4) has the driver to build it.
+#if SOC_LCD_RGB_SUPPORTED
 #include <algorithm>
 #include <cstring>
 
@@ -259,3 +262,16 @@ void RgbDisplay::set_backlight(uint8_t percent) {
 }
 
 }  // namespace hgp
+
+#else  // !SOC_LCD_RGB_SUPPORTED
+
+// Stubs so main.cpp's display selection links on a classic ESP32, where no board
+// profile ever selects an RGB panel.
+namespace hgp {
+bool RgbDisplay::begin(const LcdConfig&, i2c_master_bus_handle_t) { return false; }
+hg::DisplayInfo RgbDisplay::info() const { return {}; }
+void RgbDisplay::flush(uint16_t, uint16_t) {}
+void RgbDisplay::set_backlight(uint8_t) {}
+}  // namespace hgp
+
+#endif  // SOC_LCD_RGB_SUPPORTED

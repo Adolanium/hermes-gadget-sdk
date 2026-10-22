@@ -35,8 +35,12 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_lcd_panel_io.h"
-#include "esp_lcd_panel_rgb.h"
 #include "soc/soc_caps.h"
+// The RGB panel header only exists for chips with an LCD_CAM RGB scanout
+// (ESP32-S3/P4); a classic ESP32 build has neither it nor RgbDisplay.
+#if SOC_LCD_RGB_SUPPORTED
+#include "esp_lcd_panel_rgb.h"
+#endif
 #if SOC_MIPI_DSI_SUPPORTED
 #include "esp_lcd_mipi_dsi.h"
 #include "stc8_battery.hpp"
@@ -199,7 +203,9 @@ class RgbDisplay final : public hg::Display {
   }
 
  private:
+#if SOC_LCD_RGB_SUPPORTED
   static bool on_color_done(esp_lcd_panel_handle_t panel, const esp_lcd_rgb_panel_event_data_t* edata, void* ctx);
+#endif
   LcdConfig cfg_{};
   esp_lcd_panel_io_handle_t io_ = nullptr;
   esp_lcd_panel_handle_t panel_ = nullptr;
@@ -243,6 +249,10 @@ class SpiDisplay final : public hg::Display {
   uint16_t* framebuffer() override { return fb_; }
   void flush(uint16_t y0, uint16_t y1) override;
   void set_backlight(uint8_t percent) override;
+  // A board with no PSRAM holds a band of rows instead of the whole panel.
+  int framebuffer_rows() const override { return frame_rows_ < cfg_.height ? frame_rows_ : 0; }
+  void set_frame_origin(int y) override { frame_origin_ = y; }
+  bool take_redraw_request() override { return repaint_.exchange(false, std::memory_order_relaxed); }
   std::function<void(uint8_t)> board_backlight;
 
  private:
@@ -255,6 +265,10 @@ class SpiDisplay final : public hg::Display {
   uint16_t* bounce_ = nullptr;  // DMA-capable staging rows
   SemaphoreHandle_t done_ = nullptr;
   std::optional<hg::BandFlush> bands_;
+  int frame_rows_ = 0;  // panel rows fb_ holds (the whole panel unless it is banded)
+  int frame_origin_ = 0;  // panel row the first framebuffer row maps to
+  std::atomic<bool> repaint_{false};  // a transfer was lost: redraw the screen
+  bool paused_ = false;  // a banded flush timed out and its transfer is still pending
 };
 
 // I2S MEMS microphone: a reader task posts 20 ms PCM16 chunks while capturing.
@@ -277,6 +291,12 @@ class I2sMic final : public hg::AudioIn {
 // them in one line when a stream has finished playing (port_audio.cpp).
 uint32_t speaker_now_ms();
 void log_underruns(const char* tag, const hg::SpeakerUnderruns::Totals& t);
+
+// Three short beeps from the chip's own DAC, on the pin the board's amplifier
+// input hangs off (BoardConfig::speaker_dac), so the amplifier and speaker can be
+// checked before the gadget can play a reply. Blocks for about 0.6 s; a board
+// whose pin is not a DAC output does nothing. port_dac.cpp.
+bool dac_beep(int gpio);
 
 class I2sSpeaker final : public hg::AudioOut {
  public:

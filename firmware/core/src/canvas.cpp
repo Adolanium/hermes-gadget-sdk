@@ -13,16 +13,19 @@ void Canvas::set_clip_rows(int y0, int y1) {
 
 void Canvas::pixel(int x, int y, uint16_t color) {
   if (x < 0 || x >= w_ || y < clip_y0_ || y >= clip_y1_ || y >= h_) return;
-  px_[y * stride_ + x] = encode(color);
+  if (y < base_y_ || y >= base_y_ + rows_) return;
+  px_[(y - base_y_) * stride_ + x] = encode(color);
 }
 
 void Canvas::fill_rect(int x, int y, int w, int h, uint16_t color) {
   int x0 = std::max(0, x), x1 = std::min(w_, x + w);
   int y0 = std::max(clip_y0_, y), y1 = std::min(std::min(h_, clip_y1_), y + h);
+  y0 = std::max(y0, base_y_);
+  y1 = std::min(y1, base_y_ + rows_);
   if (x0 >= x1 || y0 >= y1) return;
   uint16_t c = encode(color);
   for (int yy = y0; yy < y1; ++yy) {
-    std::fill(px_ + yy * stride_ + x0, px_ + yy * stride_ + x1, c);
+    std::fill(px_ + (yy - base_y_) * stride_ + x0, px_ + (yy - base_y_) * stride_ + x1, c);
   }
 }
 
@@ -84,13 +87,16 @@ void Canvas::arc(int cx, int cy, int r, int thickness, int dir, uint16_t color) 
 void Canvas::bitmap1(int x, int y, int w, int h, const uint8_t* bits, uint16_t color) {
   const int stride = (w + 7) / 8;
   const uint16_t c = encode(color);
-  int y0 = std::max(y, clip_y0_), y1 = std::min(std::min(h_, clip_y1_), y + h);
+  int y0, y1;
+  if (row_window(y0, y1)) return;
+  y0 = std::max(y0, y);
+  y1 = std::min(y1, y + h);
   for (int yy = y0; yy < y1; ++yy) {
     const uint8_t* row = bits + (yy - y) * stride;
     for (int col = 0; col < w; ++col) {
       int xx = x + col;
       if (xx < 0 || xx >= w_) continue;
-      if ((row[col >> 3] >> (7 - (col & 7))) & 1) px_[yy * stride_ + xx] = c;
+      if ((row[col >> 3] >> (7 - (col & 7))) & 1) px_[(yy - base_y_) * stride_ + xx] = c;
     }
   }
 }
@@ -122,10 +128,11 @@ void Canvas::blit(int x, int y, int w, int h, const uint16_t* src) {
   for (int row = 0; row < h; ++row) {
     int yy = y + row;
     if (yy < clip_y0_ || yy >= clip_y1_ || yy >= h_ || yy < 0) continue;
+    if (yy < base_y_ || yy >= base_y_ + rows_) continue;
     for (int col = 0; col < w; ++col) {
       int xx = x + col;
       if (xx < 0 || xx >= w_) continue;
-      px_[yy * stride_ + xx] = encode(src[row * w + col]);
+      px_[(yy - base_y_) * stride_ + xx] = encode(src[row * w + col]);
     }
   }
 }

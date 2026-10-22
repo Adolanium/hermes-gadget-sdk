@@ -151,6 +151,18 @@ class Ui {
 
  private:
   void draw_frame(const UiModel& m);
+  // Draws band rows [y0, y1) and flushes them. On a display that cannot hold the
+  // whole panel (Display::framebuffer_rows) the band is drawn once per window it
+  // spans, so the caller needs no idea of the windowing.
+  void draw_bands(int y0, int y1, void (Ui::*draw)(Canvas&, const UiModel&), const UiModel& m);
+  // Calls draw(a, b) for each framebuffer window panel rows [y0, y1) cross, with
+  // the window mapped and [a, b) the panel rows of the range inside it, then
+  // pushes those rows. One call for the whole range when the framebuffer holds
+  // the panel.
+  template <typename Draw>
+  void each_window(int y0, int y1, Draw&& draw);
+  // A canvas over the whole panel (not just the UI area) for the current window.
+  Canvas panel_canvas();
   // Sends panel rows [y0, y1) to the display, timed while measuring.
   void push(int y0, int y1);
   void draw_top(Canvas& c, const UiModel& m);
@@ -200,6 +212,9 @@ class Ui {
   DisplayInfo info_;
   uint16_t bg_;  // background colour (see DisplayInfo::emissive)
   int ox_ = 0, oy_ = 0;  // area origin on the panel
+  // First panel row the framebuffer covers right now (see draw_bands); 0 unless
+  // the display holds only a band of rows.
+  int frame_origin_ = 0;
   UiLayout layout_;
   uint32_t hash_[4] = {0, 0, 0, 0};
   uint32_t hero_static_ = 0, hero_anim_ = 0;

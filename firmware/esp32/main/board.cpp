@@ -48,6 +48,8 @@ namespace {
 #define HG_BOARD_NAME "waveshare-esp32-p4-touch-lcd-3.4c"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154
 #define HG_BOARD_NAME "waveshare-esp32s3-lcd-154"
+#elif CONFIG_HG_BOARD_ESP32_CYD
+#define HG_BOARD_NAME "esp32-2432s028-cyd"
 #else
 #define HG_BOARD_NAME "custom"
 #endif
@@ -871,6 +873,51 @@ BoardConfig make() {
   b.buttons = {35, -1, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";
+  return b;
+}
+#elif CONFIG_HG_BOARD_ESP32_CYD
+// ESP32-2432S028 "Cheap Yellow Display" (CYD), the revision with two USB ports
+// (micro-USB and USB-C) and an ST7789 panel: a classic ESP32-WROOM-32 with 4 MB
+// flash and no PSRAM, a 2.8" 240x320 panel in landscape, a resistive XPT2046
+// touchscreen on its own pins, a microSD slot on VSPI and an SC8002B amplifier
+// on the DAC. The panel, the BOOT key, the amplifier (through the chip's DAC) and
+// a PDM microphone on the 4-pin header are wired here; touch and microSD are not
+// brought up yet. The original micro-USB-only CYD has an ILI9341 and needs its
+// own profile.
+// Pins: witnessmenow/ESP32-Cheap-Yellow-Display (MIT), commit 0564a140, PINS.md
+// and DisplayConfig/CYD2USB/User_Setup.h: the panel on HSPI with SCLK 14,
+// MOSI 13, MISO 12, DC 2, CS 15, no reset, backlight GPIO 21 active-high; the
+// amplifier on GPIO 26; IO22 and IO27 on the header.
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.lcd.enabled = true;
+  b.lcd.width = 320;
+  b.lcd.height = 240;
+  // Landscape orientation. MADCTL 0x60 (MV|MX) rendered the UI rotated 180
+  // degrees on this panel, so both mirror bits are swapped: MADCTL 0xA0
+  // (MV|MY), the same landscape orientation the ST7789 T-Display-S3 uses.
+  b.lcd.swap_xy = true;
+  b.lcd.mirror_x = true;
+  b.lcd.mirror_y = true;
+  b.lcd.invert = false;    // LovyanGFX CYD_INVERT = 1
+  b.lcd.bgr = false;      // LovyanGFX rgb_order = true writes MAD_RGB, i.e. native RGB565
+  b.lcd.mosi = 13;
+  b.lcd.miso = 12;
+  b.lcd.sclk = 14;
+  b.lcd.cs = 15;
+  b.lcd.dc = 2;
+  b.lcd.rst = -1;         // no reset line; the panel resets on power-up
+  b.lcd.backlight = 21;
+  b.lcd.spi_mhz = 40;
+  b.speaker_dac = 26;     // SC8002B amplifier input on DAC channel 1 (GPIO26)
+  // A PDM MEMS microphone on the 4-pin header: IO22 carries the PDM clock and
+  // IO27 the data, so nothing else is needed (SELECT is tied to ground on the
+  // module). ESP32's only PDM-to-PCM converter is on I2S0, and I2sMic picks that
+  // port for a PDM mic; the board has no I2S speaker, so the port is free.
+  b.mic = {true, 22, -1, 27, true};
+  b.buttons = {0, -1, -1, -1};  // BOOT, the only key on the board
+  b.talk_label = "BOOT";
   return b;
 }
 #elif CONFIG_HG_BOARD_WS_P4_TOUCH_LCD_3_4C

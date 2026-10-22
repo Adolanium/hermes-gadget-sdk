@@ -275,11 +275,56 @@ Ui::Ui(Display& display)
 void Ui::invalidate() { valid_ = false; }
 
 Canvas Ui::canvas() {
-  return Canvas(display_.framebuffer() + oy_ * panel_.width + ox_, info_.width, info_.height, info_.swap_bytes,
-                panel_.width);
+  // UI row y is panel row y + oy_. The framebuffer holds panel rows starting at
+  // frame_origin_, so row y lives at buffer row y + oy_ - frame_origin_, which is
+  // what base_y_ = frame_origin_ - oy_ makes Canvas index arithmetic produce.
+  const int rows = display_.framebuffer_rows();
+  return Canvas(display_.framebuffer() + ox_, info_.width, info_.height, info_.swap_bytes, panel_.width,
+                frame_origin_ - oy_, rows > 0 ? rows : panel_.height);
 }
 
 void Ui::flush(int y0, int y1) { push(y0 + oy_, y1 + oy_); }
+
+Canvas Ui::panel_canvas() {
+  const int rows = display_.framebuffer_rows();
+  return Canvas(display_.framebuffer(), panel_.width, panel_.height, panel_.swap_bytes, 0, frame_origin_,
+                rows > 0 ? rows : panel_.height);
+}
+
+template <typename Draw>
+void Ui::each_window(int y0, int y1, Draw&& draw) {
+  // Windows tile the panel, `step` rows at a time (the whole panel when the
+  // framebuffer holds it).
+  const int win = display_.framebuffer_rows();
+  const int step = win > 0 ? win : panel_.height;
+  for (int top = 0; top < panel_.height; top += step) {
+    const int a = std::max(y0, top), b = std::min(y1, top + step);
+    if (a >= b) continue;
+    frame_origin_ = top;
+    display_.set_frame_origin(frame_origin_);
+    draw(a, b);
+    push(a, b);
+  }
+}
+
+void Ui::draw_bands(int y0, int y1, void (Ui::*draw)(Canvas&, const UiModel&), const UiModel& m) {
+  // UI row y sits at panel row y + oy_.
+  const bool banded = display_.framebuffer_rows() > 0;
+  y1 = std::min<int>(y1, info_.height);
+  each_window(y0 + oy_, y1 + oy_, [&](int a, int b) {
+    if (banded && ox_) {
+      // The rows go out full width, and this window last held other rows: put
+      // back the background beside the UI square, which a whole-panel
+      // framebuffer keeps from the full repaint (push then paints the arc).
+      Canvas panel = panel_canvas();
+      panel.fill_rect(0, a, ox_, b - a, bg_);
+      panel.fill_rect(ox_ + info_.width, a, panel_.width - ox_ - info_.width, b - a, bg_);
+    }
+    Canvas c = canvas();
+    c.set_clip_rows(a - oy_, b - oy_);  // the canvas drops anything past the window as well
+    (this->*draw)(c, m);
+  });
+}
 
 void Ui::push(int y0, int y1) {
   if (band_.permille >= 0) paint_band(y0, y1);  // the arc goes over whatever these rows drew
@@ -324,6 +369,9 @@ void Ui::render(const UiModel& m) {
 }
 
 void Ui::draw_frame(const UiModel& m) {
+  // A display that holds only a band of rows cannot resend rows it missed, so it
+  // asks for the whole screen again rather than leave a stale band on the panel.
+  if (display_.take_redraw_request()) valid_ = false;
   if (m.screen == Screen::Alarm) {
     draw_alarm(m);
     return;
@@ -341,16 +389,18 @@ void Ui::draw_frame(const UiModel& m) {
   }
   const ArcSweep before = band_;
   band_ = arc ? arc_sweep(m.timer_permille) : ArcSweep{};
+  const bool swept = valid_ && arc && before.permille >= 0 && before.permille != band_.permille;
+  // A banded framebuffer no longer holds the rest of the rows the sweep crossed,
+  // so it repaints the whole panel instead.
+  if (swept && display_.framebuffer_rows() > 0) valid_ = false;
   if (!valid_ && (ox_ || oy_)) {
     // Round panel: everything outside the UI area stays the background colour.
-    Canvas panel(display_.framebuffer(), panel_.width, panel_.height, panel_.swap_bytes);
-    panel.fill_rect(0, 0, panel_.width, panel_.height, bg_);
-    push(0, panel_.height);  // paints the arc too
+    // Each push paints the arc too.
+    each_window(0, panel_.height, [&](int, int) { panel_canvas().fill_rect(0, 0, panel_.width, panel_.height, bg_); });
   }
   if (panel_.round) draw_round_battery(m);
   // Only the sweep moved: repaint the rows it crossed (the rest of the panel is unchanged).
-  if (valid_ && arc && before.permille >= 0 && before.permille != band_.permille) push_band_change(before, band_);
-  Canvas c = canvas();
+  if (swept && valid_) push_band_change(before, band_);
   const int y_header = layout_.top_h;
   const int y_content = y_header + layout_.header_h;
   const int y_bottom = h - layout_.bottom_h;
@@ -381,10 +431,7 @@ void Ui::draw_frame(const UiModel& m) {
     for (int i : {0, 3}) {
       if (valid_ && hash_[i] == hashes[i]) continue;
       int y0 = i == 0 ? 0 : y_bottom, y1 = i == 0 ? y_header : h;
-      c.set_clip_rows(y0, y1);
-      if (i == 0) draw_top(c, m);
-      else draw_bottom(c, m);
-      flush(y0, y1);
+      draw_bands(y0, y1, i == 0 ? &Ui::draw_top : &Ui::draw_bottom, m);
       hash_[i] = hashes[i];
     }
     uint32_t stat = Hash().val(m.screen).add(m.headline).add(m.detail).add(m.yes).add(m.no).val(m.caption_lines)
@@ -396,11 +443,7 @@ void Ui::draw_frame(const UiModel& m) {
       hero_anim_rows(m, y0, y1);  // only what can move
       redraw = true;
     }
-    if (redraw) {
-      c.set_clip_rows(y0, y1);
-      draw_hero(c, m);
-      flush(y0, y1);
-    }
+    if (redraw) draw_bands(y0, y1, &Ui::draw_hero, m);
     hero_static_ = stat;
     hero_anim_ = anim;
     hero_valid_ = true;
@@ -427,9 +470,7 @@ void Ui::draw_frame(const UiModel& m) {
       continue;
     }
     if (valid_ && hash_[i] == hashes[i]) continue;
-    c.set_clip_rows(bands[i].y0, bands[i].y1);
-    (this->*bands[i].draw)(c, m);
-    flush(bands[i].y0, bands[i].y1);
+    draw_bands(bands[i].y0, bands[i].y1, bands[i].draw, m);
     hash_[i] = hashes[i];
   }
   valid_ = true;
@@ -502,11 +543,12 @@ void Ui::draw_round_battery(const UiModel& m) {
                            .val(m.battery_text).val(y0).get();
   if (valid_ && key == battery_hash_) return;
   battery_hash_ = key;
-  Canvas panel(display_.framebuffer(), panel_.width, panel_.height, panel_.swap_bytes);
-  // Clear the band the strip can occupy at any level, so a shorter or hidden strip leaves nothing behind.
-  panel.fill_rect(0, 0, panel_.width, oy_, bg_);
-  if (m.battery >= 0) draw_battery(panel, m, (panel_.width - battery_width(m)) / 2, (y0 + y1) / 2);
-  push(0, oy_);
+  each_window(0, oy_, [&](int, int) {
+    Canvas panel = panel_canvas();
+    // Clear the band the strip can occupy at any level, so a shorter or hidden strip leaves nothing behind.
+    panel.fill_rect(0, 0, panel_.width, oy_, bg_);
+    if (m.battery >= 0) draw_battery(panel, m, (panel_.width - battery_width(m)) / 2, (y0 + y1) / 2);
+  });
 }
 
 int Ui::battery_width(const UiModel& m) const {
@@ -1054,7 +1096,7 @@ void Ui::draw_bottom(Canvas& c, const UiModel& m) {
 
 void Ui::paint_band(int y0, int y1) {
   if (band_rows_.empty()) return;
-  Canvas panel(display_.framebuffer(), panel_.width, panel_.height, panel_.swap_bytes);
+  Canvas panel = panel_canvas();  // push() runs inside the window that holds these rows
   const int cx = panel_.width / 2, cy = panel_.height / 2;
   for (int y = std::max(0, y0); y < std::min<int>(panel_.height, y1); ++y) {
     const BandRow& row = band_rows_[static_cast<size_t>(y)];
@@ -1104,91 +1146,93 @@ void Ui::draw_alarm(const UiModel& m) {
   const int W = panel_.width, H = panel_.height;
   const int cx = W / 2, cy = H / 2, R = std::min(W, H) / 2;
   const uint16_t ink = m.flash ? rgb565(4, 40, 24) : kGreen;
-  Canvas panel(display_.framebuffer(), W, H, panel_.swap_bytes);
-  panel.fill_rect(0, 0, W, H, m.flash ? kGreen : bg_);
+  // The whole panel, once per framebuffer window (just once when it holds the panel).
+  each_window(0, H, [&](int, int) {
+    Canvas panel = panel_canvas();
+    panel.fill_rect(0, 0, W, H, m.flash ? kGreen : bg_);
 
-  // The width a line may use at rows [y0, y1): the glass's chord there (round panels), less a margin.
-  auto avail = [&](int y0, int y1) {
-    int w = W;
-    if (panel_.round) {
-      for (int y : {y0, y1 - 1}) {
-        const int dy = y - cy;
-        w = std::min(w, 2 * isqrt(static_cast<int64_t>(R) * R - static_cast<int64_t>(dy) * dy));
+    // The width a line may use at rows [y0, y1): the glass's chord there (round panels), less a margin.
+    auto avail = [&](int y0, int y1) {
+      int w = W;
+      if (panel_.round) {
+        for (int y : {y0, y1 - 1}) {
+          const int dy = y - cy;
+          w = std::min(w, 2 * isqrt(static_cast<int64_t>(R) * R - static_cast<int64_t>(dy) * dy));
+        }
+      }
+      return std::max(0, w - 8 * s);
+    };
+
+    // The hint, in the bottom band where the bar would be.
+    const int hy = oy_ + info_.height - layout_.bottom_h;
+    const int hcols = (avail(hy, hy + Canvas::line_height(s)) + s) / (font::kCellWidth * s);
+    const std::string hint = fit(m.hint, hcols);
+    panel.text(cx - Canvas::text_width(hint, s) / 2, hy + s, hint, s, ink);
+
+    const std::vector<std::string> words = headline_lines(m.headline);
+    const int n = static_cast<int>(words.size());
+    const int gap = 3 * s;
+    const int ls = s + 1;  // the label's scale
+    const std::string label = m.detail.substr(0, m.detail.find('\n'));
+    const int label_h = label.empty() ? 0 : Canvas::line_height(ls);
+    const mascot::Bitmap* face = mascot::pick(H / 3, mascot::Frame::Idle);
+    const int face_size = face && face->size <= H / 3 ? face->size : 0;
+    const int lo = 4 * s, hi = hy - gap;  // the group's rows: clear of the top edge and of the hint
+
+    // The group's first row at headline scale k, with or without the mascot, or -1 when it does not
+    // fit: taller than [lo, hi), or a line (or the mascot) wider than the glass at its own rows.
+    auto place = [&](int k, bool with_face) {
+      const int lh = Canvas::line_height(k);
+      const int group = (with_face ? face_size + gap : 0) + n * lh + (label_h ? gap + label_h : 0);
+      if (group > hi - lo) return -1;
+      const int first = std::clamp(cy - group / 2, lo, hi - group);
+      int y = first;
+      if (with_face) {
+        if (face_size > avail(y, y + face_size)) return -1;
+        y += face_size + gap;
+      }
+      for (int i = 0; i < n; ++i, y += lh)
+        if (Canvas::text_width(words[static_cast<size_t>(i)], k) > avail(y, y + lh)) return -1;
+      return first;
+    };
+    int hs = 0, top = lo;
+    for (int k = 8; k >= 1 && !hs; --k) {
+      if (n * Canvas::line_height(k) > H * 2 / 5) continue;
+      const int first = place(k, false);
+      if (first >= 0) {
+        hs = k;
+        top = first;
       }
     }
-    return std::max(0, w - 8 * s);
-  };
+    bool with_face = false;
+    if (!hs) {
+      hs = 1;  // nothing fits whole: the smallest scale, and the lines are cut below
+    } else if (face_size) {
+      const int first = place(hs, true);
+      if (first >= 0) {
+        with_face = true;
+        top = first;
+      }
+    }
 
-  // The hint, in the bottom band where the bar would be.
-  const int hy = oy_ + info_.height - layout_.bottom_h;
-  const int hcols = (avail(hy, hy + Canvas::line_height(s)) + s) / (font::kCellWidth * s);
-  const std::string hint = fit(m.hint, hcols);
-  panel.text(cx - Canvas::text_width(hint, s) / 2, hy + s, hint, s, ink);
-
-  const std::vector<std::string> words = headline_lines(m.headline);
-  const int n = static_cast<int>(words.size());
-  const int gap = 3 * s;
-  const int ls = s + 1;  // the label's scale
-  const std::string label = m.detail.substr(0, m.detail.find('\n'));
-  const int label_h = label.empty() ? 0 : Canvas::line_height(ls);
-  const mascot::Bitmap* face = mascot::pick(H / 3, mascot::Frame::Idle);
-  const int face_size = face && face->size <= H / 3 ? face->size : 0;
-  const int lo = 4 * s, hi = hy - gap;  // the group's rows: clear of the top edge and of the hint
-
-  // The group's first row at headline scale k, with or without the mascot, or -1 when it does not
-  // fit: taller than [lo, hi), or a line (or the mascot) wider than the glass at its own rows.
-  auto place = [&](int k, bool with_face) {
-    const int lh = Canvas::line_height(k);
-    const int group = (with_face ? face_size + gap : 0) + n * lh + (label_h ? gap + label_h : 0);
-    if (group > hi - lo) return -1;
-    const int first = std::clamp(cy - group / 2, lo, hi - group);
-    int y = first;
+    const int lh = Canvas::line_height(hs);
+    int y = top;
     if (with_face) {
-      if (face_size > avail(y, y + face_size)) return -1;
+      panel.bitmap1(cx - face_size / 2, y, face->size, face->size, face->bits, ink);
       y += face_size + gap;
     }
-    for (int i = 0; i < n; ++i, y += lh)
-      if (Canvas::text_width(words[static_cast<size_t>(i)], k) > avail(y, y + lh)) return -1;
-    return first;
-  };
-  int hs = 0, top = lo;
-  for (int k = 8; k >= 1 && !hs; --k) {
-    if (n * Canvas::line_height(k) > H * 2 / 5) continue;
-    const int first = place(k, false);
-    if (first >= 0) {
-      hs = k;
-      top = first;
+    for (int i = 0; i < n; ++i, y += lh) {
+      const int cols = (avail(y, y + lh) + hs) / (font::kCellWidth * hs);
+      const std::string line = fit(words[static_cast<size_t>(i)], cols);
+      panel.text(cx - Canvas::text_width(line, hs) / 2, y, line, hs, ink);
     }
-  }
-  bool with_face = false;
-  if (!hs) {
-    hs = 1;  // nothing fits whole: the smallest scale, and the lines are cut below
-  } else if (face_size) {
-    const int first = place(hs, true);
-    if (first >= 0) {
-      with_face = true;
-      top = first;
+    if (label_h) {
+      y += gap;
+      const int cols = (avail(y, y + label_h) + ls) / (font::kCellWidth * ls);
+      const std::string shown = fit(label, cols);
+      panel.text(cx - Canvas::text_width(shown, ls) / 2, y, shown, ls, ink);
     }
-  }
-
-  const int lh = Canvas::line_height(hs);
-  int y = top;
-  if (with_face) {
-    panel.bitmap1(cx - face_size / 2, y, face->size, face->size, face->bits, ink);
-    y += face_size + gap;
-  }
-  for (int i = 0; i < n; ++i, y += lh) {
-    const int cols = (avail(y, y + lh) + hs) / (font::kCellWidth * hs);
-    const std::string line = fit(words[static_cast<size_t>(i)], cols);
-    panel.text(cx - Canvas::text_width(line, hs) / 2, y, line, hs, ink);
-  }
-  if (label_h) {
-    y += gap;
-    const int cols = (avail(y, y + label_h) + ls) / (font::kCellWidth * ls);
-    const std::string shown = fit(label, cols);
-    panel.text(cx - Canvas::text_width(shown, ls) / 2, y, shown, ls, ink);
-  }
-  push(0, H);
+  });
 }
 
 }  // namespace hg
