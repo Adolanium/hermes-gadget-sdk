@@ -83,7 +83,6 @@ struct LcdConfig {
   bool swap_xy = true, mirror_x = true, mirror_y = false, invert = true;
   int gap_x = 0, gap_y = 0;
   int mosi = -1, sclk = -1, cs = -1, dc = -1, rst = -1, backlight = -1;
-  int miso = -1;  // SPI data-in, only wired on the CYD's shared SPI bus
   int spi_mhz = 40;
   LcdBus bus{};
   RgbPanelConfig rgb{};
@@ -97,6 +96,9 @@ struct LcdConfig {
   int d1 = -1, d2 = -1, d3 = -1;  // QSPI data0 uses mosi
   bool round = false;
   uint8_t font_scale = 1;  // UI text scale multiplier, clamped so the scale stays 1..4 (hg::DisplayInfo)
+  // SPI data-in, only wired on the CYD's shared SPI bus. Last, so positional
+  // initializers written before it existed keep their meaning.
+  int miso = -1;
 };
 
 struct I2sMicConfig {
