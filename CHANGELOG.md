@@ -80,6 +80,7 @@
 - Enrollment by unapproved devices is bounded: at most 16 may wait to be paired, 4 per network address, and an unapproved record expires an hour after the device's last contact. `hermes gadget pair --yes` approves blindly only when one device is waiting; `hermes gadget pair <device>` picks one. `hermes gadget devices` marks devices still waiting to pair.
 - `hermes gadget forget` takes effect on a running gateway. The device store re-reads `devices.json` before every operation and writes through a per-process temporary file, so the gateway no longer keeps a stale copy of a forgotten key or writes it back when the device reconnects.
 - The plugin checks, before the gateway creates the adapter, that this Hermes still has every module and private adapter hook it relies on, and fails with a message naming what is missing and the Hermes commit it was tested against. The tested commit lives in `plugin/compat.py`, and a test keeps it equal to the CI pin.
+- A too-short utterance no longer leaves the device on "Sending..." until its three-minute timeout. The server now sends its "Didn't catch that" notice and a cancelled `turn.end`, so the device returns to ready at once. On touch devices the notice names the screen instead of the button.
 
 ### Tools and documentation
 

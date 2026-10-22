@@ -1,5 +1,6 @@
 """Hermes-independent plugin modules: text shaping, audio, device store."""
 
+import asyncio
 import io
 import math
 import struct
@@ -169,3 +170,88 @@ def test_battery_log_rolls_over_a_full_file(tmp_path):
     assert (tmp_path / "hg-1.1.csv").exists()
     assert (tmp_path / "hg-1.csv").stat().st_size < 400
     assert (tmp_path / "hg-1.csv").read_text().startswith("time,unix_s,battery_mv")
+
+
+# -- hub: utterances that end without audio ---------------------------------------------
+
+
+class _FakeDevice:
+    """The slice of DeviceSession the hub's audio path touches; records what it would send."""
+
+    name = "Desk"
+    device_id = "hg-0000000000000000"
+
+    def __init__(self, caps=None):
+        self.caps = caps if caps is not None else {}
+        self.sent = []
+        self._upload = None
+
+    async def send_notice(self, text, ttl_s=8):
+        self.sent.append(("notice", text))
+
+    async def turn_end(self, turn, outcome="success"):
+        self.sent.append(("turn.end", turn, outcome))
+
+    def spawn(self, coro):
+        return asyncio.get_running_loop().create_task(coro)
+
+
+def test_a_too_short_utterance_ends_the_turn_so_the_device_settles():
+    from hermes_gadget_plugin import hub
+
+    async def run():
+        device = _FakeDevice(caps={"inputs": ["talk"], "talk_mode": "hold"})
+        device._upload = hub._Upload(id="a1", stream=4, rate=16000, started=0.0, pcm=bytearray(3200))
+        await hub.DeviceHub(None, hub.HubDelegate())._h_audio_end(device, {"stream": 4})
+        assert device.sent == [("notice", "Didn't catch that - hold the button while speaking"),
+                               ("turn.end", "", "cancelled")]
+
+    asyncio.run(run())
+
+
+def test_an_end_with_no_audio_also_ends_the_turn():
+    from hermes_gadget_plugin import hub
+
+    async def run():
+        device = _FakeDevice()
+        await hub.DeviceHub(None, hub.HubDelegate())._h_audio_end(device, {"stream": 9})
+        assert ("turn.end", "", "cancelled") in device.sent
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("caps, notice", [
+    ({"inputs": ["talk", "touch"], "talk_mode": "tap"}, "Didn't catch that - tap and speak"),
+    ({"inputs": ["talk", "touch"], "talk_mode": "hold"}, "Didn't catch that - hold the screen while speaking"),
+    ({"inputs": ["talk", "cancel"], "talk_mode": "hold"}, "Didn't catch that - hold the button while speaking"),
+])
+def test_the_retry_hint_names_the_control_the_device_uses(caps, notice):
+    from hermes_gadget_plugin import hub
+
+    async def run():
+        device = _FakeDevice(caps=caps)
+        device._upload = hub._Upload(id="a3", stream=4, rate=16000, started=0.0, pcm=bytearray(800))
+        await hub.DeviceHub(None, hub.HubDelegate())._h_audio_end(device, {"stream": 4})
+        assert ("notice", notice) in device.sent
+
+    asyncio.run(run())
+
+
+def test_long_enough_utterance_still_reaches_the_delegate():
+    from hermes_gadget_plugin import hub
+
+    heard = []
+
+    class Delegate(hub.HubDelegate):
+        async def on_utterance(self, session, msg_id, wav, seconds):
+            heard.append((msg_id, seconds))
+
+    async def run():
+        device = _FakeDevice()
+        device._upload = hub._Upload(id="a2", stream=4, rate=16000, started=0.0, pcm=bytearray(16000))
+        await hub.DeviceHub(None, Delegate())._h_audio_end(device, {"stream": 4})
+        await asyncio.sleep(0)
+        assert heard == [("a2", 0.5)]
+        assert device.sent == []
+
+    asyncio.run(run())

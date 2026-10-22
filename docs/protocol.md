@@ -118,7 +118,7 @@ If authentication fails, the server sends `{"type": "error", "code": "auth_faile
 | `{"type": "session.new"}` | Start a fresh conversation (Hermes `/new`). The reference firmware sends it when CANCEL is held for 2 s |
 | `{"type": "prompt.reply", "id": "q1", "answer": "yes"}` | The answer (`yes` or `no`) to a `prompt` |
 
-- Utterances shorter than 0.25 s are dropped with a `notice`.
+- Utterances shorter than 0.25 s are dropped with a `notice`, and the server then sends a `turn.end` with an empty `turn` and outcome `cancelled`, so the device stops waiting.
 - The server caps an utterance at `max_utterance_s` (60 s by default).
 
 ### Server → device
@@ -130,7 +130,7 @@ If authentication fails, the server sends `{"type": "error", "code": "auth_faile
 | `{"type": "status", "text": "Searching the web"}` | Live working-state phrase (empty clears it) |
 | `{"type": "reply.delta", "turn": "...", "text": "partial..."}` | Streaming preview; `text` is cumulative |
 | `{"type": "reply", "turn": "...", "text": "...", "interim": true}` | A reply. With `interim`, it is progress commentary rather than the answer |
-| `{"type": "turn.end", "turn": "...", "outcome": "success\|failure\|cancelled"}` | The turn is over |
+| `{"type": "turn.end", "turn": "...", "outcome": "success\|failure\|cancelled"}` | The turn is over. An empty `turn` ends whatever the device is waiting for; the server sends one, as `cancelled`, after dropping a too-short utterance |
 | `{"type": "notice", "text": "...", "ttl_s": 8}` | Transient one-line message |
 | `{"type": "prompt", "id": "q1", "title": "Confirm /new", "text": "...", "ttl_s": 300}` | A yes/no question; see [Questions](#questions) |
 | `{"type": "prompt.close", "id": "q1"}` | The question was withdrawn (timed out or answered elsewhere) |
