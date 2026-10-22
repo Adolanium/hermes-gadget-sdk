@@ -1,8 +1,0 @@
-Command: ninja all
-[1/4] C:\Windows\system32\cmd.exe /C "cd /D E:\Trae\hermes-gadget-sdk\firmware\esp32\build-cyd && C:\Espressif\tools\python\v6.1\venv\Scripts\python.exe C:/esp/v6.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/partition_table/partition-table.bin E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/hermes_gadget.bin"
-hermes_gadget.bin binary size 0x12f240 bytes. Smallest app partition is 0x1f0000 bytes. 0xc0dc0 bytes (39%) free.
-[2/4] Performing build step for 'bootloader'
-[1/1] C:\Windows\system32\cmd.exe /C "cd /D E:\Trae\hermes-gadget-sdk\firmware\esp32\build-cyd\bootloader && C:\Espressif\tools\python\v6.1\venv\Scripts\python.exe C:/esp/v6.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x1000 E:/Trae/hermes-gadget-sdk/firmware/esp32/build-cyd/bootloader/bootloader.bin"
-Bootloader binary size 0x6680 bytes. 0x980 bytes (8%) free.
-[3/4] No install step for 'bootloader'
-[4/4] Completed 'bootloader'
