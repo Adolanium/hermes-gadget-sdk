@@ -8,6 +8,8 @@ Run with a Python that can import Hermes, e.g.:
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 import math
 import struct
@@ -89,7 +91,8 @@ def gadget(loop_thread, tmp_path, monkeypatch):
         if event.source.user_id not in state.authorized:
             await adapter.send(event.source.chat_id, PAIRING_TEXT)
             return None
-        return state.reply(event)
+        reply = state.reply(event)
+        return await reply if inspect.isawaitable(reply) else reply  # an async reply keeps the turn running
 
     adapter.set_message_handler(handler)
     assert loop_thread.run(adapter.connect())
@@ -150,12 +153,33 @@ def test_voice_arrives_as_a_cached_wav_voice_message(gadget, make_sim):
 
 def test_cancel_button_sends_stop(gadget, make_sim):
     sim = _paired_sim(gadget, make_sim)
-    gadget.reply = lambda e: None
+
+    async def still_working(event):  # the turn is still running when the cancel comes
+        if event.text == "long task":
+            await asyncio.sleep(10)
+
+    gadget.reply = still_working
     gadget.events.clear()
+    starts = lambda: sum(1 for m in sim.received if m["type"] == "turn.start")
+    before = starts()
     sim.type_text("long task")
     assert sim.wait_screen("thinking", timeout=5)
+    # The device thinks as soon as it sends; the cancel must come once the server's turn runs.
+    assert sim.wait_for(lambda: starts() > before, timeout=5)
     sim.tap("cancel")
     assert sim.wait_for(lambda: any(e.text == "/stop" for e in gadget.events), timeout=5)
+
+
+def test_cancel_after_the_reply_sends_no_stop(gadget, make_sim):
+    sim = _paired_sim(gadget, make_sim)
+    session = gadget.adapter.hub.sessions[sim.status()["device_id"]]
+    sim.type_text("what's up")
+    assert sim.wait_for(lambda: sim.last_received("turn.end") is not None, timeout=10)
+    gadget.events.clear()
+    # The reply may still be playing after turn.end: a cancel then only stops the audio.
+    gadget.run(gadget.adapter.on_cancel(session))
+    sim.run_for(0.5)
+    assert not any(e.text == "/stop" for e in gadget.events)
 
 
 def test_new_session_maps_to_slash_new(gadget, make_sim):
