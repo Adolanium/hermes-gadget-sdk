@@ -218,3 +218,13 @@ def test_script_invalid_power_preserves_native_reading(
     assert "Traceback" not in captured.err
     assert sim.power_status == previous
     assert snapshot["power"] == {"available": True, **previous}
+
+
+def test_live_audio_without_the_extra_stops_instead_of_running_silent(monkeypatch, capsys):
+    """--live-audio used to fall back to silence, so a recording captured nothing."""
+    monkeypatch.setattr("hermes_gadget.sim.audio_io.sounddevice_available", lambda: False)
+    args = argparse.Namespace(live_audio=True, headless=True, script=None, url="", board="sim-240x240",
+                              name="Test Gadget", token="", state_dir=None)
+
+    assert cli.cmd_sim(args) == 2
+    assert "audio extra" in capsys.readouterr().err
