@@ -105,6 +105,9 @@ menu "Hermes Gadget"
         config HG_BOARD_ESP32_CYD
             bool "ESP32-2432S028 CYD (ST7789 320x240, no PSRAM, experimental)"
             depends on IDF_TARGET_ESP32
+        config HG_BOARD_WS_P4_TOUCH_LCD_3_4C
+            bool "Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C (800x800 round DSI, ES8311+ES7210 audio, C6 Wi-Fi)"
+            depends on IDF_TARGET_ESP32P4
         config HG_BOARD_CUSTOM
             bool "Custom pins (configure below)"
     endchoice

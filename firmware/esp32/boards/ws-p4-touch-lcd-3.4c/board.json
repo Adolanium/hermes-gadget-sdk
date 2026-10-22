@@ -1,0 +1,6 @@
+{
+  "title": "Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C",
+  "summary": "800x800 round DSI JD9365 panel, GT911 touch, ES8311+ES7210 audio, Wi-Fi 6 via C6. Experimental.",
+  "docs": "docs/hardware.md#waveshare-esp32-p4-wifi6-touch-lcd-34c",
+  "ready_made": true
+}

@@ -225,13 +225,14 @@ class DsiDisplay final : public hg::Display {
   uint16_t* framebuffer() override { return fb_; }
   void flush(uint16_t y0, uint16_t y1) override;
   void set_backlight(uint8_t percent) override;
-  const char* controller_name() const { return "ek79007-dsi"; }
+  const char* controller_name() const { return controller_name_; }
 
  private:
   static bool on_color_done(esp_lcd_panel_handle_t panel, esp_lcd_dpi_panel_event_data_t* event, void* ctx);
   bool wait_copy(uint32_t timeout_us);
   LcdConfig cfg_{};
   DsiPanelConfig dsi_{};
+  const char* controller_name_ = "ek79007-dsi";  // set to the panel actually created
   esp_lcd_dsi_bus_handle_t bus_ = nullptr;
   esp_lcd_panel_io_handle_t io_ = nullptr;
   esp_lcd_panel_handle_t panel_ = nullptr;
