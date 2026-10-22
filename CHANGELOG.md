@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Firmware
+
+- Audio written right after a speaker stream starts is no longer thrown away on boards whose speaker task empties its queue after an abort: I2S speakers, and codec speakers without `codec.speaker_pa`. `begin()` aborts the stream before it, and the task emptied the queue on its next pass, so audio queued in between, such as a short tone written at once, could go with it. When `begin()` replaces a stream it now waits for that reset, at most 6 ticks (about 60 ms), as the P4 speaker also waits in `begin()`, so `write()` stays non-blocking, and an idle speaker starts at once. The task drops what it received while a reset was pending, and a codec cuts a stream's silent tail short when the next stream waits. A codec stream that closes with nothing played also no longer leaves `busy()` true until the next stream, which kept the screen from sleeping.
+
 ## 0.3.0
 
 Hermes Gadget 0.3.0 adds twelve board profiles, among them the first ESP32-P4 board (the Elecrow CrowPanel Advanced 10.1"), Opus speaker audio, device text in Spanish with a Latin-1 font that can follow Hermes's own language, switching Hermes profiles from the gadget, and a session dashboard. It also brings many reliability fixes for audio, Wi-Fi, power and the plugin. Details by area follow.
