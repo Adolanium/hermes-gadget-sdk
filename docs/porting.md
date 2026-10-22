@@ -100,7 +100,8 @@ Boards like the ESP32-S3-BOX family and the ESP32-S3-Touch-AMOLED-1.75 route aud
   - `write()` must not block: buffer about 1.5 s; the server keeps 0.5 s of lead.
   - `end()` drains the buffer.
   - `abort()` drops it immediately.
-  - `busy()` stays true until the buffered audio has played out.
+  - `busy()` stays true until the buffered audio has played out, and no longer once a closed stream has nothing left to play.
+  - Audio written right after `begin()` must survive the previous stream's `abort()`: a port whose task empties its queue later waits for that in `begin()`, as `I2sSpeaker` does.
 
 `I2sMic` and `I2sSpeaker` in `port_audio.cpp` are the reference implementations. The device declares its rates in `DeviceProfile`, and the server resamples to the speaker rate, so a 24 kHz or 48 kHz codec works without host changes.
 

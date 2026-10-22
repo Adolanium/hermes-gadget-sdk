@@ -148,7 +148,12 @@ bool I2sSpeaker::begin(const I2sSpeakerConfig& cfg) {
 
 bool I2sSpeaker::begin(uint32_t sample_rate) {
   if (!tx_) return false;
-  abort();
+  // A stream still open, draining, queued or being reset is aborted first. The speaker task
+  // empties the queue for that abort() on its next pass, and audio written before then would
+  // go with the old: wait for that reset, at most 6 ticks, so write() stays non-blocking. The
+  // P4 speaker waits in begin() too, and as there, an idle speaker starts at once.
+  if (busy() || flush_) abort();
+  for (int i = 0; flush_ && i < 6; ++i) vTaskDelay(1);
   rate_ = sample_rate;  // applied by the writer task before it next enables the channel
   open_ = true;
   draining_ = false;
@@ -187,15 +192,17 @@ void I2sSpeaker::task(void* arg) {
   uint32_t applied_rate = self->rate_.load();
   hg::SpeakerUnderruns gaps;
   for (;;) {
-    if (self->flush_.exchange(false)) {
+    if (self->flush_) {
       gaps.finish();  // an aborted stream isn't reported
       xStreamBufferReset(self->buffer_);
       if (enabled) {
         i2s_channel_disable(self->tx_);
         enabled = false;
       }
+      self->flush_ = false;  // only after the reset: a write() waiting for it is not wiped
     }
     size_t got = xStreamBufferReceive(self->buffer_, chunk, sizeof(chunk), pdMS_TO_TICKS(20));
+    if (self->flush_) continue;  // received while an abort() waits for its reset: old audio
     if (got == 0) {
       if (enabled && self->open_) gaps.ran_dry(speaker_now_ms());
       if (self->draining_ && !self->open_) {
