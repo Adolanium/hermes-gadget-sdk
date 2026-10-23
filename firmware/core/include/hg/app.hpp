@@ -227,6 +227,7 @@ class App {
   void h_ota_end(const json::Value& m);
   void h_ota_abort(const json::Value& m);
   void h_profile(const json::Value& m);
+  void h_face(const json::Value& m);
   bool can_switch_profile() const;
   void set_agent_profile(const std::string& id);
   void profile_notice(std::string text);
@@ -331,6 +332,7 @@ class App {
   };
   std::vector<AgentProfile> agent_profiles_;  // offered in welcome; empty = no switching
   std::string agent_profile_ = "default";
+  std::optional<mascot::Face> face_;  // agent_profile_'s, from Hermes; kept through reconnects
   // A profile.select awaiting Hermes's answer; one at a time (empty: none).
   std::string profile_pending_;
   uint32_t profile_pending_at_ = 0;

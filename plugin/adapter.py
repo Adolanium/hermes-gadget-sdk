@@ -24,6 +24,7 @@ config.yaml::
           unauthorized_dm_behavior: pair
           dashboard: true        # sessions and status tiles on devices that draw them
           profiles: [work, home] # optional: the profiles devices may switch to (default always)
+          profile_faces: true    # each profile's face (gadget-face.bin or its avatar) on devices
 
 Secrets (``~/.hermes/.env``): ``GADGET_ACCESS_TOKEN`` (optional shared token).
 """
@@ -59,6 +60,7 @@ from gateway.platforms.event import MessageEvent, MessageType
 
 from . import audio as gaudio
 from . import compat, dashboard, imaging, ota, runtime, textfmt
+from . import face as faces
 from .battery_log import BatteryLog
 from .hub import DeviceHub, DeviceSession, HubDelegate
 from .store import DeviceStore
@@ -194,6 +196,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._auto_home = _flag(extra.get("auto_home"), True)
         self._battery_log_on = _flag(extra.get("battery_log"), False)
         self._dashboard_on = _flag(extra.get("dashboard"), True)
+        self._profile_faces = _flag(extra.get("profile_faces"), True)
+        self._convert_avatars: Optional[bool] = None  # Pillow present; asked once
         # Profile switching: off without the key; "all" offers every served profile; a list offers those.
         offered = extra.get("profiles")
         self._offer_all = isinstance(offered, str) and offered.strip().lower() == "all"
@@ -429,6 +433,25 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         for prompt in prompts:
             await session.close_prompt(prompt.id)
         await session.send_profile()
+
+    async def face(self, session: DeviceSession) -> Optional[bytes]:
+        if not self._profile_faces:
+            return None
+        if self._convert_avatars is None:
+            self._convert_avatars = imaging.pillow_available()
+            if not self._convert_avatars:
+                logger.info("[%s] Pillow is not installed: devices show profile face files, not avatars", self.name)
+        try:
+            if session.profile == "default":  # this gateway's own home, for a standalone profile gateway too
+                from hermes_constants import get_hermes_home
+                home = get_hermes_home()
+            else:
+                from hermes_cli.profiles import get_profile_dir
+                home = get_profile_dir(session.profile)
+            return await asyncio.to_thread(faces.for_profile, home, self._convert_avatars)
+        except Exception as exc:  # an unreadable picture shows the mascot; never block a connection on it
+            logger.warning("[%s] no face for profile %s: %s", self.name, session.profile, exc)
+            return None
 
     def language(self, session: DeviceSession) -> Optional[str]:
         # `platforms.gadget.extra.language`, else the profile's language (HERMES_LANGUAGE > display.language > en).

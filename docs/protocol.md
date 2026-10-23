@@ -57,7 +57,7 @@ Because the id is derived from the key, nobody can claim another device's id wit
    "speaker": {"rate": 16000, "format": "pcm16"},
    "inputs": ["talk", "cancel", "up", "down"],
    "talk_mode": "hold",
-   "profiles": true},
+   "profiles": true, "faces": 1},
  "profile": "ops",
  "actions": [{"name": "led.set", "description": "Set the status LED colour.",
               "params": {"type": "object", "properties": {"color": {"type": "string"}},
@@ -71,6 +71,7 @@ Because the id is derived from the key, nobody can claim another device's id wit
 - `caps.dashboard` (`{"v": 1, "rows": 6}`) means the device draws the [dashboard](#dashboard). `v` is the newest layout it draws, and `rows` is how many lines fit on its screen at once.
 - `actions` is the device's tool manifest. Each action has a JSON-Schema `params` object and a `description` written for the model.
 - `caps.profiles: true` means the device can switch Hermes profiles (see [Profiles](#profiles)). `profile` is the profile it used last; it is omitted for `default`.
+- `caps.faces: 1` means the device draws a face that the server sends for the profile answering it (see [Faces](#faces)). `face` is the `hash` of the face it holds from an earlier connection; it is omitted when it shows the mascot.
 - `token` is required only when the host sets `GADGET_ACCESS_TOKEN`. A mismatch is rejected with error code `bad_token`.
 - `display_sleeping: true` means the screen is dark as the device connects; it is omitted while the screen is lit. See [Screen sleep](#screen-sleep).
 
@@ -128,6 +129,29 @@ A Hermes gateway can serve several profiles (each with its own memory, personali
 | `{"type": "profile", "profile": "default", "error": "busy"}` | server → device | The request was refused; `profile` is unchanged. `error` is `unknown`, `busy` (a turn or question is pending), `unpaired` or `routed` |
 
 A refusal changes nothing on the device. `error` is `routed` when the server's configuration routes this device to a profile; such a device gets no `profiles` in `welcome`. The server may also send `profile` on its own, for example `default` after the device's approval is revoked. A device that does not send `caps.profiles` keeps the gateway's existing routing (normally the default profile).
+
+### Faces
+
+A device that sends `caps.faces: 1` can show each profile with its own face instead of the built-in mascot:
+
+```json
+{"type": "face", "profile": "ops", "hash": "3f2a91c0d4e5b6a7", "bits": "<base64 26612 bytes>"}
+```
+
+| Field | Meaning |
+|---|---|
+| `profile` | The profile the face belongs to: the one answering the device |
+| `hash` | Names this face. The device sends it back as `hello.face` |
+| `bits` | The face. Without `bits` (and `hash`), the device shows the mascot again |
+
+`bits` holds the three frames (idle, blink, talk) at each of the four sizes (64, 96, 144 and 192 px), smallest size first and idle first within a size: 26,592 bytes in the [layout of the built-in mascot](faces.md#how-it-works). Ten little-endian int16 effect anchors follow, in thousandths of the drawn size: the listening waves' x and y, the speaking waves' x and y, the thinking dots' x and y, the first and last row a blink changes, and the first and last row talking changes. A device ignores a face of any other length and shows the mascot.
+
+- The server sends `face` after `welcome`, after each `profile` that is not a refusal, and after `paired` and `unpaired`. An unpaired device gets the mascot.
+- The device keeps its face in memory, through reconnects, and drops it when it changes profile: after a `profile` or `welcome` that names another profile, it shows the mascot until that profile's face arrives. It never shows the previous profile's face.
+- The server sends nothing when the device already has the right face: when `hello.face` is that face's `hash` and the welcome does not change the device's profile, or when the device shows the mascot and the profile has no face.
+- A device without `caps.faces` gets no `face` messages.
+
+The Hermes plugin sends a profile's `gadget-face.bin`, or else the profile's Hermes avatar made into a still face; see [Faces](faces.md#a-face-for-each-hermes-profile).
 
 ## Conversation
 

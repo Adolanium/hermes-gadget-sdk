@@ -281,3 +281,45 @@ def test_long_enough_utterance_still_reaches_the_delegate():
         assert device.sent == []
 
     asyncio.run(run())
+
+
+# -- faces -------------------------------------------------------------------------------
+
+def test_a_face_that_arrives_after_a_profile_switch_is_not_sent(tmp_path):
+    """The switch sends the new profile's face; a slow face for the old one must never follow it."""
+    import json
+
+    from hermes_gadget_plugin.hub import DeviceHub, DeviceSession, HubDelegate
+
+    class SlowDefault(HubDelegate):
+        def __init__(self):
+            self.release = asyncio.Event()
+
+        async def face(self, session):
+            if session.profile != "default":
+                return None
+            await self.release.wait()
+            return b"the default profile's face"
+
+    class Wire:
+        remote_address = ("127.0.0.1", 1)
+
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, raw):
+            self.sent.append(json.loads(raw))
+
+    async def main():
+        delegate, wire = SlowDefault(), Wire()
+        session = DeviceSession(DeviceHub(DeviceStore(tmp_path), delegate), wire, {"device_id": "hg-1", "caps": {"faces": 1}})
+        session.paired = True
+        first = asyncio.create_task(session.send_face())  # as after welcome, on default
+        await asyncio.sleep(0)
+        session.profile = "ops"
+        await session.send_profile()
+        delegate.release.set()
+        await first
+        return wire.sent
+
+    assert asyncio.run(main()) == [{"type": "profile", "profile": "ops"}]

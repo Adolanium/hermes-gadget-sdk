@@ -1,8 +1,10 @@
 # Faces
 
 The device draws a face on its screen: three 1-bit frames, idle, blink and talk, at 64, 96,
-144 and 192 px. **A face is built into the firmware**, so the shipped one is the Hermes Agent
-mascot, and changing it means building your own firmware image. Once built, `hermes gadget
+144 and 192 px. Each Hermes profile can have a face of its own, which Hermes sends to the device
+with no firmware build; see [A face for each Hermes profile](#a-face-for-each-hermes-profile).
+Without one, the device shows **the face built into the firmware**: the Hermes Agent mascot.
+Changing that built-in face means building your own firmware image. Once built, `hermes gadget
 update` can install that image over the air. Release firmware, whether from
 `hermes gadget update --latest` or the browser installer, carries the default face, so a
 custom face comes back by rebuilding it.
@@ -88,6 +90,40 @@ and its device key.
 **Updates bring back the default face.** `hermes gadget update --latest` and the browser
 installer install release firmware, which carries the shipped mascot. To keep your face on a
 newer release, build that release with your `mascot_data.cpp` and install the build as above.
+
+## A face for each Hermes profile
+
+Write the face into the profile's folder instead of the firmware:
+
+```
+hermes-gadget face my-face.png --mask bright --out ~/.hermes/profiles/ops/gadget-face.bin
+```
+
+A `.bin` name makes the command write a face file. The default profile's folder is the Hermes
+home itself (`~/.hermes/gadget-face.bin`). The Hermes plugin sends the face of the profile that
+answers a device when the device connects and when it switches profile, so the face changes with
+the profile, and a firmware update keeps it. Devices whose firmware predates faces keep the
+mascot.
+
+A profile without a face file shows its Hermes avatar (`assets/avatar.png`, `.jpg` or `.webp` in
+the profile's folder), made into a still face: the light parts of a picture on a dark background,
+or the dark parts of one on a light background. A still face does not blink or move its mouth;
+the waves and dots still show. For a face that blinks and talks, make a face file. Converting an
+avatar needs Pillow on the Hermes host; without it, the plugin uses face files only and says so
+once in the log.
+
+A profile with neither shows the mascot. To show the mascot for every profile, turn faces off in
+the default profile's `config.yaml`:
+
+```yaml
+platforms:
+  gadget:
+    extra:
+      profile_faces: false
+```
+
+The device keeps the face in memory, so it shows the mascot after a restart until it reconnects.
+When you switch profiles, it shows the mascot until the new profile's face arrives.
 
 ## Placing the eye and the mouth
 

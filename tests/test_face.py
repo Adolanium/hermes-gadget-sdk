@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -18,6 +19,7 @@ import pytest
 pytest.importorskip("PIL", reason="the face command needs Pillow (the images extra)")
 
 from hermes_gadget import cli, face  # noqa: E402  (after the Pillow guard)
+from hermes_gadget_plugin import face as profile_faces  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 SHIPPED = REPO / "firmware" / "core" / "src" / "mascot_data.cpp"
@@ -130,6 +132,61 @@ def test_the_mascot_has_a_geometry_check_too(tmp_path):
     assert cli.main(["face", "--out", str(tmp_path / "m.cpp"), "--preview", str(tmp_path / "p.png"),
                      "--check", str(check)]) == 0
     assert check.exists()
+
+
+def test_a_face_file_carries_the_firmwares_frames_then_its_anchors(tmp_path):
+    out = tmp_path / "gadget-face.bin"
+    assert cli.main(["face", "--out", str(out), "--preview", str(tmp_path / "p.png")]) == 0
+    shipped = SHIPPED.read_text()
+    data = arrays(shipped)
+    bits = b"".join(data[f"k{frame}{size}"] for size in EXPECTED for frame in ("Idle", "Blink", "Talk"))
+    anchors = [int(v) for v in re.findall(r"-?\d+", re.search(r"kAnchors = (.*);", shipped).group(1))]
+    assert out.read_bytes() == bits + struct.pack("<10h", *anchors)
+    assert len(bits) + 20 == profile_faces.FACE_BYTES
+
+
+def _disc(path: Path, ink: tuple, paper: tuple) -> Path:
+    """An original drawing: a filled disc with two eye holes."""
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGB", (300, 300), paper)
+    draw = ImageDraw.Draw(img)
+    draw.ellipse((50, 40, 250, 260), fill=ink)
+    draw.ellipse((100, 110, 130, 140), fill=paper)
+    draw.ellipse((170, 110, 200, 140), fill=paper)
+    img.save(path)
+    return path
+
+
+def test_an_avatar_becomes_light_ink_whichever_way_it_is_drawn(tmp_path):
+    """The screen draws light on dark: dark art on white and white art on dark give the same face."""
+    dark_on_light = profile_faces.from_picture(_disc(tmp_path / "a.png", (20, 20, 20), (250, 250, 250)))
+    light_on_dark = profile_faces.from_picture(_disc(tmp_path / "b.png", (240, 240, 240), (10, 10, 10)))
+    idle192 = slice(-20 - 3 * 4608, -20 - 2 * 4608)
+    ink = sum(bin(b).count("1") for b in dark_on_light[idle192])
+    assert 0.3 < ink / (192 * 192) < 0.6, "the disc, not the paper around it"
+    differ = sum(bin(a ^ b).count("1") for a, b in zip(dark_on_light[idle192], light_on_dark[idle192]))
+    assert differ < 0.01 * ink  # the same disc, give or take its antialiased edge
+
+
+def test_a_profile_shows_its_face_file_then_its_avatar_then_the_mascot(tmp_path, caplog):
+    home = tmp_path / "ops"
+    (home / "assets").mkdir(parents=True)
+    assert profile_faces.for_profile(home) is None  # nothing: the mascot
+
+    avatar = _disc(home / "assets" / "avatar.png", (240, 240, 240), (10, 10, 10))
+    converted = profile_faces.for_profile(home)
+    assert converted == profile_faces.from_picture(avatar)
+    assert profile_faces.for_profile(home, convert=False) is None  # no Pillow: face files only
+
+    (home / profile_faces.FACE_FILE).write_bytes(b"not a face")
+    assert profile_faces.for_profile(home) == converted  # a broken file is passed over, and said so
+    assert "not a face file" in caplog.text
+
+    assert cli.main(["face", "--out", str(home / profile_faces.FACE_FILE), "--preview", str(tmp_path / "p.png")]) == 0
+    made = (home / profile_faces.FACE_FILE).read_bytes()
+    assert profile_faces.for_profile(home) == made != converted  # the hand-made face wins
+    assert profile_faces.for_profile(home, convert=False) == made
 
 
 def test_outside_a_checkout_the_command_says_where_to_run_it(tmp_path, monkeypatch, capsys):

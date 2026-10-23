@@ -221,3 +221,25 @@ def test_a_refused_message_does_not_leave_the_device_thinking(hermes_home, gadge
     assert sim.wait_for(lambda: sim.status()["screen"] == "ready", timeout=3)
     assert gadget.events == []
     assert "not approved" in (sim.last_received("notice") or {}).get("text", "")
+
+
+def test_each_profile_shows_its_own_face_file_and_profile_faces_false_turns_them_off(hermes_home, gadget, make_sim):
+    import hashlib
+
+    from gateway.config import PlatformConfig
+    from hermes_gadget_plugin.adapter import GadgetAdapter
+    from hermes_gadget_plugin.face import FACE_BYTES, FACE_FILE
+
+    (hermes_home / FACE_FILE).write_bytes(bytes([0xAA]) * FACE_BYTES)
+    (hermes_home / "profiles" / "ops" / FACE_FILE).write_bytes(bytes([0x55]) * FACE_BYTES)
+    digest = {p: hashlib.sha256(bytes([b]) * FACE_BYTES).hexdigest()[:16] for p, b in (("default", 0xAA), ("ops", 0x55))}
+    faces = lambda: [m for m in sim.received if m["type"] == "face"]  # noqa: E731
+
+    sim = _paired_sim(gadget, make_sim)
+    assert sim.wait_for(lambda: faces() and faces()[-1]["hash"] == digest["default"], timeout=5)
+    _select_next_profile(sim)
+    assert sim.wait_for(lambda: faces()[-1]["hash"] == digest["ops"], timeout=5)
+    assert faces()[-1]["profile"] == "ops"
+
+    off = GadgetAdapter(PlatformConfig(enabled=True, extra={"profile_faces": False}))
+    assert gadget.run(off.face(gadget.adapter.hub.get(sim.status()["device_id"]))) is None

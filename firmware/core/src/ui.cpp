@@ -435,7 +435,7 @@ void Ui::draw_frame(const UiModel& m) {
       hash_[i] = hashes[i];
     }
     uint32_t stat = Hash().val(m.screen).add(m.headline).add(m.detail).add(m.yes).add(m.no).val(m.caption_lines)
-                        .val(m.name_target).get();
+                        .val(m.name_target).add(m.face ? m.face->hash : std::string()).get();
     uint32_t anim = hero_anim_key(m);
     int y0 = y_header, y1 = y_bottom;
     bool redraw = !valid_ || !hero_valid_ || stat != hero_static_;
@@ -974,7 +974,7 @@ Ui::HeroGeom Ui::hero_geom(const UiModel& m) const {
 void Ui::hero_anim_rows(const UiModel& m, int& y0, int& y1) const {
   const HeroGeom g = hero_geom(m);
   const int size = g.size, my = g.y;
-  const mascot::Anchors& a = mascot::anchors();
+  const mascot::Anchors& a = mascot::anchors(m.face);
   int top = my + size * a.eyes_y0 / 1000, bottom = my + size * a.eyes_y1 / 1000;
   auto add = [&](int lo, int hi) {
     top = std::min(top, lo);
@@ -1016,10 +1016,9 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
 
   const HeroGeom g = hero_geom(m);
   const int size = g.size, mx = g.x, my = g.y;
-  const mascot::Anchors& a = mascot::anchors();
-  if (const mascot::Bitmap* b = mascot::pick(size, mascot_frame(m))) {
-    c.bitmap1(mx, my, b->size, b->size, b->bits, kText);
-  }
+  const mascot::Anchors& a = mascot::anchors(m.face);
+  const mascot::Bitmap b = mascot::pick(size, mascot_frame(m), m.face);
+  c.bitmap1(mx, my, b.size, b.size, b.bits, kText);
   const int stroke = std::max(2, size / 48);
   auto waves = [&](int cx, int cy, int dir, int lit, int phase, uint16_t on, uint16_t dim, int r0) {
     for (int i = 0; i < 3; ++i) {
@@ -1175,8 +1174,8 @@ void Ui::draw_alarm(const UiModel& m) {
     const int ls = s + 1;  // the label's scale
     const std::string label = m.detail.substr(0, m.detail.find('\n'));
     const int label_h = label.empty() ? 0 : Canvas::line_height(ls);
-    const mascot::Bitmap* face = mascot::pick(H / 3, mascot::Frame::Idle);
-    const int face_size = face && face->size <= H / 3 ? face->size : 0;
+    const mascot::Bitmap face = mascot::pick(H / 3, mascot::Frame::Idle, m.face);
+    const int face_size = face.size <= H / 3 ? face.size : 0;
     const int lo = 4 * s, hi = hy - gap;  // the group's rows: clear of the top edge and of the hint
 
     // The group's first row at headline scale k, with or without the mascot, or -1 when it does not
@@ -1218,7 +1217,7 @@ void Ui::draw_alarm(const UiModel& m) {
     const int lh = Canvas::line_height(hs);
     int y = top;
     if (with_face) {
-      panel.bitmap1(cx - face_size / 2, y, face->size, face->size, face->bits, ink);
+      panel.bitmap1(cx - face_size / 2, y, face.size, face.size, face.bits, ink);
       y += face_size + gap;
     }
     for (int i = 0; i < n; ++i, y += lh) {

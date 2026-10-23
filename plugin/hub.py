@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 import math
@@ -56,6 +57,10 @@ class HubDelegate:
     async def select_profile(self, session: "DeviceSession", profile: str) -> str | None:
         """Bind ``session`` to ``profile`` (set ``session.profile``); return None, or why not."""
         return "unknown"
+
+    async def face(self, session: "DeviceSession") -> bytes | None:
+        """The face of ``session.profile`` (docs/protocol.md#faces), or None for the mascot."""
+        return None
 
     def language(self, session: "DeviceSession") -> Optional[str]:
         """The language id ``welcome`` names for a device left on ``auto`` (e.g. ``"es"``), or None."""
@@ -256,6 +261,7 @@ class DeviceSession:
         self.display_sleeping: bool = hello.get("display_sleeping") is True
         self.paired = False
         self.profile = "default"  # the Hermes profile that answers this device
+        self.face_hash: str | None = None  # the face the device holds; None is the mascot
         self.connected_at = time.time()
         self.last_rx = time.monotonic()
         self.closed = False
@@ -367,6 +373,7 @@ class DeviceSession:
         if paired:
             self.hub.store.confirm(self.device_id)
         await self.send_json(protocol.message("paired" if paired else "unpaired"))
+        await self.send_face()
 
     async def ask(self, prompt_id: str, title: str, text: str, ttl_s: float | None = None) -> None:
         """Show a yes/no question; the answer arrives as ``on_prompt_reply``."""
@@ -377,6 +384,23 @@ class DeviceSession:
 
     async def send_profile(self, error: str | None = None) -> None:
         await self.send_json(protocol.message("profile", profile=self.profile, error=error))
+        if error is None:
+            self.face_hash = None  # a device that changes profile drops its face
+            await self.send_face()
+
+    async def send_face(self) -> None:
+        """Send the profile's face, or the mascot, unless the device holds it already. Unpaired
+        devices get the mascot."""
+        if self.caps.get("faces") != 1:
+            return
+        profile = self.profile
+        data = await self.hub.delegate.face(self) if self.paired else None
+        digest = hashlib.sha256(data).hexdigest()[:16] if data else None
+        if self.profile != profile or digest == self.face_hash:  # switched meanwhile: that call sends its own
+            return
+        self.face_hash = digest
+        await self.send_json(protocol.message(
+            "face", profile=profile, hash=digest, bits=base64.b64encode(data).decode() if data else None))
 
     async def show_card(self, title: str, body: str, ttl_s: float = 15) -> bool:
         """Show a card. False when it is held until the screen lights up."""
@@ -761,6 +785,11 @@ class DeviceHub:
                     await self.delegate.select_profile(session, wanted)  # a refusal leaves "default"
                 welcome.update(profile=session.profile, profiles=roster)
             await session.send_json(protocol.message("welcome", **welcome))
+            # The device keeps its face through a reconnect, unless the welcome names another profile.
+            held = hello.get("face")
+            if isinstance(held, str) and welcome.get("profile", "") in ("", hello.get("profile") or "default"):
+                session.face_hash = held
+            await session.send_face()
             log.info("device %s (%s) online, paired=%s", session.device_id, session.name, session.paired)
             await self.delegate.on_ready(session)
             if not session.display_sleeping:

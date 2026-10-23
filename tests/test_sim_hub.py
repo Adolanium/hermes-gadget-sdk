@@ -623,6 +623,49 @@ def test_devices_switch_hermes_profile_and_keep_it(loop_thread, tmp_path, make_s
         loop_thread.run(hub.stop())
 
 
+class _ProfileFaces(_TwoProfiles):
+    """The default profile has a face; ops has none."""
+
+    async def face(self, session):
+        from hermes_gadget_plugin.face import FACE_BYTES
+        return bytes([0xF0]) * FACE_BYTES if session.profile == "default" else None
+
+
+def test_a_profile_face_is_sent_once_and_the_mascot_comes_back_on_a_switch(loop_thread, tmp_path, make_sim):
+    from hermes_gadget_plugin.hub import DeviceHub
+    from hermes_gadget_plugin.store import DeviceStore
+
+    hub = DeviceHub(DeviceStore(tmp_path / "server"), _ProfileFaces(), host="127.0.0.1", port=0, heartbeat_s=5)
+    loop_thread.run(hub.start())
+    faces = lambda: [m for m in sim.received if m.get("type") == "face"]  # noqa: E731
+    try:
+        sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget")
+        assert sim.wait_screen("ready", timeout=10)
+        assert sim.wait_for(lambda: faces(), timeout=5)
+        sent = faces()[0]
+        assert sent["profile"] == "default" and len(sent["hash"]) == 16 and sent["bits"]
+
+        sim.console("reconnect")  # the device names the face it holds, so it is not sent again
+        assert sim.wait_screen("connecting", timeout=5)
+        assert sim.wait_screen("ready", timeout=10)
+        sim.run_for(0.3)
+        assert len(faces()) == 1
+
+        device = hub.get(sim.status()["device_id"])
+        loop_thread.run(hub.delegate.select_profile(device, "ops"))
+        loop_thread.run(device.send_profile())  # ops has no face: the device drops it by itself
+        assert sim.wait_for(lambda: sim.status().get("profile") == "ops", timeout=5)
+        sim.run_for(0.3)
+        assert len(faces()) == 1 and device.face_hash is None
+
+        loop_thread.run(hub.delegate.select_profile(device, "default"))
+        loop_thread.run(device.send_profile())
+        assert sim.wait_for(lambda: len(faces()) == 2, timeout=5)
+        assert faces()[1]["hash"] == sent["hash"]
+    finally:
+        loop_thread.run(hub.stop())
+
+
 def test_a_server_without_profiles_sends_no_roster(devserver, make_sim):
     # Server side of compatibility; old firmware against a capable adapter is in test_profile_select_hermes.py.
     hub, _brain, url = devserver()  # EchoBrain keeps the default hooks: no profiles

@@ -107,7 +107,7 @@ const App::Route App::kRoutes[] = {
     {"prompt.close", &App::h_prompt_close}, {"ota.offer", &App::h_ota_offer},
     {"ota.begin", &App::h_ota_begin},     {"ota.end", &App::h_ota_end},
     {"ota.abort", &App::h_ota_abort},     {"dashboard", &App::h_dashboard},
-    {"profile", &App::h_profile},
+    {"profile", &App::h_profile},         {"face", &App::h_face},
 };
 
 App::App(Hal& hal, DeviceProfile profile) : hal_(hal), profile_(std::move(profile)) {}
@@ -421,6 +421,7 @@ void App::send_hello() {
     caps.set("dashboard", dash);
   }
   caps.set("profiles", true);
+  if (ui_) caps.set("faces", 1);
   if (hal_.updater) {
     json::Value ota = json::Value::object();
     ota.set("max_size", hal_.updater->capacity());
@@ -447,6 +448,7 @@ void App::send_hello() {
       .set("sensors", sensors);
   const std::string stored = setting("profile", "");  // only what Hermes confirmed, never what it showed
   if (!stored.empty()) hello.set("profile", stored);
+  if (face_) hello.set("face", face_->hash);
   if (!access_token_.empty()) hello.set("token", access_token_);
   if (display_sleeping_) hello.set("display_sleeping", true);
   send(hello);
@@ -534,6 +536,21 @@ void App::h_profile(const json::Value& m) {
                                            : i18n::Msg::ProfileRefused));
 }
 
+void App::h_face(const json::Value& m) {
+  face_.reset();
+  const std::string& bits = m["bits"].as_string();
+  if (bits.empty()) return;
+  const std::string& hash = m["hash"].as_string();
+  std::vector<uint8_t> data;
+  mascot::Face face;
+  if (hash.empty() || hash.size() > 64 || !crypto::base64_decode(bits, data) || !mascot::parse(std::move(data), face)) {
+    log(LogLevel::Warn, "ignored a malformed face");
+    return;
+  }
+  face.hash = hash;
+  face_ = std::move(face);
+}
+
 // The notice line and the open settings item; not the hint bar, which settings hides.
 void App::profile_notice(std::string text) {
   if (menu_ == Menu::Profile) check_result_ = text;
@@ -543,6 +560,7 @@ void App::profile_notice(std::string text) {
 
 void App::set_agent_profile(const std::string& id) {
   if (id.empty()) return;
+  if (id != agent_profile_) face_.reset();  // the mascot until the new profile's face arrives
   agent_profile_ = id;
   if (!hal_.storage || setting("profile", "default") == id) return;
   if (id == "default") hal_.storage->erase("profile");
@@ -1685,6 +1703,7 @@ void App::update_model() {
   m.yes.clear();
   m.no.clear();
   m.qr = nullptr;
+  m.face = face_ ? &*face_ : nullptr;
   m.dash.clear();
   m.hero = false;
   m.name_target = false;
