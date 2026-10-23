@@ -180,6 +180,21 @@ def test_an_avatar_becomes_light_ink_whichever_way_it_is_drawn(tmp_path):
     assert differ < 0.01 * ink  # the same disc, give or take its antialiased edge
 
 
+def test_an_avatar_is_converted_once_per_version(tmp_path, monkeypatch):
+    """Devices wait for the face on every connection, so a converted avatar is kept until the picture changes."""
+    home = tmp_path / "ops"
+    (home / "assets").mkdir(parents=True)
+    avatar = _disc(home / "assets" / "avatar.png", (240, 240, 240), (10, 10, 10))
+    made = []
+    real = profile_faces.from_picture
+    monkeypatch.setattr(profile_faces, "from_picture", lambda path: made.append(path) or real(path))
+    first = profile_faces.for_profile(home)
+    assert profile_faces.for_profile(home) == first and len(made) == 1
+    _disc(avatar, (20, 20, 20), (250, 250, 250))
+    os.utime(avatar, ns=(avatar.stat().st_atime_ns, avatar.stat().st_mtime_ns + 1_000_000_000))
+    assert profile_faces.for_profile(home) is not None and len(made) == 2
+
+
 def test_a_profile_shows_its_face_file_then_its_avatar_then_the_mascot(tmp_path, caplog):
     home = tmp_path / "ops"
     (home / "assets").mkdir(parents=True)

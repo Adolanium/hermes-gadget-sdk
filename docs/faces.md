@@ -122,10 +122,10 @@ platforms:
       profile_faces: false
 ```
 
-The device keeps the face in memory, so it shows the mascot after a restart until it reconnects,
-and Hermes sends the face again after the gateway restarts. When you switch profiles, or a gadget
-route sends the device to another profile, it shows the mascot until the new profile's face
-arrives.
+The device keeps the face in memory, so it shows the mascot after a restart until it reconnects.
+An unchanged face stays through reconnects and gateway restarts. When you switch profiles, or a
+gadget route sends the device to another profile, it shows the mascot until the new profile's face
+arrives. The plugin converts an avatar once per version of the picture.
 
 ## Placing the eye and the mouth
 

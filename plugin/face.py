@@ -144,6 +144,8 @@ def to_bits(alpha, size: int, threshold: int = THRESHOLD) -> bytes:
 ANCHOR_FIELDS = ("ear_cup", "mouth_pt", "think_dot", "eyes_rows", "mouth_rows")  # two values each
 FACE_BYTES = sum(3 * ((size + 7) // 8) * size for size in SIZES) + 2 * 2 * len(ANCHOR_FIELDS)
 FACE_FILE = "gadget-face.bin"
+# Each avatar's face, made once per version of the picture: devices wait for it on every connection.
+_avatar_faces: dict[Path, tuple[tuple[int, int], bytes]] = {}
 
 
 def pack(frames, anchors: dict, threshold: int = THRESHOLD) -> bytes:
@@ -194,5 +196,10 @@ def for_profile(home: Path, convert: bool = True) -> bytes | None:
         for ext in ("png", "jpg", "webp"):
             avatar = home / "assets" / f"avatar.{ext}"
             if avatar.is_file():
-                return from_picture(avatar)
+                stat = avatar.stat()
+                version = (stat.st_mtime_ns, stat.st_size)
+                cached = _avatar_faces.get(avatar)
+                if cached is None or cached[0] != version:
+                    cached = _avatar_faces[avatar] = (version, from_picture(avatar))
+                return cached[1]
     return None
