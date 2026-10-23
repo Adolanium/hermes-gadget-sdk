@@ -341,6 +341,39 @@ def test_a_device_that_cannot_switch_leaves_the_switching_ones_listening(hermes_
             assert [row["state"] for row in msgs[-1]["sessions"]] == ["busy"]  # the ops change woke it
 
 
+@pytest.mark.parametrize("late_roster", [False, True], ids=["last device leaves", "a roster read ends after"])
+def test_the_last_switching_device_leaving_drops_the_other_profiles_listeners(hermes_home, gadget, monkeypatch,
+                                                                              late_roster):
+    import asyncio
+    import os
+    from hermes_gadget_plugin import dashboard, protocol
+
+    key = os.urandom(32)
+    gadget.authorized.add(protocol.device_id_for_key(key))
+    caps = {"dashboard": {"v": dashboard.VERSION}, "profiles": True}
+    with _RawDevice(gadget.url, key, caps) as device:
+        if late_roster:
+            _dashboard_labels(device, 0.5)  # its first dashboard, before ops's copy of the plugin loads
+            ops = _profile_board(monkeypatch, "ops")
+            reading, release = _paused_roster(monkeypatch, gadget.adapter)
+            broadcast = asyncio.run_coroutine_threadsafe(gadget.adapter._push_dashboard(), gadget.loop)
+            assert reading.wait(5)
+        else:
+            ops = _profile_board(monkeypatch, "ops")
+            end = time.monotonic() + 5
+            while not ops._listeners and time.monotonic() < end:
+                time.sleep(0.02)
+            assert ops._listeners
+    if late_roster:
+        release.set()  # the read ends after the device has gone, and subscribes to ops
+        broadcast.exception(5)
+        assert ops._listeners
+    end = time.monotonic() + 3  # a poll or two
+    while ops._listeners and time.monotonic() < end:
+        time.sleep(0.05)
+    assert ops._listeners == []  # nothing left to wake for
+
+
 def _sessions_mine_and_ops(monkeypatch):
     from hermes_gadget_plugin import dashboard
 

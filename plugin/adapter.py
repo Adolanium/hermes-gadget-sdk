@@ -533,6 +533,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         live = [s for s in self._hub.sessions.values()
                 if s.paired and not s.closed and s.dashboard_version >= dashboard.VERSION]
         targets = live if only is None else [s for s in live if s is only]
+        if not any(self._switches(s) for s in live):  # no device reads other profiles' boards any more
+            self._keep_boards([])
         if not targets:
             return
         switching = [self._switches(s) for s in targets]
@@ -544,8 +546,6 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 self._pushed_seq.update((s.device_id, seq) for s, sw in zip(targets, switching)
                                         if sw and self._hub is not None and self._hub.get(s.device_id) is s)
                 theirs = dashboard.BOARD.sessions(*await self._offered_boards())
-        elif not any(self._switches(s) for s in live):  # no device reads other profiles' boards any more
-            self._keep_boards([])
         tiles = self._tiles.tiles()
         for session, switches in zip(targets, switching):
             if not session.paired or (switches and not self._still_trusted(session)):
