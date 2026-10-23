@@ -331,6 +331,26 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._prompts[device_id] = prompts
         return device_id in self._turns or bool(prompts)
 
+    def validate_native_profile_route(self, source) -> bool:
+        """Revalidate device-selected routing at native admission and durable replay.
+
+        A queued message keeps its selected profile even if the device switches again;
+        current owner trust and the offered-profile policy must still permit that turn.
+        This does not authorize a device or create an approval in another profile.
+        """
+        if (not self._switching_on() or source.platform != self.platform
+                or source.chat_type != "dm" or not source.user_id
+                or source.user_id != source.chat_id or source.profile_route_rejected
+                or source.delivered_via_upstream_relay):
+            return False
+        if source.profile not in {p["id"] for p in self.profiles()}:
+            return False
+        if not self._owner_trusts(source.user_id):
+            return False
+        # A non-default selection is owner-bound before select_profile grants it.
+        return (source.profile == "default" or
+                self._store is not None and self._store.owner_bound(source.user_id) is True)
+
     def _owner_trusts(self, device_id: str) -> bool:
         """The default profile's verdict on this device, ignoring routes; only a literal True counts."""
         try:
