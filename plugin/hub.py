@@ -839,7 +839,8 @@ class DeviceHub:
                     and session.device_profile == named):
                 session.face_hash = welcome["face"] = face.hash
             await session.send_json(protocol.message("welcome", **welcome))
-            await session.send_face(face)
+            session.spawn(session.send_face(face))  # beside the messages: making a face can take a while
+            face = None  # the task has it; an avatar's picture goes with the task
             log.info("device %s (%s) online, paired=%s", session.device_id, session.name, session.paired)
             await self.delegate.on_ready(session)
             if not session.display_sleeping:

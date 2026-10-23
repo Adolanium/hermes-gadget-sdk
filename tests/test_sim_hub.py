@@ -1,10 +1,10 @@
 """The production device core (in the simulator) against the production hub."""
 
-import hashlib
 import json
 import math
 import struct
 import threading
+import weakref
 
 import pytest
 
@@ -635,7 +635,7 @@ def _face(ink: int) -> bytes:
 
 
 def _digest(face: bytes) -> str:
-    return hashlib.sha256(face).hexdigest()[:16]
+    return ProfileFace.of(face).hash
 
 
 def _held_face(sim):
@@ -807,14 +807,18 @@ class _SlowLookup(_ProfileFaces):
 
     def __init__(self):
         self.found = None  # an asyncio.Event
+        self.texts = []
 
     async def face(self, session):
         if self.found:
             await self.found.wait()
         return await super().face(session)
 
+    async def on_text(self, session, msg_id, text):
+        self.texts.append(text)
 
-def test_a_stalled_face_lookup_still_lets_the_device_connect(loop_thread, tmp_path, make_sim):
+
+def test_a_stalled_face_lookup_does_not_hold_up_the_connection(loop_thread, tmp_path, make_sim):
     import asyncio
 
     from hermes_gadget_plugin.hub import DeviceHub
@@ -828,8 +832,51 @@ def test_a_stalled_face_lookup_still_lets_the_device_connect(loop_thread, tmp_pa
         sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget")
         assert sim.wait_screen("ready", timeout=8)  # well inside the device's 10 s handshake limit
         assert "face" not in sim.last_received("welcome")
+        sim.type_text("still here?")  # messages are read while the face is still being looked up
+        assert sim.wait_for(lambda: delegate.texts == ["still here?"], timeout=5)
+        welcomes = len([m for m in sim.received if m.get("type") == "welcome"])
+        sim.run_for(16)  # past the device's limit for a silent server: 3 heartbeats of 5 s
+        assert sim.status()["phase"] == "online"
+        assert len([m for m in sim.received if m.get("type") == "welcome"]) == welcomes  # no reconnect
     finally:
         loop_thread.loop.call_soon_threadsafe(delegate.found.set)
+        loop_thread.run(hub.stop())
+
+
+class _Picture:
+    """Stands for the source picture a face's load() keeps."""
+
+
+class _PictureFaces(_ProfileFaces):
+    """Each face's load() keeps a picture, as a converted avatar's does; ``pictures`` tracks them."""
+
+    def __init__(self):
+        self.pictures = []
+
+    async def face(self, session):
+        picture, data = _Picture(), _face(0xF0)
+        self.pictures.append(weakref.ref(picture))
+        return ProfileFace(_digest(data), lambda: picture and data)
+
+
+def test_a_connection_keeps_no_source_picture_once_its_face_is_settled(loop_thread, tmp_path, make_sim):
+    import gc
+
+    from hermes_gadget_plugin.hub import DeviceHub
+    from hermes_gadget_plugin.store import DeviceStore
+
+    delegate = _PictureFaces()
+    hub = DeviceHub(DeviceStore(tmp_path / "server"), delegate, host="127.0.0.1", port=0, heartbeat_s=5)
+    loop_thread.run(hub.start())
+    try:
+        sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget")
+        assert sim.wait_screen("ready", timeout=10)
+        assert sim.wait_for(lambda: sim.last_received("face"), timeout=5)  # sent: the picture was used
+        assert _held_face(sim) == _digest(_face(0xF0))  # kept: the picture was not needed
+        sim.run_for(0.3)
+        gc.collect()
+        assert len(delegate.pictures) == 2 and all(ref() is None for ref in delegate.pictures)
+    finally:
         loop_thread.run(hub.stop())
 
 
