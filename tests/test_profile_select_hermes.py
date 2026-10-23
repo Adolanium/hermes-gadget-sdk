@@ -224,18 +224,17 @@ def test_a_refused_message_does_not_leave_the_device_thinking(hermes_home, gadge
 
 
 def test_each_profile_shows_its_own_face_file_and_profile_faces_false_turns_them_off(hermes_home, gadget, make_sim):
-    import hashlib
     import struct
 
     from gateway.config import PlatformConfig
     from hermes_gadget_plugin.adapter import GadgetAdapter
-    from hermes_gadget_plugin.face import FACE_BYTES, FACE_FILE
+    from hermes_gadget_plugin.face import FACE_BYTES, FACE_FILE, ProfileFace
 
     anchors = struct.pack("<10h", 607, 293, 262, 620, 801, 107, 396, 508, 586, 649)
     face = {"default": bytes([0xAA]) * (FACE_BYTES - 20) + anchors, "ops": bytes([0x55]) * (FACE_BYTES - 20) + anchors}
     (hermes_home / FACE_FILE).write_bytes(face["default"])
     (hermes_home / "profiles" / "ops" / FACE_FILE).write_bytes(face["ops"])
-    digest = {p: hashlib.sha256(data).hexdigest()[:16] for p, data in face.items()}
+    digest = {p: ProfileFace.of(data).hash for p, data in face.items()}
     faces = lambda: [m for m in sim.received if m["type"] == "face"]  # noqa: E731
 
     def held():

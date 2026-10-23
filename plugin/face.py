@@ -147,8 +147,10 @@ def to_bits(alpha, size: int, threshold: int = THRESHOLD) -> bytes:
 ANCHOR_FIELDS = ("ear_cup", "mouth_pt", "think_dot", "eyes_rows", "mouth_rows")  # two values each
 FACE_BYTES = sum(3 * ((size + 7) // 8) * size for size in SIZES) + 2 * 2 * len(ANCHOR_FIELDS)
 FACE_FILE = "gadget-face.bin"
-# Part of a converted avatar's hash: change it when from_picture draws differently, so devices that
-# hold the old drawing get the new one.
+# What a face's hash is taken of starts with its kind, so a face file and an avatar never share a
+# hash. Change AVATAR_DRAWING when from_picture draws differently, so devices that hold the old
+# drawing get the new one.
+FACE_FILE_KIND = b"hermes-gadget face file\n"
 AVATAR_DRAWING = b"hermes-gadget avatar 1\n"
 
 
@@ -167,7 +169,8 @@ class ProfileFace:
 
     @classmethod
     def of(cls, data: bytes) -> "ProfileFace":
-        return cls(digest(data), lambda: data)
+        """A face given by its bytes, as a face file gives it."""
+        return cls(digest(FACE_FILE_KIND + data), lambda: data)
 
 
 def pack(frames, anchors: dict, threshold: int = THRESHOLD) -> bytes:

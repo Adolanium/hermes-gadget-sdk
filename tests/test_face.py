@@ -201,6 +201,28 @@ def test_a_replaced_avatar_gets_a_new_face_even_with_the_same_size_and_time(tmp_
     assert after.load() == profile_faces.from_picture(avatar) != before.load()
 
 
+def test_a_face_file_and_an_avatar_never_share_a_hash(tmp_path):
+    """A face file whose bytes are an avatar's hash input still gets a hash of its own."""
+    source = bytes(profile_faces.FACE_BYTES - len(profile_faces.AVATAR_DRAWING))
+    with_file, with_avatar = tmp_path / "file", tmp_path / "avatar"
+    (with_avatar / "assets").mkdir(parents=True)
+    with_file.mkdir()
+    (with_file / profile_faces.FACE_FILE).write_bytes(profile_faces.AVATAR_DRAWING + source)
+    (with_avatar / "assets" / "avatar.png").write_bytes(source)
+    assert profile_faces.for_profile(with_file).hash != profile_faces.for_profile(with_avatar).hash
+
+
+PINNED_DRAWING = "788c2b3a73475e59"  # from_picture's drawing of _disc's light disc, with Pillow 12.3
+
+
+def test_the_avatar_drawing_is_pinned_to_its_version(tmp_path):
+    """A different drawing from the same picture must come with a new AVATAR_DRAWING, or devices that
+    hold the old drawing keep it."""
+    drawn = profile_faces.digest(profile_faces.from_picture(_disc(tmp_path / "a.png", (240, 240, 240), (10, 10, 10))))
+    assert (profile_faces.AVATAR_DRAWING, drawn) == (b"hermes-gadget avatar 1\n", PINNED_DRAWING), (
+        "from_picture draws differently: bump AVATAR_DRAWING in plugin/face.py, then record the new digest here")
+
+
 def test_profiles_that_are_gone_leave_no_faces_behind(tmp_path, monkeypatch):
     import gc
     import shutil
@@ -239,7 +261,7 @@ def test_a_profile_shows_its_face_file_then_its_avatar_then_the_mascot(tmp_path,
     assert cli.main(["face", "--out", str(home / profile_faces.FACE_FILE), "--preview", str(tmp_path / "p.png")]) == 0
     made = (home / profile_faces.FACE_FILE).read_bytes()
     hand_made = profile_faces.for_profile(home)
-    assert hand_made.load() == made and hand_made.hash == profile_faces.digest(made) != converted.hash
+    assert hand_made.load() == made and hand_made.hash == profile_faces.ProfileFace.of(made).hash != converted.hash
     assert profile_faces.for_profile(home, convert=False).load() == made
 
 
