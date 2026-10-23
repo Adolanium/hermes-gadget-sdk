@@ -539,7 +539,8 @@ void App::h_profile(const json::Value& m) {
 }
 
 void App::h_face(const json::Value& m) {
-  if (!profile_.faces || !paired_) return;
+  // A face or a clear for another profile is late: it must not touch this profile's face.
+  if (!profile_.faces || !paired_ || m["profile"].as_string() != agent_profile_) return;
   face_.reset();
   const std::string& bits = m["bits"].as_string();
   if (bits.empty()) return;

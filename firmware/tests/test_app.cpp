@@ -3714,6 +3714,17 @@ TEST("faces: a malformed face shows the mascot") {
   CHECK(r.app.model().face == nullptr);
 }
 
+TEST("faces: a late face or clear for the previous profile leaves this one's alone") {
+  Rig r;
+  r.bring_online_with_profiles(true, "ops");
+  r.server(R"({"type":"profile","profile":"default"})");
+  r.server(face_message("ops", "a1"));  // sent before the switch, read after it
+  CHECK(r.app.model().face == nullptr);
+  r.server(face_message("default", "b2"));
+  r.server(R"({"type":"face","profile":"ops"})");
+  CHECK(r.app.model().face && r.app.model().face->hash == "b2");
+}
+
 TEST("faces: an unpaired device shows the mascot and names no face") {
   Rig r;
   r.bring_online(true);
