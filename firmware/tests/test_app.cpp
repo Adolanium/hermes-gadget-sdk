@@ -3771,21 +3771,30 @@ TEST("faces: a board without the memory for a face offers none and ignores one")
   CHECK(r.app.model().face == nullptr);
 }
 
-TEST("faces: a reconnect keeps the face and names its hash in hello") {
+TEST("faces: a reconnect keeps the face only when the welcome names it") {
   Rig r;
   r.bring_online_with_profiles(true, "ops");
+  // Reconnects with `named` in the welcome; returns the face the hello named.
+  auto reconnect = [&](const std::string& named) {
+    r.fake.sent.clear();
+    r.app.on_transport_closed("network flap");
+    r.advance(5000);
+    r.app.on_transport_open();
+    const Value* hello = r.fake.last("hello");
+    const std::string held = hello ? (*hello)["face"].as_string() : "";
+    r.server(R"({"type":"challenge","nonce":"bjI=","enrolled":true})");
+    r.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":true,)" + named +
+             R"("profile":"ops","profiles":[{"id":"default","name":"Hermes"},{"id":"ops","name":"Ops"}]})");
+    return held;
+  };
   r.server(face_message("ops", "a1"));
-  r.fake.sent.clear();
-  r.app.on_transport_closed("network flap");
-  r.advance(5000);
-  CHECK(r.app.model().face != nullptr);
-  r.app.on_transport_open();
-  const Value* hello = r.fake.last("hello");
-  CHECK(hello && (*hello)["face"].as_string() == "a1");
-  r.server(R"({"type":"challenge","nonce":"bjI=","enrolled":true})");
-  r.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":true,"profile":"ops",)"
-           R"("profiles":[{"id":"default","name":"Hermes"},{"id":"ops","name":"Ops"}]})");
-  CHECK(r.app.model().face && r.app.model().face->hash == "a1");
+  CHECK_EQ(reconnect(R"("face":"a1",)"), std::string("a1"));
+  CHECK(r.app.model().face && r.app.model().face->hash == "a1");  // the same face stays
+  CHECK_EQ(reconnect(R"("face":"b2",)"), std::string("a1"));
+  CHECK(r.app.model().face == nullptr);  // another one is coming: the mascot meanwhile
+  r.server(face_message("ops", "a1"));
+  CHECK_EQ(reconnect(""), std::string("a1"));
+  CHECK(r.app.model().face == nullptr);  // none named: a new route, or a server without faces
 }
 
 TEST("faces: another profile shows the mascot until its own face arrives") {

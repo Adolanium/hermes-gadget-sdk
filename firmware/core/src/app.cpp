@@ -503,9 +503,9 @@ void App::h_welcome(const json::Value& m) {
   if (paired_) {
     pairing_code_.clear();
     pairing_command_.clear();
-  } else {
-    face_.reset();  // revoked while away: the mascot, and no face named in the next hello
   }
+  // The held face stays only if the welcome names it (unpaired, or a new route: the mascot instead).
+  if (face_ && m["face"].as_string() != face_->hash) face_.reset();
   log(LogLevel::Info, paired_ ? "online (paired)" : "online (waiting for pairing approval)");
   agent_profiles_.clear();
   for (const auto& p : m["profiles"].elements()) {

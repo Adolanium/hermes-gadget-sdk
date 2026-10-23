@@ -110,6 +110,8 @@ If authentication fails, the server sends `{"type": "error", "code": "auth_faile
 
 `profile` and `profiles` are present only when the device sent `caps.profiles` and the server offers profiles. The Hermes plugin offers the profiles a multiplexed gateway serves that `platforms.gadget.extra.profiles` lists (all of them for `all`), with `default` first; without that setting it offers none. The device keeps the first 8 entries of `profiles` and ignores the rest.
 
+`face` is present only when the device named a face in `hello.face` and may keep it; see [Faces](#faces).
+
 ### Pairing
 
 | Message | Direction | Meaning |
@@ -147,8 +149,9 @@ A device that sends `caps.faces: 1` can show each profile with its own face inst
 `bits` holds the three frames (idle, blink, talk) at each of the four sizes (64, 96, 144 and 192 px), smallest size first and idle first within a size: 26,592 bytes in the [layout of the built-in mascot](faces.md#how-it-works). Ten little-endian int16 effect anchors follow, in thousandths of the drawn size: the listening waves' x and y, the speaking waves' x and y, the thinking dots' x and y, the first and last row a blink changes, and the first and last row talking changes. Each anchor is 0 to 1000, and each pair of rows has the first at or above the last. A device ignores a face of any other length, or with an anchor out of range, and shows the mascot.
 
 - The server sends `face` after `welcome`, after each `profile` that is not a refusal, and after `paired` and `unpaired`. An unpaired device gets the mascot: on `unpaired`, or a `welcome` with `paired: false`, the device drops its face, and it ignores `face` until it is paired again.
-- The device keeps its face in memory, through reconnects, and drops it when it changes profile: after a `profile` or `welcome` that names another profile, it shows the mascot until that profile's face arrives. It never shows the previous profile's face: it ignores a `face`, with or without `bits`, whose `profile` is not the one answering it.
-- The server sends nothing when the device already has the right face: when `hello.face` is that face's `hash` and the welcome does not change the device's profile, or when the device shows the mascot and the profile has no face.
+- The device keeps its face in memory, through reconnects, while `welcome.face` names it. The server names it only when it sent that face last and it belongs to the profile answering the device now, so the device sends it again in `hello.face` and gets no new copy. A welcome that does not name the held face, after a new gadget route, a server restart or from a server without faces, makes the device drop it.
+- The device also drops its face after a `profile` that names another profile. Either way it shows the mascot until the next `face` arrives, never the previous profile's face. It ignores a `face`, with or without `bits`, whose `profile` is not the one answering it.
+- The server sends nothing when the device already has the right face: when the welcome named it, or when the device shows the mascot and the profile has no face.
 - A device without `caps.faces` gets no `face` messages. The reference firmware sends `caps.faces` only on boards with PSRAM: a face takes about 27 KB, and its message about 36 KB more while it arrives.
 
 The Hermes plugin sends a profile's `gadget-face.bin`, or else the profile's Hermes avatar made into a still face; see [Faces](faces.md#a-face-for-each-hermes-profile).

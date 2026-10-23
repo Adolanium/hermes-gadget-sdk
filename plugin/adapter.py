@@ -441,20 +441,24 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             self._convert_avatars = imaging.pillow_available()
             if not self._convert_avatars:
                 logger.info("[%s] Pillow is not installed: devices show profile face files, not avatars", self.name)
-        source = self._source(session)  # the profile that answers: a gadget route's, or the device's choice
-        if source.profile_route_rejected:
+        profile = self.face_profile(session)
+        if profile is None:
             return None
         try:
-            if source.profile in (None, "default"):  # this gateway's own home, for a standalone profile too
+            if profile == "default":  # this gateway's own home, for a standalone profile too
                 from hermes_constants import get_hermes_home
                 home = get_hermes_home()
             else:
                 from hermes_cli.profiles import get_profile_dir
-                home = get_profile_dir(source.profile)
+                home = get_profile_dir(profile)
             return await asyncio.to_thread(faces.for_profile, home, self._convert_avatars)
         except Exception as exc:  # an unreadable picture shows the mascot; never block a connection on it
-            logger.warning("[%s] no face for profile %s: %s", self.name, source.profile or "default", exc)
+            logger.warning("[%s] no face for profile %s: %s", self.name, profile, exc)
             return None
+
+    def face_profile(self, session: DeviceSession) -> Optional[str]:
+        source = self._source(session)  # the profile that answers: a gadget route's, or the device's choice
+        return None if source.profile_route_rejected else source.profile or "default"
 
     def language(self, session: DeviceSession) -> Optional[str]:
         # `platforms.gadget.extra.language`, else the profile's language (HERMES_LANGUAGE > display.language > en).

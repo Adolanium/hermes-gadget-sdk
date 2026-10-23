@@ -692,12 +692,18 @@ class _RoutedLater(_TwoProfiles):
     def __init__(self):
         self.route = None
         self.faces = {"ops": _face(0x0F), "work": _face(0x3C)}
+        self.ready = None  # an asyncio.Event the route's face waits for, as a slow conversion would
 
     def profiles(self, session=None):
         return [] if self.route else super().profiles(session)
 
+    def face_profile(self, session):
+        return self.route or session.profile
+
     async def face(self, session):
-        return self.faces.get(self.route or session.profile)
+        if self.route and self.ready:
+            await self.ready.wait()
+        return self.faces.get(self.face_profile(session))
 
 
 def test_a_device_on_a_route_added_while_it_was_away_takes_the_routes_face(loop_thread, tmp_path, make_sim):
@@ -737,6 +743,39 @@ def test_a_device_on_a_route_added_while_it_was_away_takes_the_routes_face(loop_
         assert again.wait_for(lambda: last_face(again).get("hash") == work, timeout=5)
         assert _held_face(again) == work
     finally:
+        loop_thread.run(hub.stop())
+
+
+def test_a_new_route_shows_the_mascot_until_its_face_is_ready(loop_thread, tmp_path, make_sim):
+    """Never the previous profile's face: a reconnect onto a new route drops it before Ready."""
+    import asyncio
+
+    from hermes_gadget_plugin.hub import DeviceHub
+    from hermes_gadget_plugin.store import DeviceStore
+
+    delegate = _RoutedLater()
+    hub = DeviceHub(DeviceStore(tmp_path / "server"), delegate, host="127.0.0.1", port=0, heartbeat_s=5)
+    loop_thread.run(hub.start())
+    last_face = lambda: [m for m in sim.received if m.get("type") == "face"][-1]  # noqa: E731
+    ops, work = _digest(delegate.faces["ops"]), _digest(delegate.faces["work"])
+    try:
+        sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget")
+        assert sim.wait_screen("ready", timeout=10)
+        device = hub.get(sim.status()["device_id"])
+        loop_thread.run(delegate.select_profile(device, "ops"))
+        loop_thread.run(device.send_profile())
+        assert sim.wait_for(lambda: last_face().get("hash") == ops, timeout=5)
+        assert _held_face(sim) == ops  # an unchanged face stays through a reconnect, unsent
+
+        delegate.ready = asyncio.Event()
+        delegate.route = "work"
+        assert _held_face(sim) == ops  # the welcome of this reconnect, onto the route, doesn't keep it
+        assert _held_face(sim) is None  # at Ready again while work's face is still being made
+        loop_thread.loop.call_soon_threadsafe(delegate.ready.set)
+        assert sim.wait_for(lambda: last_face().get("hash") == work, timeout=5)
+        assert _held_face(sim) == work
+    finally:
+        loop_thread.loop.call_soon_threadsafe(delegate.ready.set)  # no face left waiting on a failure
         loop_thread.run(hub.stop())
 
 

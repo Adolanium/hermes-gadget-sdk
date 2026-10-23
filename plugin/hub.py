@@ -59,8 +59,12 @@ class HubDelegate:
         return "unknown"
 
     async def face(self, session: "DeviceSession") -> bytes | None:
-        """The face of ``session.profile`` (docs/protocol.md#faces), or None for the mascot."""
+        """The face of ``face_profile(session)`` (docs/protocol.md#faces), or None for the mascot."""
         return None
+
+    def face_profile(self, session: "DeviceSession") -> str | None:
+        """The profile whose face ``session`` shows: the one answering it (None: none does)."""
+        return session.profile
 
     def language(self, session: "DeviceSession") -> Optional[str]:
         """The language id ``welcome`` names for a device left on ``auto`` (e.g. ``"es"``), or None."""
@@ -398,12 +402,14 @@ class DeviceSession:
         if self.caps.get("faces") != 1:
             return
         state = self.device_profile, self.profile, self.paired
+        source = self.hub.delegate.face_profile(self)
         data = await self.hub.delegate.face(self) if self.paired else None
         digest = hashlib.sha256(data).hexdigest()[:16] if data else None
         # Switched or (un)paired meanwhile: that change sends its own face.
         if (self.device_profile, self.profile, self.paired) != state or digest == self.face_hash:
             return
         self.face_hash = digest
+        self.hub._faces[self.device_id] = (source, digest)
         await self.send_json(protocol.message(
             "face", profile=state[0], hash=digest, bits=base64.b64encode(data).decode() if data else None))
 
@@ -628,6 +634,9 @@ class DeviceHub:
         self._tasks: set[asyncio.Task] = set()  # DeviceSession.spawn, including devices already gone
         # Held back while a screen is dark, by device id: kept across reconnects.
         self._held: dict[str, _Held] = {}
+        # The face last sent to each device, and the profile it is from: what a welcome may tell a
+        # reconnecting device to keep.
+        self._faces: dict[str, tuple[str | None, str | None]] = {}
 
     def _hold(self, device_id: str) -> _Held:
         return self._held.setdefault(device_id, _Held())
@@ -789,14 +798,16 @@ class DeviceHub:
                 if isinstance(wanted, str) and wanted and wanted != session.profile:
                     await self.delegate.select_profile(session, wanted)  # a refusal leaves "default"
                 welcome.update(profile=session.profile, profiles=roster)
-            await session.send_json(protocol.message("welcome", **welcome))
-            # The device keeps its face through a reconnect, unless the welcome names another profile.
             named = hello.get("profile")
             named = named if isinstance(named, str) and named else "default"
             session.device_profile = welcome.get("profile", named)
             held = hello.get("face")
-            if isinstance(held, str) and session.device_profile == named:
-                session.face_hash = held
+            # A face the device holds stays only if the welcome names it: the one last sent, from the
+            # profile answering now. Otherwise the device shows the mascot until the new face arrives.
+            if (isinstance(held, str) and session.device_profile == named and session.paired
+                    and self._faces.get(session.device_id) == (self.delegate.face_profile(session), held)):
+                session.face_hash = welcome["face"] = held
+            await session.send_json(protocol.message("welcome", **welcome))
             await session.send_face()
             log.info("device %s (%s) online, paired=%s", session.device_id, session.name, session.paired)
             await self.delegate.on_ready(session)
