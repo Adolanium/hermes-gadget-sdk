@@ -60,3 +60,4 @@ def test_the_default_profiles_copy_finds_another_profiles_session_board(copies):
     default.add_board("default", mine)
     routed.add_board("ops", ops)  # the ops profile's copy registers its hooks on its own board
     assert default.boards(["default", "ops", "lab"]) == [mine, ops]  # lab's copy never loaded
+    assert default.boards(["ops"]) == [ops]  # only the profiles asked for

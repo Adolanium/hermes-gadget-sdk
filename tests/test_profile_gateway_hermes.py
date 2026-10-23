@@ -137,6 +137,40 @@ def test_only_a_switching_device_sees_the_offered_profiles_sessions(hermes_home,
         assert _dashboard_labels(old_firmware, 0.5) == [[]]  # exactly today's: the default profile's only
 
 
+def _sessions_mine_and_ops(monkeypatch):
+    from hermes_gadget_plugin import dashboard
+
+    monkeypatch.setattr(dashboard.BOARD, "_sessions", {})
+    dashboard.BOARD.pre_llm_call(session_id="s_mine", platform="cli")  # the default profile's own
+    _profile_board(monkeypatch, "ops").pre_llm_call(session_id="s_ops1", platform="telegram")
+
+
+@pytest.mark.parametrize("offered", [None, set()], ids=["switching off", "ops served but not offered"])
+def test_without_the_offer_a_device_gets_only_the_default_profiles_sessions(hermes_home, gadget, monkeypatch,
+                                                                            offered):
+    import os
+    from hermes_gadget_plugin import dashboard, protocol
+
+    monkeypatch.setattr(gadget.adapter, "_offer_all", False)
+    monkeypatch.setattr(gadget.adapter, "_offered", offered)  # no `profiles` key, or `profiles: []`
+    _sessions_mine_and_ops(monkeypatch)
+    key = os.urandom(32)
+    gadget.authorized.add(protocol.device_id_for_key(key))
+    with _RawDevice(gadget.url, key, {"dashboard": {"v": dashboard.VERSION}, "profiles": True}) as device:
+        assert _dashboard_labels(device, 2.5) == [["cli mine"]]  # exactly today's
+
+
+def test_a_routed_device_gets_only_the_default_profiles_sessions(live_rig, monkeypatch):
+    from hermes_gadget_plugin import dashboard
+
+    _sessions_mine_and_ops(monkeypatch)
+    live_rig.route()  # to ops, with switching on for every other device
+    live_rig.approve("ops")
+    with live_rig.connect({"dashboard": {"v": dashboard.VERSION}, "profiles": True}, profile="default") as device:
+        assert device.welcome["paired"] is True
+        assert _dashboard_labels(device, 2.5) == [["cli mine"]]  # exactly today's
+
+
 def _paused_roster(monkeypatch, adapter):
     """Hold the dashboard's roster lookup (``profiles()`` with no session) until ``release`` is set."""
     import threading
