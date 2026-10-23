@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 import types
 import pytest
 from conftest import requires_hermes
@@ -310,6 +311,34 @@ def test_a_push_queued_while_a_device_leaves_does_not_remember_it(hermes_home, g
         gadget.loop.call_soon_threadsafe(adapter._roster_lock.release)
         queued.result(5)
         assert gone not in adapter._pushed_seq and stays in adapter._pushed_seq
+
+
+def test_a_device_that_cannot_switch_leaves_the_switching_ones_listening(hermes_home, gadget, monkeypatch):
+    import os
+    from hermes_gadget_plugin import adapter as adapter_module, dashboard, protocol
+
+    monkeypatch.setattr(adapter_module, "DASHBOARD_POLL_S", 60)  # only a wake can carry the change below
+    monkeypatch.setattr(dashboard.BOARD, "_sessions", {})
+    ops = _profile_board(monkeypatch, "ops")
+    ops.on_session_start(session_id="s_ops1", platform="telegram")
+    caps = {"dashboard": {"v": dashboard.VERSION}}
+    keys = os.urandom(32), os.urandom(32)
+    gadget.authorized.update(protocol.device_id_for_key(k) for k in keys)
+    with _RawDevice(gadget.url, keys[0], {**caps, "profiles": True}) as switching:
+        assert _dashboard_labels(switching, 2.5)[-1] == ["telegram ops1"]  # outlasts the poll begun before
+        with _RawDevice(gadget.url, keys[1], caps) as plain:
+            assert _dashboard_labels(plain, 1.0) == [[]]  # its own first dashboard has been pushed
+            ops.pre_llm_call(session_id="s_ops1", platform="telegram")
+            msgs = []
+            end = time.monotonic() + 1.5
+            while time.monotonic() < end and not msgs:
+                try:
+                    msg = json.loads(switching.ws.recv(timeout=end - time.monotonic()))
+                except TimeoutError:
+                    break
+                if msg.get("type") == "dashboard":
+                    msgs.append(msg)
+            assert [row["state"] for row in msgs[-1]["sessions"]] == ["busy"]  # the ops change woke it
 
 
 def _sessions_mine_and_ops(monkeypatch):
