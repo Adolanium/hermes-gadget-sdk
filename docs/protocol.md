@@ -150,7 +150,7 @@ A device that sends `caps.faces: 1` can show each profile with its own face inst
 
 - The server sends `face` after `welcome`, after each `profile` that is not a refusal, and after `paired` and `unpaired`. An unpaired device gets the mascot: on `unpaired`, or a `welcome` with `paired: false`, the device drops its face, and it ignores `face` until it is paired again.
 - The device keeps its face in memory, through reconnects, while `welcome.face` names it. The server names it only when it sent that face last and it belongs to the profile answering the device now, so the device sends it again in `hello.face` and gets no new copy. A welcome that does not name the held face, after a new gadget route, a server restart or from a server without faces, makes the device drop it.
-- The device also drops its face after a `profile` that names another profile. Either way it shows the mascot until the next `face` arrives, never the previous profile's face. It ignores a `face`, with or without `bits`, whose `profile` is not the one answering it.
+- The device also drops its face after a `profile` that names another profile. Either way it shows the mascot until the next `face` arrives, never the previous profile's face. It ignores a `face`, with or without `bits`, whose `profile` is not its own, as the table defines it.
 - The server sends nothing when the device already has the right face: when the welcome named it, or when the device shows the mascot and the profile has no face.
 - A device without `caps.faces` gets no `face` messages. The reference firmware sends `caps.faces` only on boards with PSRAM: a face takes about 27 KB, and its message about 36 KB more while it arrives.
 
