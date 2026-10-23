@@ -326,12 +326,12 @@ def test_a_face_that_arrives_after_a_profile_switch_is_not_sent(tmp_path):
 
     async def main():
         session, delegate, wire = _slow_face_session(tmp_path)
-        first = asyncio.create_task(session.send_face())  # as after welcome, on default
+        first = session.update_face()  # as after welcome, on default
         await asyncio.sleep(0)
         session.profile = "ops"
         await session.send_profile()
         delegate.release.set()
-        await first
+        await asyncio.gather(first, session._face_task, return_exceptions=True)
         return wire.sent
 
     assert asyncio.run(main()) == [{"type": "profile", "profile": "ops"}]
@@ -340,11 +340,11 @@ def test_a_face_that_arrives_after_a_profile_switch_is_not_sent(tmp_path):
 def test_a_face_that_arrives_after_the_device_is_unpaired_is_not_sent(tmp_path):
     async def main():
         session, delegate, wire = _slow_face_session(tmp_path)
-        first = asyncio.create_task(session.send_face())
+        first = session.update_face()
         await asyncio.sleep(0)
         await session.set_paired(False)  # revoked while the face was being made
         delegate.release.set()
-        await first
+        await asyncio.gather(first, session._face_task, return_exceptions=True)
         return wire.sent, session.face_hash
 
     assert asyncio.run(main()) == ([{"type": "unpaired"}], None)
@@ -355,12 +355,12 @@ def test_a_face_made_for_a_replaced_connection_is_dropped(tmp_path):
 
     async def main():
         old, delegate, old_wire = _slow_face_session(tmp_path)
-        first = asyncio.create_task(old.send_face())
+        first = old.update_face()
         await asyncio.sleep(0)
         new, _, new_wire = _slow_face_session(tmp_path, old.hub)  # the hub's sessions now name the new one
         await old.close("replaced by a newer connection")
         delegate.release.set()
-        await asyncio.gather(first, new.send_face())
+        await asyncio.gather(first, new.update_face(), return_exceptions=True)
         return [m["type"] for m in old_wire.sent], [m["type"] for m in new_wire.sent], new.face_hash
 
     old_sent, new_sent, held = asyncio.run(main())

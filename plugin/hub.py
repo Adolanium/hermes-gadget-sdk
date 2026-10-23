@@ -45,7 +45,7 @@ def short_utterance_notice(session: "DeviceSession") -> str:
     return "Didn't catch that - hold the button while speaking"
 
 
-_LOOK_UP = object()  # send_face(): find the face first
+_LOOK_UP = object()  # update_face(): find the face first
 
 
 class HubDelegate:
@@ -279,6 +279,7 @@ class DeviceSession:
         self._stream_counter = 0
         self._pending: dict[str, asyncio.Future] = {}
         self._tasks: set[asyncio.Task] = set()
+        self._face_task: asyncio.Task | None = None  # update_face(): at most one, ended with the session
         self._ota_inbox: asyncio.Queue | None = None  # the device's ota.* replies, while an update runs
         self._dashboard_sent: dict | None = None  # the last dashboard this connection delivered
 
@@ -381,7 +382,7 @@ class DeviceSession:
         if paired:
             self.hub.store.confirm(self.device_id)
         await self.send_json(protocol.message("paired" if paired else "unpaired"))
-        await self.send_face()
+        self.update_face()
 
     async def ask(self, prompt_id: str, title: str, text: str, ttl_s: float | None = None) -> None:
         """Show a yes/no question; the answer arrives as ``on_prompt_reply``."""
@@ -395,7 +396,7 @@ class DeviceSession:
         if error is None:
             self.device_profile = self.profile
             self.face_hash = None  # a device that changes profile drops its face
-            await self.send_face()
+            self.update_face()
 
     async def find_face(self) -> ProfileFace | None:
         """The face the device should show now; unpaired devices get the mascot (None)."""
@@ -411,17 +412,26 @@ class DeviceSession:
         """What decides the face: a face found for another state is not this one's."""
         return self.device_profile, self.profile, self.paired
 
-    async def send_face(self, face: ProfileFace | None | object = _LOOK_UP) -> None:
-        """Send the profile's face, or the mascot, unless the device holds it already. ``face`` is
-        what find_face() returned, when the caller has it."""
+    def update_face(self, face: ProfileFace | None | object = _LOOK_UP) -> asyncio.Task | None:
+        """Bring the device's face up to date, beside the messages: the session's one face operation.
+        It is for the state now; a newer one replaces it, and the session's end stops it. ``face`` is
+        what find_face() returned for this state, when the caller has it."""
         if self.caps.get("faces") != 1:
+            return None
+        if self._face_task:
+            self._face_task.cancel()
+        self._face_task = self.spawn(self._send_face(self.face_state(), face))
+        return self._face_task
+
+    async def _send_face(self, state: tuple, face: ProfileFace | None | object) -> None:
+        """Send the face for ``state``, or the mascot, unless the device holds it already."""
+        # Switched, (un)paired or replaced since: whatever changed started its own update.
+        stale = lambda: self.face_state() != state or not self.current()  # noqa: E731
+        if stale():
             return
-        state = self.face_state()
         if face is _LOOK_UP:
             face = await self.find_face()
         digest = face.hash if face else None
-        # Switched, (un)paired or replaced meanwhile: whatever changed sends its own face.
-        stale = lambda: self.face_state() != state or not self.current()  # noqa: E731
         if stale() or digest == self.face_hash:
             return
         try:
@@ -431,9 +441,9 @@ class DeviceSession:
             return
         if stale():
             return
-        self.face_hash = digest
         await self.send_json(protocol.message(
             "face", profile=state[0], hash=digest, bits=base64.b64encode(data).decode() if data else None))
+        self.face_hash = digest
 
     async def show_card(self, title: str, body: str, ttl_s: float = 15) -> bool:
         """Show a card. False when it is held until the screen lights up."""
@@ -577,6 +587,8 @@ class DeviceSession:
 
     def _shutdown(self) -> None:
         self.closed = True
+        if self._face_task:
+            self._face_task.cancel()
         for fut in self._pending.values():
             if not fut.done():
                 fut.set_exception(ActionError(f"{self.name} disconnected"))
@@ -839,7 +851,7 @@ class DeviceHub:
                     and session.device_profile == named):
                 session.face_hash = welcome["face"] = face.hash
             await session.send_json(protocol.message("welcome", **welcome))
-            session.spawn(session.send_face(face))  # beside the messages: making a face can take a while
+            session.update_face(face)
             face = None  # the task has it; an avatar's picture goes with the task
             log.info("device %s (%s) online, paired=%s", session.device_id, session.name, session.paired)
             await self.delegate.on_ready(session)
@@ -863,6 +875,8 @@ class DeviceHub:
                 heartbeat.cancel()
             if session is not None:
                 session._shutdown()
+                if session._face_task:
+                    await asyncio.gather(session._face_task, return_exceptions=True)
                 if self.sessions.get(session.device_id) is session:
                     del self.sessions[session.device_id]
                 log.info("device %s offline", session.device_id)
