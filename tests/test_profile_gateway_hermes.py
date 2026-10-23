@@ -137,6 +137,40 @@ def test_only_a_switching_device_sees_the_offered_profiles_sessions(hermes_home,
         assert _dashboard_labels(old_firmware, 0.5) == [[]]  # exactly today's: the default profile's only
 
 
+def _paused_roster(monkeypatch, adapter):
+    """Hold the dashboard's roster lookup (``profiles()`` with no session) until ``release`` is set."""
+    import threading
+
+    reading, release, roster = threading.Event(), threading.Event(), adapter.profiles
+
+    def profiles(session=None):
+        if session is None:
+            reading.set()
+            release.wait(10)
+        return roster(session)
+
+    monkeypatch.setattr(adapter, "profiles", profiles)
+    return reading, release
+
+
+def test_a_device_revoked_while_the_roster_is_read_gets_no_dashboard(hermes_home, gadget, monkeypatch):
+    import os
+    from hermes_gadget_plugin import dashboard, protocol
+
+    _profile_board(monkeypatch, "ops").pre_llm_call(session_id="s_ops1", platform="telegram")
+    reading, release = _paused_roster(monkeypatch, gadget.adapter)
+    key = os.urandom(32)
+    device_id = protocol.device_id_for_key(key)
+    gadget.authorized.add(device_id)
+    with _RawDevice(gadget.url, key, {"dashboard": {"v": dashboard.VERSION}, "profiles": True}) as device:
+        assert reading.wait(5)  # the first dashboard is waiting for the roster
+        gadget.authorized.discard(device_id)  # revoked in the default profile
+        while json.loads(device.ws.recv(timeout=10)).get("type") != "unpaired":
+            pass
+        release.set()
+        assert _dashboard_labels(device, 1.0) == []
+
+
 def test_grants_are_scoped_serialized_and_refusable(hermes_home, gadget, monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
 
