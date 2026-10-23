@@ -180,9 +180,9 @@ def test_a_routed_device_gets_the_face_of_the_profile_its_route_names(routing_ri
     (home / FACE_FILE).write_bytes(bytes([0xAA]) * FACE_BYTES)
     (home / "profiles" / "ops" / FACE_FILE).write_bytes(bytes([0x55]) * FACE_BYTES)
     session = _session("default")
-    assert asyncio.run(adapter.face(session)) == bytes([0xAA]) * FACE_BYTES  # no route: the default profile
+    assert asyncio.run(adapter.face(session)).load() == bytes([0xAA]) * FACE_BYTES  # no route: the default profile
     runner.config.profile_routes = _ops_route(DEVICE)
-    assert asyncio.run(adapter.face(session)) == bytes([0x55]) * FACE_BYTES
+    assert asyncio.run(adapter.face(session)).load() == bytes([0x55]) * FACE_BYTES
     (home / "profiles" / "ops" / "gateway.parked").touch()
     runner._profile_adapters = {}
     assert asyncio.run(adapter.face(session)) is None  # Hermes refuses the route: no profile's face

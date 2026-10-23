@@ -4,10 +4,12 @@ import hashlib
 import json
 import math
 import struct
+import threading
 
 import pytest
 
 from conftest import requires_sim
+from hermes_gadget_plugin.face import ProfileFace
 from hermes_gadget_plugin.hub import HubDelegate
 
 pytestmark = requires_sim
@@ -644,11 +646,21 @@ def _held_face(sim):
     return [m for m in sim.sent if m.get("type") == "hello"][-1].get("face")
 
 
+def _shows_mascot(sim, session, loop_thread) -> bool:
+    """Whether the screen shows the mascot: clearing the face then changes nothing but a blink."""
+    sim.run_for(0.2)
+    before = sim.rgb888()
+    loop_thread.run(session.send_json({"type": "face", "profile": session.device_profile}))
+    sim.run_for(0.2)
+    after = sim.rgb888()
+    return sum(before[i:i + 3] != after[i:i + 3] for i in range(0, len(before), 3)) < 300
+
+
 class _ProfileFaces(_TwoProfiles):
     """The default profile has a face; ops has none."""
 
     async def face(self, session):
-        return _face(0xF0) if session.profile == "default" else None
+        return ProfileFace.of(_face(0xF0)) if session.profile == "default" else None
 
 
 def test_a_profile_face_is_sent_once_and_the_mascot_comes_back_on_a_switch(loop_thread, tmp_path, make_sim):
@@ -692,15 +704,24 @@ class _RoutedLater(_TwoProfiles):
     def __init__(self):
         self.route = None
         self.faces = {"ops": _face(0x0F), "work": _face(0x3C)}
-        self.ready = None  # an asyncio.Event the route's face waits for, as a slow conversion would
+        self.converting = None  # a threading.Event the route's face waits for, as converting an avatar would
+        self.started = threading.Event()  # set once that wait begins
 
     def profiles(self, session=None):
         return [] if self.route else super().profiles(session)
 
     async def face(self, session):
-        if self.route and self.ready:
-            await self.ready.wait()
-        return self.faces.get(self.route or session.profile)
+        data = self.faces.get(self.route or session.profile)
+        if data is None:
+            return None
+        if not (self.route and self.converting):
+            return ProfileFace.of(data)
+
+        def load():
+            self.started.set()
+            self.converting.wait(10)
+            return data
+        return ProfileFace(_digest(data), load)
 
 
 def test_a_device_on_a_route_added_while_it_was_away_takes_the_routes_face(loop_thread, tmp_path, make_sim):
@@ -743,10 +764,8 @@ def test_a_device_on_a_route_added_while_it_was_away_takes_the_routes_face(loop_
         loop_thread.run(hub.stop())
 
 
-def test_a_new_route_drops_the_held_face_before_ready_and_sends_its_own(loop_thread, tmp_path, make_sim):
-    """Never the previous profile's face: the welcome waits for the route's face and doesn't keep the old one."""
-    import asyncio
-
+def test_a_new_route_shows_the_mascot_while_its_face_is_made(loop_thread, tmp_path, make_sim):
+    """Never the previous profile's face: the welcome drops it at once, and the route's face follows."""
     from hermes_gadget_plugin.hub import DeviceHub
     from hermes_gadget_plugin.store import DeviceStore
 
@@ -758,27 +777,88 @@ def test_a_new_route_drops_the_held_face_before_ready_and_sends_its_own(loop_thr
     try:
         sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget")
         assert sim.wait_screen("ready", timeout=10)
-        device = hub.get(sim.status()["device_id"])
+        device_id = sim.status()["device_id"]
+        device = hub.get(device_id)
         loop_thread.run(delegate.select_profile(device, "ops"))
         loop_thread.run(device.send_profile())
         assert sim.wait_for(lambda: last_face().get("hash") == ops, timeout=5)
         assert _held_face(sim) == ops  # an unchanged face stays through a reconnect, unsent
         assert sim.last_received("welcome")["face"] == ops
 
-        delegate.ready = asyncio.Event()
+        delegate.converting = threading.Event()
         delegate.route = "work"
+        welcomes = len([m for m in sim.received if m.get("type") == "welcome"])
         sim.console("reconnect")
-        assert sim.wait_screen("connecting", timeout=5)
-        sim.run_for(0.5)
-        assert sim.device.screen() != "ready"  # no Ready while work's face is still being made
-        loop_thread.loop.call_soon_threadsafe(delegate.ready.set)
-        assert sim.wait_screen("ready", timeout=10)
+        assert sim.wait_for(delegate.started.is_set, timeout=10)  # work's face is being made
+        assert _shows_mascot(sim, hub.get(device_id), loop_thread)  # not ops's face meanwhile
+        delegate.converting.set()
+        assert sim.wait_for(lambda: len([m for m in sim.received if m.get("type") == "welcome"]) > welcomes, timeout=10)
         assert "face" not in sim.last_received("welcome")  # ops's face is not kept
         assert sim.wait_for(lambda: last_face().get("hash") == work, timeout=5)
         assert _held_face(sim) == work
     finally:
-        if delegate.ready:
-            loop_thread.loop.call_soon_threadsafe(delegate.ready.set)  # no face left waiting on a failure
+        if delegate.converting:
+            delegate.converting.set()  # no face left waiting on a failure
+        loop_thread.run(hub.stop())
+
+
+class _SlowLookup(_ProfileFaces):
+    """Finding the face waits for ``found``, as a stalled file read would."""
+
+    def __init__(self):
+        self.found = None  # an asyncio.Event
+
+    async def face(self, session):
+        if self.found:
+            await self.found.wait()
+        return await super().face(session)
+
+
+def test_a_stalled_face_lookup_still_lets_the_device_connect(loop_thread, tmp_path, make_sim):
+    import asyncio
+
+    from hermes_gadget_plugin.hub import DeviceHub
+    from hermes_gadget_plugin.store import DeviceStore
+
+    delegate = _SlowLookup()
+    hub = DeviceHub(DeviceStore(tmp_path / "server"), delegate, host="127.0.0.1", port=0, heartbeat_s=5)
+    loop_thread.run(hub.start())
+    try:
+        delegate.found = asyncio.Event()  # never set: the lookup never finishes
+        sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget")
+        assert sim.wait_screen("ready", timeout=8)  # well inside the device's 10 s handshake limit
+        assert "face" not in sim.last_received("welcome")
+    finally:
+        loop_thread.loop.call_soon_threadsafe(delegate.found.set)
+        loop_thread.run(hub.stop())
+
+
+def test_a_device_unpaired_while_its_face_is_looked_up_gets_an_unpaired_welcome(loop_thread, tmp_path, make_sim):
+    import asyncio
+
+    from hermes_gadget_plugin.hub import DeviceHub
+    from hermes_gadget_plugin.store import DeviceStore
+
+    delegate = _SlowLookup()
+    hub = DeviceHub(DeviceStore(tmp_path / "server"), delegate, host="127.0.0.1", port=0, heartbeat_s=5)
+    loop_thread.run(hub.start())
+    try:
+        sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget")
+        assert sim.wait_screen("ready", timeout=10)
+        assert sim.wait_for(lambda: sim.last_received("face"), timeout=5)
+        device_id, first = sim.status()["device_id"], hub.get(sim.status()["device_id"])
+        delegate.found = asyncio.Event()
+        sim.console("reconnect")
+        assert sim.wait_for(lambda: hub.get(device_id) not in (None, first), timeout=10)
+        loop_thread.run(hub.get(device_id).set_paired(False))  # revoked while the face is looked up
+        loop_thread.loop.call_soon_threadsafe(delegate.found.set)
+        assert sim.wait_for(lambda: sim.last_received("welcome")["session"] != first.session_id, timeout=10)
+        assert sim.last_received("welcome")["paired"] is False
+        sim.run_for(0.3)
+        assert sim.status()["paired"] is False
+    finally:
+        if delegate.found:
+            loop_thread.loop.call_soon_threadsafe(delegate.found.set)
         loop_thread.run(hub.stop())
 
 

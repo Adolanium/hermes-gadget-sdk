@@ -180,19 +180,46 @@ def test_an_avatar_becomes_light_ink_whichever_way_it_is_drawn(tmp_path):
     assert differ < 0.01 * ink  # the same disc, give or take its antialiased edge
 
 
-def test_an_avatar_is_converted_once_per_version(tmp_path, monkeypatch):
-    """Devices wait for the face on every connection, so a converted avatar is kept until the picture changes."""
+def test_a_replaced_avatar_gets_a_new_face_even_with_the_same_size_and_time(tmp_path):
+    """A face is named by the picture's bytes, so a restored or copied avatar with the old metadata
+    still gets its own face."""
+    from PIL import Image
+
     home = tmp_path / "ops"
     (home / "assets").mkdir(parents=True)
-    avatar = _disc(home / "assets" / "avatar.png", (240, 240, 240), (10, 10, 10))
-    made = []
-    real = profile_faces.from_picture
-    monkeypatch.setattr(profile_faces, "from_picture", lambda path: made.append(path) or real(path))
-    first = profile_faces.for_profile(home)
-    assert profile_faces.for_profile(home) == first and len(made) == 1
-    _disc(avatar, (20, 20, 20), (250, 250, 250))
-    os.utime(avatar, ns=(avatar.stat().st_atime_ns, avatar.stat().st_mtime_ns + 1_000_000_000))
-    assert profile_faces.for_profile(home) is not None and len(made) == 2
+    avatar = home / "assets" / "avatar.png"
+    # Uncompressed (BMP bytes under the avatar's name), so both pictures have the same size.
+    Image.open(_disc(tmp_path / "a.png", (240, 240, 240), (10, 10, 10))).save(avatar, format="BMP")
+    before = profile_faces.for_profile(home)
+    before.load()
+    stat = avatar.stat()
+    Image.open(_disc(tmp_path / "b.png", (240, 240, 240), (120, 10, 10))).save(avatar, format="BMP")
+    os.utime(avatar, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    assert (avatar.stat().st_size, avatar.stat().st_mtime_ns) == (stat.st_size, stat.st_mtime_ns)
+    after = profile_faces.for_profile(home)
+    assert after.hash != before.hash
+    assert after.load() == profile_faces.from_picture(avatar) != before.load()
+
+
+def test_profiles_that_are_gone_leave_no_faces_behind(tmp_path, monkeypatch):
+    import gc
+    import shutil
+    import tracemalloc
+
+    monkeypatch.setattr(profile_faces, "from_picture", lambda path: bytes(profile_faces.FACE_BYTES))
+    tracemalloc.start()
+    try:
+        start = tracemalloc.get_traced_memory()[0]
+        for i in range(40):
+            home = tmp_path / f"p{i}"
+            (home / "assets").mkdir(parents=True)
+            (home / "assets" / "avatar.png").write_bytes(b"picture %d" % i)
+            profile_faces.for_profile(home).load()
+            shutil.rmtree(home)
+        gc.collect()
+        assert tracemalloc.get_traced_memory()[0] - start < 200_000  # forty kept faces would hold over 1 MB
+    finally:
+        tracemalloc.stop()
 
 
 def test_a_profile_shows_its_face_file_then_its_avatar_then_the_mascot(tmp_path, caplog):
@@ -202,17 +229,18 @@ def test_a_profile_shows_its_face_file_then_its_avatar_then_the_mascot(tmp_path,
 
     avatar = _disc(home / "assets" / "avatar.png", (240, 240, 240), (10, 10, 10))
     converted = profile_faces.for_profile(home)
-    assert converted == profile_faces.from_picture(avatar)
+    assert converted.load() == profile_faces.from_picture(avatar)
     assert profile_faces.for_profile(home, convert=False) is None  # no Pillow: face files only
 
     (home / profile_faces.FACE_FILE).write_bytes(b"not a face")
-    assert profile_faces.for_profile(home) == converted  # a broken file is passed over, and said so
+    assert profile_faces.for_profile(home).hash == converted.hash  # a broken file is passed over, and said so
     assert "not a face file" in caplog.text
 
     assert cli.main(["face", "--out", str(home / profile_faces.FACE_FILE), "--preview", str(tmp_path / "p.png")]) == 0
     made = (home / profile_faces.FACE_FILE).read_bytes()
-    assert profile_faces.for_profile(home) == made != converted  # the hand-made face wins
-    assert profile_faces.for_profile(home, convert=False) == made
+    hand_made = profile_faces.for_profile(home)
+    assert hand_made.load() == made and hand_made.hash == profile_faces.digest(made) != converted.hash
+    assert profile_faces.for_profile(home, convert=False).load() == made
 
 
 def test_outside_a_checkout_the_command_says_where_to_run_it(tmp_path, monkeypatch, capsys):

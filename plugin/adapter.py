@@ -434,7 +434,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             await session.close_prompt(prompt.id)
         await session.send_profile()
 
-    async def face(self, session: DeviceSession) -> Optional[bytes]:
+    async def face(self, session: DeviceSession) -> Optional[faces.ProfileFace]:
         if not self._profile_faces:
             return None
         if self._convert_avatars is None:

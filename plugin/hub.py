@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import hashlib
 import json
 import logging
 import math
@@ -22,11 +21,13 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from . import audio, opus, protocol
+from .face import ProfileFace
 from .store import DeviceStore
 
 log = logging.getLogger("hermes_gadget.hub")
 
 HANDSHAKE_TIMEOUT_S = 10.0
+FACE_LOOKUP_S = 1.5          # how long a welcome waits to learn the face's hash (devices give up after 10 s)
 AUDIO_FRAME_MS = 40          # outbound audio frame duration
 PLAYBACK_LEAD_S = 0.5        # how far ahead of real time playback audio is sent
 IMAGE_CHUNK_BYTES = 4096
@@ -44,6 +45,9 @@ def short_utterance_notice(session: "DeviceSession") -> str:
     return "Didn't catch that - hold the button while speaking"
 
 
+_LOOK_UP = object()  # send_face(): find the face first
+
+
 class HubDelegate:
     """Decides what device traffic means. Every method has a no-op default."""
 
@@ -58,8 +62,9 @@ class HubDelegate:
         """Bind ``session`` to ``profile`` (set ``session.profile``); return None, or why not."""
         return "unknown"
 
-    async def face(self, session: "DeviceSession") -> bytes | None:
-        """The face of the profile answering ``session`` (docs/protocol.md#faces), or None for the mascot."""
+    async def face(self, session: "DeviceSession") -> ProfileFace | None:
+        """The face of the profile answering ``session`` (docs/protocol.md#faces), or None for the mascot.
+        Return quickly: the welcome waits for its hash. Slow work belongs in ``ProfileFace.load``."""
         return None
 
     def language(self, session: "DeviceSession") -> Optional[str]:
@@ -392,22 +397,35 @@ class DeviceSession:
             self.face_hash = None  # a device that changes profile drops its face
             await self.send_face()
 
-    async def load_face(self) -> tuple:
-        """The face the device should show now, as (the state it is for, its bytes, its hash). Unpaired
-        devices get the mascot: no bytes, no hash."""
-        state = self.device_profile, self.profile, self.paired
-        data = await self.hub.delegate.face(self) if self.paired and self.caps.get("faces") == 1 else None
-        return state, data, hashlib.sha256(data).hexdigest()[:16] if data else None
+    async def find_face(self) -> ProfileFace | None:
+        """The face the device should show now; unpaired devices get the mascot (None)."""
+        if not self.paired or self.caps.get("faces") != 1:
+            return None
+        return await self.hub.delegate.face(self)
 
-    async def send_face(self, loaded: tuple | None = None) -> None:
-        """Send the profile's face, or the mascot, unless the device holds it already. ``loaded`` is
-        what load_face() made, so the handshake needn't make it twice."""
+    def current(self) -> bool:
+        """Still the device's open connection: a reconnect replaces it."""
+        return not self.closed and self.hub.sessions.get(self.device_id) is self
+
+    async def send_face(self, face: ProfileFace | None | object = _LOOK_UP) -> None:
+        """Send the profile's face, or the mascot, unless the device holds it already. ``face`` is
+        what find_face() returned, when the caller has it."""
         if self.caps.get("faces") != 1:
             return
-        state, data, digest = loaded or await self.load_face()
+        state = self.device_profile, self.profile, self.paired
+        if face is _LOOK_UP:
+            face = await self.find_face()
+        digest = face.hash if face else None
         # Switched, (un)paired or replaced meanwhile: whatever changed sends its own face.
-        if ((self.device_profile, self.profile, self.paired) != state or self.closed
-                or self.hub.sessions.get(self.device_id) is not self or digest == self.face_hash):
+        stale = lambda: (self.device_profile, self.profile, self.paired) != state or not self.current()  # noqa: E731
+        if stale() or digest == self.face_hash:
+            return
+        try:
+            data = await asyncio.to_thread(face.load) if face else None
+        except Exception as exc:  # an unreadable picture leaves the mascot, which the device shows now
+            log.warning("no face for %s: %s", self.device_id, exc)
+            return
+        if stale():
             return
         self.face_hash = digest
         await self.send_json(protocol.message(
@@ -785,27 +803,36 @@ class DeviceHub:
             session.paired = bool(await self.delegate.is_paired(session))
             if session.paired:
                 self.store.confirm(session.device_id)
+            roster = self.delegate.profiles(session) if session.caps.get("profiles") is True else []
+            if roster:
+                wanted = hello.get("profile")
+                if isinstance(wanted, str) and wanted and wanted != session.profile:
+                    await self.delegate.select_profile(session, wanted)  # a refusal leaves "default"
+            named = hello.get("profile")
+            named = named if isinstance(named, str) and named else "default"
+            session.device_profile = session.profile if roster else named
+            # The welcome keeps the face the device holds only if it is the profile's face now. Finding
+            # its hash reads a file; a lookup that stalls counts as unknown, and is done again below.
+            face: ProfileFace | None | object = _LOOK_UP
+            try:
+                face = await asyncio.wait_for(session.find_face(), FACE_LOOKUP_S)
+            except asyncio.TimeoutError:
+                log.warning("device %s: the face lookup took over %.1f s", session.device_id, FACE_LOOKUP_S)
+            if not session.current():
+                return
+            # Built after the awaits, so it says what holds now (pairing can change meanwhile).
             welcome = dict(session=session.session_id, paired=session.paired, heartbeat_s=self.heartbeat_s,
                            server="hermes", proto=protocol.VERSION)
             language = self.delegate.language(session)
             if language:
                 welcome["language"] = language
-            if session.caps.get("profiles") is True and (roster := self.delegate.profiles(session)):
-                wanted = hello.get("profile")
-                if isinstance(wanted, str) and wanted and wanted != session.profile:
-                    await self.delegate.select_profile(session, wanted)  # a refusal leaves "default"
+            if roster:
                 welcome.update(profile=session.profile, profiles=roster)
-            named = hello.get("profile")
-            named = named if isinstance(named, str) and named else "default"
-            session.device_profile = welcome.get("profile", named)
-            # The face the device should show is made before the welcome, which keeps the one the device
-            # holds only if it is that face: otherwise the device shows the mascot until the face arrives.
-            loaded = await session.load_face()
-            digest = loaded[2]
-            if digest is not None and hello.get("face") == digest and session.device_profile == named:
-                session.face_hash = welcome["face"] = digest
+            if (isinstance(face, ProfileFace) and session.paired and hello.get("face") == face.hash
+                    and session.device_profile == named):
+                session.face_hash = welcome["face"] = face.hash
             await session.send_json(protocol.message("welcome", **welcome))
-            await session.send_face(loaded)
+            await session.send_face(face)
             log.info("device %s (%s) online, paired=%s", session.device_id, session.name, session.paired)
             await self.delegate.on_ready(session)
             if not session.display_sleeping:

@@ -300,6 +300,7 @@ class _Wire:
 
 def _slow_face_session(tmp_path, hub=None):
     """A paired, current session on default whose face is made only once ``delegate.release`` is set."""
+    from hermes_gadget_plugin.face import ProfileFace
     from hermes_gadget_plugin.hub import DeviceHub, DeviceSession, HubDelegate
 
     class SlowDefault(HubDelegate):
@@ -310,7 +311,7 @@ def _slow_face_session(tmp_path, hub=None):
             if session.profile != "default":
                 return None
             await self.release.wait()
-            return b"the default profile's face"
+            return ProfileFace.of(b"the default profile's face")
 
     delegate, wire = SlowDefault(), _Wire()
     hub = hub or DeviceHub(DeviceStore(tmp_path), delegate)

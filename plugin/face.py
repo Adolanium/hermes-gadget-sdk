@@ -8,10 +8,13 @@ needed to make a face from a picture, not to send a face file.
 
 from __future__ import annotations
 
+import hashlib
+import io
 import logging
 import struct
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -144,8 +147,27 @@ def to_bits(alpha, size: int, threshold: int = THRESHOLD) -> bytes:
 ANCHOR_FIELDS = ("ear_cup", "mouth_pt", "think_dot", "eyes_rows", "mouth_rows")  # two values each
 FACE_BYTES = sum(3 * ((size + 7) // 8) * size for size in SIZES) + 2 * 2 * len(ANCHOR_FIELDS)
 FACE_FILE = "gadget-face.bin"
-# Each avatar's face, made once per version of the picture: devices wait for it on every connection.
-_avatar_faces: dict[Path, tuple[tuple[int, int], bytes]] = {}
+# Part of a converted avatar's hash: change it when from_picture draws differently, so devices that
+# hold the old drawing get the new one.
+AVATAR_DRAWING = b"hermes-gadget avatar 1\n"
+
+
+def digest(data: bytes) -> str:
+    """The `hash` that names a face on the wire."""
+    return hashlib.sha256(data).hexdigest()[:16]
+
+
+@dataclass(frozen=True)
+class ProfileFace:
+    """A profile's face, named before it is made: `hash` comes from the source file, read at once,
+    and `load()` makes the face's bytes, which for an avatar means converting it."""
+
+    hash: str
+    load: Callable[[], bytes]
+
+    @classmethod
+    def of(cls, data: bytes) -> "ProfileFace":
+        return cls(digest(data), lambda: data)
 
 
 def pack(frames, anchors: dict, threshold: int = THRESHOLD) -> bytes:
@@ -157,7 +179,7 @@ def pack(frames, anchors: dict, threshold: int = THRESHOLD) -> bytes:
     return bits + struct.pack(f"<{len(values)}h", *values)
 
 
-def from_picture(path: Path) -> bytes:
+def from_picture(path: Path | io.BytesIO) -> bytes:
     """A still face from a picture not drawn for the device, such as a Hermes avatar.
 
     The screen draws light ink on dark, so a picture on a light background gives its dark parts
@@ -182,24 +204,21 @@ def from_picture(path: Path) -> bytes:
     return pack(dict.fromkeys(FRAMES, ink), measure(ink, Options()))
 
 
-def for_profile(home: Path, convert: bool = True) -> bytes | None:
+def for_profile(home: Path, convert: bool = True) -> ProfileFace | None:
     """The face a Hermes profile shows: its face file, else its avatar (`assets/avatar.*`, as
-    Hermes keeps it) when `convert`, else None for the mascot."""
+    Hermes keeps it) when `convert`, else None for the mascot. This reads one file; converting an
+    avatar waits for `load()`."""
     path = home / FACE_FILE
     if path.is_file():
         data = path.read_bytes()
         if len(data) == FACE_BYTES:
-            return data
+            return ProfileFace.of(data)
         logger.warning("%s is not a face file (%d bytes, not %d); make it with hermes-gadget face --out",
                        path, len(data), FACE_BYTES)
     if convert:
         for ext in ("png", "jpg", "webp"):
             avatar = home / "assets" / f"avatar.{ext}"
             if avatar.is_file():
-                stat = avatar.stat()
-                version = (stat.st_mtime_ns, stat.st_size)
-                cached = _avatar_faces.get(avatar)
-                if cached is None or cached[0] != version:
-                    cached = _avatar_faces[avatar] = (version, from_picture(avatar))
-                return cached[1]
+                source = avatar.read_bytes()
+                return ProfileFace(digest(AVATAR_DRAWING + source), lambda: from_picture(io.BytesIO(source)))
     return None
