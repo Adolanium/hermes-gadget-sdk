@@ -267,6 +267,7 @@ class DeviceSession:
         self._tasks: set[asyncio.Task] = set()
         self._ota_inbox: asyncio.Queue | None = None  # the device's ota.* replies, while an update runs
         self._dashboard_sent: dict | None = None  # the last dashboard this connection delivered
+        self._dashboards = 0  # dashboards offered, sent or held
 
     # -- capabilities -----------------------------------------------------------
 
@@ -366,6 +367,8 @@ class DeviceSession:
         self.paired = paired
         if paired:
             self.hub.store.confirm(self.device_id)
+        elif held := self.hub._held.get(self.device_id):
+            held.dashboard = None  # it was made for a paired device
         await self.send_json(protocol.message("paired" if paired else "unpaired"))
 
     async def ask(self, prompt_id: str, title: str, text: str, ttl_s: float | None = None) -> None:
@@ -401,6 +404,7 @@ class DeviceSession:
     async def send_dashboard(self, dashboard: dict) -> bool:
         """Send a dashboard snapshot if it differs from the last one delivered. False when it
         wasn't sent: unchanged, or held until the screen lights up (only the latest is kept)."""
+        self._dashboards += 1
         if self.display_sleeping:
             self.hub._hold(self.device_id).dashboard = dashboard
             return False
@@ -429,7 +433,10 @@ class DeviceSession:
         if held is None:
             return
         if held.status is not None:
+            offered = self._dashboards
             await self.send_status(held.status)
+            if self._dashboards != offered:
+                held.dashboard = None  # a newer one was offered while the status went out
         if held.dashboard is not None:
             await self.send_dashboard(held.dashboard)
         if held.view is None:

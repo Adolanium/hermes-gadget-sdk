@@ -258,6 +258,42 @@ def test_a_dark_screen_gets_only_the_latest_dashboard_when_it_lights_up(online, 
     assert types(frames) == ["dashboard", "display"]  # the card stays on top of it
 
 
+def test_a_dashboard_sent_while_the_held_status_goes_out_replaces_the_held_one(online, loop_thread):
+    import asyncio
+
+    hub, connect = online
+    device, session = connect()
+    device.frames()
+    device.screen(True)
+    assert _wait(lambda: session.display_sleeping)
+    loop_thread.run(session.send_status("Thinking"))
+    loop_thread.run(session.send_dashboard(SNAPSHOT))
+    loop_thread.run(session._send_lock.acquire())  # another write is still going out
+    device.screen(False)  # the wake queues the held status behind it
+    assert _wait(lambda: not session.display_sleeping)
+    time.sleep(0.1)
+    newer = asyncio.run_coroutine_threadsafe(session.send_dashboard(NEWER), loop_thread.loop)
+    time.sleep(0.1)
+    loop_thread.loop.call_soon_threadsafe(session._send_lock.release)
+    newer.result(5)
+    frames = device.frames()
+    assert types(frames)[0] == "status" and dashboards(frames) == [NEWER]  # never the older one after it
+
+
+
+def test_a_dashboard_held_for_a_device_that_is_then_unpaired_is_never_sent(online, loop_thread):
+    hub, connect = online
+    device, session = connect()
+    loop_thread.run(session.set_paired(True))
+    device.frames()
+    device.screen(True)
+    assert _wait(lambda: session.display_sleeping)
+    loop_thread.run(session.send_dashboard(SNAPSHOT))
+    loop_thread.run(session.set_paired(False))  # revoked while the screen was dark
+    device.screen(False)
+    assert dashboards(device.frames()) == []
+
+
 def test_a_held_dashboard_survives_a_reconnect(online, loop_thread):
     hub, connect = online
     device, session = connect(sleeping=True)
