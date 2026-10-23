@@ -4,7 +4,7 @@
 
 ### Hermes plugin
 
-- Validate device-selected profiles during Hermes native session admission and durable replay, retaining Default-owner trust, offered-profile policy and owner binding. Requires the matching Hermes `validate_native_profile_route` hook; without it, a secondary profile can be selected but ordinary messages fail with `profile_mismatch`.
+- Validate device-selected profiles during Hermes native session admission and durable replay, retaining Default-owner trust, offered-profile policy and owner binding. Requires the matching Hermes `validate_native_profile_route` hook; without it, a secondary profile can be selected but ordinary messages fail with `profile_mismatch`. Contributed by @bricelb.
 
 ### Hardware and setup
 
