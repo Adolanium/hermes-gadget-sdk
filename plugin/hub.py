@@ -393,10 +393,11 @@ class DeviceSession:
         devices get the mascot."""
         if self.caps.get("faces") != 1:
             return
-        profile = self.profile
-        data = await self.hub.delegate.face(self) if self.paired else None
+        profile, paired = self.profile, self.paired
+        data = await self.hub.delegate.face(self) if paired else None
         digest = hashlib.sha256(data).hexdigest()[:16] if data else None
-        if self.profile != profile or digest == self.face_hash:  # switched meanwhile: that call sends its own
+        # Switched or (un)paired meanwhile: that change sends its own face.
+        if (self.profile, self.paired) != (profile, paired) or digest == self.face_hash:
             return
         self.face_hash = digest
         await self.send_json(protocol.message(

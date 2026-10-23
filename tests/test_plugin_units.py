@@ -2,6 +2,7 @@
 
 import asyncio
 import io
+import json
 import math
 import struct
 import wave
@@ -285,10 +286,20 @@ def test_long_enough_utterance_still_reaches_the_delegate():
 
 # -- faces -------------------------------------------------------------------------------
 
-def test_a_face_that_arrives_after_a_profile_switch_is_not_sent(tmp_path):
-    """The switch sends the new profile's face; a slow face for the old one must never follow it."""
-    import json
+class _Wire:
+    """A device's socket: records what the hub sends."""
 
+    remote_address = ("127.0.0.1", 1)
+
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, raw):
+        self.sent.append(json.loads(raw))
+
+
+def _slow_face_session(tmp_path):
+    """A paired session on default whose face is made only once ``delegate.release`` is set."""
     from hermes_gadget_plugin.hub import DeviceHub, DeviceSession, HubDelegate
 
     class SlowDefault(HubDelegate):
@@ -301,19 +312,17 @@ def test_a_face_that_arrives_after_a_profile_switch_is_not_sent(tmp_path):
             await self.release.wait()
             return b"the default profile's face"
 
-    class Wire:
-        remote_address = ("127.0.0.1", 1)
+    delegate, wire = SlowDefault(), _Wire()
+    session = DeviceSession(DeviceHub(DeviceStore(tmp_path), delegate), wire, {"device_id": "hg-1", "caps": {"faces": 1}})
+    session.paired = True
+    return session, delegate, wire
 
-        def __init__(self):
-            self.sent = []
 
-        async def send(self, raw):
-            self.sent.append(json.loads(raw))
+def test_a_face_that_arrives_after_a_profile_switch_is_not_sent(tmp_path):
+    """The switch sends the new profile's face; a slow face for the old one must never follow it."""
 
     async def main():
-        delegate, wire = SlowDefault(), Wire()
-        session = DeviceSession(DeviceHub(DeviceStore(tmp_path), delegate), wire, {"device_id": "hg-1", "caps": {"faces": 1}})
-        session.paired = True
+        session, delegate, wire = _slow_face_session(tmp_path)
         first = asyncio.create_task(session.send_face())  # as after welcome, on default
         await asyncio.sleep(0)
         session.profile = "ops"
@@ -323,3 +332,16 @@ def test_a_face_that_arrives_after_a_profile_switch_is_not_sent(tmp_path):
         return wire.sent
 
     assert asyncio.run(main()) == [{"type": "profile", "profile": "ops"}]
+
+
+def test_a_face_that_arrives_after_the_device_is_unpaired_is_not_sent(tmp_path):
+    async def main():
+        session, delegate, wire = _slow_face_session(tmp_path)
+        first = asyncio.create_task(session.send_face())
+        await asyncio.sleep(0)
+        await session.set_paired(False)  # revoked while the face was being made
+        delegate.release.set()
+        await first
+        return wire.sent, session.face_hash
+
+    assert asyncio.run(main()) == ([{"type": "unpaired"}], None)

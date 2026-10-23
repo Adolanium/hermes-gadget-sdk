@@ -503,6 +503,8 @@ void App::h_welcome(const json::Value& m) {
   if (paired_) {
     pairing_code_.clear();
     pairing_command_.clear();
+  } else {
+    face_.reset();  // revoked while away: the mascot, and no face named in the next hello
   }
   log(LogLevel::Info, paired_ ? "online (paired)" : "online (waiting for pairing approval)");
   agent_profiles_.clear();
@@ -537,7 +539,7 @@ void App::h_profile(const json::Value& m) {
 }
 
 void App::h_face(const json::Value& m) {
-  if (!profile_.faces) return;
+  if (!profile_.faces || !paired_) return;
   face_.reset();
   const std::string& bits = m["bits"].as_string();
   if (bits.empty()) return;
@@ -644,6 +646,7 @@ void App::h_paired(const json::Value&) {
 
 void App::h_unpaired(const json::Value&) {
   paired_ = false;
+  face_.reset();
   mode_ = Mode::Idle;
   stop_playback();
 }

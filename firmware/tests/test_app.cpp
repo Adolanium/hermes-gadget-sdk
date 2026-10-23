@@ -3714,6 +3714,32 @@ TEST("faces: a malformed face shows the mascot") {
   CHECK(r.app.model().face == nullptr);
 }
 
+TEST("faces: an unpaired device shows the mascot and names no face") {
+  Rig r;
+  r.bring_online(true);
+  r.server(face_message("default", "a1"));
+  r.server(R"({"type":"unpaired"})");
+  CHECK(r.app.model().face == nullptr);
+  r.server(face_message("default", "a1"));  // a face still on its way
+  CHECK(r.app.model().face == nullptr);
+
+  Rig away;  // revoked while offline: the welcome says so
+  away.bring_online(true);
+  away.server(face_message("default", "a1"));
+  away.app.on_transport_closed("network flap");
+  away.advance(5000);
+  away.app.on_transport_open();
+  away.server(R"({"type":"challenge","nonce":"bjI=","enrolled":true})");
+  away.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":false})");
+  CHECK(away.app.model().face == nullptr);
+  away.fake.sent.clear();
+  away.app.on_transport_closed("network flap");
+  away.advance(5000);
+  away.app.on_transport_open();
+  const Value* hello = away.fake.last("hello");
+  CHECK(hello && !hello->has("face"));
+}
+
 TEST("faces: a board without the memory for a face offers none and ignores one") {
   hg::DeviceProfile p = Rig::profile("ws://hermes.local:8765/gadget");
   p.faces = false;
