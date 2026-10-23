@@ -145,6 +145,17 @@ def test_a_face_file_carries_the_firmwares_frames_then_its_anchors(tmp_path):
     assert len(bits) + 20 == profile_faces.FACE_BYTES
 
 
+def test_a_face_files_anchors_stay_on_the_bitmap():
+    """The device refuses a face with an anchor off the bitmap, so one drawn past an edge is held to it."""
+    from PIL import Image
+
+    blank = Image.new("L", (face.MASTER_SIZE, face.MASTER_SIZE), 0)
+    geo = {"ear_cup": (-50, 300), "mouth_pt": (500, 1100), "think_dot": (800, 100), "eyes_rows": (400, 500),
+           "mouth_rows": (980, 1100)}
+    data = profile_faces.pack(dict.fromkeys(face.FRAMES, blank), geo)
+    assert struct.unpack("<10h", data[-20:]) == (0, 293, 488, 1000, 781, 98, 391, 488, 957, 1000)
+
+
 def _disc(path: Path, ink: tuple, paper: tuple) -> Path:
     """An original drawing: a filled disc with two eye holes."""
     from PIL import Image, ImageDraw

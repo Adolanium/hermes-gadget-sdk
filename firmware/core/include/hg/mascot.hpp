@@ -52,8 +52,9 @@ struct Face {
   Anchors anchors;
 };
 // The face message's `bits`: base64 of the bitmaps, then of the anchors as ten little-endian int16
-// in Anchors' field order. False, before allocating anything, when the length is not exactly that,
-// and false when there is no memory for it.
+// in Anchors' field order. False, before allocating anything, when the length is not exactly that;
+// false when there is no memory for it, and when an anchor is outside 0..1000 or a row range is
+// upside down.
 bool parse(std::string_view base64, Face& out);
 // pick() and anchors() for `face`, or for the mascot when it is null.
 Bitmap pick(int max_size, Frame frame, const Face* face);

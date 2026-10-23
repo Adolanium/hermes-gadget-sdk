@@ -35,7 +35,11 @@ bool parse(std::string_view base64, Face& out) {
   if (!data || !crypto::base64_decode(base64, data.get(), total, len) || len != total) return false;
   const uint8_t* a = data.get() + n;
   int16_t v[10];
-  for (size_t i = 0; i < 10; ++i) v[i] = static_cast<int16_t>(a[2 * i] | (a[2 * i + 1] << 8));
+  for (size_t i = 0; i < 10; ++i) {
+    v[i] = static_cast<int16_t>(a[2 * i] | (a[2 * i + 1] << 8));
+    if (v[i] < 0 || v[i] > 1000) return false;  // off the bitmap: the effects and blink repaints would miss
+  }
+  if (v[6] > v[7] || v[8] > v[9]) return false;  // the eye and mouth rows, top first
   out.anchors = {{v[0], v[1]}, {v[2], v[3]}, {v[4], v[5]}, v[6], v[7], v[8], v[9]};
   out.bits = std::move(data);
   return true;

@@ -628,7 +628,8 @@ class _ProfileFaces(_TwoProfiles):
 
     async def face(self, session):
         from hermes_gadget_plugin.face import FACE_BYTES
-        return bytes([0xF0]) * FACE_BYTES if session.profile == "default" else None
+        anchors = struct.pack("<10h", 607, 293, 262, 620, 801, 107, 396, 508, 586, 649)
+        return bytes([0xF0]) * (FACE_BYTES - len(anchors)) + anchors if session.profile == "default" else None
 
 
 def test_a_profile_face_is_sent_once_and_the_mascot_comes_back_on_a_switch(loop_thread, tmp_path, make_sim):

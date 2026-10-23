@@ -148,9 +148,10 @@ FACE_FILE = "gadget-face.bin"
 
 def pack(frames, anchors: dict, threshold: int = THRESHOLD) -> bytes:
     """A face's bytes (docs/protocol.md#faces): every size, smallest first, each as idle, blink and
-    talk; then the effect anchors as little-endian int16 thousandths, in the firmware's order."""
+    talk; then the effect anchors as little-endian int16 thousandths, in the firmware's order, held
+    to the 0..1000 the device accepts."""
     bits = b"".join(to_bits(frames[frame], size, threshold) for size in SIZES for frame in FRAMES)
-    values = [thousandths(v) for name in ANCHOR_FIELDS for v in anchors[name]]
+    values = [min(1000, max(0, thousandths(v))) for name in ANCHOR_FIELDS for v in anchors[name]]
     return bits + struct.pack(f"<{len(values)}h", *values)
 
 

@@ -3669,9 +3669,10 @@ TEST("language: the agent can set auto through screen.language") {
 
 namespace {
 // A face message (docs/protocol.md#faces) whose every bitmap byte is `ink`.
-std::string face_message(const std::string& profile, const std::string& hash, uint8_t ink = 0xff) {
+std::string face_message(const std::string& profile, const std::string& hash, uint8_t ink = 0xff,
+                         std::vector<int> anchors = {607, 293, 262, 620, 801, 107, 396, 508, 586, 649}) {
   std::vector<uint8_t> data(3 * (512 + 1152 + 2592 + 4608), ink);
-  for (int v : {607, 293, 262, 620, 801, 107, 396, 508, 586, 649}) {
+  for (int v : anchors) {
     data.push_back(static_cast<uint8_t>(v & 0xff));
     data.push_back(static_cast<uint8_t>(v >> 8));
   }
@@ -3712,6 +3713,14 @@ TEST("faces: a malformed face shows the mascot") {
   CHECK(r.app.model().face == nullptr);
   r.server(R"({"type":"face","profile":"default","hash":"c3","bits":")" + std::string(400000, 'A') + R"("})");
   CHECK(r.app.model().face == nullptr);
+  r.server(face_message("default", "d4", 0xff, {607, 293, 262, 620, 801, 107, 32767, 32767, 586, 649}));
+  CHECK(r.app.model().face == nullptr);  // eye rows off the bitmap: the blink would never repaint
+  r.server(face_message("default", "e5", 0xff, {607, 293, 262, 620, 801, 107, 508, 396, 586, 649}));
+  CHECK(r.app.model().face == nullptr);  // eye rows upside down
+  r.server(face_message("default", "f6", 0xff, {-5, 293, 262, 620, 801, 107, 396, 508, 586, 649}));
+  CHECK(r.app.model().face == nullptr);
+  r.server(face_message("default", "a7", 0xff, {0, 0, 1000, 1000, 0, 1000, 0, 1000, 500, 500}));
+  CHECK(r.app.model().face != nullptr);  // the edges are fine
 }
 
 TEST("faces: a late face or clear for the previous profile leaves this one's alone") {
