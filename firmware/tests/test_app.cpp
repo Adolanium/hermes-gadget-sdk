@@ -3750,7 +3750,7 @@ TEST("faces: an unpaired device shows the mascot and names no face") {
   away.advance(5000);
   away.app.on_transport_open();
   away.server(R"({"type":"challenge","nonce":"bjI=","enrolled":true})");
-  away.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":false})");
+  away.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":false,"face":"a1"})");  // even named
   CHECK(away.app.model().face == nullptr);
   away.fake.sent.clear();
   away.app.on_transport_closed("network flap");
