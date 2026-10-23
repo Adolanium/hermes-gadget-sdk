@@ -91,6 +91,166 @@ def test_old_firmware_gets_no_roster_and_an_untouched_source(hermes_home, gadget
     assert event.source.profile is None
 
 
+def _dashboard_labels(device, seconds):
+    """The session labels of each dashboard the device gets within ``seconds``."""
+    import time
+
+    seen, end = [], time.monotonic() + seconds
+    while (left := end - time.monotonic()) > 0:
+        try:
+            msg = json.loads(device.ws.recv(timeout=left))
+        except TimeoutError:
+            break
+        if msg.get("type") == "dashboard":
+            seen.append([row["label"] for row in msg["sessions"]])
+    return seen
+
+
+def _profile_board(monkeypatch, profile):
+    """A session board registered the way ``profile``'s own copy of the plugin registers it."""
+    from hermes_gadget_plugin import dashboard, runtime
+
+    monkeypatch.setitem(runtime._boards, profile, None)  # so the registration is undone after the test
+    board = dashboard.SessionBoard()
+    board.register(types.SimpleNamespace(profile_name=profile, register_hook=lambda name, callback: None))
+    return board
+
+
+def test_only_a_switching_device_sees_the_offered_profiles_sessions(hermes_home, gadget, monkeypatch):
+    import os
+    from hermes_gadget_plugin import adapter as adapter_module, dashboard, protocol
+
+    monkeypatch.setattr(adapter_module, "DASHBOARD_POLL_S", 60)  # only a wake sends a change below
+    monkeypatch.setattr(dashboard.BOARD, "_sessions", {})  # the default profile's board: no sessions
+    ops = _profile_board(monkeypatch, "ops")
+    old = _profile_board(monkeypatch, "old")  # parked, so not served and never offered
+    old.pre_llm_call(session_id="s_old1", platform="cli")
+    ops.pre_llm_call(session_id="s_ops1", platform="telegram")
+    caps = {"dashboard": {"v": dashboard.VERSION}}
+    keys = os.urandom(32), os.urandom(32)
+    gadget.authorized.update(protocol.device_id_for_key(k) for k in keys)
+    with _RawDevice(gadget.url, keys[0], {**caps, "profiles": True}) as switching, \
+            _RawDevice(gadget.url, keys[1], caps) as old_firmware:
+        assert _dashboard_labels(switching, 2.5)[-1] == ["telegram ops1"]  # outlasts the poll begun before
+        ops.pre_approval_request(session_id="s_ops2")  # wakes the dashboard as a session of its own does
+        assert _dashboard_labels(switching, 1.5)[-1] == ["session ops2", "telegram ops1"]
+        assert _dashboard_labels(old_firmware, 0.5) == [[]]  # exactly today's: the default profile's only
+
+
+def _sessions_mine_and_ops(monkeypatch):
+    from hermes_gadget_plugin import dashboard
+
+    monkeypatch.setattr(dashboard.BOARD, "_sessions", {})
+    dashboard.BOARD.pre_llm_call(session_id="s_mine", platform="cli")  # the default profile's own
+    _profile_board(monkeypatch, "ops").pre_llm_call(session_id="s_ops1", platform="telegram")
+
+
+@pytest.mark.parametrize("offered", [None, set()], ids=["switching off", "ops served but not offered"])
+def test_without_the_offer_a_device_gets_only_the_default_profiles_sessions(hermes_home, gadget, monkeypatch,
+                                                                            offered):
+    import os
+    from hermes_gadget_plugin import dashboard, protocol
+
+    monkeypatch.setattr(gadget.adapter, "_offer_all", False)
+    monkeypatch.setattr(gadget.adapter, "_offered", offered)  # no `profiles` key, or `profiles: []`
+    _sessions_mine_and_ops(monkeypatch)
+    key = os.urandom(32)
+    gadget.authorized.add(protocol.device_id_for_key(key))
+    with _RawDevice(gadget.url, key, {"dashboard": {"v": dashboard.VERSION}, "profiles": True}) as device:
+        assert _dashboard_labels(device, 2.5) == [["cli mine"]]  # exactly today's
+
+
+def test_a_routed_device_gets_only_the_default_profiles_sessions(live_rig, monkeypatch):
+    from hermes_gadget_plugin import dashboard
+
+    _sessions_mine_and_ops(monkeypatch)
+    live_rig.route()  # to ops, with switching on for every other device
+    live_rig.approve("ops")
+    with live_rig.connect({"dashboard": {"v": dashboard.VERSION}, "profiles": True}, profile="default") as device:
+        assert device.welcome["paired"] is True
+        assert _dashboard_labels(device, 2.5) == [["cli mine"]]  # exactly today's
+
+
+def _paused_roster(monkeypatch, adapter):
+    """Hold the dashboard's roster lookup (``profiles()`` with no session) until ``release`` is set."""
+    import threading
+
+    reading, release, roster = threading.Event(), threading.Event(), adapter.profiles
+
+    def profiles(session=None):
+        if session is None:
+            reading.set()
+            release.wait(10)
+        return roster(session)
+
+    monkeypatch.setattr(adapter, "profiles", profiles)
+    return reading, release
+
+
+def test_a_device_revoked_while_the_roster_is_read_gets_no_dashboard(hermes_home, gadget, monkeypatch):
+    import os
+    from hermes_gadget_plugin import dashboard, protocol
+
+    _profile_board(monkeypatch, "ops").pre_llm_call(session_id="s_ops1", platform="telegram")
+    reading, release = _paused_roster(monkeypatch, gadget.adapter)
+    key = os.urandom(32)
+    device_id = protocol.device_id_for_key(key)
+    gadget.authorized.add(device_id)
+    with _RawDevice(gadget.url, key, {"dashboard": {"v": dashboard.VERSION}, "profiles": True}) as device:
+        assert reading.wait(5)  # the first dashboard is waiting for the roster
+        gadget.authorized.discard(device_id)  # revoked in the default profile
+        while json.loads(device.ws.recv(timeout=10)).get("type") != "unpaired":
+            pass
+        release.set()
+        assert _dashboard_labels(device, 1.0) == []
+
+
+def test_a_roster_read_still_running_at_disconnect_leaves_no_listener(hermes_home, gadget, monkeypatch):
+    import asyncio
+    import os
+    import time
+    from hermes_gadget_plugin import dashboard, protocol
+
+    ops = _profile_board(monkeypatch, "ops")
+    reading, release = _paused_roster(monkeypatch, gadget.adapter)
+    key = os.urandom(32)
+    gadget.authorized.add(protocol.device_id_for_key(key))
+    with _RawDevice(gadget.url, key, {"dashboard": {"v": dashboard.VERSION}, "profiles": True}):
+        assert reading.wait(5)  # the first dashboard is waiting for the roster
+        stopping = asyncio.run_coroutine_threadsafe(gadget.adapter.disconnect(), gadget.loop)
+        time.sleep(0.3)  # disconnect has dropped its listeners and waits for the connection to end
+        release.set()
+        stopping.result(10)
+        time.sleep(0.3)
+    assert ops._listeners == []  # nothing keeps calling the stopped adapter
+
+
+def test_a_board_no_longer_offered_or_replaced_loses_its_listener(hermes_home, gadget, monkeypatch):
+    import os
+    import time
+    from hermes_gadget_plugin import adapter as adapter_module, dashboard, protocol
+
+    monkeypatch.setattr(adapter_module, "DASHBOARD_POLL_S", 60)  # only a wake sends a dashboard below
+    monkeypatch.setattr(dashboard.BOARD, "_sessions", {})
+    ops = _profile_board(monkeypatch, "ops")
+    ops.pre_llm_call(session_id="s_ops1", platform="telegram")
+    key = os.urandom(32)
+    gadget.authorized.add(protocol.device_id_for_key(key))
+    with _RawDevice(gadget.url, key, {"dashboard": {"v": dashboard.VERSION}, "profiles": True}) as device:
+        assert _dashboard_labels(device, 2.5)[-1] == ["telegram ops1"]
+        assert len(ops._listeners) == 1
+        reloaded = _profile_board(monkeypatch, "ops")  # a reloaded copy of ops's plugin registers anew
+        dashboard.BOARD.pre_llm_call(session_id="s_mine", platform="cli")  # wakes the dashboard
+        _dashboard_labels(device, 1.0)
+        assert ops._listeners == [] and len(reloaded._listeners) == 1
+        monkeypatch.setattr(gadget.adapter, "_offer_all", False)
+        monkeypatch.setattr(gadget.adapter, "_offered", {"default"})  # ops is taken off the list
+        dashboard.BOARD.pre_llm_call(session_id="s_min2", platform="cli")
+        assert _dashboard_labels(device, 1.0)[-1] == ["cli min2", "cli mine"]
+        time.sleep(0.1)
+        assert reloaded._listeners == []  # nothing wakes the dashboard for a profile it no longer shows
+
+
 DEVICE = "hg-cccccccccccccccc"
 
 

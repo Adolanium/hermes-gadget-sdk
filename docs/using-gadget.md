@@ -21,7 +21,7 @@ If speech is missing, check [audio setup](connect-hermes.md#4-enable-speech). Fo
 
 ## Watch Hermes sessions on the dashboard
 
-The dashboard lists the Hermes agent's sessions, from every platform the gateway serves, and any status tiles you set on the host. Each session shows its state:
+The dashboard lists the Hermes agent's sessions, from every platform the gateway serves, and any status tiles you set on the host. When the host offers [several profiles](hermes-integration.md#running-against-a-profile-or-a-multiplexed-gateway), a device that can switch also lists the sessions of each offered profile that has the gadget plugin enabled. Each session shows its state:
 
 | State | Colour | Meaning |
 |---|---|---|
