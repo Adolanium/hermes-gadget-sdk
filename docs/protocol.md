@@ -149,7 +149,7 @@ A device that sends `caps.faces: 1` can show each profile with its own face inst
 - The server sends `face` after `welcome`, after each `profile` that is not a refusal, and after `paired` and `unpaired`. An unpaired device gets the mascot.
 - The device keeps its face in memory, through reconnects, and drops it when it changes profile: after a `profile` or `welcome` that names another profile, it shows the mascot until that profile's face arrives. It never shows the previous profile's face.
 - The server sends nothing when the device already has the right face: when `hello.face` is that face's `hash` and the welcome does not change the device's profile, or when the device shows the mascot and the profile has no face.
-- A device without `caps.faces` gets no `face` messages.
+- A device without `caps.faces` gets no `face` messages. The reference firmware sends `caps.faces` only on boards with PSRAM: a face takes about 27 KB, and its message about 36 KB more while it arrives.
 
 The Hermes plugin sends a profile's `gadget-face.bin`, or else the profile's Hermes avatar made into a still face; see [Faces](faces.md#a-face-for-each-hermes-profile).
 

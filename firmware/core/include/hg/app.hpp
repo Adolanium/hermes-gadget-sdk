@@ -60,6 +60,9 @@ struct DeviceProfile {
   bool frame_stats = false;
   uint32_t frame_budget_us = FrameStats::kDefaultBudgetUs;
   uint32_t frame_log_ms = 10000;
+  // Room for a face from Hermes (docs/protocol.md#faces): about 27 KB, and its message at once.
+  // Boards without PSRAM don't offer faces.
+  bool faces = true;
 };
 
 // A device-side capability the agent may invoke. `params` is a JSON-schema

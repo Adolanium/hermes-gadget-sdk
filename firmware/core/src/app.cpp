@@ -421,7 +421,7 @@ void App::send_hello() {
     caps.set("dashboard", dash);
   }
   caps.set("profiles", true);
-  if (ui_) caps.set("faces", 1);
+  if (ui_ && profile_.faces) caps.set("faces", 1);
   if (hal_.updater) {
     json::Value ota = json::Value::object();
     ota.set("max_size", hal_.updater->capacity());
@@ -537,13 +537,13 @@ void App::h_profile(const json::Value& m) {
 }
 
 void App::h_face(const json::Value& m) {
+  if (!profile_.faces) return;
   face_.reset();
   const std::string& bits = m["bits"].as_string();
   if (bits.empty()) return;
   const std::string& hash = m["hash"].as_string();
-  std::vector<uint8_t> data;
   mascot::Face face;
-  if (hash.empty() || hash.size() > 64 || !crypto::base64_decode(bits, data) || !mascot::parse(std::move(data), face)) {
+  if (hash.empty() || hash.size() > 64 || !mascot::parse(bits, face)) {
     log(LogLevel::Warn, "ignored a malformed face");
     return;
   }

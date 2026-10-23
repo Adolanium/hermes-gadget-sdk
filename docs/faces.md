@@ -103,7 +103,7 @@ A `.bin` name makes the command write a face file. The default profile's folder 
 home itself (`~/.hermes/gadget-face.bin`). The Hermes plugin sends the face of the profile that
 answers a device when the device connects and when it switches profile, so the face changes with
 the profile, and a firmware update keeps it. Devices whose firmware predates faces keep the
-mascot.
+mascot, and so do boards without PSRAM, which have no room for a second face.
 
 A profile without a face file shows its Hermes avatar (`assets/avatar.png`, `.jpg` or `.webp` in
 the profile's folder), made into a still face: the light parts of a picture on a dark background,

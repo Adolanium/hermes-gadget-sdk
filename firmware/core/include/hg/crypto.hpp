@@ -37,6 +37,8 @@ Digest hmac_sha256(const uint8_t* key, size_t key_len, const uint8_t* msg, size_
 std::string base64_encode(const uint8_t* data, size_t len);
 // Returns false on malformed input (padding optional).
 bool base64_decode(std::string_view in, std::vector<uint8_t>& out);
+// The same into out[0, cap), with the decoded length in `len`; false also when it needs more than `cap`.
+bool base64_decode(std::string_view in, uint8_t* out, size_t cap, size_t& len);
 
 std::string hex(const uint8_t* data, size_t len);
 

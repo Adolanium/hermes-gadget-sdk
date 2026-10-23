@@ -3710,6 +3710,19 @@ TEST("faces: a malformed face shows the mascot") {
   CHECK(r.app.model().face == nullptr);
   r.server(face_message("default", ""));
   CHECK(r.app.model().face == nullptr);
+  r.server(R"({"type":"face","profile":"default","hash":"c3","bits":")" + std::string(400000, 'A') + R"("})");
+  CHECK(r.app.model().face == nullptr);
+}
+
+TEST("faces: a board without the memory for a face offers none and ignores one") {
+  hg::DeviceProfile p = Rig::profile("ws://hermes.local:8765/gadget");
+  p.faces = false;
+  Rig r(p);
+  r.bring_online(true);
+  const Value* hello = r.fake.last("hello");
+  CHECK(hello && !(*hello)["caps"].has("faces"));
+  r.server(face_message("default", "a1"));
+  CHECK(r.app.model().face == nullptr);
 }
 
 TEST("faces: a reconnect keeps the face and names its hash in hello") {
