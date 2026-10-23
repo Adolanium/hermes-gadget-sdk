@@ -203,6 +203,9 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._dashboard_task: Optional[asyncio.Task] = None
         self._dashboard_wake: Optional[asyncio.Event] = None
         self._boards: Dict[dashboard.SessionBoard, Callable[[], None]] = {}  # each board read, its unsubscribe
+        self._roster_lock = asyncio.Lock()  # one roster read at a time; never held across a send
+        self._push_seq = 0
+        self._pushed_seq: Dict[str, int] = {}  # device -> the newest push that read a roster for it
         self._battery_log: Optional[BatteryLog] = None
         self._tls_cert = extra.get("tls_cert")
         self._tls_key = extra.get("tls_key")
@@ -278,6 +281,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if self._hub:
             await self._hub.stop()
             self._hub = None
+        self._pushed_seq.clear()  # after the stop: a push still finishing while it ran may add one
         self._mark_disconnected()
 
     @property
@@ -526,18 +530,33 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     async def _push_dashboard(self, only: Optional[DeviceSession] = None) -> None:
         if self._hub is None or self._tiles is None:
             return
-        targets = [only] if only is not None else list(self._hub.sessions.values())
-        targets = [s for s in targets if s.paired and not s.closed and s.dashboard_version >= dashboard.VERSION]
+        live = [s for s in self._hub.sessions.values()
+                if s.paired and not s.closed and s.dashboard_version >= dashboard.VERSION]
+        targets = live if only is None else [s for s in live if s is only]
+        if not any(self._switches(s) for s in live):  # no device reads other profiles' boards any more
+            self._keep_boards([])
         if not targets:
             return
         switching = [self._switches(s) for s in targets]
-        others = await self._offered_boards() if any(switching) else self._keep_boards([])
-        mine = dashboard.BOARD.sessions()
-        theirs = dashboard.BOARD.sessions(*others) if others else mine
+        theirs: Optional[List[Dict[str, str]]] = None
+        seq = 0
+        if any(switching):
+            async with self._roster_lock:  # rosters are read, and their rows taken, in push order
+                self._push_seq = seq = self._push_seq + 1
+                self._pushed_seq.update((s.device_id, seq) for s, sw in zip(targets, switching)
+                                        if sw and self._hub is not None and self._hub.get(s.device_id) is s)
+                theirs = dashboard.BOARD.sessions(*await self._offered_boards())
+        mine = dashboard.BOARD.sessions()  # after any roster wait, so a change made during it goes out
+        if theirs is None:
+            theirs = mine
         tiles = self._tiles.tiles()
         for session, switches in zip(targets, switching):
             if not session.paired or (switches and not self._still_trusted(session)):
                 continue  # revoked or replaced while the roster was read
+            if switches and self._pushed_seq.get(session.device_id) != seq:
+                continue  # a newer push has a newer roster for this device and sends it
+            # No await from the check to here: send_dashboard queues on the device's send lock (FIFO)
+            # before any newer push can, so an older dashboard never lands after a newer one.
             await session.send_dashboard(dashboard.message(
                 theirs if switches else mine, tiles, charset=session.charset, cols=session.display.get("text_cols")))
 
@@ -714,6 +733,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     async def on_disconnect(self, session: DeviceSession) -> None:
         if self._hub and session.device_id not in self._hub.sessions:
             self._turns.pop(session.device_id, None)
+            self._pushed_seq.pop(session.device_id, None)
 
     # -- turn lifecycle -------------------------------------------------------------
 
