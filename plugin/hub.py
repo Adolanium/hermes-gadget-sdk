@@ -262,6 +262,9 @@ class DeviceSession:
         self.paired = False
         self.profile = "default"  # the Hermes profile that answers this device
         self.face_hash: str | None = None  # the face the device holds; None is the mascot
+        # The profile the device takes as its own, which a face must name: the last `profile` or
+        # `welcome.profile`, else the one it named in hello. A gadget route doesn't change it.
+        self.device_profile = "default"
         self.connected_at = time.time()
         self.last_rx = time.monotonic()
         self.closed = False
@@ -385,6 +388,7 @@ class DeviceSession:
     async def send_profile(self, error: str | None = None) -> None:
         await self.send_json(protocol.message("profile", profile=self.profile, error=error))
         if error is None:
+            self.device_profile = self.profile
             self.face_hash = None  # a device that changes profile drops its face
             await self.send_face()
 
@@ -393,15 +397,15 @@ class DeviceSession:
         devices get the mascot."""
         if self.caps.get("faces") != 1:
             return
-        profile, paired = self.profile, self.paired
-        data = await self.hub.delegate.face(self) if paired else None
+        state = self.device_profile, self.profile, self.paired
+        data = await self.hub.delegate.face(self) if self.paired else None
         digest = hashlib.sha256(data).hexdigest()[:16] if data else None
         # Switched or (un)paired meanwhile: that change sends its own face.
-        if (self.profile, self.paired) != (profile, paired) or digest == self.face_hash:
+        if (self.device_profile, self.profile, self.paired) != state or digest == self.face_hash:
             return
         self.face_hash = digest
         await self.send_json(protocol.message(
-            "face", profile=profile, hash=digest, bits=base64.b64encode(data).decode() if data else None))
+            "face", profile=state[0], hash=digest, bits=base64.b64encode(data).decode() if data else None))
 
     async def show_card(self, title: str, body: str, ttl_s: float = 15) -> bool:
         """Show a card. False when it is held until the screen lights up."""
@@ -787,8 +791,11 @@ class DeviceHub:
                 welcome.update(profile=session.profile, profiles=roster)
             await session.send_json(protocol.message("welcome", **welcome))
             # The device keeps its face through a reconnect, unless the welcome names another profile.
+            named = hello.get("profile")
+            named = named if isinstance(named, str) and named else "default"
+            session.device_profile = welcome.get("profile", named)
             held = hello.get("face")
-            if isinstance(held, str) and welcome.get("profile", "") in ("", hello.get("profile") or "default"):
+            if isinstance(held, str) and session.device_profile == named:
                 session.face_hash = held
             await session.send_face()
             log.info("device %s (%s) online, paired=%s", session.device_id, session.name, session.paired)

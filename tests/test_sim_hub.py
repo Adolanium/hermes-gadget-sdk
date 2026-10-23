@@ -1,5 +1,6 @@
 """The production device core (in the simulator) against the production hub."""
 
+import hashlib
 import json
 import math
 import struct
@@ -623,13 +624,31 @@ def test_devices_switch_hermes_profile_and_keep_it(loop_thread, tmp_path, make_s
         loop_thread.run(hub.stop())
 
 
+def _face(ink: int) -> bytes:
+    """A face the device takes (docs/protocol.md#faces): every bitmap byte ``ink``, the mascot's anchors."""
+    from hermes_gadget_plugin.face import FACE_BYTES
+
+    anchors = struct.pack("<10h", 607, 293, 262, 620, 801, 107, 396, 508, 586, 649)
+    return bytes([ink]) * (FACE_BYTES - len(anchors)) + anchors
+
+
+def _digest(face: bytes) -> str:
+    return hashlib.sha256(face).hexdigest()[:16]
+
+
+def _held_face(sim):
+    """The hash of the face the device holds, as the hello of a reconnect names it."""
+    sim.console("reconnect")
+    assert sim.wait_screen("connecting", timeout=5)
+    assert sim.wait_screen("ready", timeout=10)
+    return [m for m in sim.sent if m.get("type") == "hello"][-1].get("face")
+
+
 class _ProfileFaces(_TwoProfiles):
     """The default profile has a face; ops has none."""
 
     async def face(self, session):
-        from hermes_gadget_plugin.face import FACE_BYTES
-        anchors = struct.pack("<10h", 607, 293, 262, 620, 801, 107, 396, 508, 586, 649)
-        return bytes([0xF0]) * (FACE_BYTES - len(anchors)) + anchors if session.profile == "default" else None
+        return _face(0xF0) if session.profile == "default" else None
 
 
 def test_a_profile_face_is_sent_once_and_the_mascot_comes_back_on_a_switch(loop_thread, tmp_path, make_sim):
@@ -663,6 +682,60 @@ def test_a_profile_face_is_sent_once_and_the_mascot_comes_back_on_a_switch(loop_
         loop_thread.run(device.send_profile())
         assert sim.wait_for(lambda: len(faces()) == 2, timeout=5)
         assert faces()[1]["hash"] == sent["hash"]
+    finally:
+        loop_thread.run(hub.stop())
+
+
+class _RoutedLater(_TwoProfiles):
+    """Two profiles a device picks from, until a gadget route sends it to ``route``: no roster then."""
+
+    def __init__(self):
+        self.route = None
+        self.faces = {"ops": _face(0x0F), "work": _face(0x3C)}
+
+    def profiles(self, session=None):
+        return [] if self.route else super().profiles(session)
+
+    async def face(self, session):
+        return self.faces.get(self.route or session.profile)
+
+
+def test_a_device_on_a_route_added_while_it_was_away_takes_the_routes_face(loop_thread, tmp_path, make_sim):
+    """The welcome then names no profile, so a face names the one the device kept, and the device takes it."""
+    from hermes_gadget_plugin.hub import DeviceHub
+    from hermes_gadget_plugin.store import DeviceStore
+
+    delegate = _RoutedLater()
+    hub = DeviceHub(DeviceStore(tmp_path / "server"), delegate, host="127.0.0.1", port=0, heartbeat_s=5)
+    loop_thread.run(hub.start())
+    url = f"ws://127.0.0.1:{hub.bound_port}/gadget"
+    last_face = lambda sim: [m for m in sim.received if m.get("type") == "face"][-1]  # noqa: E731
+    try:
+        sim = make_sim(url)
+        assert sim.wait_screen("ready", timeout=10)
+        device = hub.get(sim.status()["device_id"])
+        loop_thread.run(delegate.select_profile(device, "ops"))
+        loop_thread.run(device.send_profile())
+        assert sim.wait_for(lambda: last_face(sim).get("hash") == _digest(delegate.faces["ops"]), timeout=5)
+        assert _held_face(sim) == _digest(delegate.faces["ops"])
+
+        delegate.route = "work"  # a reconnect with ops's face held
+        assert _held_face(sim) == _digest(delegate.faces["ops"])
+        assert sim.wait_for(lambda: last_face(sim).get("hash") == _digest(delegate.faces["work"]), timeout=5)
+        assert last_face(sim)["profile"] == "ops"  # the profile the device keeps, not the route's
+        assert _held_face(sim) == _digest(delegate.faces["work"])
+
+        work = _digest(delegate.faces.pop("work"))  # no face, or profile_faces off: the clear is taken too
+        assert _held_face(sim) == work
+        assert sim.wait_for(lambda: "bits" not in last_face(sim), timeout=5)
+        assert _held_face(sim) is None
+
+        delegate.faces["work"] = _face(0x3C)
+        sim.close()
+        again = make_sim(url)  # a restart: the stored choice of ops, no face in memory
+        assert again.wait_screen("ready", timeout=10)
+        assert again.wait_for(lambda: last_face(again).get("hash") == work, timeout=5)
+        assert _held_face(again) == work
     finally:
         loop_thread.run(hub.stop())
 

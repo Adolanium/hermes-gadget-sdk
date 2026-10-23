@@ -140,7 +140,7 @@ A device that sends `caps.faces: 1` can show each profile with its own face inst
 
 | Field | Meaning |
 |---|---|
-| `profile` | The profile the face belongs to: the one answering the device |
+| `profile` | The device's own profile: the last `profile` or `welcome.profile` it got, else the `hello.profile` it sent (`default` without one). The face is that of the profile answering the device, which a gadget route can make another one |
 | `hash` | Names this face. The device sends it back as `hello.face` |
 | `bits` | The face. Without `bits` (and `hash`), the device shows the mascot again |
 
