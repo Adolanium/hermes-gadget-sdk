@@ -306,6 +306,22 @@ def test_a_held_dashboard_survives_a_reconnect(online, loop_thread):
     assert loop_thread.run(session2.send_dashboard(NEWER)) is True
 
 
+def test_a_held_dashboard_is_not_replayed_to_a_device_that_reconnects_unpaired(devserver, loop_thread):
+    hub, brain, url = devserver()
+    device = Device(url, sleeping=True)
+    assert _wait(lambda: device.device_id in hub.sessions)
+    loop_thread.run(hub.sessions[device.device_id].send_dashboard(SNAPSHOT))
+    device.close()
+    assert _wait(lambda: device.device_id not in hub.sessions)
+    brain.require_pairing = True  # revoked while it was away
+    again = Device(url, key=device.key, sleeping=False)
+    try:
+        assert _wait(lambda: device.device_id in hub.sessions)
+        assert dashboards(again.frames()) == []
+    finally:
+        again.close()
+
+
 def test_capabilities_name_the_dashboard_version(online):
     _hub, connect = online
     _device, session = connect()

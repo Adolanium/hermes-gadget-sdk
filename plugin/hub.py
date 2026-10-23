@@ -437,7 +437,7 @@ class DeviceSession:
             await self.send_status(held.status)
             if self._dashboards != offered:
                 held.dashboard = None  # a newer one was offered while the status went out
-        if held.dashboard is not None:
+        if held.dashboard is not None and self.paired:  # a device unpaired meanwhile gets none
             await self.send_dashboard(held.dashboard)
         if held.view is None:
             return
