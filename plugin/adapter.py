@@ -538,7 +538,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if not targets:
             return
         switching = [self._switches(s) for s in targets]
-        mine = theirs = dashboard.BOARD.sessions()
+        theirs: Optional[List[Dict[str, str]]] = None
         seq = 0
         if any(switching):
             async with self._roster_lock:  # rosters are read, and their rows taken, in push order
@@ -546,6 +546,9 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 self._pushed_seq.update((s.device_id, seq) for s, sw in zip(targets, switching)
                                         if sw and self._hub is not None and self._hub.get(s.device_id) is s)
                 theirs = dashboard.BOARD.sessions(*await self._offered_boards())
+        mine = dashboard.BOARD.sessions()  # after any roster wait, so a change made during it goes out
+        if theirs is None:
+            theirs = mine
         tiles = self._tiles.tiles()
         for session, switches in zip(targets, switching):
             if not session.paired or (switches and not self._still_trusted(session)):

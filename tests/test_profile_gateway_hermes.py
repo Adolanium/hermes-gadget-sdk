@@ -341,6 +341,28 @@ def test_a_device_that_cannot_switch_leaves_the_switching_ones_listening(hermes_
             assert [row["state"] for row in msgs[-1]["sessions"]] == ["busy"]  # the ops change woke it
 
 
+def test_a_device_that_cannot_switch_gets_the_rows_from_after_the_roster_wait(hermes_home, gadget, monkeypatch):
+    import os
+    from hermes_gadget_plugin import adapter as adapter_module, dashboard, protocol
+
+    monkeypatch.setattr(adapter_module, "DASHBOARD_POLL_S", 60)  # only a wake sends a dashboard below
+    monkeypatch.setattr(dashboard.BOARD, "_sessions", {})
+    _profile_board(monkeypatch, "ops")
+    caps = {"dashboard": {"v": dashboard.VERSION}}
+    keys = os.urandom(32), os.urandom(32)
+    gadget.authorized.update(protocol.device_id_for_key(k) for k in keys)
+    with _RawDevice(gadget.url, keys[0], {**caps, "profiles": True}) as switching, \
+            _RawDevice(gadget.url, keys[1], caps) as plain:
+        _dashboard_labels(switching, 2.5), _dashboard_labels(plain, 0.5)  # their first dashboards
+        reading, release = _paused_roster(monkeypatch, gadget.adapter)
+        dashboard.BOARD.pre_llm_call(session_id="s_aaa1", platform="cli")  # wakes an update to both
+        assert reading.wait(5)  # that update waits for the roster
+        dashboard.BOARD.pre_llm_call(session_id="s_bbb2", platform="cli")  # changes during the wait
+        release.set()
+        # One dashboard, with both sessions: no stale one taken before the wait goes out first.
+        assert _dashboard_labels(plain, 1.5) == [["cli bbb2", "cli aaa1"]]
+
+
 @pytest.mark.parametrize("late_roster", [False, True], ids=["last device leaves", "a roster read ends after"])
 def test_the_last_switching_device_leaving_drops_the_other_profiles_listeners(hermes_home, gadget, monkeypatch,
                                                                               late_roster):
