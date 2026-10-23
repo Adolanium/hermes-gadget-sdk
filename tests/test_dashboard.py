@@ -126,7 +126,11 @@ def test_a_failing_listener_never_reaches_the_agent():
     assert board.pre_llm_call(session_id="s1") is None  # pre_llm_call results become turn context
 
 
-def test_the_board_registers_every_hook_it_handles():
+def test_the_board_registers_every_hook_it_handles(monkeypatch):
+    from hermes_gadget_plugin import runtime
+
+    monkeypatch.setitem(runtime._boards, "default", None)  # its registration is undone after the test
+
     class Ctx:
         def __init__(self):
             self.hooks = {}
@@ -140,6 +144,17 @@ def test_the_board_registers_every_hook_it_handles():
                               "post_approval_response", "on_session_finalize", "on_session_reset"}
     # Hermes adds keyword arguments over time; the hooks take whatever comes.
     ctx.hooks["pre_llm_call"](session_id="x", future_field=1, telemetry_schema_version=2)
+
+
+def test_each_profiles_copy_registers_its_board_by_profile(monkeypatch):
+    from types import SimpleNamespace
+
+    from hermes_gadget_plugin import runtime
+
+    monkeypatch.setitem(runtime._boards, "ops", None)
+    board = SessionBoard()
+    board.register(SimpleNamespace(profile_name="ops", register_hook=lambda name, callback: None))
+    assert runtime.boards(["ops"]) == [board]  # what the default profile's adapter reads for ops
 
 
 # -- tiles -------------------------------------------------------------------------------------

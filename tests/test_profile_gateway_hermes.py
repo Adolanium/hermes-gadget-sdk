@@ -106,15 +106,24 @@ def _dashboard_labels(device, seconds):
     return seen
 
 
+def _profile_board(monkeypatch, profile):
+    """A session board registered the way ``profile``'s own copy of the plugin registers it."""
+    from hermes_gadget_plugin import dashboard, runtime
+
+    monkeypatch.setitem(runtime._boards, profile, None)  # so the registration is undone after the test
+    board = dashboard.SessionBoard()
+    board.register(types.SimpleNamespace(profile_name=profile, register_hook=lambda name, callback: None))
+    return board
+
+
 def test_only_a_switching_device_sees_the_offered_profiles_sessions(hermes_home, gadget, monkeypatch):
     import os
-    from hermes_gadget_plugin import adapter as adapter_module, dashboard, protocol, runtime
+    from hermes_gadget_plugin import adapter as adapter_module, dashboard, protocol
 
     monkeypatch.setattr(adapter_module, "DASHBOARD_POLL_S", 60)  # only a wake sends a change below
     monkeypatch.setattr(dashboard.BOARD, "_sessions", {})  # the default profile's board: no sessions
-    ops, old = dashboard.SessionBoard(), dashboard.SessionBoard()
-    monkeypatch.setitem(runtime._boards, "ops", ops)  # as the ops profile's copy of the plugin registers it
-    monkeypatch.setitem(runtime._boards, "old", old)  # parked, so not served and never offered
+    ops = _profile_board(monkeypatch, "ops")
+    old = _profile_board(monkeypatch, "old")  # parked, so not served and never offered
     old.pre_llm_call(session_id="s_old1", platform="cli")
     ops.pre_llm_call(session_id="s_ops1", platform="telegram")
     caps = {"dashboard": {"v": dashboard.VERSION}}
