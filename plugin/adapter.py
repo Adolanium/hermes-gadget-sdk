@@ -548,6 +548,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         """The session boards of the other profiles a switching device may pick, as each profile's
         copy of the plugin loads them; a change on one wakes the dashboard like one of ours."""
         offered = [p["id"] for p in await asyncio.to_thread(self.profiles)]
+        if self._dashboard_task is None:  # disconnect() began meanwhile and dropped every listener
+            return []
         boards = [b for b in runtime.boards(offered) if b is not dashboard.BOARD]
         for board in boards:
             if board not in self._boards:

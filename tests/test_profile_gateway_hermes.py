@@ -171,6 +171,26 @@ def test_a_device_revoked_while_the_roster_is_read_gets_no_dashboard(hermes_home
         assert _dashboard_labels(device, 1.0) == []
 
 
+def test_a_roster_read_still_running_at_disconnect_leaves_no_listener(hermes_home, gadget, monkeypatch):
+    import asyncio
+    import os
+    import time
+    from hermes_gadget_plugin import dashboard, protocol
+
+    ops = _profile_board(monkeypatch, "ops")
+    reading, release = _paused_roster(monkeypatch, gadget.adapter)
+    key = os.urandom(32)
+    gadget.authorized.add(protocol.device_id_for_key(key))
+    with _RawDevice(gadget.url, key, {"dashboard": {"v": dashboard.VERSION}, "profiles": True}):
+        assert reading.wait(5)  # the first dashboard is waiting for the roster
+        stopping = asyncio.run_coroutine_threadsafe(gadget.adapter.disconnect(), gadget.loop)
+        time.sleep(0.3)  # disconnect has dropped its listeners and waits for the connection to end
+        release.set()
+        stopping.result(10)
+        time.sleep(0.3)
+    assert ops._listeners == []  # nothing keeps calling the stopped adapter
+
+
 def test_grants_are_scoped_serialized_and_refusable(hermes_home, gadget, monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
 
