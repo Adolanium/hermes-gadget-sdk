@@ -225,6 +225,32 @@ def test_a_roster_read_still_running_at_disconnect_leaves_no_listener(hermes_hom
     assert ops._listeners == []  # nothing keeps calling the stopped adapter
 
 
+def test_a_board_no_longer_offered_or_replaced_loses_its_listener(hermes_home, gadget, monkeypatch):
+    import os
+    import time
+    from hermes_gadget_plugin import adapter as adapter_module, dashboard, protocol
+
+    monkeypatch.setattr(adapter_module, "DASHBOARD_POLL_S", 60)  # only a wake sends a dashboard below
+    monkeypatch.setattr(dashboard.BOARD, "_sessions", {})
+    ops = _profile_board(monkeypatch, "ops")
+    ops.pre_llm_call(session_id="s_ops1", platform="telegram")
+    key = os.urandom(32)
+    gadget.authorized.add(protocol.device_id_for_key(key))
+    with _RawDevice(gadget.url, key, {"dashboard": {"v": dashboard.VERSION}, "profiles": True}) as device:
+        assert _dashboard_labels(device, 2.5)[-1] == ["telegram ops1"]
+        assert len(ops._listeners) == 1
+        reloaded = _profile_board(monkeypatch, "ops")  # a reloaded copy of ops's plugin registers anew
+        dashboard.BOARD.pre_llm_call(session_id="s_mine", platform="cli")  # wakes the dashboard
+        _dashboard_labels(device, 1.0)
+        assert ops._listeners == [] and len(reloaded._listeners) == 1
+        monkeypatch.setattr(gadget.adapter, "_offer_all", False)
+        monkeypatch.setattr(gadget.adapter, "_offered", {"default"})  # ops is taken off the list
+        dashboard.BOARD.pre_llm_call(session_id="s_min2", platform="cli")
+        assert _dashboard_labels(device, 1.0)[-1] == ["cli min2", "cli mine"]
+        time.sleep(0.1)
+        assert reloaded._listeners == []  # nothing wakes the dashboard for a profile it no longer shows
+
+
 def test_grants_are_scoped_serialized_and_refusable(hermes_home, gadget, monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
 

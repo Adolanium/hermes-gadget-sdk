@@ -554,7 +554,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if not targets:
             return
         switching = [self._switches(s) for s in targets]
-        others = await self._offered_boards() if any(switching) else []
+        others = await self._offered_boards() if any(switching) else self._keep_boards([])
         mine = dashboard.BOARD.sessions()
         theirs = dashboard.BOARD.sessions(*others) if others else mine
         tiles = self._tiles.tiles()
@@ -570,7 +570,13 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         offered = [p["id"] for p in await asyncio.to_thread(self.profiles)]
         if self._dashboard_task is None:  # disconnect() began meanwhile and dropped every listener
             return []
-        boards = [b for b in runtime.boards(offered) if b is not dashboard.BOARD]
+        return self._keep_boards([b for b in runtime.boards(offered) if b is not dashboard.BOARD])
+
+    def _keep_boards(self, boards: List[dashboard.SessionBoard]) -> List[dashboard.SessionBoard]:
+        """Listen to ``boards`` and our own board only: a profile taken off the offer, or a board
+        a reloaded copy of the plugin replaced, no longer wakes the dashboard."""
+        for board in [b for b in self._boards if b is not dashboard.BOARD and b not in boards]:
+            self._boards.pop(board)()
         for board in boards:
             if board not in self._boards:
                 self._boards[board] = board.subscribe(self._board_changed)
