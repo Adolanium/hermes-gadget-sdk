@@ -776,7 +776,7 @@ Or with `idf.py set-target esp32` followed by `idf.py -D SDKCONFIG_DEFAULTS="sdk
 
 ### First flash: what to check
 
-The pin map comes from the community [ESP32-Cheap-Yellow-Display](https://github.com/witnessmenow/ESP32-Cheap-Yellow-Display/tree/0564a140c76de76ef34a8b7115044e7c6c852695) reference (`PINS.md`, and `DisplayConfig/CYD2USB/User_Setup.h` for the two-USB revision's ST7789). Nobody has run this profile on a board yet, so the colour order, inversion and mirroring are the contributor's settings and still unchecked. On the first flash:
+The pin map comes from the community [ESP32-Cheap-Yellow-Display](https://github.com/witnessmenow/ESP32-Cheap-Yellow-Display/tree/0564a140c76de76ef34a8b7115044e7c6c852695) reference (`PINS.md`, and `DisplayConfig/CYD2USB/User_Setup.h` for the two-USB revision's ST7789). The contributor ran an earlier build of this port on a Guition ESP32-2432S028: its display (in monochrome), the DAC speaker, and Wi-Fi and pairing set with `menuconfig` worked. Touch was off and no microphone was fitted. The merged profile draws in colour through the banded framebuffer and has not run on a board yet, so the colour order, inversion and mirroring are the contributor's settings and still unchecked. On the first flash:
 
 1. **Boot log:** `st7789 320x240 ready` and the `parts:` line naming the display, the microphone (`pdm` once a PDM mic is fitted, `none` without one) and no touch.
 2. **Sound:** about a second into boot the speaker header plays three short beeps, and the log shows `three beeps on GPIO26 (DAC channel 1)`. Silence points at the amplifier wiring or the speaker, not the panel; a log line about GPIO26 not being a DAC output means `b.speaker_dac` in `board.cpp` is wrong.
