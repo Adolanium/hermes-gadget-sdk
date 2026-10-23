@@ -171,6 +171,23 @@ def test_a_device_on_ops_runs_in_the_ops_home_and_replies_through_the_gadget_ada
         assert get_hermes_home() == home / "profiles" / "ops"
 
 
+def test_a_routed_device_gets_the_face_of_the_profile_its_route_names(routing_rig):
+    import asyncio
+
+    from hermes_gadget_plugin.face import FACE_BYTES, FACE_FILE
+
+    runner, adapter, home = routing_rig
+    (home / FACE_FILE).write_bytes(bytes([0xAA]) * FACE_BYTES)
+    (home / "profiles" / "ops" / FACE_FILE).write_bytes(bytes([0x55]) * FACE_BYTES)
+    session = _session("default")
+    assert asyncio.run(adapter.face(session)) == bytes([0xAA]) * FACE_BYTES  # no route: the default profile
+    runner.config.profile_routes = _ops_route(DEVICE)
+    assert asyncio.run(adapter.face(session)) == bytes([0x55]) * FACE_BYTES
+    (home / "profiles" / "ops" / "gateway.parked").touch()
+    runner._profile_adapters = {}
+    assert asyncio.run(adapter.face(session)) is None  # Hermes refuses the route: no profile's face
+
+
 @pytest.mark.parametrize("ops", ["served", "parked"])
 def test_a_routed_device_keeps_its_route_and_gets_no_switching(routing_rig, ops):
     import asyncio
