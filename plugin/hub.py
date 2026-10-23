@@ -367,8 +367,6 @@ class DeviceSession:
         self.paired = paired
         if paired:
             self.hub.store.confirm(self.device_id)
-        elif held := self.hub._held.get(self.device_id):
-            held.dashboard = None  # it was made for a paired device
         await self.send_json(protocol.message("paired" if paired else "unpaired"))
 
     async def ask(self, prompt_id: str, title: str, text: str, ttl_s: float | None = None) -> None:
@@ -437,7 +435,8 @@ class DeviceSession:
             await self.send_status(held.status)
             if self._dashboards != offered:
                 held.dashboard = None  # a newer one was offered while the status went out
-        if held.dashboard is not None and self.paired:  # a device unpaired meanwhile gets none
+        # Only to a connection that may get one now: paired, and drawing that dashboard version.
+        if held.dashboard is not None and self.paired and self.dashboard_version >= held.dashboard.get("v", 1):
             await self.send_dashboard(held.dashboard)
         if held.view is None:
             return
