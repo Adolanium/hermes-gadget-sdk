@@ -41,7 +41,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from agent.i18n import get_language, t
 from gateway.config import Platform, PlatformConfig
@@ -204,7 +204,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._tiles: Optional[dashboard.TileStore] = None
         self._dashboard_task: Optional[asyncio.Task] = None
         self._dashboard_wake: Optional[asyncio.Event] = None
-        self._board_unsubscribe = None
+        self._boards: Dict[dashboard.SessionBoard, Callable[[], None]] = {}  # each board read, its unsubscribe
         self._battery_log: Optional[BatteryLog] = None
         self._tls_cert = extra.get("tls_cert")
         self._tls_key = extra.get("tls_key")
@@ -260,7 +260,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if self._dashboard_on:
             self._tiles = dashboard.TileStore(plugin_data_dir(PLATFORM_NAME))
             self._dashboard_wake = asyncio.Event()
-            self._board_unsubscribe = dashboard.BOARD.subscribe(self._board_changed)
+            self._boards[dashboard.BOARD] = dashboard.BOARD.subscribe(self._board_changed)
             self._dashboard_task = asyncio.create_task(self._watch_dashboard())
         self._mark_connected()
         self._wire_plugin_handlers(None)
@@ -270,9 +270,9 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
 
     async def disconnect(self) -> None:
         runtime.unregister(self._registry_key, self)
-        if self._board_unsubscribe:
-            self._board_unsubscribe()
-            self._board_unsubscribe = None
+        for unsubscribe in self._boards.values():
+            unsubscribe()
+        self._boards.clear()
         for task in (self._watch_task, self._update_task, self._dashboard_task):
             if task:
                 task.cancel()
@@ -533,10 +533,24 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         targets = [s for s in targets if s.paired and not s.closed and s.dashboard_version >= dashboard.VERSION]
         if not targets:
             return
-        sessions, tiles = dashboard.BOARD.sessions(), self._tiles.tiles()
-        for session in targets:
+        switching = [self._switches(s) for s in targets]
+        others = await self._offered_boards() if any(switching) else []
+        mine = dashboard.BOARD.sessions()
+        theirs = dashboard.BOARD.sessions(*others) if others else mine
+        tiles = self._tiles.tiles()
+        for session, switches in zip(targets, switching):
             await session.send_dashboard(dashboard.message(
-                sessions, tiles, charset=session.charset, cols=session.display.get("text_cols")))
+                theirs if switches else mine, tiles, charset=session.charset, cols=session.display.get("text_cols")))
+
+    async def _offered_boards(self) -> List[dashboard.SessionBoard]:
+        """The session boards of the other profiles a switching device may pick, as each profile's
+        copy of the plugin loads them; a change on one wakes the dashboard like one of ours."""
+        offered = [p["id"] for p in await asyncio.to_thread(self.profiles)]
+        boards = [b for b in runtime.boards(offered) if b is not dashboard.BOARD]
+        for board in boards:
+            if board not in self._boards:
+                self._boards[board] = board.subscribe(self._board_changed)
+        return boards
 
     # -- firmware updates -------------------------------------------------------------
 

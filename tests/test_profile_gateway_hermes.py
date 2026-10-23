@@ -91,6 +91,43 @@ def test_old_firmware_gets_no_roster_and_an_untouched_source(hermes_home, gadget
     assert event.source.profile is None
 
 
+def _dashboard_labels(device, seconds):
+    """The session labels of each dashboard the device gets within ``seconds``."""
+    import time
+
+    seen, end = [], time.monotonic() + seconds
+    while (left := end - time.monotonic()) > 0:
+        try:
+            msg = json.loads(device.ws.recv(timeout=left))
+        except TimeoutError:
+            break
+        if msg.get("type") == "dashboard":
+            seen.append([row["label"] for row in msg["sessions"]])
+    return seen
+
+
+def test_only_a_switching_device_sees_the_offered_profiles_sessions(hermes_home, gadget, monkeypatch):
+    import os
+    from hermes_gadget_plugin import adapter as adapter_module, dashboard, protocol, runtime
+
+    monkeypatch.setattr(adapter_module, "DASHBOARD_POLL_S", 60)  # only a wake sends a change below
+    monkeypatch.setattr(dashboard.BOARD, "_sessions", {})  # the default profile's board: no sessions
+    ops, old = dashboard.SessionBoard(), dashboard.SessionBoard()
+    monkeypatch.setitem(runtime._boards, "ops", ops)  # as the ops profile's copy of the plugin registers it
+    monkeypatch.setitem(runtime._boards, "old", old)  # parked, so not served and never offered
+    old.pre_llm_call(session_id="s_old1", platform="cli")
+    ops.pre_llm_call(session_id="s_ops1", platform="telegram")
+    caps = {"dashboard": {"v": dashboard.VERSION}}
+    keys = os.urandom(32), os.urandom(32)
+    gadget.authorized.update(protocol.device_id_for_key(k) for k in keys)
+    with _RawDevice(gadget.url, keys[0], {**caps, "profiles": True}) as switching, \
+            _RawDevice(gadget.url, keys[1], caps) as old_firmware:
+        assert _dashboard_labels(switching, 2.5)[-1] == ["telegram ops1"]  # outlasts the poll begun before
+        ops.pre_approval_request(session_id="s_ops2")  # wakes the dashboard as a session of its own does
+        assert _dashboard_labels(switching, 1.5)[-1] == ["session ops2", "telegram ops1"]
+        assert _dashboard_labels(old_firmware, 0.5) == [[]]  # exactly today's: the default profile's only
+
+
 def test_grants_are_scoped_serialized_and_refusable(hermes_home, gadget, monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
 

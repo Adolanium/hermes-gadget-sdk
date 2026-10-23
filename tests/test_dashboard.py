@@ -87,6 +87,22 @@ def test_order_is_waiting_busy_idle_and_old_idle_sessions_expire():
     assert board.sessions() == []  # turns that never reported their end don't stay forever
 
 
+def test_other_profiles_boards_merge_in_the_same_order_up_to_the_limit():
+    clock = Clock()
+    mine, ops = SessionBoard(clock=clock), SessionBoard(clock=clock)
+    mine.on_session_start(session_id="mine", platform="cli")
+    clock.t += 1
+    ops.pre_llm_call(session_id="ops1", platform="cli")
+    clock.t += 1
+    mine.pre_llm_call(session_id="busy", platform="gadget")
+    ops.pre_approval_request(session_id="ops2")
+    assert [r["label"] for r in mine.sessions(ops)] == ["session ops2", "gadget busy", "cli ops1", "cli mine"]
+    assert [r["label"] for r in mine.sessions()] == ["gadget busy", "cli mine"]
+    for n in range(dashboard.MAX_SESSIONS):
+        ops.on_session_start(session_id=f"x{n:03d}")
+    assert len(mine.sessions(ops)) == dashboard.MAX_SESSIONS
+
+
 def test_listeners_hear_changes_only():
     board = SessionBoard()
     calls = []

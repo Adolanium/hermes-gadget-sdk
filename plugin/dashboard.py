@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from . import textfmt
+from . import runtime, textfmt
 
 VERSION = 1                # the dashboard message layout this plugin sends
 MAX_SESSIONS = 8
@@ -121,17 +121,25 @@ class SessionBoard:
     def register(self, ctx) -> None:
         for name in self.HOOKS:
             ctx.register_hook(name, getattr(self, name))
+        # Hermes loads a copy of the plugin per profile, and a turn fires only its own profile's
+        # hooks. A device switched to this profile reads this board too (adapter._push_dashboard).
+        runtime.add_board(getattr(ctx, "profile_name", None) or "default", self)
 
     # -- reading ------------------------------------------------------------------------
 
-    def sessions(self) -> list[dict[str, str]]:
-        """Sessions worth showing: waiting first, then busy, then idle; newest first within each."""
+    def _live(self) -> list[tuple[str, dict[str, Any]]]:
         now = self._clock()
         with self._lock:
             for sid in [s for s, rec in self._sessions.items()
                         if now - rec.get("at", now) > (IDLE_KEEP_S if rec["state"] == "idle" else ACTIVE_KEEP_S)]:
                 del self._sessions[sid]
-            rows = sorted(self._sessions.items(), key=lambda kv: (_ORDER[kv[1]["state"]], -kv[1].get("at", 0)))
+            return [(sid, dict(rec)) for sid, rec in self._sessions.items()]
+
+    def sessions(self, *others: SessionBoard) -> list[dict[str, str]]:
+        """Sessions worth showing, with those of ``others``: waiting first, then busy, then idle;
+        newest first within each."""
+        rows = sorted((row for board in (self, *others) for row in board._live()),
+                      key=lambda kv: (_ORDER[kv[1]["state"]], -kv[1].get("at", 0)))
         return [{"id": sid[-4:], "label": f"{rec['platform'] or 'session'} {sid[-4:]}", "state": rec["state"]}
                 for sid, rec in rows[:MAX_SESSIONS]]
 
