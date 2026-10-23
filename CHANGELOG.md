@@ -14,7 +14,7 @@
 
 ### Hermes plugin
 
-- With profile switching on, a gadget that can switch profiles also lists on its dashboard the sessions of the other profiles it may switch to, where the gadget plugin is enabled, so a device switched to another profile sees its sessions there. Hermes loads a copy of the plugin per profile, and each copy records only its own profile's sessions; the default profile's adapter now also reads those of the offered profiles. With switching off, and on devices that cannot switch or that a profile route sends somewhere, the dashboard is as before. [User guide](docs/using-gadget.md#watch-hermes-sessions-on-the-dashboard).
+- With profile switching on, a gadget that can switch profiles also lists on its dashboard the sessions of the other profiles it may switch to, where the gadget plugin is enabled, so a device switched to another profile sees its sessions there. Hermes loads a copy of the plugin per profile, and each copy records only its own profile's sessions; the default profile's adapter now also reads those of the offered profiles. With switching off, and on devices that cannot switch or that a profile route sends somewhere, the dashboard is as before. [User guide](docs/using-gadget.md#watch-hermes-sessions-on-the-dashboard). Contributed by @mforce.
 
 ## 0.3.0
 
