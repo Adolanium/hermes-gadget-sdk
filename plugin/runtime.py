@@ -9,7 +9,7 @@ from __future__ import annotations
 import sys
 import threading
 import types
-from typing import Any
+from typing import Any, Iterable
 
 # Hermes imports a directory plugin once per profile scope (``hermes_plugins.gadget``, then
 # ``hermes_plugins.gadget__home_<digest>``), so module globals would give each profile its own
@@ -19,9 +19,11 @@ _SHARED = "hermes_gadget_runtime_registry"
 _fresh = types.ModuleType(_SHARED)
 _fresh.lock = threading.Lock()
 _fresh.adapters = {}
+_fresh.boards = {}  # each profile's dashboard.SessionBoard, from that profile's copy of the plugin
 _registry = sys.modules.setdefault(_SHARED, _fresh)  # atomic: two copies importing at once share one
 _lock: threading.Lock = _registry.lock
 _adapters: dict[str, Any] = _registry.adapters
+_boards: dict[str, Any] = _registry.boards
 
 
 def register(profile: str, adapter: Any) -> None:
@@ -48,3 +50,14 @@ def active(profile: str | None = None) -> Any | None:
 def any_active() -> bool:
     with _lock:
         return bool(_adapters)
+
+
+def add_board(profile: str, board: Any) -> None:
+    with _lock:
+        _boards[profile] = board
+
+
+def boards(profiles: Iterable[str]) -> list[Any]:
+    """The session boards of those ``profiles`` whose plugin copy has loaded."""
+    with _lock:
+        return [_boards[p] for p in profiles if p in _boards]

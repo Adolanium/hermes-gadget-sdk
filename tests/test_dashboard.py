@@ -87,6 +87,22 @@ def test_order_is_waiting_busy_idle_and_old_idle_sessions_expire():
     assert board.sessions() == []  # turns that never reported their end don't stay forever
 
 
+def test_other_profiles_boards_merge_in_the_same_order_up_to_the_limit():
+    clock = Clock()
+    mine, ops = SessionBoard(clock=clock), SessionBoard(clock=clock)
+    mine.on_session_start(session_id="mine", platform="cli")
+    clock.t += 1
+    ops.pre_llm_call(session_id="ops1", platform="cli")
+    clock.t += 1
+    mine.pre_llm_call(session_id="busy", platform="gadget")
+    ops.pre_approval_request(session_id="ops2")
+    assert [r["label"] for r in mine.sessions(ops)] == ["session ops2", "gadget busy", "cli ops1", "cli mine"]
+    assert [r["label"] for r in mine.sessions()] == ["gadget busy", "cli mine"]
+    for n in range(dashboard.MAX_SESSIONS):
+        ops.on_session_start(session_id=f"x{n:03d}")
+    assert len(mine.sessions(ops)) == dashboard.MAX_SESSIONS
+
+
 def test_listeners_hear_changes_only():
     board = SessionBoard()
     calls = []
@@ -110,7 +126,11 @@ def test_a_failing_listener_never_reaches_the_agent():
     assert board.pre_llm_call(session_id="s1") is None  # pre_llm_call results become turn context
 
 
-def test_the_board_registers_every_hook_it_handles():
+def test_the_board_registers_every_hook_it_handles(monkeypatch):
+    from hermes_gadget_plugin import runtime
+
+    monkeypatch.setitem(runtime._boards, "default", None)  # its registration is undone after the test
+
     class Ctx:
         def __init__(self):
             self.hooks = {}
@@ -124,6 +144,17 @@ def test_the_board_registers_every_hook_it_handles():
                               "post_approval_response", "on_session_finalize", "on_session_reset"}
     # Hermes adds keyword arguments over time; the hooks take whatever comes.
     ctx.hooks["pre_llm_call"](session_id="x", future_field=1, telemetry_schema_version=2)
+
+
+def test_each_profiles_copy_registers_its_board_by_profile(monkeypatch):
+    from types import SimpleNamespace
+
+    from hermes_gadget_plugin import runtime
+
+    monkeypatch.setitem(runtime._boards, "ops", None)
+    board = SessionBoard()
+    board.register(SimpleNamespace(profile_name="ops", register_hook=lambda name, callback: None))
+    assert runtime.boards(["ops"]) == [board]  # what the default profile's adapter reads for ops
 
 
 # -- tiles -------------------------------------------------------------------------------------

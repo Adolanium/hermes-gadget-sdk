@@ -52,3 +52,12 @@ def test_a_profile_with_its_own_adapter_still_gets_its_own(copies):
     assert default.active("lab") is mine
     assert routed.active("default") is theirs
     assert routed.active("nina") is theirs  # several running: an unrouted profile falls back to default
+
+
+def test_the_default_profiles_copy_finds_another_profiles_session_board(copies):
+    default, routed = copies
+    mine, ops = object(), object()
+    default.add_board("default", mine)
+    routed.add_board("ops", ops)  # the ops profile's copy registers its hooks on its own board
+    assert default.boards(["default", "ops", "lab"]) == [mine, ops]  # lab's copy never loaded
+    assert default.boards(["ops"]) == [ops]  # only the profiles asked for
