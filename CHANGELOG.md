@@ -4,6 +4,7 @@
 
 ### Hermes plugin
 
+- Profile switching no longer writes into other Hermes profiles. The plugin used to approve a switching device in each profile's pairing store itself; now each profile approves it through its own pairing flow the first time the device talks to it, and the device shows the command to run (`hermes -p <profile> pairing approve gadget <code>`) instead of waiting for a reply. The default profile's verdict comes from the adapter's own sender check rather than a private gateway method. Asked for in the Hermes plugin catalog review ([NousResearch/hermes-agent#142936](https://github.com/NousResearch/hermes-agent/pull/142936)).
 - Validate device-selected profiles during Hermes native session admission and durable replay, retaining Default-owner trust, offered-profile policy and owner binding. Requires the matching Hermes `validate_native_profile_route` hook; without it, a secondary profile can be selected but ordinary messages fail with `profile_mismatch`. Contributed by @bricelb.
 
 ### Hardware and setup

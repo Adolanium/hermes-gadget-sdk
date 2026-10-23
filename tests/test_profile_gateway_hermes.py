@@ -91,25 +91,6 @@ def test_old_firmware_gets_no_roster_and_an_untouched_source(hermes_home, gadget
     assert event.source.profile is None
 
 
-def test_grants_are_scoped_serialized_and_refusable(hermes_home, gadget, monkeypatch):
-    from concurrent.futures import ThreadPoolExecutor
-
-    from gateway.pairing import PairingStore
-    from hermes_gadget_plugin.adapter import GadgetAdapter
-
-    (hermes_home / ".env").write_text("GADGET_ALLOWED_USERS=hg-0000000000000000\n")
-    (hermes_home / "profiles" / "ops" / ".env").write_text("GADGET_ALLOWED_USERS=hg-1111111111111111\n")
-    devices = [f"hg-{i:016x}" for i in range(2, 6)]
-    with ThreadPoolExecutor(4) as pool:
-        assert all(pool.map(lambda d: GadgetAdapter._grant(d, d, "ops"), devices))
-    store = PairingStore(profile="ops")
-    assert all(store.is_approved("gadget", d) for d in devices)  # no grant lost to a concurrent rewrite
-    assert "hg-0000000000000000" in (hermes_home / ".env").read_text()
-    assert not any(d in (hermes_home / ".env").read_text() for d in devices)  # default's allowlist untouched
-    monkeypatch.setattr(PairingStore, "generate_code", lambda self, *a, **kw: None)  # rate limited / locked out
-    assert GadgetAdapter._grant("hg-ffffffffffffffff", "x", "ops") is False
-
-
 DEVICE = "hg-cccccccccccccccc"
 
 
@@ -199,33 +180,25 @@ def test_a_routed_device_keeps_its_route_and_gets_no_switching(routing_rig, ops)
     assert adapter.profiles(session) != []
 
 
-def test_owner_check_ignores_routes_and_ops_only_approval(routing_rig):
-    # Real Hermes callbacks: the adapter's routed one trusts an ops-only approval through a static
-    # route; the default-bound owner check the plugin uses for every profile decision does not.
+def test_owner_check_is_the_adapters_own_check_and_ignores_other_profiles(routing_rig):
+    # The default profile's verdict comes from the adapter's own sender check (no private runner call):
+    # without a route it is the default profile's answer, and an approval that only ops holds doesn't count.
     from gateway.config import Platform
     from gateway.pairing import PairingStore
     from gateway.run import _profile_runtime_scope
 
     runner, adapter, home = routing_rig
-    runner.config.profile_routes = _ops_route(DEVICE)
     ops = PairingStore(profile="ops")
-    runner.pairing_stores["ops"] = ops  # Hermes picks per-profile stores from this map
-    with _profile_runtime_scope(home / "profiles" / "ops"):  # as _grant does: never touch default's allowlist
+    runner.pairing_stores["ops"] = ops
+    with _profile_runtime_scope(home / "profiles" / "ops"):
         ops.approve_code("gadget", ops.generate_code("gadget", DEVICE, "Kitchen"))
-    routed = runner._make_adapter_auth_check(Platform("gadget"))
-    owner = runner._make_adapter_auth_check(Platform("gadget"), profile_name="default")
-    assert routed(DEVICE, "dm", DEVICE) is True
-    assert owner(DEVICE, "dm", DEVICE) is False
-    adapter._owner_check = owner
-    assert adapter._owner_trusts(DEVICE) is False
-    adapter.set_authorization_check(routed)
+    adapter.set_authorization_check(runner._make_adapter_auth_check(Platform("gadget")))
     capable = _session("default")
-    assert adapter._verdict(capable) is True  # routed: the route's approval keeps it paired
-    runner.config.profile_routes = []
+    assert adapter._owner_trusts(DEVICE) is False
     assert adapter._verdict(capable) is False  # it switches: only the default profile counts
     default = runner.pairing_store
     default.approve_code("gadget", default.generate_code("gadget", DEVICE, "Kitchen"))
-    assert owner(DEVICE, "dm", DEVICE) is True
+    assert adapter._owner_trusts(DEVICE) is True
     assert adapter._verdict(capable) is True
 
 
@@ -327,13 +300,13 @@ def _admitted(rig, wait_s=1.5):
     return [(e.text, e.source.profile) for e in rig.events if rig.admits(e.source)]
 
 
-def test_dropping_the_profile_flag_does_not_reuse_a_plugin_grant(live_rig):
+def test_dropping_the_profile_flag_does_not_reach_ops(live_rig):
     rig = live_rig
     rig.approve()
     with rig.connect({"profiles": True}) as device:
         assert device.welcome["paired"] is True
         session = rig.adapter.hub.get(rig.device)
-        assert rig.run(rig.adapter.select_profile(session, "ops")) is None  # the plugin approves it in ops
+        assert rig.run(rig.adapter.select_profile(session, "ops")) is None
     rig.route()
     rig.runner.pairing_store.revoke("gadget", rig.device)
     with rig.connect({}) as device:  # older firmware, same key, an old ops route
@@ -374,40 +347,42 @@ def test_a_replaced_connection_cannot_send_voice_after_revocation(live_rig, monk
         assert _admitted(rig) == []
 
 
-def test_a_device_is_bound_to_the_default_profile_before_any_grant_is_visible(live_rig, monkeypatch):
-    import asyncio
-    import threading
+def test_switching_writes_nothing_into_the_target_profile_which_pairs_on_its_own(live_rig):
+    # Profiles stay islands: the switch only binds the device to the default profile in the plugin's own
+    # store. Ops refuses its turns until ops itself approves the device (hermes -p ops pairing approve ...).
+    rig = live_rig
+    rig.approve()
+    with rig.connect({"profiles": True}):
+        session = rig.adapter.hub.get(rig.device)
+        assert rig.run(rig.adapter.select_profile(session, "ops")) is None
+        assert not rig.runner.pairing_stores["ops"].is_approved("gadget", rig.device)
+        assert rig.adapter._store.owner_bound(rig.device)
+        rig.run(rig.adapter.on_text(session, "m1", "hi"))
+        assert [(e.text, e.source.profile) for e in rig.events if e.text == "hi"] == [("hi", "ops")]
+        assert _admitted(rig) == []
+        rig.approve("ops")
+        assert _admitted(rig) == [("hi", "ops")]
 
-    from hermes_gadget_plugin.adapter import GadgetAdapter
+
+def test_the_target_profiles_pairing_code_reaches_the_device_as_its_command(live_rig):
+    from gateway.run_inbound_unauthorized import pairing_code_reply, pairing_profile_arg
 
     rig = live_rig
     rig.approve()
-    granted, release = threading.Event(), threading.Event()
-    grant = GadgetAdapter._grant
-
-    def paused_grant(*args):
-        result = grant(*args)  # the ops approval is on disk from here
-        granted.set()
-        release.wait(10)
-        return result
-
-    monkeypatch.setattr(GadgetAdapter, "_grant", staticmethod(paused_grant))
-    with rig.connect({"profiles": True}):
+    with rig.connect({"profiles": True}) as device:
         session = rig.adapter.hub.get(rig.device)
-
-        async def start():
-            return asyncio.ensure_future(rig.adapter.select_profile(session, "ops"))
-
-        switch = rig.run(start())
-        assert granted.wait(10)
-        rig.route()
-        rig.runner.pairing_store.revoke("gadget", rig.device)
-        with rig.connect({}) as legacy:  # older firmware, same key, an old ops route
-            assert legacy.welcome["paired"] is False
-            rig.run(rig.adapter.on_text(rig.adapter.hub.get(rig.device), "m1", "grant-gap"))
-            assert _admitted(rig) == []
-            release.set()
-            assert rig.run(asyncio.wait_for(switch, 10)) == "unpaired"
+        assert rig.run(rig.adapter.select_profile(session, "ops")) is None
+        offer = pairing_code_reply("gadget", "ABCD2345", pairing_profile_arg(rig.runner.pairing_stores["ops"]))
+        assert rig.run(rig.adapter.send(rig.device, offer)).success
+        seen = []
+        while not any(m["type"] == "reply" for m in seen):
+            seen.append(json.loads(device.ws.recv(timeout=5)))
+        assert {"type": "turn.end", "turn": "", "outcome": "cancelled"}.items() <= next(
+            m for m in seen if m["type"] == "turn.end").items()  # no turn runs: the device settles
+        reply = next(m for m in seen if m["type"] == "reply")["text"]
+        assert "hermes -p ops pairing approve gadget ABCD2345" in reply
+        assert session.paired and session.profile == "ops"  # still paired on default, still on ops
+        assert rig.adapter._store.pairing_for(rig.device) is None  # default's pairing state untouched
 
 
 def test_a_switch_that_cannot_bind_the_device_mints_nothing(live_rig, monkeypatch):
@@ -447,40 +422,6 @@ def test_forget_from_a_stale_store_keeps_the_device_bound(live_rig):
         assert _admitted(rig) == []
 
 
-@pytest.mark.parametrize("hermes", ["no factory", "old factory signature"])
-def test_a_hermes_without_the_owner_check_refuses_instead_of_dropping_the_device(live_rig, monkeypatch, hermes):
-    rig = live_rig
-    rig.approve()
-    if hermes == "no factory":
-        owner = next(c for c in type(rig.runner).__mro__ if "_make_adapter_auth_check" in c.__dict__)
-        monkeypatch.delattr(owner, "_make_adapter_auth_check")
-    else:
-        monkeypatch.setattr(rig.runner, "_make_adapter_auth_check", lambda platform: None)
-    with rig.connect({"profiles": True}, profile="ops") as device:
-        assert device.welcome["type"] == "welcome"
-        assert device.welcome["paired"] is False and device.welcome["profile"] == "default"
-        assert rig.adapter.hub.get(rig.device) is not None  # still connected
-    assert not rig.runner.pairing_stores["ops"].is_approved("gadget", rig.device)
-    assert all(e.text == "/status" and e.source.profile == "default" for e in rig.events)  # the pairing trigger only
-
-
-def test_a_hermes_without_profile_dirs_refuses_the_switch_and_keeps_the_device(live_rig, monkeypatch):
-    import hermes_cli.profiles as profiles
-
-    rig = live_rig
-    rig.approve()
-    with rig.connect({"profiles": True}) as device:
-        assert device.welcome["paired"] is True
-        monkeypatch.delattr(profiles, "get_profile_dir")
-        device.ws.send(json.dumps({"type": "profile.select", "profile": "ops"}))
-        while (reply := json.loads(device.ws.recv(timeout=5)))["type"] != "profile":
-            pass
-        assert reply == {"type": "profile", "profile": "default", "error": "unpaired"}
-        assert rig.adapter.hub.get(rig.device) is not None  # still connected
-    assert not rig.runner.pairing_stores["ops"].is_approved("gadget", rig.device)
-    assert all(e.text == "/status" and e.source.profile == "default" for e in rig.events)  # the pairing trigger only
-
-
 def test_an_upgraded_routed_device_keeps_its_route_and_pairing(live_rig):
     rig = live_rig
     rig.route()
@@ -496,18 +437,3 @@ def test_an_upgraded_routed_device_keeps_its_route_and_pairing(live_rig):
             pass
         assert reply == {"type": "profile", "profile": "default", "error": "routed"}
     assert not rig.adapter._store.owner_bound(rig.device)
-
-
-def test_a_failed_grant_leaves_the_device_where_it_was(live_rig, hermes_home, monkeypatch):
-    from hermes_gadget_plugin.adapter import GadgetAdapter
-
-    rig = live_rig
-    rig.approve()
-    (hermes_home / "profiles" / "lab").mkdir()  # a third served profile, whose grant will fail
-    (hermes_home / "profiles" / "lab" / "config.yaml").write_text("{}\n")
-    with rig.connect({"profiles": True}):
-        session = rig.adapter.hub.get(rig.device)
-        assert rig.run(rig.adapter.select_profile(session, "ops")) is None
-        monkeypatch.setattr(GadgetAdapter, "_grant", staticmethod(lambda *a: False))  # rate limited, say
-        assert rig.run(rig.adapter.select_profile(session, "lab")) == "unpaired"
-        assert session.profile == "ops"
