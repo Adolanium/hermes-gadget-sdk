@@ -407,17 +407,21 @@ class DeviceSession:
         """Still the device's open connection: a reconnect replaces it."""
         return not self.closed and self.hub.sessions.get(self.device_id) is self
 
+    def face_state(self) -> tuple:
+        """What decides the face: a face found for another state is not this one's."""
+        return self.device_profile, self.profile, self.paired
+
     async def send_face(self, face: ProfileFace | None | object = _LOOK_UP) -> None:
         """Send the profile's face, or the mascot, unless the device holds it already. ``face`` is
         what find_face() returned, when the caller has it."""
         if self.caps.get("faces") != 1:
             return
-        state = self.device_profile, self.profile, self.paired
+        state = self.face_state()
         if face is _LOOK_UP:
             face = await self.find_face()
         digest = face.hash if face else None
         # Switched, (un)paired or replaced meanwhile: whatever changed sends its own face.
-        stale = lambda: (self.device_profile, self.profile, self.paired) != state or not self.current()  # noqa: E731
+        stale = lambda: self.face_state() != state or not self.current()  # noqa: E731
         if stale() or digest == self.face_hash:
             return
         try:
@@ -814,12 +818,15 @@ class DeviceHub:
             # The welcome keeps the face the device holds only if it is the profile's face now. Finding
             # its hash reads a file; a lookup that stalls counts as unknown, and is done again below.
             face: ProfileFace | None | object = _LOOK_UP
+            looked_up = session.face_state()
             try:
                 face = await asyncio.wait_for(session.find_face(), FACE_LOOKUP_S)
             except asyncio.TimeoutError:
                 log.warning("device %s: the face lookup took over %.1f s", session.device_id, FACE_LOOKUP_S)
             if not session.current():
                 return
+            if session.face_state() != looked_up:  # unpaired meanwhile, say: that face is not for now
+                face = _LOOK_UP
             # Built after the awaits, so it says what holds now (pairing can change meanwhile).
             welcome = dict(session=session.session_id, paired=session.paired, heartbeat_s=self.heartbeat_s,
                            server="hermes", proto=protocol.VERSION)

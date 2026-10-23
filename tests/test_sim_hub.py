@@ -847,6 +847,7 @@ def test_a_device_unpaired_while_its_face_is_looked_up_gets_an_unpaired_welcome(
         assert sim.wait_screen("ready", timeout=10)
         assert sim.wait_for(lambda: sim.last_received("face"), timeout=5)
         device_id, first = sim.status()["device_id"], hub.get(sim.status()["device_id"])
+        sent = len([m for m in sim.received if m.get("type") == "face"])
         delegate.found = asyncio.Event()
         sim.console("reconnect")
         assert sim.wait_for(lambda: hub.get(device_id) not in (None, first), timeout=10)
@@ -856,6 +857,7 @@ def test_a_device_unpaired_while_its_face_is_looked_up_gets_an_unpaired_welcome(
         assert sim.last_received("welcome")["paired"] is False
         sim.run_for(0.3)
         assert sim.status()["paired"] is False
+        assert not any("bits" in m for m in [m for m in sim.received if m.get("type") == "face"][sent:])  # no face sent
     finally:
         if delegate.found:
             loop_thread.loop.call_soon_threadsafe(delegate.found.set)
