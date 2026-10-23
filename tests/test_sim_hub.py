@@ -697,13 +697,10 @@ class _RoutedLater(_TwoProfiles):
     def profiles(self, session=None):
         return [] if self.route else super().profiles(session)
 
-    def face_profile(self, session):
-        return self.route or session.profile
-
     async def face(self, session):
         if self.route and self.ready:
             await self.ready.wait()
-        return self.faces.get(self.face_profile(session))
+        return self.faces.get(self.route or session.profile)
 
 
 def test_a_device_on_a_route_added_while_it_was_away_takes_the_routes_face(loop_thread, tmp_path, make_sim):
@@ -731,9 +728,9 @@ def test_a_device_on_a_route_added_while_it_was_away_takes_the_routes_face(loop_
         assert last_face(sim)["profile"] == "ops"  # the profile the device keeps, not the route's
         assert _held_face(sim) == _digest(delegate.faces["work"])
 
-        work = _digest(delegate.faces.pop("work"))  # no face, or profile_faces off: the clear is taken too
+        work = _digest(delegate.faces.pop("work"))  # no face, or profile_faces off
         assert _held_face(sim) == work
-        assert sim.wait_for(lambda: "bits" not in last_face(sim), timeout=5)
+        assert "face" not in sim.last_received("welcome")  # so the device drops it
         assert _held_face(sim) is None
 
         delegate.faces["work"] = _face(0x3C)
@@ -746,8 +743,8 @@ def test_a_device_on_a_route_added_while_it_was_away_takes_the_routes_face(loop_
         loop_thread.run(hub.stop())
 
 
-def test_a_new_route_shows_the_mascot_until_its_face_is_ready(loop_thread, tmp_path, make_sim):
-    """Never the previous profile's face: a reconnect onto a new route drops it before Ready."""
+def test_a_new_route_drops_the_held_face_before_ready_and_sends_its_own(loop_thread, tmp_path, make_sim):
+    """Never the previous profile's face: the welcome waits for the route's face and doesn't keep the old one."""
     import asyncio
 
     from hermes_gadget_plugin.hub import DeviceHub
@@ -766,16 +763,52 @@ def test_a_new_route_shows_the_mascot_until_its_face_is_ready(loop_thread, tmp_p
         loop_thread.run(device.send_profile())
         assert sim.wait_for(lambda: last_face().get("hash") == ops, timeout=5)
         assert _held_face(sim) == ops  # an unchanged face stays through a reconnect, unsent
+        assert sim.last_received("welcome")["face"] == ops
 
         delegate.ready = asyncio.Event()
         delegate.route = "work"
-        assert _held_face(sim) == ops  # the welcome of this reconnect, onto the route, doesn't keep it
-        assert _held_face(sim) is None  # at Ready again while work's face is still being made
+        sim.console("reconnect")
+        assert sim.wait_screen("connecting", timeout=5)
+        sim.run_for(0.5)
+        assert sim.device.screen() != "ready"  # no Ready while work's face is still being made
         loop_thread.loop.call_soon_threadsafe(delegate.ready.set)
+        assert sim.wait_screen("ready", timeout=10)
+        assert "face" not in sim.last_received("welcome")  # ops's face is not kept
         assert sim.wait_for(lambda: last_face().get("hash") == work, timeout=5)
         assert _held_face(sim) == work
     finally:
-        loop_thread.loop.call_soon_threadsafe(delegate.ready.set)  # no face left waiting on a failure
+        if delegate.ready:
+            loop_thread.loop.call_soon_threadsafe(delegate.ready.set)  # no face left waiting on a failure
+        loop_thread.run(hub.stop())
+
+
+def test_a_restarted_gateway_keeps_an_unchanged_face_without_sending_it(loop_thread, tmp_path, make_sim):
+    from hermes_gadget_plugin.hub import DeviceHub
+    from hermes_gadget_plugin.store import DeviceStore
+
+    def start_hub(port=0):
+        hub = DeviceHub(DeviceStore(tmp_path / "server"), _ProfileFaces(), host="127.0.0.1", port=port, heartbeat_s=5)
+        loop_thread.run(hub.start())
+        return hub
+
+    hub = start_hub()
+    port = hub.bound_port
+    faces = lambda: [m for m in sim.received if m.get("type") == "face"]  # noqa: E731
+    try:
+        sim = make_sim(f"ws://127.0.0.1:{port}/gadget")
+        assert sim.wait_screen("ready", timeout=10)
+        assert sim.wait_for(lambda: faces(), timeout=5)
+        held = faces()[0]["hash"]
+        welcomes = len([m for m in sim.received if m.get("type") == "welcome"])
+        loop_thread.run(hub.stop())
+        hub = start_hub(port)  # a new process: it has never sent this device anything
+        assert sim.wait_for(lambda: len([m for m in sim.received if m.get("type") == "welcome"]) > welcomes, timeout=15)
+        assert sim.wait_screen("ready", timeout=5)
+        assert sim.last_received("welcome")["face"] == held  # kept: no mascot at Ready
+        sim.run_for(0.3)
+        assert len(faces()) == 1  # and not sent again
+        assert _held_face(sim) == held
+    finally:
         loop_thread.run(hub.stop())
 
 

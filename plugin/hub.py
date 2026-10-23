@@ -59,12 +59,8 @@ class HubDelegate:
         return "unknown"
 
     async def face(self, session: "DeviceSession") -> bytes | None:
-        """The face of ``face_profile(session)`` (docs/protocol.md#faces), or None for the mascot."""
+        """The face of the profile answering ``session`` (docs/protocol.md#faces), or None for the mascot."""
         return None
-
-    def face_profile(self, session: "DeviceSession") -> str | None:
-        """The profile whose face ``session`` shows: the one answering it (None: none does)."""
-        return session.profile
 
     def language(self, session: "DeviceSession") -> Optional[str]:
         """The language id ``welcome`` names for a device left on ``auto`` (e.g. ``"es"``), or None."""
@@ -396,20 +392,24 @@ class DeviceSession:
             self.face_hash = None  # a device that changes profile drops its face
             await self.send_face()
 
-    async def send_face(self) -> None:
-        """Send the profile's face, or the mascot, unless the device holds it already. Unpaired
-        devices get the mascot."""
+    async def load_face(self) -> tuple:
+        """The face the device should show now, as (the state it is for, its bytes, its hash). Unpaired
+        devices get the mascot: no bytes, no hash."""
+        state = self.device_profile, self.profile, self.paired
+        data = await self.hub.delegate.face(self) if self.paired and self.caps.get("faces") == 1 else None
+        return state, data, hashlib.sha256(data).hexdigest()[:16] if data else None
+
+    async def send_face(self, loaded: tuple | None = None) -> None:
+        """Send the profile's face, or the mascot, unless the device holds it already. ``loaded`` is
+        what load_face() made, so the handshake needn't make it twice."""
         if self.caps.get("faces") != 1:
             return
-        state = self.device_profile, self.profile, self.paired
-        source = self.hub.delegate.face_profile(self)
-        data = await self.hub.delegate.face(self) if self.paired else None
-        digest = hashlib.sha256(data).hexdigest()[:16] if data else None
-        # Switched or (un)paired meanwhile: that change sends its own face.
-        if (self.device_profile, self.profile, self.paired) != state or digest == self.face_hash:
+        state, data, digest = loaded or await self.load_face()
+        # Switched, (un)paired or replaced meanwhile: whatever changed sends its own face.
+        if ((self.device_profile, self.profile, self.paired) != state or self.closed
+                or self.hub.sessions.get(self.device_id) is not self or digest == self.face_hash):
             return
         self.face_hash = digest
-        self.hub._faces[self.device_id] = (source, digest)
         await self.send_json(protocol.message(
             "face", profile=state[0], hash=digest, bits=base64.b64encode(data).decode() if data else None))
 
@@ -634,9 +634,6 @@ class DeviceHub:
         self._tasks: set[asyncio.Task] = set()  # DeviceSession.spawn, including devices already gone
         # Held back while a screen is dark, by device id: kept across reconnects.
         self._held: dict[str, _Held] = {}
-        # The face last sent to each device, and the profile it is from: what a welcome may tell a
-        # reconnecting device to keep.
-        self._faces: dict[str, tuple[str | None, str | None]] = {}
 
     def _hold(self, device_id: str) -> _Held:
         return self._held.setdefault(device_id, _Held())
@@ -801,14 +798,14 @@ class DeviceHub:
             named = hello.get("profile")
             named = named if isinstance(named, str) and named else "default"
             session.device_profile = welcome.get("profile", named)
-            held = hello.get("face")
-            # A face the device holds stays only if the welcome names it: the one last sent, from the
-            # profile answering now. Otherwise the device shows the mascot until the new face arrives.
-            if (isinstance(held, str) and session.device_profile == named and session.paired
-                    and self._faces.get(session.device_id) == (self.delegate.face_profile(session), held)):
-                session.face_hash = welcome["face"] = held
+            # The face the device should show is made before the welcome, which keeps the one the device
+            # holds only if it is that face: otherwise the device shows the mascot until the face arrives.
+            loaded = await session.load_face()
+            digest = loaded[2]
+            if digest is not None and hello.get("face") == digest and session.device_profile == named:
+                session.face_hash = welcome["face"] = digest
             await session.send_json(protocol.message("welcome", **welcome))
-            await session.send_face()
+            await session.send_face(loaded)
             log.info("device %s (%s) online, paired=%s", session.device_id, session.name, session.paired)
             await self.delegate.on_ready(session)
             if not session.display_sleeping:

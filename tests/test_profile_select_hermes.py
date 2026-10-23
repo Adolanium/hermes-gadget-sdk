@@ -254,7 +254,7 @@ def test_each_profile_shows_its_own_face_file_and_profile_faces_false_turns_them
     assert held() == digest["ops"]
 
     gadget.adapter._profile_faces = False  # as profile_faces: false sets it
-    assert held() == digest["ops"]  # this reconnect's welcome brings the clear
-    assert sim.wait_for(lambda: "bits" not in faces()[-1], timeout=5)
+    assert held() == digest["ops"]
+    assert "face" not in sim.last_received("welcome")  # this reconnect's welcome drops it
     assert held() is None
     assert GadgetAdapter(PlatformConfig(enabled=True, extra={"profile_faces": False}))._profile_faces is False

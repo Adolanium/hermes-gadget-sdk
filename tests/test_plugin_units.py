@@ -298,8 +298,8 @@ class _Wire:
         self.sent.append(json.loads(raw))
 
 
-def _slow_face_session(tmp_path):
-    """A paired session on default whose face is made only once ``delegate.release`` is set."""
+def _slow_face_session(tmp_path, hub=None):
+    """A paired, current session on default whose face is made only once ``delegate.release`` is set."""
     from hermes_gadget_plugin.hub import DeviceHub, DeviceSession, HubDelegate
 
     class SlowDefault(HubDelegate):
@@ -313,9 +313,11 @@ def _slow_face_session(tmp_path):
             return b"the default profile's face"
 
     delegate, wire = SlowDefault(), _Wire()
-    session = DeviceSession(DeviceHub(DeviceStore(tmp_path), delegate), wire, {"device_id": "hg-1", "caps": {"faces": 1}})
+    hub = hub or DeviceHub(DeviceStore(tmp_path), delegate)
+    session = DeviceSession(hub, wire, {"device_id": "hg-1", "caps": {"faces": 1}})
     session.paired = True
-    return session, delegate, wire
+    hub.sessions[session.device_id] = session
+    return session, hub.delegate, wire
 
 
 def test_a_face_that_arrives_after_a_profile_switch_is_not_sent(tmp_path):
@@ -345,3 +347,20 @@ def test_a_face_that_arrives_after_the_device_is_unpaired_is_not_sent(tmp_path):
         return wire.sent, session.face_hash
 
     assert asyncio.run(main()) == ([{"type": "unpaired"}], None)
+
+
+def test_a_face_made_for_a_replaced_connection_is_dropped(tmp_path):
+    """A reconnect replaces the connection while its face is still being made: only the new one answers."""
+
+    async def main():
+        old, delegate, old_wire = _slow_face_session(tmp_path)
+        first = asyncio.create_task(old.send_face())
+        await asyncio.sleep(0)
+        new, _, new_wire = _slow_face_session(tmp_path, old.hub)  # the hub's sessions now name the new one
+        await old.close("replaced by a newer connection")
+        delegate.release.set()
+        await asyncio.gather(first, new.send_face())
+        return [m["type"] for m in old_wire.sent], [m["type"] for m in new_wire.sent], new.face_hash
+
+    old_sent, new_sent, held = asyncio.run(main())
+    assert "face" not in old_sent and new_sent == ["face"] and held is not None
