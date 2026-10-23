@@ -127,6 +127,10 @@ An unchanged face stays through reconnects and gateway restarts. When you switch
 gadget route sends the device to another profile, it shows the mascot until the new profile's face
 arrives.
 
+A face is known by the file it comes from, not by the picture it makes. Any change to that file,
+even one that draws the same face (a metadata edit in the avatar, or the avatar replaced by a face
+file made from it), shows the mascot for a moment and sends the face once more.
+
 ## Placing the eye and the mouth
 
 The device blinks and talks, so the generator has to know where the face's features are. It
