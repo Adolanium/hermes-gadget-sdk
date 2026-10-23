@@ -137,6 +137,181 @@ def test_only_a_switching_device_sees_the_offered_profiles_sessions(hermes_home,
         assert _dashboard_labels(old_firmware, 0.5) == [[]]  # exactly today's: the default profile's only
 
 
+WITH_OPS, WITHOUT_OPS = [{"id": "default"}, {"id": "ops"}], [{"id": "default"}]
+
+
+
+@pytest.mark.parametrize("rosters, rows, heard", [
+    ([WITH_OPS, WITHOUT_OPS], [], False),  # ops is parked: an older push cannot bring it back
+    ([WITHOUT_OPS, WITH_OPS], ["telegram ops1"], True),  # ops is unparked: an older roster cannot drop it
+], ids=["ops leaves the offer", "ops joins the offer"])
+def test_the_newer_of_two_pushes_decides_the_dashboard(hermes_home, gadget, monkeypatch, rosters, rows, heard):
+    import asyncio
+    import os
+    import threading
+    import time
+    from hermes_gadget_plugin import adapter as adapter_module, dashboard, protocol
+
+    monkeypatch.setattr(adapter_module, "DASHBOARD_POLL_S", 60)  # only the two pushes below read the roster
+    monkeypatch.setattr(dashboard.BOARD, "_sessions", {})
+    ops = _profile_board(monkeypatch, "ops")
+    ops.pre_llm_call(session_id="s_ops1", platform="telegram")
+    key = os.urandom(32)
+    gadget.authorized.add(protocol.device_id_for_key(key))
+    with _RawDevice(gadget.url, key, {"dashboard": {"v": dashboard.VERSION}, "profiles": True}) as device:
+        assert _dashboard_labels(device, 2.5)[-1] == ["telegram ops1"]  # outlasts the poll begun before
+        releases, reads = [threading.Event(), threading.Event()], []
+
+        def profiles(session=None):
+            n = len(reads)
+            reads.append(n)
+            releases[n].wait(10)
+            return rosters[n]
+
+        monkeypatch.setattr(gadget.adapter, "profiles", profiles)
+        older = asyncio.run_coroutine_threadsafe(gadget.adapter._push_dashboard(), gadget.loop)
+        while not reads:
+            time.sleep(0.01)
+        newer = asyncio.run_coroutine_threadsafe(gadget.adapter._push_dashboard(), gadget.loop)
+        time.sleep(0.3)  # without one push at a time, the newer roster read starts now
+        releases[1].set()  # the newer read may finish first
+        time.sleep(0.3)
+        releases[0].set()
+        older.result(5)
+        newer.result(5)
+        assert _dashboard_labels(device, 0.5)[-1] == rows
+        assert ops._listeners == ([gadget.adapter._board_changed] if heard else [])
+
+
+
+def test_a_push_held_up_by_another_device_does_not_send_its_older_roster(hermes_home, gadget, monkeypatch):
+    import asyncio
+    import os
+    import threading
+    from hermes_gadget_plugin import adapter as adapter_module, dashboard, protocol
+
+    monkeypatch.setattr(adapter_module, "DASHBOARD_POLL_S", 60)
+    monkeypatch.setattr(dashboard.BOARD, "_sessions", {})
+    _profile_board(monkeypatch, "ops").pre_llm_call(session_id="s_ops1", platform="telegram")
+    caps = {"dashboard": {"v": dashboard.VERSION}, "profiles": True}
+    keys = os.urandom(32), os.urandom(32)
+    gadget.authorized.update(protocol.device_id_for_key(k) for k in keys)
+    stuck, entered = asyncio.Event(), threading.Event()
+
+    async def send_dashboard(_msg):
+        entered.set()
+        await stuck.wait()
+        return True
+
+    with _RawDevice(gadget.url, keys[0], caps), _RawDevice(gadget.url, keys[1], caps) as b:
+        assert _dashboard_labels(b, 2.5)[-1] == ["telegram ops1"]  # outlasts the poll begun before
+        a, b_session = (gadget.adapter.hub.get(protocol.device_id_for_key(k)) for k in keys)
+        monkeypatch.setattr(a, "send_dashboard", send_dashboard)
+        older = asyncio.run_coroutine_threadsafe(gadget.adapter._push_dashboard(), gadget.loop)  # A, then B
+        assert entered.wait(5)  # it has read the roster with ops and waits on A
+        monkeypatch.setattr(gadget.adapter, "_offer_all", False)
+        monkeypatch.setattr(gadget.adapter, "_offered", set())  # ops is taken off the offer
+        try:
+            gadget.run(gadget.adapter._push_dashboard(b_session))
+            assert _dashboard_labels(b, 0.5) == [[]]
+        finally:
+            gadget.loop.call_soon_threadsafe(stuck.set)
+            older.result(5)
+        assert _dashboard_labels(b, 0.5) == []  # the older push skips B: its roster still had ops
+
+
+
+@pytest.mark.parametrize("switching", [False, True], ids=["switching off", "switching on"])
+def test_a_device_stuck_in_a_dashboard_send_does_not_hold_up_another(hermes_home, gadget, monkeypatch, switching):
+    import asyncio
+    import os
+    import time
+    from hermes_gadget_plugin import dashboard, protocol
+
+    if not switching:
+        monkeypatch.setattr(gadget.adapter, "_offer_all", False)
+        monkeypatch.setattr(gadget.adapter, "_offered", None)
+    caps = {"dashboard": {"v": dashboard.VERSION}, "profiles": True}
+    keys = os.urandom(32), os.urandom(32)
+    gadget.authorized.update(protocol.device_id_for_key(k) for k in keys)
+    stuck = asyncio.Event()  # never set before the end: A's socket accepts nothing
+
+    async def send_dashboard(_msg):
+        await stuck.wait()
+        return True
+
+    with _RawDevice(gadget.url, keys[0], caps):
+        a = gadget.adapter.hub.get(protocol.device_id_for_key(keys[0]))
+        monkeypatch.setattr(a, "send_dashboard", send_dashboard)
+        pushing = asyncio.run_coroutine_threadsafe(gadget.adapter._push_dashboard(), gadget.loop)
+        try:
+            with _RawDevice(gadget.url, keys[1], caps) as b:
+                b.ws.send(json.dumps({"type": "text", "id": "m1", "text": "from b"}))
+                end = time.monotonic() + 3
+                while not any(e.text == "from b" for e in gadget.events) and time.monotonic() < end:
+                    time.sleep(0.02)
+                assert any(e.text == "from b" for e in gadget.events)  # B's input runs while A's send waits
+        finally:
+            gadget.loop.call_soon_threadsafe(stuck.set)
+            pushing.exception(5)  # the push may then find a closed socket; only its end matters
+
+
+
+def test_a_device_that_leaves_takes_its_push_order_with_it(hermes_home, gadget):
+    import os
+    import time
+    from hermes_gadget_plugin import dashboard, protocol
+
+    keys = os.urandom(32), os.urandom(32)
+    gone, stays = (protocol.device_id_for_key(k) for k in keys)
+    gadget.authorized.update((gone, stays))
+    caps = {"dashboard": {"v": dashboard.VERSION}, "profiles": True}
+    with _RawDevice(gadget.url, keys[1], caps):
+        with _RawDevice(gadget.url, keys[0], caps):
+            end = time.monotonic() + 5
+            while not {gone, stays} <= set(gadget.adapter._pushed_seq) and time.monotonic() < end:
+                time.sleep(0.02)
+            assert {gone, stays} <= set(gadget.adapter._pushed_seq)
+        end = time.monotonic() + 5
+        while gone in gadget.adapter._pushed_seq and time.monotonic() < end:
+            time.sleep(0.02)
+        assert gone not in gadget.adapter._pushed_seq and stays in gadget.adapter._pushed_seq
+    gadget.adapter._pushed_seq["hg-0000000000000000"] = 1  # as a push still finishing at shutdown leaves
+    gadget.run(gadget.adapter.disconnect())
+    assert gadget.adapter._pushed_seq == {}
+
+
+
+def test_a_push_queued_while_a_device_leaves_does_not_remember_it(hermes_home, gadget):
+    import asyncio
+    import os
+    import time
+    from hermes_gadget_plugin import dashboard, protocol
+
+    keys = os.urandom(32), os.urandom(32)
+    stays, gone = (protocol.device_id_for_key(k) for k in keys)
+    gadget.authorized.update((stays, gone))
+    caps = {"dashboard": {"v": dashboard.VERSION}, "profiles": True}
+    adapter = gadget.adapter
+
+    def until(check):
+        end = time.monotonic() + 5
+        while not check() and time.monotonic() < end:
+            time.sleep(0.02)
+        return check()
+
+    with _RawDevice(gadget.url, keys[0], caps):
+        with _RawDevice(gadget.url, keys[1], caps):
+            assert until(lambda: {stays, gone} <= set(adapter._pushed_seq))
+            gadget.run(adapter._roster_lock.acquire())  # another push is reading the roster
+            queued = asyncio.run_coroutine_threadsafe(adapter._push_dashboard(), gadget.loop)  # both devices
+            time.sleep(0.1)
+        assert until(lambda: gone not in adapter.hub.sessions and gone not in adapter._pushed_seq)
+        gadget.loop.call_soon_threadsafe(adapter._roster_lock.release)
+        queued.result(5)
+        assert gone not in adapter._pushed_seq and stays in adapter._pushed_seq
+
+
 def _sessions_mine_and_ops(monkeypatch):
     from hermes_gadget_plugin import dashboard
 
