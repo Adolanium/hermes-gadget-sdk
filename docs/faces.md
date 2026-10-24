@@ -116,8 +116,9 @@ A profile shows its face only once Hermes would accept the device's turns in tha
 default profile, that is the pairing the device already has. For any other profile, whether the
 device switched to it or a gadget route sends it there, it means that profile's own pairing approval
 (`hermes -p ops pairing approve gadget <code>`) or the gateway's allowlist; until then the device
-shows the mascot. When the profile approves the device, its face follows within a few seconds; when
-it revokes the device, the mascot comes back.
+shows the mascot. Once Hermes accepts the device there, the face follows within a few seconds, and
+once Hermes no longer accepts it, the mascot comes back. Removing the profile's pairing approval
+does not bring the mascot back while the gateway's allowlist still lets the device in.
 
 A profile with neither a face file nor an avatar shows the mascot. To show the mascot for every
 profile, turn faces off in the default profile's `config.yaml`:
