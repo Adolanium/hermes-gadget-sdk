@@ -223,3 +223,25 @@ def test_the_simulated_firmware_holds_a_card_until_its_screen_wakes(devserver, m
     assert sim.wait_for(lambda: not session.display_sleeping, timeout=5)
     assert sim.wait_screen("card", timeout=5)
     assert sim.last_received("display")["title"] == "Timer"
+
+
+def test_the_simulated_firmware_sleeps_face_down(devserver, make_sim):
+    """End to end with the C++ core: lying face down sleeps the screen, turning it over wakes it."""
+    hub, _brain, url = devserver()
+    sim = make_sim(url, board="sim-466x466-round")
+    assert sim.wait_screen("ready", timeout=10)
+    session = next(iter(hub.sessions.values()))
+    assert sim.console("set face_down_sleep on").startswith("@ok")
+    sim.set_face_down(True)
+    assert sim.wait_for(lambda: sim.status()["face_down"], timeout=5)
+    assert sim.peripherals.backlight == 0
+    assert sim.wait_for(lambda: session.display_sleeping, timeout=5)
+
+    sim.set_face_down(False)
+    assert sim.wait_for(lambda: not sim.status()["face_down"], timeout=5)
+    assert sim.peripherals.backlight > 0
+    assert sim.wait_for(lambda: not session.display_sleeping, timeout=5)
+
+    plain = make_sim(url, state="no-motion")
+    assert plain.wait_screen("ready", timeout=10)
+    assert "face_down" not in plain.status()

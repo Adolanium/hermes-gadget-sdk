@@ -2,8 +2,18 @@
 #include "hg/battery.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace hg {
+namespace {
+
+// Face down: the screen points at the floor (device-frame milli-g). Down is z
+// under -700 with x and y each under 500; up is z over -300.
+constexpr int kDownZ = -700, kDownTiltMg = 500, kUpZ = -300;
+constexpr uint32_t kFaceDownMs = 800, kFaceUpMs = 300;
+constexpr uint32_t kMotionStaleMs = 2000;  // a silent sensor never keeps the screen dark
+
+}  // namespace
 
 bool App::battery_is_estimated() const {
   if (!power_status_ || power_status_->battery_present == false) return false;
@@ -20,6 +30,13 @@ std::optional<uint8_t> App::display_battery_percent() const {
 }
 
 bool App::wake_display() {
+  if (face_down_) {
+    // Lying face down, only turning the gadget over lights the screen. Ending a
+    // doze lets what asked (an alarm's first beep) find the port awake; power_tick
+    // dozes again when it is idle.
+    set_dozing(false);
+    return true;  // the input that asked is consumed, as on a timed-out screen
+  }
   activity_at_ = now();
   const bool sleeping = display_sleeping_;
   if (display_dimmed_ || sleeping) {
@@ -100,6 +117,76 @@ void App::power_tick() {
     doze = idle && display_sleeping_ && on_battery_;
   }
   set_dozing(doze);
+}
+
+bool App::can_sleep_face_down() const {
+  // Every path that darkens the screen and wakes it again needs a backlight: a
+  // board without one would freeze a lit frame while telling Hermes it is dark.
+  return profile_.motion_sensor && hal_.display && hal_.display->info().has_backlight;
+}
+
+bool App::face_down_sleep_enabled() const { return can_sleep_face_down() && face_down_sleep_; }
+
+void App::on_motion(int16_t x_mg, int16_t y_mg, int16_t z_mg) {
+  motion_[0] = x_mg;
+  motion_[1] = y_mg;
+  motion_[2] = z_mg;
+  motion_at_ = now();
+  motion_seen_ = true;
+}
+
+void App::motion_tick() {
+  if (!motion_seen_) return;
+  const uint32_t t = now() | 1u;  // 0 means "not since"
+  if (now() - motion_at_ > kMotionStaleMs) {
+    // The sensor stopped reporting: never stay dark on old data.
+    down_since_ = up_since_ = 0;
+    if (face_down_) leave_face_down();
+    return;
+  }
+  const int x = motion_[0], y = motion_[1], z = motion_[2];
+  const bool down = z < kDownZ && std::abs(x) < kDownTiltMg && std::abs(y) < kDownTiltMg;
+  const bool up = z > kUpZ;
+  down_since_ = down ? (down_since_ ? down_since_ : t) : 0;
+  up_since_ = up ? (up_since_ ? up_since_ : t) : 0;
+  if (face_down_) {
+    if (!face_down_sleep_enabled() || (up_since_ && t - up_since_ >= kFaceUpMs)) leave_face_down();
+  } else if (face_down_sleep_enabled() && down_since_ && t - down_since_ >= kFaceDownMs) {
+    enter_face_down();
+  }
+}
+
+void App::enter_face_down() {
+  face_down_ = true;
+  // A reply being spoken goes quiet and its text waits for the turn-over, like a
+  // reply that arrives face down. The turn carries on: Hermes is not told to stop.
+  reply_while_face_down_ = mode_ == Mode::Responding;
+  if (mode_ == Mode::Listening) cancel_listening("face down");
+  // A ringing alarm goes quiet and stays up: flipping the gadget over means "hush".
+  alarm_ringing_ = false;
+  stop_playback();  // the speech, an alarm beep, a tone, or a stream a later turn.start left playing
+  if (settings_open()) close_settings();
+  // A screen sleep that only turning the gadget over ends: every reader of a
+  // dark screen (the model, Hermes, the status) stays right without new branches.
+  display_dimmed_ = false;
+  display_sleeping_ = true;
+  hal_.display->set_backlight(0);
+  log(LogLevel::Info, "face down: screen off, Hermes muted");
+  update_model();
+}
+
+void App::leave_face_down() {
+  face_down_ = false;
+  down_since_ = 0;
+  if (reply_while_face_down_ && !reply_.empty()) {
+    // The reply that arrived face down shows from the top for the usual window.
+    reply_until_ = now() + kReplyLingerMs;
+    scroll_ = 0;
+    page_at_ = now() + page_dwell_ms();
+  }
+  reply_while_face_down_ = false;
+  wake_display();  // lights at the brightness setting, ends a doze, redraws
+  log(LogLevel::Info, "face up: screen on");
 }
 
 json::Value App::power_value() const {

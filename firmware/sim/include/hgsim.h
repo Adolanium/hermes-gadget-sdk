@@ -22,7 +22,7 @@ extern "C" {
 #define HGSIM_API __attribute__((visibility("default")))
 #endif
 
-#define HGSIM_ABI_VERSION 6
+#define HGSIM_ABI_VERSION 7
 
 typedef struct hgsim hgsim;
 
@@ -87,6 +87,7 @@ typedef struct hgsim_config {
   size_t update_capacity; /* bytes the update slot holds; 0 = no over-the-air updates */
   int update_pending;     /* this boot runs an installed update that isn't confirmed yet */
   int has_power;         /* explicitly supplied simulated power readings */
+  int motion;            /* an accelerometer feeds hgsim_motion (face-down sleep) */
 } hgsim_config;
 
 /* Action handler: fill `result_json` (a JSON object) and return 1, or write an
@@ -111,6 +112,8 @@ HGSIM_API void hgsim_transport_closed(hgsim* sim, const char* reason);
 HGSIM_API void hgsim_button(hgsim* sim, int button, int pressed);
 /* Touchscreen sample in screen pixels; touching = 0 when the finger lifts. */
 HGSIM_API void hgsim_touch(hgsim* sim, int touching, int x, int y);
+/* Accelerometer sample in milli-g, device frame (+z out of the screen); send a few per second. */
+HGSIM_API void hgsim_motion(hgsim* sim, int x_mg, int y_mg, int z_mg);
 HGSIM_API void hgsim_mic_samples(hgsim* sim, const int16_t* samples, size_t count);
 HGSIM_API void hgsim_submit_text(hgsim* sim, const char* text);
 HGSIM_API void hgsim_set_sensor(hgsim* sim, const char* name, double value);

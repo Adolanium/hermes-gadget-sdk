@@ -42,8 +42,8 @@ The round panel's edge arc lies in the ring around the UI square, which no band 
 
 `App` is not thread-safe, and that is deliberate.
 
-- Ports call `App::tick()` every 5–20 ms and deliver every asynchronous event (Wi-Fi up, WebSocket frame, microphone chunk, button edge, console line) on that same thread.
-- On the ESP32, driver tasks post to a FreeRTOS queue that the main task drains.
+- Ports call `App::tick()` every 5–20 ms and deliver every asynchronous event (Wi-Fi up, WebSocket frame, microphone chunk, button edge, motion sample, console line) on that same thread.
+- On the ESP32, driver tasks post to a FreeRTOS queue that the main task drains. The motion task is the exception: it keeps only its latest sample, and the main task reads it.
 - In the simulator, the WebSocket thread posts to a Python queue that the UI thread drains.
 
 As a result the core has no locks and every test is deterministic.

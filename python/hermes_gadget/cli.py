@@ -96,6 +96,12 @@ def _script_step(sim, cmd: str, rest: str) -> None:
             sim.set_power(json.loads(rest))
         except (ValueError, TypeError) as exc:
             raise ScriptError(f"invalid power reading: {exc}") from exc
+    elif cmd == "facedown":
+        if rest not in ("on", "off"):
+            raise ScriptError("facedown needs on or off")
+        if not sim.board.motion:
+            raise ScriptError(f"the {sim.board.name} board has no motion sensor")
+        sim.set_face_down(rest == "on")
     elif cmd == "status":
         print(sim.status())
     elif cmd == "screenshot":

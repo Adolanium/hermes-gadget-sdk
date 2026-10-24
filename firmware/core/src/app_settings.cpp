@@ -18,8 +18,8 @@ bool App::settings_title_hit(int x, int y) const {
 
 bool App::open_settings() {
   // The alarm too: a hold that began just before it rang must not cover it and silence it.
-  if (prompt_showing() || ota_busy() || ota_ == Ota::Restarting || !wifi_setup_text_.empty() || phone_pairing_ ||
-      alarm_)
+  if (face_down_ || prompt_showing() || ota_busy() || ota_ == Ota::Restarting || !wifi_setup_text_.empty() ||
+      phone_pairing_ || alarm_)
     return false;
   wake_display();
   if (settings_open()) { close_settings(); return true; }
@@ -69,6 +69,7 @@ void App::settings_input(Button button, bool pressed) {
       switch (item) {
         case Menu::Profile: return agent_profiles_.size() > 1;
         case Menu::Power: return hal_.power != nullptr;
+        case Menu::FaceDownSleep: return can_sleep_face_down();
         case Menu::PowerOff: return can_power_off;
         case Menu::WifiSetup: return static_cast<bool>(on_wifi_setup);
         case Menu::Phone: return static_cast<bool>(on_phone_pair);
@@ -137,6 +138,9 @@ void App::settings_input(Button button, bool pressed) {
       console("set screen_timeout " + std::to_string(next));
       break;
     }
+    case Menu::FaceDownSleep:
+      console(face_down_sleep_ ? "set face_down_sleep off" : "set face_down_sleep on");
+      break;
     case Menu::PowerOff:
       if (!power_off_armed_) {
         power_off_armed_ = true;
@@ -272,6 +276,10 @@ void App::settings_model() {
       m.detail = tr(Msg::ScreenTimeout);
       m.body = screen_timeout_ms_ ? tr(Msg::TimeoutSeconds, {std::to_string(screen_timeout_ms_ / 1000)})
                                  : std::string(tr(Msg::TimeoutAlwaysOn));
+      break;
+    case Menu::FaceDownSleep:
+      m.detail = tr(Msg::FaceDownSleep);
+      m.body = tr(face_down_sleep_ ? Msg::FaceDownSleepOn : Msg::FaceDownSleepOff);
       break;
     case Menu::PowerOff:
       m.detail = tr(Msg::PowerOff);

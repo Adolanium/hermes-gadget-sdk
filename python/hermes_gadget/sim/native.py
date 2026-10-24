@@ -20,7 +20,7 @@ from .. import paths
 
 log = logging.getLogger("hermes_gadget.sim")
 
-ABI_VERSION = 6
+ABI_VERSION = 7
 
 BUTTON_TALK, BUTTON_CANCEL, BUTTON_UP, BUTTON_DOWN = 0, 1, 2, 3
 BUTTONS = {"talk": BUTTON_TALK, "cancel": BUTTON_CANCEL, "up": BUTTON_UP, "down": BUTTON_DOWN}
@@ -99,6 +99,7 @@ class _Config(Structure):
         ("update_capacity", c_size_t),
         ("update_pending", c_int),
         ("has_power", c_int),
+        ("motion", c_int),
     ]
 
 
@@ -176,6 +177,7 @@ def load_library(path: Path | None = None) -> ctypes.CDLL:
     lib.hgsim_transport_closed.argtypes = [c_void_p, c_char_p]
     lib.hgsim_button.argtypes = [c_void_p, c_int, c_int]
     lib.hgsim_touch.argtypes = [c_void_p, c_int, c_int, c_int]
+    lib.hgsim_motion.argtypes = [c_void_p, c_int, c_int, c_int]
     lib.hgsim_mic_samples.argtypes = [c_void_p, c_char_p, c_size_t]
     lib.hgsim_submit_text.argtypes = [c_void_p, c_char_p]
     lib.hgsim_set_sensor.argtypes = [c_void_p, c_char_p, c_double]
@@ -209,7 +211,7 @@ class NativeDevice:
                  speaker_rate: int = 16000, library: Path | None = None,
                  button_labels: tuple[str, str] | None = None, round_panel: bool = False,
                  touch_screen: bool = False, update_capacity: int = 0, update_pending: bool = False,
-                 audio_host: AudioHost | None = None, power: bool = False):
+                 motion: bool = False, audio_host: AudioHost | None = None, power: bool = False):
         self._lib = load_library(library)
         self._host_obj = host
         self.width, self.height = width, height
@@ -217,7 +219,7 @@ class NativeDevice:
         self._strings += [s.encode() for s in button_labels] if button_labels else [None, None]
         self._config = _Config(width, height, int(mic), int(speaker), int(backlight), int(scroll_buttons),
                                mic_rate, speaker_rate, *self._strings, int(round_panel), int(touch_screen),
-                               update_capacity, int(update_pending), int(power))
+                               update_capacity, int(update_pending), int(power), int(motion))
         self._callbacks = self._make_callbacks(host, audio_host or host)
         self._handle = self._lib.hgsim_create(ctypes.byref(self._config), ctypes.byref(self._callbacks))
         if not self._handle:
@@ -382,6 +384,10 @@ class NativeDevice:
 
     def touch(self, touching: bool, x: int = 0, y: int = 0) -> None:
         self._lib.hgsim_touch(self._handle, int(touching), int(x), int(y))
+
+    def motion(self, x_mg: int, y_mg: int, z_mg: int) -> None:
+        """An accelerometer sample in milli-g (device frame: +z out of the screen)."""
+        self._lib.hgsim_motion(self._handle, int(x_mg), int(y_mg), int(z_mg))
 
     def mic_samples(self, pcm: bytes) -> None:
         self._lib.hgsim_mic_samples(self._handle, pcm, len(pcm) // 2)
