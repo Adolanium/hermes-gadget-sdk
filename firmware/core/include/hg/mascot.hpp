@@ -2,6 +2,10 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdlib>
+#include <memory>
+#include <string>
+#include <string_view>
 
 namespace hg::mascot {
 
@@ -36,5 +40,24 @@ struct Anchors {
   int16_t mouth_y0, mouth_y1;  // rows that change when talking
 };
 const Anchors& anchors();
+
+// A face Hermes sent for the profile that answers (docs/protocol.md#faces). It has the mascot's
+// sizes and frames and replaces it while the app holds one.
+struct Face {
+  struct Free {
+    void operator()(uint8_t* p) const { std::free(p); }
+  };
+  std::string hash;
+  std::unique_ptr<uint8_t, Free> bits;  // every size, smallest first, each as idle, blink, talk
+  Anchors anchors;
+};
+// The face message's `bits`: base64 of the bitmaps, then of the anchors as ten little-endian int16
+// in Anchors' field order. False, before allocating anything, when the length is not exactly that;
+// false when there is no memory for it, and when an anchor is outside 0..1000 or a row range is
+// upside down.
+bool parse(std::string_view base64, Face& out);
+// pick() and anchors() for `face`, or for the mascot when it is null.
+Bitmap pick(int max_size, Frame frame, const Face* face);
+const Anchors& anchors(const Face* face);
 
 }  // namespace hg::mascot

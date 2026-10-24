@@ -159,7 +159,15 @@ std::string base64_encode(const uint8_t* data, size_t len) {
 }
 
 bool base64_decode(std::string_view in, std::vector<uint8_t>& out) {
-  out.clear();
+  out.resize(in.size() * 3 / 4 + 1);
+  size_t len = 0;
+  const bool ok = base64_decode(in, out.data(), out.size(), len);
+  out.resize(len);
+  return ok;
+}
+
+bool base64_decode(std::string_view in, uint8_t* out, size_t cap, size_t& len) {
+  len = 0;
   uint32_t acc = 0;
   int bits = 0;
   size_t pad = 0;
@@ -176,7 +184,8 @@ bool base64_decode(std::string_view in, std::vector<uint8_t>& out) {
     bits += 6;
     if (bits >= 8) {
       bits -= 8;
-      out.push_back(static_cast<uint8_t>(acc >> bits));
+      if (len == cap) return false;
+      out[len++] = static_cast<uint8_t>(acc >> bits);
     }
   }
   return pad <= 2;

@@ -83,6 +83,7 @@ struct UiModel {
   bool hero = false;
   uint8_t caption_lines = 1;  // hero: lines the detail may wrap to (then "..")
   bool name_target = false;   // hero: the caption sits in a panel that a tap opens the profile list from
+  const mascot::Face* face = nullptr;  // drawn instead of the mascot; borrowed like `qr`
   // Wi-Fi setup: a scannable code for the temporary network, drawn centred in
   // the content band. Null on every other screen. Borrowed, not owned: the app
   // keeps the matrix so it is encoded once, not on every model update.

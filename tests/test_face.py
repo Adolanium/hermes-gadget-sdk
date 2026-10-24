@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -18,6 +19,7 @@ import pytest
 pytest.importorskip("PIL", reason="the face command needs Pillow (the images extra)")
 
 from hermes_gadget import cli, face  # noqa: E402  (after the Pillow guard)
+from hermes_gadget_plugin import face as profile_faces  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 SHIPPED = REPO / "firmware" / "core" / "src" / "mascot_data.cpp"
@@ -130,6 +132,137 @@ def test_the_mascot_has_a_geometry_check_too(tmp_path):
     assert cli.main(["face", "--out", str(tmp_path / "m.cpp"), "--preview", str(tmp_path / "p.png"),
                      "--check", str(check)]) == 0
     assert check.exists()
+
+
+def test_a_face_file_carries_the_firmwares_frames_then_its_anchors(tmp_path):
+    out = tmp_path / "gadget-face.bin"
+    assert cli.main(["face", "--out", str(out), "--preview", str(tmp_path / "p.png")]) == 0
+    shipped = SHIPPED.read_text()
+    data = arrays(shipped)
+    bits = b"".join(data[f"k{frame}{size}"] for size in EXPECTED for frame in ("Idle", "Blink", "Talk"))
+    anchors = [int(v) for v in re.findall(r"-?\d+", re.search(r"kAnchors = (.*);", shipped).group(1))]
+    assert out.read_bytes() == bits + struct.pack("<10h", *anchors)
+    assert len(bits) + 20 == profile_faces.FACE_BYTES
+
+
+def test_a_face_files_anchors_stay_on_the_bitmap():
+    """The device refuses a face with an anchor off the bitmap, so one drawn past an edge is held to it."""
+    from PIL import Image
+
+    blank = Image.new("L", (face.MASTER_SIZE, face.MASTER_SIZE), 0)
+    geo = {"ear_cup": (-50, 300), "mouth_pt": (500, 1100), "think_dot": (800, 100), "eyes_rows": (400, 500),
+           "mouth_rows": (980, 1100)}
+    data = profile_faces.pack(dict.fromkeys(face.FRAMES, blank), geo)
+    assert struct.unpack("<10h", data[-20:]) == (0, 293, 488, 1000, 781, 98, 391, 488, 957, 1000)
+
+
+def _disc(path: Path, ink: tuple, paper: tuple) -> Path:
+    """An original drawing: a filled disc with two eye holes."""
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGB", (300, 300), paper)
+    draw = ImageDraw.Draw(img)
+    draw.ellipse((50, 40, 250, 260), fill=ink)
+    draw.ellipse((100, 110, 130, 140), fill=paper)
+    draw.ellipse((170, 110, 200, 140), fill=paper)
+    img.save(path)
+    return path
+
+
+def test_an_avatar_becomes_light_ink_whichever_way_it_is_drawn(tmp_path):
+    """The screen draws light on dark: dark art on white and white art on dark give the same face."""
+    dark_on_light = profile_faces.from_picture(_disc(tmp_path / "a.png", (20, 20, 20), (250, 250, 250)))
+    light_on_dark = profile_faces.from_picture(_disc(tmp_path / "b.png", (240, 240, 240), (10, 10, 10)))
+    idle192 = slice(-20 - 3 * 4608, -20 - 2 * 4608)
+    ink = sum(bin(b).count("1") for b in dark_on_light[idle192])
+    assert 0.3 < ink / (192 * 192) < 0.6, "the disc, not the paper around it"
+    differ = sum(bin(a ^ b).count("1") for a, b in zip(dark_on_light[idle192], light_on_dark[idle192]))
+    assert differ < 0.01 * ink  # the same disc, give or take its antialiased edge
+
+
+def test_a_replaced_avatar_gets_a_new_face_even_with_the_same_size_and_time(tmp_path):
+    """A face is named by the picture's bytes, so a restored or copied avatar with the old metadata
+    still gets its own face."""
+    from PIL import Image
+
+    home = tmp_path / "ops"
+    (home / "assets").mkdir(parents=True)
+    avatar = home / "assets" / "avatar.png"
+    # Uncompressed (BMP bytes under the avatar's name), so both pictures have the same size.
+    Image.open(_disc(tmp_path / "a.png", (240, 240, 240), (10, 10, 10))).save(avatar, format="BMP")
+    before = profile_faces.for_profile(home)
+    before.load()
+    stat = avatar.stat()
+    Image.open(_disc(tmp_path / "b.png", (240, 240, 240), (120, 10, 10))).save(avatar, format="BMP")
+    os.utime(avatar, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    assert (avatar.stat().st_size, avatar.stat().st_mtime_ns) == (stat.st_size, stat.st_mtime_ns)
+    after = profile_faces.for_profile(home)
+    assert after.hash != before.hash
+    assert after.load() == profile_faces.from_picture(avatar) != before.load()
+
+
+def test_a_face_file_and_an_avatar_never_share_a_hash(tmp_path):
+    """A face file whose bytes are an avatar's hash input still gets a hash of its own."""
+    source = bytes(profile_faces.FACE_BYTES - len(profile_faces.AVATAR_DRAWING))
+    with_file, with_avatar = tmp_path / "file", tmp_path / "avatar"
+    (with_avatar / "assets").mkdir(parents=True)
+    with_file.mkdir()
+    (with_file / profile_faces.FACE_FILE).write_bytes(profile_faces.AVATAR_DRAWING + source)
+    (with_avatar / "assets" / "avatar.png").write_bytes(source)
+    assert profile_faces.for_profile(with_file).hash != profile_faces.for_profile(with_avatar).hash
+
+
+PINNED_DRAWING = "788c2b3a73475e59"  # from_picture's drawing of _disc's light disc, with Pillow 12.3
+
+
+def test_the_avatar_drawing_is_pinned_to_its_version(tmp_path):
+    """A different drawing from the same picture must come with a new AVATAR_DRAWING, or devices that
+    hold the old drawing keep it."""
+    drawn = profile_faces.digest(profile_faces.from_picture(_disc(tmp_path / "a.png", (240, 240, 240), (10, 10, 10))))
+    assert (profile_faces.AVATAR_DRAWING, drawn) == (b"hermes-gadget avatar 1\n", PINNED_DRAWING), (
+        "from_picture draws differently: bump AVATAR_DRAWING in plugin/face.py, then record the new digest here")
+
+
+def test_profiles_that_are_gone_leave_no_faces_behind(tmp_path, monkeypatch):
+    import gc
+    import shutil
+    import tracemalloc
+
+    monkeypatch.setattr(profile_faces, "from_picture", lambda path: bytes(profile_faces.FACE_BYTES))
+    tracemalloc.start()
+    try:
+        start = tracemalloc.get_traced_memory()[0]
+        for i in range(40):
+            home = tmp_path / f"p{i}"
+            (home / "assets").mkdir(parents=True)
+            (home / "assets" / "avatar.png").write_bytes(b"picture %d" % i)
+            profile_faces.for_profile(home).load()
+            shutil.rmtree(home)
+        gc.collect()
+        assert tracemalloc.get_traced_memory()[0] - start < 200_000  # forty kept faces would hold over 1 MB
+    finally:
+        tracemalloc.stop()
+
+
+def test_a_profile_shows_its_face_file_then_its_avatar_then_the_mascot(tmp_path, caplog):
+    home = tmp_path / "ops"
+    (home / "assets").mkdir(parents=True)
+    assert profile_faces.for_profile(home) is None  # nothing: the mascot
+
+    avatar = _disc(home / "assets" / "avatar.png", (240, 240, 240), (10, 10, 10))
+    converted = profile_faces.for_profile(home)
+    assert converted.load() == profile_faces.from_picture(avatar)
+    assert profile_faces.for_profile(home, convert=False) is None  # no Pillow: face files only
+
+    (home / profile_faces.FACE_FILE).write_bytes(b"not a face")
+    assert profile_faces.for_profile(home).hash == converted.hash  # a broken file is passed over, and said so
+    assert "not a face file" in caplog.text
+
+    assert cli.main(["face", "--out", str(home / profile_faces.FACE_FILE), "--preview", str(tmp_path / "p.png")]) == 0
+    made = (home / profile_faces.FACE_FILE).read_bytes()
+    hand_made = profile_faces.for_profile(home)
+    assert hand_made.load() == made and hand_made.hash == profile_faces.ProfileFace.of(made).hash != converted.hash
+    assert profile_faces.for_profile(home, convert=False).load() == made
 
 
 def test_outside_a_checkout_the_command_says_where_to_run_it(tmp_path, monkeypatch, capsys):

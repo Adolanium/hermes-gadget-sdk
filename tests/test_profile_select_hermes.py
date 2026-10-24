@@ -223,3 +223,42 @@ def test_a_refused_message_does_not_leave_the_device_thinking(hermes_home, gadge
     assert sim.wait_for(lambda: sim.status()["screen"] == "ready", timeout=3)
     assert gadget.events == []
     assert "not approved" in (sim.last_received("notice") or {}).get("text", "")
+
+
+def test_each_profile_shows_its_own_face_file_and_profile_faces_false_turns_them_off(hermes_home, gadget, make_sim):
+    import struct
+    import types
+
+    from gateway.config import PlatformConfig
+    from hermes_gadget_plugin.adapter import GadgetAdapter
+    from hermes_gadget_plugin.face import FACE_BYTES, FACE_FILE, ProfileFace
+
+    anchors = struct.pack("<10h", 607, 293, 262, 620, 801, 107, 396, 508, 586, 649)
+    face = {"default": bytes([0xAA]) * (FACE_BYTES - 20) + anchors, "ops": bytes([0x55]) * (FACE_BYTES - 20) + anchors}
+    (hermes_home / FACE_FILE).write_bytes(face["default"])
+    (hermes_home / "profiles" / "ops" / FACE_FILE).write_bytes(face["ops"])
+    digest = {p: ProfileFace.of(data).hash for p, data in face.items()}
+    faces = lambda: [m for m in sim.received if m["type"] == "face"]  # noqa: E731
+
+    def held():
+        """The face the device holds, as the hello of a reconnect names it."""
+        sim.console("reconnect")
+        assert sim.wait_screen("connecting", timeout=5)
+        assert sim.wait_screen("ready", timeout=10)
+        return [m for m in sim.sent if m["type"] == "hello"][-1].get("face")
+
+    # Ops has approved the device: no runner here, so this stands in for Hermes's own check.
+    gadget.adapter.gateway_runner = types.SimpleNamespace(_is_user_authorized_for_source=lambda source: True)
+    sim = _paired_sim(gadget, make_sim)
+    assert sim.wait_for(lambda: faces() and faces()[-1]["hash"] == digest["default"], timeout=5)
+    assert held() == digest["default"]
+    _select_next_profile(sim)
+    assert sim.wait_for(lambda: faces()[-1]["hash"] == digest["ops"], timeout=5)
+    assert faces()[-1]["profile"] == "ops"
+    assert held() == digest["ops"]
+
+    gadget.adapter._profile_faces = False  # as profile_faces: false sets it
+    assert held() == digest["ops"]
+    assert "face" not in sim.last_received("welcome")  # this reconnect's welcome drops it
+    assert held() is None
+    assert GadgetAdapter(PlatformConfig(enabled=True, extra={"profile_faces": False}))._profile_faces is False

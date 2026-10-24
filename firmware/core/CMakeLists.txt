@@ -13,6 +13,7 @@ set(HG_CORE_SOURCES
     src/i18n_es.cpp
     src/frame_stats.cpp
     src/json.cpp
+    src/mascot.cpp
     src/mascot_data.cpp
     src/protocol.cpp
     src/qr.cpp
