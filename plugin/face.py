@@ -189,14 +189,15 @@ def from_picture(path: Path | io.BytesIO) -> bytes:
     """A still face from a picture not drawn for the device, such as a Hermes avatar.
 
     A picture with transparency is a drawing: its visible pixels are the ink, and its eyes, mouth
-    and other features, the pixels far lighter or darker than the drawing's usual brightness, are
-    holes, as in the mascot. An opaque picture has no such outline, so the screen's light ink on
+    and other features, the pixels far lighter or darker than the drawing's own colour, are holes,
+    as in the mascot. The drawing's colour is that of its outline, which features inside it don't
+    touch, so even a mouth bigger than the rest of the face stays the hole. An opaque picture has no such outline, so the screen's light ink on
     dark decides: a picture on a light background gives its dark parts as ink, and one on a dark
     background its light parts, cut at the picture's own average brightness so a dim photo keeps
     its features. A still face has no eyes or mouth placed by hand, so it neither blinks nor talks:
     a face file does.
     """
-    from PIL import Image, ImageChops, ImageOps, ImageStat
+    from PIL import Image, ImageChops, ImageFilter, ImageOps, ImageStat
 
     with Image.open(path) as src:
         art = ImageOps.fit(ImageOps.exif_transpose(src).convert("RGBA"), (MASTER_SIZE, MASTER_SIZE),
@@ -204,8 +205,9 @@ def from_picture(path: Path | io.BytesIO) -> bytes:
     opaque = art.getchannel("A").point(lambda v: 255 if v > THRESHOLD else 0)
     lum = Image.composite(art.convert("L"), Image.new("L", art.size, 0), opaque)
     if opaque.getextrema()[0] == 0 and opaque.getbbox():  # transparency: the drawing is the ink
-        usual = ImageStat.Stat(lum, opaque).median[0]
-        features = lum.point(lambda v: 255 if abs(v - usual) > FEATURE_GAP else 0)
+        outline = ImageChops.subtract(opaque, opaque.filter(ImageFilter.MinFilter(5)))  # 2 px inside the edge
+        body = ImageStat.Stat(lum, outline if outline.getbbox() else opaque).median[0]
+        features = lum.point(lambda v: 255 if abs(v - body) > FEATURE_GAP else 0)
         ink = ImageChops.subtract(opaque, features)
         return pack(dict.fromkeys(FRAMES, ink), measure(ink, Options()))
     cut = ImageStat.Stat(lum, opaque).mean[0] if opaque.getbbox() else THRESHOLD

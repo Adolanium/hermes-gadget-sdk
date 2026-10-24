@@ -287,6 +287,26 @@ def test_a_drawing_with_features_on_a_transparent_background_keeps_them(tmp_path
         assert not _ink_at(face, size, 5 / 300, 5 / 300), f"{size} px: the transparent corner is no ink"
 
 
+@pytest.mark.parametrize("mouth_right", [225, 230])
+def test_a_large_dark_mouth_stays_a_hole_in_the_body(tmp_path, mouth_right):
+    """The body's colour comes from its outline, so a mouth bigger than the rest of the face is still the hole."""
+    from PIL import Image, ImageDraw
+
+    path = tmp_path / "avatar.png"
+    img = Image.new("RGBA", (300, 300), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    draw.ellipse((30, 30, 270, 270), fill=(255, 255, 255, 255))
+    draw.ellipse((75, 60, 105, 90), fill=(0, 0, 0, 255))
+    draw.ellipse((195, 60, 225, 90), fill=(0, 0, 0, 255))
+    draw.ellipse((65, 100, mouth_right, 265), fill=(0, 0, 0, 255))
+    img.save(path)
+    face = profile_faces.from_picture(path)
+    for size in (64, 192):
+        assert _ink_at(face, size, 45 / 300, 150 / 300), f"{size} px: the cheek is ink"
+        assert _ink_at(face, size, 150 / 300, 45 / 300), f"{size} px: the forehead is ink"
+        assert not _ink_at(face, size, 150 / 300, 190 / 300), f"{size} px: the mouth is a hole"
+
+
 def test_a_two_tone_drawing_on_a_transparent_background_stays_whole(tmp_path):
     """Two close shades are one body, not a body and a feature: the whole disc is ink."""
     from PIL import Image, ImageDraw

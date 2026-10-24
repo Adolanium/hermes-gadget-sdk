@@ -109,7 +109,7 @@ A profile without a face file shows its Hermes avatar (`assets/avatar.png`, `.jp
 the profile's folder), made into a still face: the light parts of a picture on a dark background,
 or the dark parts of one on a light background. A picture with transparency is a drawing
 instead: its visible pixels are the shape, and its eyes, mouth and other parts much lighter or
-darker than the rest of it are holes, as in the mascot. A still face does not
+darker than its outline are holes, as in the mascot. A still face does not
 blink or move its mouth;
 the waves and dots still show. For a face that blinks and talks, make a face file. Converting an
 avatar needs Pillow on the Hermes host; without it, the plugin uses face files only and says so
