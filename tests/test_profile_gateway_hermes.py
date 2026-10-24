@@ -623,9 +623,9 @@ def test_a_routed_device_keeps_its_route_and_gets_no_switching(routing_rig, ops)
     assert adapter.profiles(session) != []
 
 
-def test_owner_check_is_the_adapters_own_check_and_ignores_other_profiles(routing_rig):
-    # The default profile's verdict comes from the adapter's own sender check (no private runner call):
-    # without a route it is the default profile's answer, and an approval that only ops holds doesn't count.
+def test_owner_check_is_default_scoped_and_ignores_other_profiles(routing_rig):
+    # The default profile's verdict is the default profile's own answer: an approval that only ops holds
+    # doesn't count. A static route would make ops answer instead, so a routed device fails closed.
     from gateway.config import Platform
     from gateway.pairing import PairingStore
     from gateway.run import _profile_runtime_scope
@@ -643,6 +643,15 @@ def test_owner_check_is_the_adapters_own_check_and_ignores_other_profiles(routin
     default.approve_code("gadget", default.generate_code("gadget", DEVICE, "Kitchen"))
     assert adapter._owner_trusts(DEVICE) is True
     assert adapter._verdict(capable) is True
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(adapter, "gateway_runner", None)  # unrouted: the public sender check answers alone
+        assert adapter._owner_trusts(DEVICE) is True
+    runner.config.profile_routes = _ops_route(DEVICE)  # the route would make ops answer for the default profile
+    assert adapter._owner_trusts(DEVICE) is False  # so it fails closed, though the default profile approves it
+    runner.config.profile_routes = []
+    assert adapter._owner_trusts(DEVICE) is True
+    default.revoke("gadget", DEVICE)
+    assert adapter._owner_trusts(DEVICE) is False
 
 
 def test_an_unknown_profile_falls_back_to_the_launch_home(routing_rig):
@@ -754,12 +763,15 @@ def _admitted(rig, wait_s=1.5):
 
 
 def test_dropping_the_profile_flag_does_not_reach_ops(live_rig):
+    # The device switched once, so it answers to the default profile for good. Ops's own approval and an
+    # old static route to ops must not stand in for the default approval once that one is revoked.
     rig = live_rig
     rig.approve()
     with rig.connect({"profiles": True}) as device:
         assert device.welcome["paired"] is True
         session = rig.adapter.hub.get(rig.device)
         assert rig.run(rig.adapter.select_profile(session, "ops")) is None
+    rig.approve("ops")
     rig.route()
     rig.runner.pairing_store.revoke("gadget", rig.device)
     with rig.connect({}) as device:  # older firmware, same key, an old ops route

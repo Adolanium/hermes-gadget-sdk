@@ -226,6 +226,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._prompts: Dict[str, List[_Prompt]] = {}  # device id -> questions, oldest (shown) first
         self._new_requested: Dict[str, float] = {}  # device id -> when it asked for a new session
         self._owner_check = None  # tests may stand in for the default profile's verdict; None = this adapter's own check
+        self._routed_refused: set = set()  # owner-bound devices a route sends elsewhere, warned about once
 
     # -- lifecycle ------------------------------------------------------------------
 
@@ -359,10 +360,22 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 self._store is not None and self._store.owner_bound(source.user_id) is True)
 
     def _owner_trusts(self, device_id: str) -> bool:
-        """The default profile's verdict on this device; only a literal True counts. It is this adapter's
-        own sender check: the default profile's listener, and a device that switches is never routed, so
-        no route stands in for the default profile here. Other profiles' approvals are their own."""
+        """The default profile's verdict on this device; only a literal True counts. Other profiles'
+        approvals are their own. The listener's sender check is the default profile's answer only while
+        no ``gateway.profile_routes`` entry matches the device: a route makes Hermes read the routed
+        profile instead, and Hermes has no public per-profile check yet
+        (NousResearch/hermes-agent#143892). A device that switched before can be
+        routed later, so a routed device fails closed here rather than let another profile's approval
+        stand in for the default one."""
         try:
+            routed = self.build_source(chat_id=device_id, chat_type="dm", user_id=device_id)
+            if routed.profile is not None or routed.profile_route_rejected is True:
+                if device_id not in self._routed_refused:
+                    self._routed_refused.add(device_id)
+                    logger.warning("[%s] %s answers to the default profile, but gateway.profile_routes sends "
+                                   "it elsewhere: refusing it. Remove the route and let it switch profiles "
+                                   "instead.", self.name, device_id)
+                return False
             check = self._owner_check or self._is_sender_authorized
             return check(device_id, "dm", device_id) is True
         except Exception:
