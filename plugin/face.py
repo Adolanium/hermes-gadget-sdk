@@ -22,7 +22,7 @@ SIZES = (64, 96, 144, 192)
 FRAMES = ("idle", "blink", "talk")
 THRESHOLD = 110  # alpha above this is ink after downsampling
 MASTER_SIZE = 1024  # a drawing's side, in pixels, before it is cut down to SIZES
-ONE_COLOUR = 8  # visible pixels whose brightness varies less than this (std. dev.) are one colour
+FEATURE_GAP = 64  # on transparency, a visible pixel this much lighter or darker than the drawing is a feature
 
 
 def ink_box(alpha, threshold: int = THRESHOLD) -> tuple[int, int, int, int]:
@@ -188,22 +188,26 @@ def pack(frames, anchors: dict, threshold: int = THRESHOLD) -> bytes:
 def from_picture(path: Path | io.BytesIO) -> bytes:
     """A still face from a picture not drawn for the device, such as a Hermes avatar.
 
-    The screen draws light ink on dark, so a picture on a light background gives its dark parts as
-    ink, and one on a dark background (transparency counts as dark) its light parts. The cut is the
-    visible pixels' own average brightness, so a dim photo keeps its features. A drawing in one
-    colour on transparency has no light or dark parts to tell apart, so its visible pixels are the
-    ink. A still face has no eyes or mouth placed by hand, so it neither blinks nor talks: a face
-    file does.
+    A picture with transparency is a drawing: its visible pixels are the ink, and its eyes, mouth
+    and other features, the pixels far lighter or darker than the drawing's usual brightness, are
+    holes, as in the mascot. An opaque picture has no such outline, so the screen's light ink on
+    dark decides: a picture on a light background gives its dark parts as ink, and one on a dark
+    background its light parts, cut at the picture's own average brightness so a dim photo keeps
+    its features. A still face has no eyes or mouth placed by hand, so it neither blinks nor talks:
+    a face file does.
     """
-    from PIL import Image, ImageOps, ImageStat
+    from PIL import Image, ImageChops, ImageOps, ImageStat
 
     with Image.open(path) as src:
         art = ImageOps.fit(ImageOps.exif_transpose(src).convert("RGBA"), (MASTER_SIZE, MASTER_SIZE),
                            Image.Resampling.LANCZOS)
     opaque = art.getchannel("A").point(lambda v: 255 if v > THRESHOLD else 0)
     lum = Image.composite(art.convert("L"), Image.new("L", art.size, 0), opaque)
-    if opaque.getextrema()[0] == 0 and opaque.getbbox() and ImageStat.Stat(lum, opaque).stddev[0] < ONE_COLOUR:
-        return pack(dict.fromkeys(FRAMES, opaque), measure(opaque, Options()))
+    if opaque.getextrema()[0] == 0 and opaque.getbbox():  # transparency: the drawing is the ink
+        usual = ImageStat.Stat(lum, opaque).median[0]
+        features = lum.point(lambda v: 255 if abs(v - usual) > FEATURE_GAP else 0)
+        ink = ImageChops.subtract(opaque, features)
+        return pack(dict.fromkeys(FRAMES, ink), measure(ink, Options()))
     cut = ImageStat.Stat(lum, opaque).mean[0] if opaque.getbbox() else THRESHOLD
     edge = MASTER_SIZE // 25
     frame = Image.new("L", art.size, 255)

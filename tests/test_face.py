@@ -213,7 +213,7 @@ def test_a_face_file_and_an_avatar_never_share_a_hash(tmp_path):
 
 
 PINNED_DRAWING = "788c2b3a73475e59"  # from_picture's drawing of _disc's light disc, with Pillow 12.3
-PINNED_TRANSPARENT_DRAWING = "eb09c14f03399765"  # and of _smiling_disc, antialiased, on transparency
+PINNED_TRANSPARENT_DRAWING = "1c041f85320ac581"  # and of _smiling_disc, antialiased, on transparency
 
 
 def test_the_avatar_drawing_is_pinned_to_its_version(tmp_path):
@@ -247,18 +247,19 @@ def test_profiles_that_are_gone_leave_no_faces_behind(tmp_path, monkeypatch):
         tracemalloc.stop()
 
 
-def _smiling_disc(path: Path, scale: int = 1) -> Path:
-    """Original art on a transparent canvas: a white disc with black eyes and a smile. With ``scale`` above
-    1 it is drawn that much larger and scaled down, so its edges are antialiased."""
+def _smiling_disc(path: Path, scale: int = 1, body=(255, 255, 255), features=(0, 0, 0)) -> Path:
+    """Original art on a transparent canvas: a disc with eyes and a smile, white on black unless told
+    otherwise. With ``scale`` above 1 it is drawn that much larger and scaled down, so its edges are
+    antialiased."""
     from PIL import Image, ImageDraw
 
-    s = scale
+    s, body, features = scale, body + (255,), features + (255,)
     img = Image.new("RGBA", (300 * s, 300 * s), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    draw.ellipse((30 * s, 30 * s, 270 * s, 270 * s), fill=(255, 255, 255, 255))
-    draw.ellipse((85 * s, 85 * s, 125 * s, 125 * s), fill=(0, 0, 0, 255))
-    draw.ellipse((175 * s, 85 * s, 215 * s, 125 * s), fill=(0, 0, 0, 255))
-    draw.arc((90 * s, 130 * s, 210 * s, 230 * s), 20, 160, fill=(0, 0, 0, 255), width=12 * s)
+    draw.ellipse((30 * s, 30 * s, 270 * s, 270 * s), fill=body)
+    draw.ellipse((85 * s, 85 * s, 125 * s, 125 * s), fill=features)
+    draw.ellipse((175 * s, 85 * s, 215 * s, 125 * s), fill=features)
+    draw.arc((90 * s, 130 * s, 210 * s, 230 * s), 20, 160, fill=features, width=12 * s)
     if s > 1:
         img = img.resize((300, 300), Image.Resampling.LANCZOS)
     img.save(path)
@@ -272,15 +273,33 @@ def _ink_at(face: bytes, size: int, x: float, y: float) -> bool:
     return bool(face[offset + row * size // 8 + col // 8] >> (7 - col % 8) & 1)
 
 
-def test_a_drawing_with_features_on_a_transparent_background_keeps_them(tmp_path):
-    """Transparency alone doesn't make a picture one colour: its dark eyes and mouth stay holes in the ink."""
-    face = profile_faces.from_picture(_smiling_disc(tmp_path / "avatar.png"))
+@pytest.mark.parametrize("body, features", [
+    ((255, 255, 255), (0, 0, 0)), ((0, 0, 0), (255, 255, 255)), ((128, 128, 128), (255, 255, 255)),
+    ((0, 0, 255), (255, 255, 255))], ids=["white-body", "black-body", "grey-body", "blue-body"])
+def test_a_drawing_with_features_on_a_transparent_background_keeps_them(tmp_path, body, features):
+    """On transparency the drawing is the ink and its eyes and mouth are holes, whichever is lighter."""
+    face = profile_faces.from_picture(_smiling_disc(tmp_path / "avatar.png", body=body, features=features))
     for size in (64, 192):
         assert _ink_at(face, size, 70 / 300, 160 / 300), f"{size} px: the cheek is ink"
         assert not _ink_at(face, size, 105 / 300, 105 / 300), f"{size} px: the left eye is a hole"
         assert not _ink_at(face, size, 195 / 300, 105 / 300), f"{size} px: the right eye is a hole"
         assert not _ink_at(face, size, 150 / 300, 228 / 300), f"{size} px: the mouth is a hole"
         assert not _ink_at(face, size, 5 / 300, 5 / 300), f"{size} px: the transparent corner is no ink"
+
+
+def test_a_two_tone_drawing_on_a_transparent_background_stays_whole(tmp_path):
+    """Two close shades are one body, not a body and a feature: the whole disc is ink."""
+    from PIL import Image, ImageDraw
+
+    path = tmp_path / "avatar.png"
+    img = Image.new("RGBA", (300, 300), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    draw.pieslice((30, 30, 270, 270), 90, 270, fill=(120, 120, 120, 255))
+    draw.pieslice((30, 30, 270, 270), 270, 90, fill=(136, 136, 136, 255))
+    img.save(path)
+    face = profile_faces.from_picture(path)
+    for size in (64, 192):
+        assert _ink_at(face, size, 80 / 300, 150 / 300) and _ink_at(face, size, 220 / 300, 150 / 300), size
 
 
 @pytest.mark.parametrize("colour", [(255, 255, 255, 255), (0, 0, 0, 255)], ids=["white", "black"])
