@@ -39,7 +39,6 @@ import re
 import ssl
 import time
 import uuid
-import weakref
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -56,7 +55,6 @@ from gateway.platforms.base import (
     cache_image_from_url,
 )
 from gateway.platforms.event import MessageEvent, MessageType
-from gateway.session import SessionSource
 
 from . import audio as gaudio
 from . import compat, dashboard, imaging, ota, runtime, textfmt
@@ -223,6 +221,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._prompts: Dict[str, List[_Prompt]] = {}  # device id -> questions, oldest (shown) first
         self._new_requested: Dict[str, float] = {}  # device id -> when it asked for a new session
         self._owner_check = None  # tests may stand in for the default profile's verdict; None = this adapter's own check
+        self._routed_refused: set = set()  # owner-bound devices a route sends elsewhere, warned about once
 
     # -- lifecycle ------------------------------------------------------------------
 
@@ -357,25 +356,22 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
 
     def _owner_trusts(self, device_id: str) -> bool:
         """The default profile's verdict on this device; only a literal True counts. Other profiles'
-        approvals are their own. An unrouted device gets the listener's own sender check, which then
-        is the default profile's answer. That check follows ``gateway.profile_routes``, though, and a
-        device that switched before can be routed later, so a routed device's source is stamped
-        ``default`` before Hermes canonicalizes it: a stamped profile is kept, never routed. Hermes has
-        no public per-profile check yet, so that path uses the runner's own; it fails closed."""
+        approvals are their own. The listener's sender check is the default profile's answer only while
+        no ``gateway.profile_routes`` entry matches the device: a route makes Hermes read the routed
+        profile instead, and Hermes has no public per-profile check. A device that switched before can be
+        routed later, so a routed device fails closed here rather than let another profile's approval
+        stand in for the default one."""
         try:
-            if self._owner_check is not None:
-                return self._owner_check(device_id, "dm", device_id) is True
             routed = self.build_source(chat_id=device_id, chat_type="dm", user_id=device_id)
-            if routed.profile is None and routed.profile_route_rejected is not True:
-                return self._is_sender_authorized(device_id, "dm", device_id) is True
-            runner = getattr(self, "gateway_runner", None)
-            if runner is None:
+            if routed.profile is not None or routed.profile_route_rejected is True:
+                if device_id not in self._routed_refused:
+                    self._routed_refused.add(device_id)
+                    logger.warning("[%s] %s answers to the default profile, but gateway.profile_routes sends "
+                                   "it elsewhere: refusing it. Remove the route and let it switch profiles "
+                                   "instead.", self.name, device_id)
                 return False
-            source = SessionSource(platform=self.platform, chat_id=device_id, chat_type="dm",
-                                   user_id=device_id, profile="default")
-            source._transport_adapter_ref = weakref.ref(self)
-            return (runner._canonicalize(source) is not None
-                    and runner._is_user_authorized_for_source(source) is True)
+            check = self._owner_check or self._is_sender_authorized
+            return check(device_id, "dm", device_id) is True
         except Exception:
             logger.warning("[%s] authorization check failed for %s", self.name, device_id, exc_info=True)
             return False

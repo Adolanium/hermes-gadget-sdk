@@ -601,7 +601,7 @@ def test_a_routed_device_keeps_its_route_and_gets_no_switching(routing_rig, ops)
 
 def test_owner_check_is_default_scoped_and_ignores_other_profiles(routing_rig):
     # The default profile's verdict is the default profile's own answer: an approval that only ops holds
-    # doesn't count, with or without a static route sending the device to ops.
+    # doesn't count. A static route would make ops answer instead, so a routed device fails closed.
     from gateway.config import Platform
     from gateway.pairing import PairingStore
     from gateway.run import _profile_runtime_scope
@@ -622,7 +622,9 @@ def test_owner_check_is_default_scoped_and_ignores_other_profiles(routing_rig):
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(adapter, "gateway_runner", None)  # unrouted: the public sender check answers alone
         assert adapter._owner_trusts(DEVICE) is True
-    runner.config.profile_routes = _ops_route(DEVICE)  # the route picks ops; the default verdict ignores it
+    runner.config.profile_routes = _ops_route(DEVICE)  # the route would make ops answer for the default profile
+    assert adapter._owner_trusts(DEVICE) is False  # so it fails closed, though the default profile approves it
+    runner.config.profile_routes = []
     assert adapter._owner_trusts(DEVICE) is True
     default.revoke("gadget", DEVICE)
     assert adapter._owner_trusts(DEVICE) is False
