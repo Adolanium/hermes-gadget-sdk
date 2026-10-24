@@ -358,7 +358,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         """The default profile's verdict on this device; only a literal True counts. Other profiles'
         approvals are their own. The listener's sender check is the default profile's answer only while
         no ``gateway.profile_routes`` entry matches the device: a route makes Hermes read the routed
-        profile instead, and Hermes has no public per-profile check. A device that switched before can be
+        profile instead, and Hermes has no public per-profile check yet
+        (NousResearch/hermes-agent#143892). A device that switched before can be
         routed later, so a routed device fails closed here rather than let another profile's approval
         stand in for the default one."""
         try:
