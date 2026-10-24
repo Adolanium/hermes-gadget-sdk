@@ -333,20 +333,44 @@ def test_a_large_dark_mouth_stays_a_hole_in_the_body(tmp_path, mouth_right):
         assert not _ink_at(face, size, 150 / 300, 190 / 300), f"{size} px: the mouth is a hole"
 
 
-@pytest.mark.parametrize("colour", [(255, 255, 255, 255), (0, 0, 0, 255)], ids=["white", "black"])
-def test_a_solid_drawing_on_a_transparent_background_keeps_its_shape(tmp_path, colour):
+def _ink_share(face: bytes, size: int) -> float:
+    """The share of the idle frame at ``size`` px that is ink."""
+    offset = sum(3 * s * s // 8 for s in profile_faces.SIZES if s < size)
+    return sum(bin(b).count("1") for b in face[offset:offset + size * size // 8]) / (size * size)
+
+
+@pytest.mark.parametrize("colour, scale", [
+    ((255, 255, 255), 1), ((0, 0, 0), 1), ((128, 128, 128), 1), ((245, 230, 30), 1), ((128, 128, 128), 4)],
+    ids=["white", "black", "grey", "yellow", "grey-antialiased"])
+def test_a_solid_drawing_on_a_transparent_background_keeps_its_shape(tmp_path, colour, scale):
     """Its visible pixels are the shape, whatever their colour: one colour gives no light or dark parts."""
     from PIL import Image, ImageDraw
 
     path = tmp_path / "avatar.png"
-    img = Image.new("RGBA", (300, 300), (0, 0, 0, 0))
-    ImageDraw.Draw(img).ellipse((50, 40, 250, 260), fill=colour)
+    img = Image.new("RGBA", (300 * scale, 300 * scale), (0, 0, 0, 0))
+    ImageDraw.Draw(img).ellipse((50 * scale, 40 * scale, 250 * scale, 260 * scale), fill=colour + (255,))
+    if scale > 1:
+        img = img.resize((300, 300), Image.Resampling.LANCZOS)
     img.save(path)
-    data = profile_faces.from_picture(path)
-    sizes = {64: data[:512], 192: data[3 * (512 + 1152 + 2592):3 * (512 + 1152 + 2592) + 4608]}  # idle frames
-    for size, bits in sizes.items():
-        ink = sum(bin(b).count("1") for b in bits) / (size * size)
-        assert 0.3 < ink < 0.7, f"{size} px: {ink:.0%} ink, not the disc"
+    face = profile_faces.from_picture(path)
+    for size in (64, 192):
+        assert 0.3 < _ink_share(face, size) < 0.7, f"{size} px: {_ink_share(face, size):.0%} ink, not the disc"
+
+
+def test_a_flat_star_on_a_transparent_background_keeps_its_shape(tmp_path):
+    import math
+
+    from PIL import Image, ImageDraw
+
+    path = tmp_path / "avatar.png"
+    points = [(150 + (120 if i % 2 == 0 else 50) * math.sin(i * math.pi / 5),
+               150 - (120 if i % 2 == 0 else 50) * math.cos(i * math.pi / 5)) for i in range(10)]
+    img = Image.new("RGBA", (300, 300), (0, 0, 0, 0))
+    ImageDraw.Draw(img).polygon(points, fill=(128, 128, 128, 255))
+    img.save(path)
+    face = profile_faces.from_picture(path)
+    for size in (64, 192):
+        assert _ink_share(face, size) > 0.15 and _ink_at(face, size, 0.5, 0.5), f"{size} px: not the star"
 
 
 def test_a_profile_shows_its_face_file_then_its_avatar_then_the_mascot(tmp_path, caplog):
