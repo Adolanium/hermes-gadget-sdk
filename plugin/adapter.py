@@ -39,6 +39,7 @@ import re
 import ssl
 import time
 import uuid
+import weakref
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -55,6 +56,7 @@ from gateway.platforms.base import (
     cache_image_from_url,
 )
 from gateway.platforms.event import MessageEvent, MessageType
+from gateway.session import SessionSource
 
 from . import audio as gaudio
 from . import compat, dashboard, imaging, ota, runtime, textfmt
@@ -354,12 +356,21 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 self._store is not None and self._store.owner_bound(source.user_id) is True)
 
     def _owner_trusts(self, device_id: str) -> bool:
-        """The default profile's verdict on this device; only a literal True counts. It is this adapter's
-        own sender check: the default profile's listener, and a device that switches is never routed, so
-        no route stands in for the default profile here. Other profiles' approvals are their own."""
+        """The default profile's verdict on this device; only a literal True counts. The listener's own
+        sender check follows ``gateway.profile_routes``, and a device that switched before can be routed
+        later, so the source is stamped ``default`` before Hermes canonicalizes it: a stamped profile is
+        kept, never routed. Other profiles' approvals are their own."""
         try:
-            check = self._owner_check or self._is_sender_authorized
-            return check(device_id, "dm", device_id) is True
+            if self._owner_check is not None:
+                return self._owner_check(device_id, "dm", device_id) is True
+            runner = getattr(self, "gateway_runner", None)
+            if runner is None:
+                return False
+            source = SessionSource(platform=self.platform, chat_id=device_id, chat_type="dm",
+                                   user_id=device_id, profile="default")
+            source._transport_adapter_ref = weakref.ref(self)
+            return (runner._canonicalize(source) is not None
+                    and runner._is_user_authorized_for_source(source) is True)
         except Exception:
             logger.warning("[%s] authorization check failed for %s", self.name, device_id, exc_info=True)
             return False
