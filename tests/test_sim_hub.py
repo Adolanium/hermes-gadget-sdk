@@ -1067,6 +1067,82 @@ def test_messages_are_read_while_a_switched_profiles_face_is_looked_up(loop_thre
         loop_thread.run(hub.stop())
 
 
+class _HeldLookup(_TwoProfiles):
+    """Both profiles have a face. Arming ``hold`` (an asyncio.Event) holds the next lookup until it is set."""
+
+    def __init__(self):
+        self.faces = {"ops": _face(0x0F), "default": _face(0x3C)}
+        self.hold = None
+        self.waiting = False
+
+    async def face(self, session):
+        if self.hold is not None:
+            hold, self.hold = self.hold, None
+            self.waiting = True
+            await hold.wait()
+        return ProfileFace.of(self.faces[session.profile])
+
+
+def test_a_profile_reset_during_the_welcome_lookup_leaves_the_device_its_face(loop_thread, tmp_path, make_sim):
+    """A reset sends the default face before the welcome, and the welcome then drops it: it is sent again."""
+    import asyncio
+
+    delegate = _HeldLookup()
+    hub = _hub(loop_thread, tmp_path, delegate)
+    default = _digest(delegate.faces["default"])
+    try:
+        sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget")
+        assert sim.wait_screen("ready", timeout=10)
+        device_id = sim.status()["device_id"]
+        loop_thread.run(delegate.select_profile(hub.get(device_id), "ops"))
+        loop_thread.run(hub.get(device_id).send_profile())
+        assert sim.wait_for(lambda: (sim.last_received("face") or {}).get("profile") == "ops", timeout=5)
+
+        hold = delegate.hold = asyncio.Event()
+        welcomes = len([m for m in sim.received if m.get("type") == "welcome"])
+        sim.console("reconnect")
+        assert sim.wait_for(lambda: delegate.waiting, timeout=10)
+
+        async def reset():  # as the plugin resets a stored profile it no longer serves
+            session = hub.get(device_id)
+            session.profile = "default"
+            await session.send_profile()
+        loop_thread.run(reset())
+        assert sim.wait_for(lambda: (sim.last_received("face") or {}).get("hash") == default, timeout=5)
+        loop_thread.loop.call_soon_threadsafe(hold.set)
+        assert sim.wait_for(lambda: len([m for m in sim.received if m.get("type") == "welcome"]) > welcomes, timeout=10)
+        sim.run_for(0.5)
+        assert _held_face(sim) == default
+    finally:
+        if delegate.hold:
+            loop_thread.loop.call_soon_threadsafe(delegate.hold.set)
+        loop_thread.run(hub.stop())
+
+
+def test_an_unpair_and_a_quick_reapproval_leave_the_device_its_face(loop_thread, tmp_path, make_sim):
+    import asyncio
+
+    delegate = _HeldLookup()
+    hub = _hub(loop_thread, tmp_path, delegate)
+    default = _digest(delegate.faces["default"])
+    try:
+        sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget")
+        assert sim.wait_screen("ready", timeout=10)
+        assert sim.wait_for(lambda: (sim.last_received("face") or {}).get("hash") == default, timeout=5)
+        session = hub.get(sim.status()["device_id"])
+
+        async def revoke_and_reapprove():  # before the face work of the revocation has run
+            await session.set_paired(False)
+            await session.set_paired(True)
+            await asyncio.gather(session._face_task, return_exceptions=True)
+        loop_thread.run(revoke_and_reapprove())
+        assert sim.wait_for(lambda: sim.status()["paired"] is True, timeout=5)
+        sim.run_for(0.5)
+        assert _held_face(sim) == default
+    finally:
+        loop_thread.run(hub.stop())
+
+
 def test_a_server_without_profiles_sends_no_roster(devserver, make_sim):
     # Server side of compatibility; old firmware against a capable adapter is in test_profile_select_hermes.py.
     hub, _brain, url = devserver()  # EchoBrain keeps the default hooks: no profiles

@@ -382,6 +382,8 @@ class DeviceSession:
         if paired:
             self.hub.store.confirm(self.device_id)
         await self.send_json(protocol.message("paired" if paired else "unpaired"))
+        if not paired:
+            self.face_hash = None  # unpaired drops the device's face
         self.update_face()
 
     async def ask(self, prompt_id: str, title: str, text: str, ttl_s: float | None = None) -> None:
@@ -853,8 +855,9 @@ class DeviceHub:
                 welcome.update(profile=session.profile, profiles=roster)
             if (isinstance(face, ProfileFace) and session.paired and hello.get("face") == face.hash
                     and session.device_profile == named):
-                session.face_hash = welcome["face"] = face.hash
+                welcome["face"] = face.hash
             await session.send_json(protocol.message("welcome", **welcome))
+            session.face_hash = welcome.get("face")  # the welcome keeps that face, or drops the device's
             session.update_face(face, looked_up)  # after the welcome's send, which may let the state change
             face = None  # the task has it; an avatar's picture goes with the task
             log.info("device %s (%s) online, paired=%s", session.device_id, session.name, session.paired)
