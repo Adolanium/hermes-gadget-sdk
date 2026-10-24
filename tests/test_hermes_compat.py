@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 import sys
 import types
@@ -82,6 +83,16 @@ def test_the_adapter_only_uses_listed_private_hooks():
     used = set(re.findall(r"(?:self|super\(\))\.(_[a-z][a-z_]*)\b", source))
     inherited = {name for name in used - own if not name.startswith("__")}
     assert inherited <= set(compat.ADAPTER_HOOKS), sorted(inherited - set(compat.ADAPTER_HOOKS))
+
+
+def test_every_module_level_hermes_import_is_listed():
+    """A module-level import the table lacks fails right after compat.check passes, without its message."""
+    hermes = ("agent", "gateway", "plugins", "tools", "hermes_cli", "hermes_constants")
+    for path in sorted((REPO / "plugin").glob("*.py")):
+        for node in ast.parse(path.read_text(encoding="utf-8")).body:
+            if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module.split(".")[0] in hermes:
+                unlisted = [a.name for a in node.names if a.name not in compat.IMPORTS.get(node.module, ())]
+                assert not unlisted, f"{path.name}: {node.module} {unlisted} not in compat.IMPORTS"
 
 
 @requires_hermes
