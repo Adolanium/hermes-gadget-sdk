@@ -109,12 +109,21 @@ A profile without a face file shows its Hermes avatar (`assets/avatar.png`, `.jp
 the profile's folder), made into a still face: the light parts of a picture on a dark background,
 or the dark parts of one on a light background, cut at the picture's own average brightness;
 transparency counts as a dark background. A drawing in one colour on transparency has no parts on
-either side of that cut, so its visible pixels are the shape instead. Two kinds of drawing on
-transparency come out poorly: a dark one with light eyes and mouth keeps only the eyes and mouth,
-and one in two close shades keeps only the lighter shade. For those, make a face file. A still
-face does not blink or move its mouth; the waves and dots still show. For a face that blinks and
-talks, make a face file. Converting an avatar needs Pillow on the Hermes host; without it, the
-plugin uses face files only and says so once in the log.
+either side of that cut, so its visible pixels are the shape instead. One colour means its fully
+opaque pixels differ by at most 16 brightness levels, so shades that close stay one whole body.
+
+Some drawings on transparency come out poorly; for those, make a face file:
+
+- A dark drawing with light eyes and mouth keeps only the eyes and mouth.
+- A drawing in two shades more than 16 levels apart keeps only the lighter shade.
+- A flat icon whose opaque pixels still vary by more than 16 levels, such as a yellow icon that
+  was antialiased by scaling it down, can come out blank.
+- Eyes or a mouth drawn semi-transparent on a one-colour body don't count as parts, so they are
+  filled in. Draw them fully opaque.
+
+A still face does not blink or move its mouth; the waves and dots still show. For a face that
+blinks and talks, make a face file. Converting an avatar needs Pillow on the Hermes host; without
+it, the plugin uses face files only and says so once in the log.
 
 A profile shows its face only once Hermes would accept the device's turns in that profile. For the
 default profile, that is the pairing the device already has. For any other profile, whether the
