@@ -210,6 +210,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._roster_lock = asyncio.Lock()  # one roster read at a time; never held across a send
         self._push_seq = 0
         self._pushed_seq: Dict[str, int] = {}  # device -> the newest push that read a roster for it
+        self._face_from: Dict[str, Optional[str]] = {}  # device -> the profile its last face lookup could show
         self._battery_log: Optional[BatteryLog] = None
         self._tls_cert = extra.get("tls_cert")
         self._tls_key = extra.get("tls_key")
@@ -442,19 +443,37 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             self._convert_avatars = imaging.pillow_available()
             if not self._convert_avatars:
                 logger.info("[%s] Pillow is not installed: devices show profile face files, not avatars", self.name)
-        source = self._source(session)  # the profile that answers: a gadget route's, or the device's choice
-        if source.profile_route_rejected:
+        profile = self._face_from[session.device_id] = self._face_profile(session)
+        if profile is None:
             return None
         try:
-            if source.profile in (None, "default"):  # this gateway's own home, for a standalone profile too
+            if profile == "default":  # this gateway's own home, for a standalone profile too
                 from hermes_constants import get_hermes_home
                 home = get_hermes_home()
             else:
                 from hermes_cli.profiles import get_profile_dir
-                home = get_profile_dir(source.profile)
+                home = get_profile_dir(profile)
             return await asyncio.to_thread(faces.for_profile, home, self._convert_avatars)
         except Exception as exc:  # an unreadable picture shows the mascot; never block a connection on it
-            logger.warning("[%s] no face for profile %s: %s", self.name, source.profile or "default", exc)
+            logger.warning("[%s] no face for profile %s: %s", self.name, profile, exc)
+            return None
+
+    def _face_profile(self, session: DeviceSession) -> Optional[str]:
+        """The profile whose face the device may show: the one answering it (a gadget route's, or the
+        device's choice), once that profile approves the device. None: the mascot."""
+        source = self._source(session)
+        if source.profile_route_rejected:
+            return None
+        if source.profile in (None, "default"):
+            return "default"  # session.paired is the default profile's approval
+        # Another profile approves the device itself (its pairing store, or an allowlist): ask Hermes, as it
+        # decides for the device's turns there. Without a runner to ask, no approval is known.
+        check = getattr(getattr(self, "gateway_runner", None), "_is_user_authorized_for_source", None)
+        try:
+            return source.profile if check is not None and check(source) is True else None
+        except Exception:
+            logger.warning("[%s] cannot check %s in profile %s", self.name, session.device_id, source.profile,
+                           exc_info=True)
             return None
 
     def language(self, session: DeviceSession) -> Optional[str]:
@@ -527,6 +546,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                         self._prompts.pop(session.device_id, None)
                         await session.set_paired(False)
                         await self.on_ready(session)
+                    # Another profile approving or revoking the device only shows here: its face follows.
+                    if (session.paired and self._profile_faces and session.device_id in self._face_from
+                            and self._face_profile(session) != self._face_from[session.device_id]):
+                        session.update_face()
                 except Exception as exc:
                     logger.debug("[%s] pairing sync failed for %s: %s", self.name, session.device_id, exc)
 
@@ -760,6 +783,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if self._hub and session.device_id not in self._hub.sessions:
             self._turns.pop(session.device_id, None)
             self._pushed_seq.pop(session.device_id, None)
+            self._face_from.pop(session.device_id, None)
 
     # -- turn lifecycle -------------------------------------------------------------
 

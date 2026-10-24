@@ -227,6 +227,7 @@ def test_a_refused_message_does_not_leave_the_device_thinking(hermes_home, gadge
 
 def test_each_profile_shows_its_own_face_file_and_profile_faces_false_turns_them_off(hermes_home, gadget, make_sim):
     import struct
+    import types
 
     from gateway.config import PlatformConfig
     from hermes_gadget_plugin.adapter import GadgetAdapter
@@ -246,6 +247,8 @@ def test_each_profile_shows_its_own_face_file_and_profile_faces_false_turns_them
         assert sim.wait_screen("ready", timeout=10)
         return [m for m in sim.sent if m["type"] == "hello"][-1].get("face")
 
+    # Ops has approved the device: no runner here, so this stands in for Hermes's own check.
+    gadget.adapter.gateway_runner = types.SimpleNamespace(_is_user_authorized_for_source=lambda source: True)
     sim = _paired_sim(gadget, make_sim)
     assert sim.wait_for(lambda: faces() and faces()[-1]["hash"] == digest["default"], timeout=5)
     assert held() == digest["default"]

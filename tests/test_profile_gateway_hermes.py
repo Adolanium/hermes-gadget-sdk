@@ -5,7 +5,7 @@ import json
 import time
 import types
 import pytest
-from conftest import requires_hermes
+from conftest import requires_hermes, requires_sim
 
 pytestmark = [requires_hermes, pytest.mark.usefixtures("registered_platform")]
 
@@ -582,6 +582,13 @@ def test_a_routed_device_gets_the_face_of_the_profile_its_route_names(routing_ri
     session = _session("default")
     assert asyncio.run(adapter.face(session)).load() == bytes([0xAA]) * FACE_BYTES  # no route: the default profile
     runner.config.profile_routes = _ops_route(DEVICE)
+    assert asyncio.run(adapter.face(session)) is None  # ops hasn't approved the device yet
+    from gateway.pairing import PairingStore
+    from gateway.run import _profile_runtime_scope
+
+    ops = runner.pairing_stores["ops"] = PairingStore(profile="ops")
+    with _profile_runtime_scope(home / "profiles" / "ops"):
+        ops.approve_code("gadget", ops.generate_code("gadget", DEVICE, "Kitchen"))
     assert asyncio.run(adapter.face(session)).load() == bytes([0x55]) * FACE_BYTES
     (home / "profiles" / "ops" / "gateway.parked").touch()
     runner._profile_adapters = {}
@@ -706,20 +713,30 @@ def live_rig(hermes_home, loop_thread, tmp_path, monkeypatch):
         return runner._canonicalize(source, primary_home=hermes_home) is not None and \
             runner._is_user_authorized_for_source(source)
 
-    def approve(profile="default"):
+    def store(profile):
+        return runner.pairing_store if profile == "default" else runner.pairing_stores[profile]
+
+    def approve(profile="default", device_id=device):
         from gateway.run import _profile_runtime_scope
         from hermes_cli.profiles import get_profile_dir
 
-        store = runner.pairing_store if profile == "default" else runner.pairing_stores[profile]
         with _profile_runtime_scope(get_profile_dir(profile)):
-            store.approve_code("gadget", store.generate_code("gadget", device, "Kitchen"))
+            store(profile).approve_code("gadget", store(profile).generate_code("gadget", device_id, "Kitchen"))
+
+    def revoke(profile, device_id=device):
+        from gateway.run import _profile_runtime_scope
+        from hermes_cli.profiles import get_profile_dir
+
+        with _profile_runtime_scope(get_profile_dir(profile)):
+            assert store(profile).revoke("gadget", device_id)
 
     def route():
         runner.config.profile_routes = _ops_route(device)
 
     yield types.SimpleNamespace(
         runner=runner, adapter=adapter, device=device, events=events, run=loop_thread.run, admits=admits,
-        approve=approve, route=route, connect=lambda caps, profile=None: _RawDevice(url, key, caps, profile))
+        approve=approve, revoke=revoke, route=route, url=url,
+        connect=lambda caps, profile=None: _RawDevice(url, key, caps, profile))
     loop_thread.run(adapter.cancel_background_tasks())
     loop_thread.run(adapter.disconnect())
 
@@ -873,3 +890,73 @@ def test_an_upgraded_routed_device_keeps_its_route_and_pairing(live_rig):
             pass
         assert reply == {"type": "profile", "profile": "default", "error": "routed"}
     assert not rig.adapter._store.owner_bound(rig.device)
+
+
+def _faces_on_ops(rig, hermes_home, make_sim):
+    """A native device trusted by the default profile, holding default's face, then switched to ops;
+    ops hasn't approved it. Returns the device, a function giving the face it holds, and the hashes."""
+    import struct
+
+    from hermes_gadget_plugin.face import FACE_BYTES, FACE_FILE, ProfileFace
+
+    anchors = struct.pack("<10h", 607, 293, 262, 620, 801, 107, 396, 508, 586, 649)
+    face = {"default": bytes([0xAA]) * (FACE_BYTES - 20) + anchors, "ops": bytes([0x55]) * (FACE_BYTES - 20) + anchors}
+    (hermes_home / FACE_FILE).write_bytes(face["default"])
+    (hermes_home / "profiles" / "ops" / FACE_FILE).write_bytes(face["ops"])
+    digest = {p: ProfileFace.of(data).hash for p, data in face.items()}
+    sim = make_sim(rig.url)
+
+    def held():
+        """The face the device holds, as the hello of a reconnect names it."""
+        sim.console("reconnect")
+        assert sim.wait_screen("connecting", timeout=5)
+        assert sim.wait_screen("ready", timeout=10)
+        return [m for m in sim.sent if m["type"] == "hello"][-1].get("face")
+
+    assert sim.wait_screen("pairing", "ready", timeout=10)
+    rig.approve("default", sim.status()["device_id"])
+    assert sim.wait_screen("ready", timeout=10)
+    assert sim.wait_for(lambda: (sim.last_received("face") or {}).get("hash") == digest["default"], timeout=5)
+    session = rig.adapter.hub.get(sim.status()["device_id"])
+    assert rig.run(rig.adapter.select_profile(session, "ops")) is None
+    rig.run(session.send_profile())
+    sim.run_for(3)  # longer than the pairing check
+    return sim, held, digest
+
+
+@requires_sim
+def test_a_profile_that_has_not_approved_the_device_shows_the_mascot(live_rig, hermes_home, make_sim):
+    sim, held, _ = _faces_on_ops(live_rig, hermes_home, make_sim)
+    assert not any(m.get("profile") == "ops" and "bits" in m for m in sim.received if m["type"] == "face")
+    assert held() is None
+
+
+@requires_sim
+def test_a_profiles_approval_brings_its_face(live_rig, hermes_home, make_sim):
+    sim, held, digest = _faces_on_ops(live_rig, hermes_home, make_sim)
+    assert held() is None
+    live_rig.approve("ops", sim.status()["device_id"])
+    assert sim.wait_for(lambda: (sim.last_received("face") or {}).get("hash") == digest["ops"], timeout=8)
+    assert held() == digest["ops"]
+
+
+@requires_sim
+def test_a_profiles_revocation_clears_its_face(live_rig, hermes_home, make_sim):
+    sim, held, digest = _faces_on_ops(live_rig, hermes_home, make_sim)
+    live_rig.approve("ops", sim.status()["device_id"])
+    assert sim.wait_for(lambda: (sim.last_received("face") or {}).get("hash") == digest["ops"], timeout=8)
+    live_rig.revoke("ops", sim.status()["device_id"])
+    assert sim.wait_for(lambda: "bits" not in sim.last_received("face"), timeout=8)
+    assert held() is None
+
+
+@requires_sim
+def test_the_default_profiles_face_needs_only_its_own_approval(live_rig, hermes_home, make_sim):
+    sim, held, digest = _faces_on_ops(live_rig, hermes_home, make_sim)
+    session = live_rig.adapter.hub.get(sim.status()["device_id"])
+    assert live_rig.run(live_rig.adapter.select_profile(session, "default")) is None
+    before = len(sim.received)
+    live_rig.run(session.send_profile())
+    assert sim.wait_for(lambda: any(m["type"] == "face" and m.get("hash") == digest["default"]
+                                    for m in sim.received[before:]), timeout=5)
+    assert held() == digest["default"]
