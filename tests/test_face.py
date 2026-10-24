@@ -235,6 +235,24 @@ def test_a_cartoon_on_transparency_converts_as_before_the_one_colour_fallback(tm
     assert profile_faces.digest(face) == drawn
 
 
+@pytest.mark.parametrize("eye_radius, drawn", [(7, "e3bb93e9649e7be6"), (10, "4267e3c778eb4bb9"),
+                                                (14, "3a158facbc3d6347")])
+def test_a_dark_cartoon_with_small_light_features_converts_as_before(tmp_path, eye_radius, drawn):
+    """Little of it crosses the cut, but it isn't one colour, so it keeps f0a6b71's drawing (these digests come
+    from that converter) instead of becoming a solid disc."""
+    from PIL import Image, ImageDraw
+
+    path, r = tmp_path / "avatar.png", eye_radius
+    img = Image.new("RGBA", (300, 300), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    draw.ellipse((30, 30, 270, 270), fill=(20, 20, 20, 255))
+    for cx in (100, 200):
+        draw.ellipse((cx - r, 105 - r, cx + r, 105 + r), fill=(255, 255, 255, 255))
+    draw.arc((110, 150, 190, 205), 20, 160, fill=(255, 255, 255, 255), width=4)
+    img.save(path)
+    assert profile_faces.digest(profile_faces.from_picture(path)) == drawn
+
+
 def test_profiles_that_are_gone_leave_no_faces_behind(tmp_path, monkeypatch):
     import gc
     import shutil

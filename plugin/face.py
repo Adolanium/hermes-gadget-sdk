@@ -23,6 +23,7 @@ FRAMES = ("idle", "blink", "talk")
 THRESHOLD = 110  # alpha above this is ink after downsampling
 MASTER_SIZE = 1024  # a drawing's side, in pixels, before it is cut down to SIZES
 NEARLY_BLANK = 0.05  # a share of the visible drawing below this as ink means the cut found no parts
+ONE_COLOUR = 16  # visible pixels whose brightness spans at most this are one colour, give or take resampling
 
 
 def ink_box(alpha, threshold: int = THRESHOLD) -> tuple[int, int, int, int]:
@@ -208,8 +209,10 @@ def from_picture(path: Path | io.BytesIO) -> bytes:
     light_background = ImageStat.Stat(lum, frame).mean[0] > cut
     ink = lum.point(lambda v: 255 if (v < cut if light_background else v > cut) else 0)
     ink = Image.composite(ink, Image.new("L", art.size, 0), opaque)
-    if opaque.getextrema()[0] == 0 and opaque.getbbox() and ImageStat.Stat(ink, opaque).mean[0] < 255 * NEARLY_BLANK:
-        ink = opaque  # nearly nothing of the visible drawing crossed the cut: one colour on transparency
+    if opaque.getextrema()[0] == 0 and opaque.getbbox():  # some of it is transparent
+        low, high = ImageStat.Stat(lum, opaque).extrema[0]
+        if ImageStat.Stat(ink, opaque).mean[0] < 255 * NEARLY_BLANK and high - low <= ONE_COLOUR:
+            ink = opaque  # a drawing in one colour: nothing of it crossed the cut
     return pack(dict.fromkeys(FRAMES, ink), measure(ink, Options()))
 
 
