@@ -1135,7 +1135,8 @@ void Ui::push_band_change(const ArcSweep& from, const ArcSweep& to) {
 void Ui::draw_alarm(const UiModel& m) {
   band_ = ArcSweep{};  // no arc over the alarm
   band_shown_ = false;
-  const uint32_t key = Hash().val(m.flash).add(m.headline).add(m.detail).add(m.hint).val(m.lang).get();
+  const uint32_t key = Hash().val(m.flash).add(m.headline).add(m.detail).add(m.hint).val(m.lang)
+                           .add(m.face ? m.face->hash : std::string()).get();
   if (valid_ && alarm_shown_ && key == alarm_hash_) return;  // invalidate() repaints it too
   alarm_shown_ = true;
   alarm_hash_ = key;
