@@ -619,6 +619,9 @@ def test_owner_check_is_default_scoped_and_ignores_other_profiles(routing_rig):
     default.approve_code("gadget", default.generate_code("gadget", DEVICE, "Kitchen"))
     assert adapter._owner_trusts(DEVICE) is True
     assert adapter._verdict(capable) is True
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(adapter, "gateway_runner", None)  # unrouted: the public sender check answers alone
+        assert adapter._owner_trusts(DEVICE) is True
     runner.config.profile_routes = _ops_route(DEVICE)  # the route picks ops; the default verdict ignores it
     assert adapter._owner_trusts(DEVICE) is True
     default.revoke("gadget", DEVICE)

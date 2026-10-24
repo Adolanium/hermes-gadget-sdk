@@ -356,13 +356,18 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 self._store is not None and self._store.owner_bound(source.user_id) is True)
 
     def _owner_trusts(self, device_id: str) -> bool:
-        """The default profile's verdict on this device; only a literal True counts. The listener's own
-        sender check follows ``gateway.profile_routes``, and a device that switched before can be routed
-        later, so the source is stamped ``default`` before Hermes canonicalizes it: a stamped profile is
-        kept, never routed. Other profiles' approvals are their own."""
+        """The default profile's verdict on this device; only a literal True counts. Other profiles'
+        approvals are their own. An unrouted device gets the listener's own sender check, which then
+        is the default profile's answer. That check follows ``gateway.profile_routes``, though, and a
+        device that switched before can be routed later, so a routed device's source is stamped
+        ``default`` before Hermes canonicalizes it: a stamped profile is kept, never routed. Hermes has
+        no public per-profile check yet, so that path uses the runner's own; it fails closed."""
         try:
             if self._owner_check is not None:
                 return self._owner_check(device_id, "dm", device_id) is True
+            routed = self.build_source(chat_id=device_id, chat_type="dm", user_id=device_id)
+            if routed.profile is None and routed.profile_route_rejected is not True:
+                return self._is_sender_authorized(device_id, "dm", device_id) is True
             runner = getattr(self, "gateway_runner", None)
             if runner is None:
                 return False
