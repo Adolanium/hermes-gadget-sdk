@@ -2,10 +2,9 @@
 
 ## Unreleased
 
-### Hermes plugin
+## 0.4.0
 
-- Profile switching no longer writes into other Hermes profiles. The plugin used to approve a switching device in each profile's pairing store itself; now each profile approves it through its own pairing flow the first time the device talks to it, and the device shows the command to run (`hermes -p <profile> pairing approve gadget <code>`) instead of waiting for a reply. The default profile's verdict comes from the adapter's own sender check. A device that has switched but that a static route now sends elsewhere is refused, so another profile's approval never stands in for the default one (found by @mforce). Asked for in the Hermes plugin catalog review ([NousResearch/hermes-agent#142936](https://github.com/NousResearch/hermes-agent/pull/142936)).
-- Validate device-selected profiles during Hermes native session admission and durable replay, retaining Default-owner trust, offered-profile policy and owner binding. Requires the matching Hermes `validate_native_profile_route` hook; without it, a secondary profile can be selected but ordinary messages fail with `profile_mismatch`. Contributed by @bricelb.
+Hermes Gadget 0.4.0 gives each Hermes profile its own face on the device, adds countdown timers that Hermes sets through device actions, and face-down sleep on boards with a motion sensor. It adds two experimental boards, the ESP32-2432S028 "Cheap Yellow Display" (the first classic ESP32 profile, drawn in bands without PSRAM) and the Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C. Profile switching no longer writes into other Hermes profiles and keeps the default profile's verdict even under a static route, and a switching device's dashboard lists the offered profiles' sessions, in order. Details by area follow.
 
 ### Hardware and setup
 
@@ -21,8 +20,20 @@
 
 ### Hermes plugin
 
+- Profile switching no longer writes into other Hermes profiles. The plugin used to approve a switching device in each profile's pairing store itself; now each profile approves it through its own pairing flow the first time the device talks to it, and the device shows the command to run (`hermes -p <profile> pairing approve gadget <code>`) instead of waiting for a reply. The default profile's verdict comes from the adapter's own sender check. A device that has switched but that a static route now sends elsewhere is refused, so another profile's approval never stands in for the default one (found by @mforce). Asked for in the Hermes plugin catalog review ([NousResearch/hermes-agent#142936](https://github.com/NousResearch/hermes-agent/pull/142936)).
+- Validate device-selected profiles during Hermes native session admission and durable replay, retaining Default-owner trust, offered-profile policy and owner binding. Requires the matching Hermes `validate_native_profile_route` hook; without it, a secondary profile can be selected but ordinary messages fail with `profile_mismatch`. Contributed by @bricelb.
 - With profile switching on, a gadget that can switch profiles also lists on its dashboard the sessions of the other profiles it may switch to, where the gadget plugin is enabled, so a device switched to another profile sees its sessions there. Hermes loads a copy of the plugin per profile, and each copy records only its own profile's sessions; the default profile's adapter now also reads those of the offered profiles. With switching off, and on devices that cannot switch or that a profile route sends somewhere, the dashboard is as before. [User guide](docs/using-gadget.md#watch-hermes-sessions-on-the-dashboard). Contributed by @mforce.
 - A switching gadget's dashboard no longer shows a profile that has just left the offer, or misses one just added, when two updates overlap, and a gadget that cannot switch no longer stops the other profiles' changes reaching it. Reading the profile list never makes a connecting gadget wait for a slow one. A dashboard held while the screen is dark is dropped if a newer one goes out first, and is never sent to a device that is unpaired or reconnects without dashboard support. Contributed by @mforce.
+
+### Upgrade and verification
+
+Use the [browser installer](https://adolanium.github.io/hermes-gadget-sdk/installer.html) for USB installation. Existing devices can use `hermes gadget update <device> --latest`. Install the matching plugin using the commit-pinned command in the release notes, and update the copy in every cloned Hermes profile too (see [One profile per gadget](docs/hermes-integration.md#one-profile-per-gadget)). Old firmware keeps working with this plugin, and this firmware with the 0.3.0 plugin. Faces need both updated; timers and face-down sleep need the new firmware. A device that has switched profiles and that a static `gateway.profile_routes` entry now sends elsewhere is refused; remove the route and let it switch instead. Device-selected secondary profiles on Hermes versions with session-authority admission also need the Hermes `validate_native_profile_route` hook. The simulator's native library is at ABI 7; rebuild it with `hermes-gadget build-sim`.
+
+Hardware ports remain experimental until a complete physical report is recorded for the exact revision; see [hardware capabilities and verification](docs/hardware-validation.md). Software tests and successful builds do not establish physical hardware verification.
+
+### Contributors
+
+Special thanks to [@mforce](https://github.com/mforce), who shaped much of this release: profile faces from the first design to the firmware, the switching dashboards and the security fix for routed devices, each with careful tests and honest limits. Thanks also to [@momoshamiko](https://github.com/momoshamiko) for timers, face-down sleep and the speaker fix, [@bricelb](https://github.com/bricelb) for the native admission hook, [Tony Tran (@thanhtantran)](https://github.com/thanhtantran) for the CYD board and banded rendering, and [Richard Ahlquist (@rahlquist)](https://github.com/rahlquist) for the Waveshare P4 3.4C board, for their pull requests.
 
 ## 0.3.0
 
