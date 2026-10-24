@@ -412,15 +412,19 @@ class DeviceSession:
         """What decides the face: a face found for another state is not this one's."""
         return self.device_profile, self.profile, self.paired
 
-    def update_face(self, face: ProfileFace | None | object = _LOOK_UP) -> asyncio.Task | None:
+    def update_face(self, face: ProfileFace | None | object = _LOOK_UP,
+                    found_for: tuple | None = None) -> asyncio.Task | None:
         """Bring the device's face up to date, beside the messages: the session's one face operation.
         It is for the state now; a newer one replaces it, and the session's end stops it. ``face`` is
-        what find_face() returned for this state, when the caller has it."""
+        what find_face() returned when the state was ``found_for``; it is looked up again otherwise."""
         if self.caps.get("faces") != 1:
             return None
+        state = self.face_state()
+        if found_for != state:
+            face = _LOOK_UP
         if self._face_task:
             self._face_task.cancel()
-        self._face_task = self.spawn(self._send_face(self.face_state(), face))
+        self._face_task = self.spawn(self._send_face(state, face))
         return self._face_task
 
     async def _send_face(self, state: tuple, face: ProfileFace | None | object) -> None:
@@ -851,7 +855,7 @@ class DeviceHub:
                     and session.device_profile == named):
                 session.face_hash = welcome["face"] = face.hash
             await session.send_json(protocol.message("welcome", **welcome))
-            session.update_face(face)
+            session.update_face(face, looked_up)  # after the welcome's send, which may let the state change
             face = None  # the task has it; an avatar's picture goes with the task
             log.info("device %s (%s) online, paired=%s", session.device_id, session.name, session.paired)
             await self.delegate.on_ready(session)

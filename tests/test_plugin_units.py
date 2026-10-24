@@ -365,3 +365,19 @@ def test_a_face_made_for_a_replaced_connection_is_dropped(tmp_path):
 
     old_sent, new_sent, held = asyncio.run(main())
     assert "face" not in old_sent and new_sent == ["face"] and held is not None
+
+
+def test_a_face_found_before_an_unpair_is_not_sent_after_it(tmp_path):
+    """The welcome's face was found while paired; an unpair during the welcome's send must not let it go out."""
+    from hermes_gadget_plugin.face import ProfileFace
+
+    async def main():
+        session, delegate, wire = _slow_face_session(tmp_path)
+        found_for = session.face_state()
+        found = ProfileFace.of(b"the default profile's face")
+        session.paired = False  # revoked while the welcome was being sent
+        delegate.release.set()
+        await session.update_face(found, found_for)
+        return wire.sent
+
+    assert asyncio.run(main()) == []
