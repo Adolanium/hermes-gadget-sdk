@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <mutex>
 #include <string>
@@ -20,6 +21,7 @@
 #include "axp2101.hpp"
 #include "band_flush.hpp"
 #include "cores3.hpp"
+#include "qmi8658.hpp"
 #include "shared_reply.hpp"
 #include "speaker_pa.hpp"
 #include "speaker_underruns.hpp"
@@ -562,6 +564,29 @@ class TouchInput {
   volatile int64_t last_edge_us_ = INT64_MIN;  // per-edge debounce (ISR-written)
 };
 
+// Reads the QMI8658 at 10 Hz from its own task, on its own device handle on
+// the shared bus (ESP-IDF's i2c_master serialises the transactions), maps the
+// axes into the device frame and keeps EMA-smoothed milli-g in atomics. The
+// task never touches hg::App; the app task polls samples() and calls
+// App::on_motion directly.
+class MotionInput {
+ public:
+  bool begin(const ImuConfig& cfg, i2c_master_bus_handle_t bus);
+  // Latest smoothed sample for `diag` (0, 0, 0 before the first good read).
+  void latest(int16_t& x, int16_t& y, int16_t& z) const;
+  // Counts good reads: the app task forwards a sample only when this moved, so a
+  // sensor that stops answering goes stale in App::motion_tick instead of repeating.
+  uint32_t samples() const { return samples_.load(std::memory_order_acquire); }
+
+ private:
+  static void task(void* arg);
+  ImuConfig cfg_{};
+  i2c_master_dev_handle_t dev_ = nullptr;
+  std::unique_ptr<hg::Qmi8658> chip_;
+  std::atomic<int16_t> x_{0}, y_{0}, z_{0};
+  std::atomic<uint32_t> samples_{0};
+};
+
 #if SOC_MIPI_DSI_SUPPORTED
 class Stc8Power final : public hg::Power {
  public:
@@ -781,7 +806,9 @@ struct Parts {
   const char* speaker = "none";
   bool touch = false;
   bool key = false;
+  const char* imu = "none";
   i2c_master_bus_handle_t i2c = nullptr;  // scanned by `diag`
+  MotionInput* motion = nullptr;          // latest sample for the report
 };
 
 // Starts keeping a RAM copy of recent log lines. Call first in app_main.

@@ -197,6 +197,17 @@ struct TouchConfig {
   I2cBusConfig bus{};
 };
 
+// QMI8658 accelerometer on the I2C bus (face-down sleep). The port maps its
+// axes into the device frame: +x towards the right of the picture, +y towards
+// its top, +z out of the screen towards the viewer. `*_from` picks the sensor
+// axis feeding a device axis (0 = x, 1 = y, 2 = z), `*_sign` its direction.
+struct ImuConfig {
+  bool enabled = false;
+  uint8_t addr = 0x6B;
+  int8_t x_from = 0, y_from = 1, z_from = 2;
+  int8_t x_sign = 1, y_sign = 1, z_sign = 1;
+};
+
 // A key whose level is read from a TCA9554 or PCF8574 I/O expander input (e.g.
 // a PMIC's power key). Acts as CANCEL: a press cancels, holding 2 s starts a
 // new session.
@@ -270,6 +281,7 @@ struct BoardConfig {
   I2cBusConfig i2c;
   CodecAudioConfig codec;
   TouchConfig touch;
+  ImuConfig imu;
   ExpanderKeyConfig pwr_key;
   ExpanderResetConfig expander_reset;
   PowerRail power_rails[2];

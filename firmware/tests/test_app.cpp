@@ -143,7 +143,11 @@ struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Stor
   bool spk_draining = false;  // ended, but the last audio is still playing
   size_t spk_samples = 0;
   bool begin(uint32_t) override { return spk_open = true; }
-  void write(const int16_t*, size_t n) override { spk_samples += n; }
+  bool spoke_while_dozing = false;  // the speaker was written before the port woke
+  void write(const int16_t*, size_t n) override {
+    spk_samples += n;
+    if (dozing) spoke_while_dozing = true;
+  }
   void end() override { spk_open = false; }
   void abort() override { spk_open = false; }
   bool busy() const override { return spk_open || spk_draining; }
@@ -203,6 +207,13 @@ struct Rig {
   explicit Rig(const std::string& server = "ws://hermes.local:8765/gadget") : app(hal, profile(server)) {}
   explicit Rig(hg::DeviceProfile p) : app(hal, std::move(p)) {}
 
+  // A board whose port feeds App::on_motion: it can sleep face down.
+  static hg::DeviceProfile motion_profile() {
+    hg::DeviceProfile p = profile("ws://hermes.local:8765/gadget");
+    p.motion_sensor = true;
+    return p;
+  }
+
   static hg::DeviceProfile touch_profile() {
     hg::DeviceProfile p = profile("ws://hermes.local:8765/gadget");
     p.touch_screen = true;
@@ -223,6 +234,14 @@ struct Rig {
     for (uint32_t t = 0; t < ms; t += 10) {
       fake.clock += 10;
       app.tick();
+    }
+  }
+
+  // Feeds on_motion at 10 Hz while the clock runs, like the port's motion task.
+  void hold_still(int16_t x, int16_t y, int16_t z, uint32_t ms) {
+    for (uint32_t t = 0; t < ms; t += 100) {
+      app.on_motion(x, y, z);
+      advance(100);
     }
   }
 
@@ -1706,6 +1725,271 @@ TEST("doze: boards without a power reading never doze") {
   r.advance(10000);
   CHECK_EQ(r.fake.brightness, 0);
   CHECK(!r.fake.dozing);
+}
+
+namespace {
+// The last state message about the screen (sensor readings also travel as state).
+const Value* last_display_state(const FakeHal& fake) {
+  for (auto it = fake.sent.rbegin(); it != fake.sent.rend(); ++it)
+    if ((*it)["type"].as_string() == "state" && (*it)["display_sleeping"].is_bool()) return &*it;
+  return nullptr;
+}
+}  // namespace
+
+TEST("face down: off by default; a motion board lying face down stays lit") {
+  Rig r(Rig::motion_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  r.hold_still(30, -20, -1000, 2000);
+  CHECK_EQ(r.fake.brightness, 100);
+  Value status;
+  CHECK(hg::json::parse(r.app.status_json(), status));
+  CHECK(status["face_down"].is_bool() && !status["face_down"].as_bool());
+}
+
+TEST("face down: set face_down_sleep takes on or off only, and the choice survives a restart") {
+  Rig r(Rig::motion_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set face_down_sleep maybe"), std::string("@error face_down_sleep must be on or off"));
+  CHECK_EQ(r.app.console("set face_down_sleep on"), std::string("@ok face_down_sleep"));
+  Rig again(Rig::motion_profile());
+  again.fake.backlight = true;
+  again.fake.kv = r.fake.kv;
+  again.bring_online(true);
+  again.hold_still(0, 0, -1000, 1000);
+  CHECK_EQ(again.fake.brightness, 0);  // on out of the box, no command needed
+}
+
+TEST("face down: the screen goes dark, listening is cancelled and Hermes is told; turned over it lights") {
+  Rig r(Rig::motion_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set face_down_sleep on"), std::string("@ok face_down_sleep"));
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK(r.fake.mic_on);
+  r.hold_still(30, -20, -1000, 1000);
+  CHECK_EQ(r.fake.brightness, 0);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.fake.last("audio.cancel") != nullptr);
+  Value status;
+  CHECK(hg::json::parse(r.app.status_json(), status));
+  CHECK(status["face_down"].as_bool());
+  const Value* dark = last_display_state(r.fake);
+  CHECK(dark && (*dark)["display_sleeping"].as_bool());
+  r.app.on_button(hg::Button::Talk, false);  // the release is swallowed, as on a timed-out screen
+  CHECK_EQ(r.fake.brightness, 0);
+  r.hold_still(0, 0, 1000, 500);
+  CHECK_EQ(r.fake.brightness, 100);
+  const Value* lit = last_display_state(r.fake);
+  CHECK(lit && (*lit)["display_sleeping"].is_bool() && !(*lit)["display_sleeping"].as_bool());
+}
+
+TEST("face down: a reply being spoken goes quiet, the turn goes on, and its text waits for the turn-over") {
+  Rig r(Rig::motion_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set face_down_sleep on"), std::string("@ok face_down_sleep"));
+  r.server(R"({"type":"turn.start","turn":"t1"})");
+  r.server(R"({"type":"audio.start","stream":3,"rate":16000,"format":"pcm16"})");
+  r.server(R"({"type":"reply","text":"Your package arrived."})");
+  CHECK(r.fake.spk_open);
+  r.hold_still(30, -20, -1000, 1000);
+  CHECK(!r.fake.spk_open);
+  CHECK(r.fake.last("cancel") == nullptr);  // Hermes keeps working
+  CHECK_EQ(r.fake.brightness, 0);
+  r.server(R"({"type":"audio.end","stream":3})");
+  r.server(R"({"type":"turn.end","turn":"t1","outcome":"success"})");
+  // Longer than a reply normally stays up: the text still waits for the turn-over.
+  r.hold_still(0, 0, -1000, 30000);
+  r.hold_still(0, 0, 1000, 500);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK(!r.app.model().hero);  // the reply's text, not the mascot
+  CHECK_EQ(r.app.model().body, std::string("Your package arrived."));
+}
+
+TEST("face down: speech that arrives face down plays nothing, and its text waits for the turn-over") {
+  Rig r(Rig::motion_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set face_down_sleep on"), std::string("@ok face_down_sleep"));
+  // A new turn starts while the last one's speech still plays: the mode is Thinking.
+  r.server(R"({"type":"turn.start","turn":"t1"})");
+  r.server(R"({"type":"audio.start","stream":3,"rate":16000,"format":"pcm16"})");
+  r.server(R"({"type":"turn.start","turn":"t2"})");
+  CHECK(r.fake.spk_open);
+  r.hold_still(30, -20, -1000, 1000);
+  CHECK(!r.fake.spk_open);  // the left-over speech stops too
+  CHECK_EQ(r.fake.brightness, 0);
+  // The thinking turn answers while the gadget lies there: silent, and the text waits.
+  r.server(R"({"type":"audio.start","stream":4,"rate":16000,"format":"pcm16"})");
+  CHECK(!r.fake.spk_open);  // the stream is never begun
+  r.server(R"({"type":"reply","text":"Your package arrived."})");
+  r.server(R"({"type":"turn.end","turn":"t2","outcome":"success"})");
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(!r.fake.mic_on);
+  CHECK_EQ(r.fake.brightness, 0);
+  // Longer than a reply normally stays up: the text still waits for the turn-over.
+  r.hold_still(0, 0, -1000, 30000);
+  r.hold_still(0, 0, 1000, 500);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK(!r.app.model().hero);  // the reply's text, not the mascot
+  CHECK_EQ(r.app.model().body, std::string("Your package arrived."));
+  CHECK_EQ(r.app.model().scroll, 0);  // from the top
+}
+
+TEST("face down: nothing lights the screen - a press, a question, brightness and volume changes") {
+  Rig r(Rig::motion_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set face_down_sleep on"), std::string("@ok face_down_sleep"));
+  r.hold_still(0, 0, -1000, 1000);
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(!r.fake.mic_on);  // the press is consumed, no recording starts
+  r.server(R"({"type":"prompt","id":"q1","title":"Allow?","text":"Run the command"})");
+  CHECK_EQ(r.fake.brightness, 0);
+  r.server(R"({"type":"action","id":"b1","name":"screen.brightness","args":{"percent":60}})");
+  CHECK_EQ(r.fake.brightness, 0);  // the level is stored, not applied
+  CHECK_EQ(r.app.console("set volume 40"), std::string("@ok volume"));
+  CHECK_EQ(r.fake.brightness, 0);
+  r.hold_still(0, 0, -1000, 200);
+  const Value* dark = last_display_state(r.fake);
+  CHECK(dark && (*dark)["display_sleeping"].as_bool());  // Hermes still holds cards for it
+  r.hold_still(0, 0, 1000, 500);
+  CHECK_EQ(r.fake.brightness, 60);  // the turn-over applies the stored level
+}
+
+TEST("face down: a ringing alarm goes quiet; a timer that ends face down rings with a dark screen") {
+  {
+    KeyPower key;
+    Rig r(Rig::motion_profile());
+    r.fake.backlight = true;
+    r.hal.power = &key;
+    r.bring_online(true);
+    CHECK_EQ(r.app.console("set face_down_sleep on"), std::string("@ok face_down_sleep"));
+    r.server(R"({"type":"action","id":"x1","name":"timer.start","args":{"seconds":1}})");
+    r.hold_still(0, 0, 1000, 1500);  // face up while it starts to ring
+    CHECK(r.app.screen() == hg::Screen::Alarm);
+    const size_t beeps = r.fake.spk_samples;
+    CHECK(beeps > 0);
+    r.hold_still(0, 0, -1000, 1000);  // face down: quiet, and the alarm stays up
+    CHECK_EQ(r.fake.brightness, 0);
+    CHECK(r.app.screen() == hg::Screen::Alarm);
+    const size_t quiet = r.fake.spk_samples;
+    r.hold_still(0, 0, -1000, 3000);
+    CHECK_EQ(r.fake.spk_samples, quiet);
+    r.hold_still(0, 0, 1000, 500);  // turned over: the alarm shows
+    CHECK_EQ(r.fake.brightness, 100);
+    CHECK(r.app.screen() == hg::Screen::Alarm);
+    r.hold_still(0, 0, 1000, 3000);  // and stays quiet: laying it face down was the hush
+    CHECK_EQ(r.fake.spk_samples, quiet);
+  }
+  {
+    // On battery, a face-down idle board dozes; the alarm's beeps are never written while dozing.
+    KeyPower key;
+    Rig r(Rig::motion_profile());
+    r.fake.backlight = true;
+    r.hal.power = &key;
+    r.bring_online(true);
+    CHECK_EQ(r.app.console("set face_down_sleep on"), std::string("@ok face_down_sleep"));
+    r.hold_still(0, 0, -1000, 1000);
+    CHECK_EQ(r.fake.brightness, 0);
+    CHECK(r.fake.dozing);
+    r.server(R"({"type":"action","id":"x1","name":"timer.start","args":{"seconds":1}})");
+    const size_t before = r.fake.spk_samples;
+    r.hold_still(0, 0, -1000, 1600);  // the timer ends face down
+    CHECK(r.fake.spk_samples > before);  // an alarm should be heard: it rings
+    CHECK_EQ(r.fake.brightness, 0);       // with the screen dark
+    CHECK(!r.fake.spoke_while_dozing);
+  }
+}
+
+TEST("face down: a sensor that stops reporting for two seconds lights the screen") {
+  Rig r(Rig::motion_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set face_down_sleep on"), std::string("@ok face_down_sleep"));
+  r.hold_still(0, 0, -1000, 1000);
+  CHECK_EQ(r.fake.brightness, 0);
+  r.advance(2100);  // no sample arrives
+  CHECK_EQ(r.fake.brightness, 100);  // never stay dark on old data
+}
+
+TEST("face down: turning the setting off while face down lights the screen on the next tick") {
+  Rig r(Rig::motion_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set face_down_sleep on"), std::string("@ok face_down_sleep"));
+  r.hold_still(0, 0, -1000, 1000);
+  CHECK_EQ(r.fake.brightness, 0);
+  CHECK_EQ(r.app.console("set face_down_sleep off"), std::string("@ok face_down_sleep"));
+  CHECK_EQ(r.fake.brightness, 0);  // the console itself lights nothing
+  r.advance(50);
+  CHECK_EQ(r.fake.brightness, 100);
+}
+
+TEST("face down: boards without a motion sensor or without a backlight never offer it") {
+  const auto never_offered = [](Rig& r) {
+    // A full lap of the menu never lands on the item.
+    CHECK(r.app.open_settings());
+    for (int i = 0; i < 20; ++i) {
+      r.app.on_button(hg::Button::Down, true);
+      CHECK(r.app.model().detail != std::string("Face-down sleep"));
+    }
+    r.app.close_settings();
+  };
+  {
+    Rig plain;  // no motion sensor: the setting is stored and does nothing
+    plain.fake.backlight = true;
+    plain.bring_online(true);
+    CHECK_EQ(plain.app.console("set face_down_sleep on"), std::string("@ok face_down_sleep"));
+    plain.hold_still(0, 0, -1000, 2000);
+    CHECK_EQ(plain.fake.brightness, 100);
+    Value status;
+    CHECK(hg::json::parse(plain.app.status_json(), status));
+    CHECK(!status["face_down"].is_bool());
+    never_offered(plain);
+  }
+  {
+    Rig r(Rig::motion_profile());  // a motion sensor, but no backlight to turn off
+    r.bring_online(true);
+    CHECK_EQ(r.app.console("set face_down_sleep on"), std::string("@ok face_down_sleep"));
+    r.hold_still(0, 0, -1000, 2000);
+    // Its picture stays lit, so Hermes is never told that the screen is dark.
+    const Value* dark = last_display_state(r.fake);
+    CHECK(!dark || !(*dark)["display_sleeping"].as_bool());
+    Value status;
+    CHECK(hg::json::parse(r.app.status_json(), status));
+    CHECK(!status["face_down"].is_bool());
+    CHECK(!status["display_sleeping"].as_bool());
+    never_offered(r);
+  }
+}
+
+TEST("face down: the settings item follows Screen timeout, shows Off and toggles") {
+  Rig r(Rig::motion_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 20 && r.app.model().detail != "Screen timeout"; ++i) r.app.on_button(hg::Button::Down, true);
+  CHECK_EQ(r.app.model().detail, std::string("Screen timeout"));
+  r.app.on_button(hg::Button::Down, true);
+  CHECK_EQ(r.app.model().detail, std::string("Face-down sleep"));  // next after Screen timeout
+  CHECK(r.app.model().body.rfind("Off\n", 0) == 0);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.model().body.rfind("On\n", 0) == 0);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.model().body.rfind("Off\n", 0) == 0);
+  r.app.close_settings();
+  r.hold_still(0, 0, -1000, 1000);  // back on Off: lying face down does nothing
+  CHECK_EQ(r.fake.brightness, 100);
 }
 
 TEST("power: an idle settings menu sleeps on every view; the wake input restores it where it was") {

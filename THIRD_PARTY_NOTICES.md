@@ -95,6 +95,8 @@ The CrowPanel Advanced 10.1-inch P4 pin map, DSI timings, backlight polarity, an
 
 The ESP32-2432S028 (CYD, two-USB revision) pin map and panel settings in `firmware/esp32/main/board.cpp` follow Brian Lough's [ESP32-Cheap-Yellow-Display](https://github.com/witnessmenow/ESP32-Cheap-Yellow-Display/tree/0564a140c76de76ef34a8b7115044e7c6c852695) reference at commit `0564a140c76de76ef34a8b7115044e7c6c852695`: [`PINS.md`](https://github.com/witnessmenow/ESP32-Cheap-Yellow-Display/blob/0564a140c76de76ef34a8b7115044e7c6c852695/PINS.md) and [`DisplayConfig/CYD2USB/User_Setup.h`](https://github.com/witnessmenow/ESP32-Cheap-Yellow-Display/blob/0564a140c76de76ef34a8b7115044e7c6c852695/DisplayConfig/CYD2USB/User_Setup.h). The repository is under the MIT License (Copyright (c) 2023 Brian Lough); only these hardware facts are used and no code is copied. The panel uses ESP-IDF's built-in ST7789 driver and the speaker beeps use ESP-IDF's DAC driver, so the board adds no managed component.
 
+The QMI8658 driver's register values follow the [QST QMI8658A datasheet Rev A](https://qstcorp.com/upload/pdf/202301/13-52-25%20QMI8658A%20Datasheet%20Rev%20A.pdf) (© 2022 QST Corporation). Only hardware facts (register addresses, values and data layouts) were taken; no vendor code is copied. See [NOTICE](NOTICE).
+
 ## Release packages
 
 Firmware packages include `hermes-gadget-<version>-licenses.zip` with this document, the project's notices, license texts, and notices found in the installed ESP-IDF and managed component sources. The browser installer links that archive when the release supplies it.
