@@ -1046,3 +1046,25 @@ def test_a_revocation_during_the_welcome_lookup_installs_no_face(live_rig, herme
 @requires_sim
 def test_a_revocation_during_the_welcome_lookup_drops_the_held_face(live_rig, hermes_home, make_sim, monkeypatch):
     assert _revoked_during_the_welcome_lookup(live_rig, hermes_home, make_sim, monkeypatch, held_before=True) is None
+
+
+@requires_sim
+def test_a_switched_device_a_route_later_refuses_drops_its_face(live_rig, hermes_home, make_sim):
+    """A device that switched answers to the default profile for good; a route added later makes the plugin
+    refuse it, even though the routed profile approved it. It must not keep, or get, any profile's face."""
+    sim, held, digest = _faces_on_ops(live_rig, hermes_home, make_sim)
+    device_id = sim.status()["device_id"]
+    live_rig.approve("ops", device_id)
+    assert sim.wait_for(lambda: (sim.last_received("face") or {}).get("hash") == digest["ops"], timeout=8)
+    assert held() == digest["ops"]
+
+    live_rig.runner.config.profile_routes = _ops_route(device_id)
+    assert sim.wait_for(lambda: sim.status()["paired"] is False, timeout=8)  # refused at the next pairing check
+    sent = len(sim.received)
+    sim.console("reconnect")
+    assert sim.wait_screen("connecting", timeout=5)
+    assert sim.wait_for(lambda: len([m for m in sim.received[sent:] if m["type"] == "welcome"]) == 1, timeout=10)
+    assert [m for m in sim.sent if m["type"] == "hello"][-1].get("face") is None  # the face went with the refusal
+    assert sim.last_received("welcome")["paired"] is False
+    sim.run_for(3)  # past the next pairing check
+    assert not any("bits" in m for m in sim.received[sent:] if m["type"] == "face")
