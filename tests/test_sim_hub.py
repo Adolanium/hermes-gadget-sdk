@@ -733,7 +733,7 @@ def test_a_device_on_a_route_added_while_it_was_away_takes_the_routes_face(loop_
     hub = DeviceHub(DeviceStore(tmp_path / "server"), delegate, host="127.0.0.1", port=0, heartbeat_s=5)
     loop_thread.run(hub.start())
     url = f"ws://127.0.0.1:{hub.bound_port}/gadget"
-    last_face = lambda sim: [m for m in sim.received if m.get("type") == "face"][-1]  # noqa: E731
+    last_face = lambda sim: ([m for m in sim.received if m.get("type") == "face"] or [{}])[-1]  # noqa: E731
     try:
         sim = make_sim(url)
         assert sim.wait_screen("ready", timeout=10)
@@ -772,7 +772,7 @@ def test_a_new_route_shows_the_mascot_while_its_face_is_made(loop_thread, tmp_pa
     delegate = _RoutedLater()
     hub = DeviceHub(DeviceStore(tmp_path / "server"), delegate, host="127.0.0.1", port=0, heartbeat_s=5)
     loop_thread.run(hub.start())
-    last_face = lambda: [m for m in sim.received if m.get("type") == "face"][-1]  # noqa: E731
+    last_face = lambda: ([m for m in sim.received if m.get("type") == "face"] or [{}])[-1]  # noqa: E731
     ops, work = _digest(delegate.faces["ops"]), _digest(delegate.faces["work"])
     try:
         sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget")
