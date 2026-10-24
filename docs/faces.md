@@ -112,11 +112,12 @@ the waves and dots still show. For a face that blinks and talks, make a face fil
 avatar needs Pillow on the Hermes host; without it, the plugin uses face files only and says so
 once in the log.
 
-A profile shows its face only once it has approved the device. The default profile's face needs
-the pairing the device already has. Any other profile, whether the device switched to it or a gadget
-route sends it there, approves the device itself (`hermes -p ops pairing approve gadget <code>`, or
-an allowlist), and until then the device shows the mascot. When that profile approves the device,
-its face follows within a few seconds; when it revokes the device, the mascot comes back.
+A profile shows its face only once Hermes would accept the device's turns in that profile. For the
+default profile, that is the pairing the device already has. For any other profile, whether the
+device switched to it or a gadget route sends it there, it means that profile's own pairing approval
+(`hermes -p ops pairing approve gadget <code>`) or the gateway's allowlist; until then the device
+shows the mascot. When the profile approves the device, its face follows within a few seconds; when
+it revokes the device, the mascot comes back.
 
 A profile with neither a face file nor an avatar shows the mascot. To show the mascot for every
 profile, turn faces off in the default profile's `config.yaml`:
