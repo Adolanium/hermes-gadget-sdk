@@ -38,11 +38,10 @@ import logging
 import os
 import re
 import ssl
-import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from agent.i18n import get_language, t
 from gateway.config import Platform, PlatformConfig
@@ -93,7 +92,6 @@ SLASH_CONFIRM_TTL_S = 300  # mirrors tools.slash_confirm.DEFAULT_TIMEOUT_SECONDS
 # list of choices and an italic note on typed replies. A device keeps the first two.
 _CHOICE_LIST = re.compile(r"^\s*[•*-]\s", re.MULTILINE)
 _ITALIC_NOTE = re.compile(r"^_.*_$", re.DOTALL)
-_GRANT_LOCK = threading.Lock()  # PairingStore locks per instance; grants rewrite one shared approved-file
 
 
 def _flag(value: Any, default: bool) -> bool:
@@ -208,7 +206,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._tiles: Optional[dashboard.TileStore] = None
         self._dashboard_task: Optional[asyncio.Task] = None
         self._dashboard_wake: Optional[asyncio.Event] = None
-        self._board_unsubscribe = None
+        self._boards: Dict[dashboard.SessionBoard, Callable[[], None]] = {}  # each board read, its unsubscribe
+        self._roster_lock = asyncio.Lock()  # one roster read at a time; never held across a send
+        self._push_seq = 0
+        self._pushed_seq: Dict[str, int] = {}  # device -> the newest push that read a roster for it
         self._battery_log: Optional[BatteryLog] = None
         self._tls_cert = extra.get("tls_cert")
         self._tls_key = extra.get("tls_key")
@@ -223,7 +224,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._registry_key = "default"
         self._prompts: Dict[str, List[_Prompt]] = {}  # device id -> questions, oldest (shown) first
         self._new_requested: Dict[str, float] = {}  # device id -> when it asked for a new session
-        self._owner_check = None  # the default profile's auth check, built from the runner on first use
+        self._owner_check = None  # tests may stand in for the default profile's verdict; None = this adapter's own check
 
     # -- lifecycle ------------------------------------------------------------------
 
@@ -264,7 +265,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if self._dashboard_on:
             self._tiles = dashboard.TileStore(plugin_data_dir(PLATFORM_NAME))
             self._dashboard_wake = asyncio.Event()
-            self._board_unsubscribe = dashboard.BOARD.subscribe(self._board_changed)
+            self._boards[dashboard.BOARD] = dashboard.BOARD.subscribe(self._board_changed)
             self._dashboard_task = asyncio.create_task(self._watch_dashboard())
         self._mark_connected()
         self._wire_plugin_handlers(None)
@@ -274,9 +275,9 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
 
     async def disconnect(self) -> None:
         runtime.unregister(self._registry_key, self)
-        if self._board_unsubscribe:
-            self._board_unsubscribe()
-            self._board_unsubscribe = None
+        for unsubscribe in self._boards.values():
+            unsubscribe()
+        self._boards.clear()
         for task in (self._watch_task, self._update_task, self._dashboard_task):
             if task:
                 task.cancel()
@@ -284,6 +285,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if self._hub:
             await self._hub.stop()
             self._hub = None
+        self._pushed_seq.clear()  # after the stop: a push still finishing while it ran may add one
         self._mark_disconnected()
 
     @property
@@ -335,12 +337,33 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._prompts[device_id] = prompts
         return device_id in self._turns or bool(prompts)
 
+    def validate_native_profile_route(self, source) -> bool:
+        """Revalidate device-selected routing at native admission and durable replay.
+
+        A queued message keeps its selected profile even if the device switches again;
+        current owner trust and the offered-profile policy must still permit that turn.
+        This does not authorize a device or create an approval in another profile.
+        """
+        if (not self._switching_on() or source.platform != self.platform
+                or source.chat_type != "dm" or not source.user_id
+                or source.user_id != source.chat_id or source.profile_route_rejected
+                or source.delivered_via_upstream_relay):
+            return False
+        if source.profile not in {p["id"] for p in self.profiles()}:
+            return False
+        if not self._owner_trusts(source.user_id):
+            return False
+        # A non-default selection is owner-bound before select_profile grants it.
+        return (source.profile == "default" or
+                self._store is not None and self._store.owner_bound(source.user_id) is True)
+
     def _owner_trusts(self, device_id: str) -> bool:
-        """The default profile's verdict on this device, ignoring routes; only a literal True counts."""
+        """The default profile's verdict on this device; only a literal True counts. It is this adapter's
+        own sender check: the default profile's listener, and a device that switches is never routed, so
+        no route stands in for the default profile here. Other profiles' approvals are their own."""
         try:
-            if self._owner_check is None and (runner := getattr(self, "gateway_runner", None)) is not None:
-                self._owner_check = runner._make_adapter_auth_check(self.platform, profile_name="default")
-            return self._owner_check is not None and self._owner_check(device_id, "dm", device_id) is True
+            check = self._owner_check or self._is_sender_authorized
+            return check(device_id, "dm", device_id) is True
         except Exception:
             logger.warning("[%s] authorization check failed for %s", self.name, device_id, exc_info=True)
             return False
@@ -361,8 +384,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         return self._switching_on() and session.caps.get("profiles") is True and not self._routed(session)
 
     def _owner_bound(self, session: DeviceSession) -> bool:
-        """Devices held to the default profile's verdict: those that switch, and any this plugin
-        approved in another profile, whatever they claim in a later hello."""
+        """Devices held to the default profile's verdict: those that switch, and any that switched
+        before, whatever they claim in a later hello."""
         return self._switches(session) or self._store.owner_bound(session.device_id)
 
     def _verdict(self, session: DeviceSession) -> Optional[bool]:
@@ -387,42 +410,20 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if self._busy(session.device_id):
             return "busy"
         if profile != "default":
-            try:  # before the grant exists, so no approval this plugin makes is ever unbound
+            # Bound before the first message goes there, so a later hello without caps.profiles still
+            # answers to the default profile. Nothing is written into the target profile: it approves the
+            # device itself, through its own pairing flow, the first time the device talks to it.
+            try:
                 await asyncio.to_thread(self._store.bind_to_owner, session.device_id)
             except OSError:
                 logger.warning("[%s] cannot bind %s to the default profile", self.name, session.device_id,
                                exc_info=True)
                 return "unpaired"
-            if not await asyncio.to_thread(self._grant, session.device_id, session.name, profile):
-                return "unpaired"
-        if not self._still_trusted(session):  # revoked or replaced while the grant ran
+        if not self._still_trusted(session):  # revoked or replaced meanwhile
             return "unpaired"
         session.profile = profile
         logger.info("[%s] %s now talks to profile %s", self.name, session.device_id, profile)
         return None
-
-    @staticmethod
-    def _grant(device_id: str, name: str, profile: str) -> bool:
-        """Approve a device the default profile trusts in ``profile``'s own pairing store, which is what
-        the gateway checks for a turn routed there. Pairing on the default profile stays the only approval."""
-        try:
-            from gateway.pairing import PairingStore
-            from gateway.run import _profile_runtime_scope
-            from hermes_cli.profiles import get_profile_dir
-
-            # The target profile's scope, so the allowlist mirror in approve_code touches that
-            # profile's .env, not the default one's.
-            with _GRANT_LOCK, _profile_runtime_scope(get_profile_dir(profile)):
-                store = PairingStore(profile=profile)
-                if store.is_approved(PLATFORM_NAME, device_id):
-                    return True
-                # ponytail: PairingStore has no public "approve this user", so mint a code and redeem it.
-                # Rate limits, three pending codes or a lockout make this fail; the device is told "unpaired".
-                code = store.generate_code(PLATFORM_NAME, device_id, name)
-                return bool(code and store.approve_code(PLATFORM_NAME, code))
-        except Exception:  # a storage error refuses the switch; it must not drop the connection
-            logger.warning("could not approve %s in profile %s", device_id, profile, exc_info=True)
-            return False
 
     async def _reset_profile(self, session: DeviceSession) -> None:
         """Back to the default profile; questions from the old one go (Hermes times them out as denied)."""
@@ -555,14 +556,53 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     async def _push_dashboard(self, only: Optional[DeviceSession] = None) -> None:
         if self._hub is None or self._tiles is None:
             return
-        targets = [only] if only is not None else list(self._hub.sessions.values())
-        targets = [s for s in targets if s.paired and not s.closed and s.dashboard_version >= dashboard.VERSION]
+        live = [s for s in self._hub.sessions.values()
+                if s.paired and not s.closed and s.dashboard_version >= dashboard.VERSION]
+        targets = live if only is None else [s for s in live if s is only]
+        if not any(self._switches(s) for s in live):  # no device reads other profiles' boards any more
+            self._keep_boards([])
         if not targets:
             return
-        sessions, tiles = dashboard.BOARD.sessions(), self._tiles.tiles()
-        for session in targets:
+        switching = [self._switches(s) for s in targets]
+        theirs: Optional[List[Dict[str, str]]] = None
+        seq = 0
+        if any(switching):
+            async with self._roster_lock:  # rosters are read, and their rows taken, in push order
+                self._push_seq = seq = self._push_seq + 1
+                self._pushed_seq.update((s.device_id, seq) for s, sw in zip(targets, switching)
+                                        if sw and self._hub is not None and self._hub.get(s.device_id) is s)
+                theirs = dashboard.BOARD.sessions(*await self._offered_boards())
+        mine = dashboard.BOARD.sessions()  # after any roster wait, so a change made during it goes out
+        if theirs is None:
+            theirs = mine
+        tiles = self._tiles.tiles()
+        for session, switches in zip(targets, switching):
+            if not session.paired or (switches and not self._still_trusted(session)):
+                continue  # revoked or replaced while the roster was read
+            if switches and self._pushed_seq.get(session.device_id) != seq:
+                continue  # a newer push has a newer roster for this device and sends it
+            # No await from the check to here: send_dashboard queues on the device's send lock (FIFO)
+            # before any newer push can, so an older dashboard never lands after a newer one.
             await session.send_dashboard(dashboard.message(
-                sessions, tiles, charset=session.charset, cols=session.display.get("text_cols")))
+                theirs if switches else mine, tiles, charset=session.charset, cols=session.display.get("text_cols")))
+
+    async def _offered_boards(self) -> List[dashboard.SessionBoard]:
+        """The session boards of the other profiles a switching device may pick, as each profile's
+        copy of the plugin loads them; a change on one wakes the dashboard like one of ours."""
+        offered = [p["id"] for p in await asyncio.to_thread(self.profiles)]
+        if self._dashboard_task is None:  # disconnect() began meanwhile and dropped every listener
+            return []
+        return self._keep_boards([b for b in runtime.boards(offered) if b is not dashboard.BOARD])
+
+    def _keep_boards(self, boards: List[dashboard.SessionBoard]) -> List[dashboard.SessionBoard]:
+        """Listen to ``boards`` and our own board only: a profile taken off the offer, or a board
+        a reloaded copy of the plugin replaced, no longer wakes the dashboard."""
+        for board in [b for b in self._boards if b is not dashboard.BOARD and b not in boards]:
+            self._boards.pop(board)()
+        for board in boards:
+            if board not in self._boards:
+                self._boards[board] = board.subscribe(self._board_changed)
+        return boards
 
     # -- firmware updates -------------------------------------------------------------
 
@@ -666,7 +706,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     async def _forward(self, session: DeviceSession, event: MessageEvent) -> None:
         """Hand a device message to Hermes. Work for another profile needs the default profile's live
         trust and the current connection, so neither a revoked device nor a replaced connection still
-        finishing an upload reaches a profile through an approval this plugin made there."""
+        finishing an upload reaches another profile; that profile then checks its own approval."""
         if (event.source.profile not in (None, "default") and self._owner_bound(session)
                 and not self._still_trusted(session)):
             logger.info("[%s] dropped a message from %s for profile %s: not trusted by the default profile",
@@ -719,6 +759,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     async def on_disconnect(self, session: DeviceSession) -> None:
         if self._hub and session.device_id not in self._hub.sessions:
             self._turns.pop(session.device_id, None)
+            self._pushed_seq.pop(session.device_id, None)
 
     # -- turn lifecycle -------------------------------------------------------------
 
@@ -761,6 +802,14 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             return SendResult(success=False, error=f"gadget {chat_id} is not connected")
         if not session.paired:
             await self._forward_unpaired(session, content)
+            return SendResult(success=True, message_id=uuid.uuid4().hex[:12])
+        if session.profile != "default" and (match := _PAIRING_CMD.search(content or "")):
+            # The profile it switched to doesn't know this device yet: Hermes offered that profile's own
+            # pairing code. Show the command to approve it there; no turn runs, so settle the device.
+            await session.turn_end("", outcome="cancelled")
+            await session.send_reply(textfmt.for_device(
+                f"Not approved for the {session.profile} profile yet. On the Hermes host run:\n{match.group(1)}",
+                session.charset))
             return SendResult(success=True, message_id=uuid.uuid4().hex[:12])
         heard = transcript_echo(content or "")
         if heard is not None:

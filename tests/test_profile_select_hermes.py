@@ -29,7 +29,7 @@ def test_a_paired_device_switches_profile_and_its_turns_run_there(hermes_home, g
     assert [p["id"] for p in sim.last_received("welcome")["profiles"]] == ["default", "ops"]
     _select_next_profile(sim)
     assert sim.wait_for(lambda: {"type": "profile", "profile": "ops"} in _profile_msgs(sim), timeout=5)
-    assert PairingStore(profile="ops").is_approved("gadget", device)  # pair once, use every profile
+    assert not PairingStore(profile="ops").is_approved("gadget", device)  # nothing written into ops
     gadget.events.clear()
     sim.type_text("hi")
     assert sim.wait_for(lambda: gadget.events, timeout=5)
@@ -90,19 +90,21 @@ def test_a_stored_profile_that_is_gone_falls_back_to_default(hermes_home, gadget
     assert sim.status().get("profile") == "default"
 
 
-def test_revocation_resets_profile_and_questions_even_mid_grant(hermes_home, gadget, make_sim, monkeypatch):
-    from hermes_gadget_plugin.adapter import GadgetAdapter, _Prompt
+def test_revocation_resets_profile_and_questions_even_mid_switch(hermes_home, gadget, make_sim, monkeypatch):
+    from hermes_gadget_plugin.adapter import _Prompt
 
     run, adapter = gadget.run, gadget.adapter
     sim = _paired_sim(gadget, make_sim)
     session = adapter.hub.get(sim.status()["device_id"])
 
-    def revoke_during_grant(device_id, name, profile):
-        gadget.authorized.discard(device_id)  # revoked on the default profile while the grant runs
-        return True
+    bind = adapter._store.bind_to_owner
 
-    with monkeypatch.context() as grant_patch:  # never monkeypatch.undo(): it would drop the fixtures' patches too
-        grant_patch.setattr(GadgetAdapter, "_grant", staticmethod(revoke_during_grant))
+    def revoke_during_bind(device_id):
+        gadget.authorized.discard(device_id)  # revoked on the default profile while the switch runs
+        return bind(device_id)
+
+    with monkeypatch.context() as bind_patch:  # never monkeypatch.undo(): it would drop the fixtures' patches too
+        bind_patch.setattr(adapter._store, "bind_to_owner", revoke_during_bind)
         assert run(adapter.select_profile(session, "ops")) == "unpaired"
     assert session.profile == "default"
     gadget.authorized.add(session.device_id)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 import types
 import pytest
 from conftest import requires_hermes
@@ -91,23 +92,422 @@ def test_old_firmware_gets_no_roster_and_an_untouched_source(hermes_home, gadget
     assert event.source.profile is None
 
 
-def test_grants_are_scoped_serialized_and_refusable(hermes_home, gadget, monkeypatch):
-    from concurrent.futures import ThreadPoolExecutor
+def _dashboard_labels(device, seconds):
+    """The session labels of each dashboard the device gets within ``seconds``."""
+    import time
 
-    from gateway.pairing import PairingStore
-    from hermes_gadget_plugin.adapter import GadgetAdapter
+    seen, end = [], time.monotonic() + seconds
+    while (left := end - time.monotonic()) > 0:
+        try:
+            msg = json.loads(device.ws.recv(timeout=left))
+        except TimeoutError:
+            break
+        if msg.get("type") == "dashboard":
+            seen.append([row["label"] for row in msg["sessions"]])
+    return seen
 
-    (hermes_home / ".env").write_text("GADGET_ALLOWED_USERS=hg-0000000000000000\n")
-    (hermes_home / "profiles" / "ops" / ".env").write_text("GADGET_ALLOWED_USERS=hg-1111111111111111\n")
-    devices = [f"hg-{i:016x}" for i in range(2, 6)]
-    with ThreadPoolExecutor(4) as pool:
-        assert all(pool.map(lambda d: GadgetAdapter._grant(d, d, "ops"), devices))
-    store = PairingStore(profile="ops")
-    assert all(store.is_approved("gadget", d) for d in devices)  # no grant lost to a concurrent rewrite
-    assert "hg-0000000000000000" in (hermes_home / ".env").read_text()
-    assert not any(d in (hermes_home / ".env").read_text() for d in devices)  # default's allowlist untouched
-    monkeypatch.setattr(PairingStore, "generate_code", lambda self, *a, **kw: None)  # rate limited / locked out
-    assert GadgetAdapter._grant("hg-ffffffffffffffff", "x", "ops") is False
+
+def _profile_board(monkeypatch, profile):
+    """A session board registered the way ``profile``'s own copy of the plugin registers it."""
+    from hermes_gadget_plugin import dashboard, runtime
+
+    monkeypatch.setitem(runtime._boards, profile, None)  # so the registration is undone after the test
+    board = dashboard.SessionBoard()
+    board.register(types.SimpleNamespace(profile_name=profile, register_hook=lambda name, callback: None))
+    return board
+
+
+def test_only_a_switching_device_sees_the_offered_profiles_sessions(hermes_home, gadget, monkeypatch):
+    import os
+    from hermes_gadget_plugin import adapter as adapter_module, dashboard, protocol
+
+    monkeypatch.setattr(adapter_module, "DASHBOARD_POLL_S", 60)  # only a wake sends a change below
+    monkeypatch.setattr(dashboard.BOARD, "_sessions", {})  # the default profile's board: no sessions
+    ops = _profile_board(monkeypatch, "ops")
+    old = _profile_board(monkeypatch, "old")  # parked, so not served and never offered
+    old.pre_llm_call(session_id="s_old1", platform="cli")
+    ops.pre_llm_call(session_id="s_ops1", platform="telegram")
+    caps = {"dashboard": {"v": dashboard.VERSION}}
+    keys = os.urandom(32), os.urandom(32)
+    gadget.authorized.update(protocol.device_id_for_key(k) for k in keys)
+    with _RawDevice(gadget.url, keys[0], {**caps, "profiles": True}) as switching, \
+            _RawDevice(gadget.url, keys[1], caps) as old_firmware:
+        assert _dashboard_labels(switching, 2.5)[-1] == ["telegram ops1"]  # outlasts the poll begun before
+        ops.pre_approval_request(session_id="s_ops2")  # wakes the dashboard as a session of its own does
+        assert _dashboard_labels(switching, 1.5)[-1] == ["session ops2", "telegram ops1"]
+        assert _dashboard_labels(old_firmware, 0.5) == [[]]  # exactly today's: the default profile's only
+
+
+WITH_OPS, WITHOUT_OPS = [{"id": "default"}, {"id": "ops"}], [{"id": "default"}]
+
+
+
+@pytest.mark.parametrize("rosters, rows, heard", [
+    ([WITH_OPS, WITHOUT_OPS], [], False),  # ops is parked: an older push cannot bring it back
+    ([WITHOUT_OPS, WITH_OPS], ["telegram ops1"], True),  # ops is unparked: an older roster cannot drop it
+], ids=["ops leaves the offer", "ops joins the offer"])
+def test_the_newer_of_two_pushes_decides_the_dashboard(hermes_home, gadget, monkeypatch, rosters, rows, heard):
+    import asyncio
+    import os
+    import threading
+    import time
+    from hermes_gadget_plugin import adapter as adapter_module, dashboard, protocol
+
+    monkeypatch.setattr(adapter_module, "DASHBOARD_POLL_S", 60)  # only the two pushes below read the roster
+    monkeypatch.setattr(dashboard.BOARD, "_sessions", {})
+    ops = _profile_board(monkeypatch, "ops")
+    ops.pre_llm_call(session_id="s_ops1", platform="telegram")
+    key = os.urandom(32)
+    gadget.authorized.add(protocol.device_id_for_key(key))
+    with _RawDevice(gadget.url, key, {"dashboard": {"v": dashboard.VERSION}, "profiles": True}) as device:
+        assert _dashboard_labels(device, 2.5)[-1] == ["telegram ops1"]  # outlasts the poll begun before
+        releases, reads = [threading.Event(), threading.Event()], []
+
+        def profiles(session=None):
+            n = len(reads)
+            reads.append(n)
+            releases[n].wait(10)
+            return rosters[n]
+
+        monkeypatch.setattr(gadget.adapter, "profiles", profiles)
+        older = asyncio.run_coroutine_threadsafe(gadget.adapter._push_dashboard(), gadget.loop)
+        while not reads:
+            time.sleep(0.01)
+        newer = asyncio.run_coroutine_threadsafe(gadget.adapter._push_dashboard(), gadget.loop)
+        time.sleep(0.3)  # without one push at a time, the newer roster read starts now
+        releases[1].set()  # the newer read may finish first
+        time.sleep(0.3)
+        releases[0].set()
+        older.result(5)
+        newer.result(5)
+        assert _dashboard_labels(device, 0.5)[-1] == rows
+        assert ops._listeners == ([gadget.adapter._board_changed] if heard else [])
+
+
+
+def test_a_push_held_up_by_another_device_does_not_send_its_older_roster(hermes_home, gadget, monkeypatch):
+    import asyncio
+    import os
+    import threading
+    from hermes_gadget_plugin import adapter as adapter_module, dashboard, protocol
+
+    monkeypatch.setattr(adapter_module, "DASHBOARD_POLL_S", 60)
+    monkeypatch.setattr(dashboard.BOARD, "_sessions", {})
+    _profile_board(monkeypatch, "ops").pre_llm_call(session_id="s_ops1", platform="telegram")
+    caps = {"dashboard": {"v": dashboard.VERSION}, "profiles": True}
+    keys = os.urandom(32), os.urandom(32)
+    gadget.authorized.update(protocol.device_id_for_key(k) for k in keys)
+    stuck, entered = asyncio.Event(), threading.Event()
+
+    async def send_dashboard(_msg):
+        entered.set()
+        await stuck.wait()
+        return True
+
+    with _RawDevice(gadget.url, keys[0], caps), _RawDevice(gadget.url, keys[1], caps) as b:
+        assert _dashboard_labels(b, 2.5)[-1] == ["telegram ops1"]  # outlasts the poll begun before
+        a, b_session = (gadget.adapter.hub.get(protocol.device_id_for_key(k)) for k in keys)
+        monkeypatch.setattr(a, "send_dashboard", send_dashboard)
+        older = asyncio.run_coroutine_threadsafe(gadget.adapter._push_dashboard(), gadget.loop)  # A, then B
+        assert entered.wait(5)  # it has read the roster with ops and waits on A
+        monkeypatch.setattr(gadget.adapter, "_offer_all", False)
+        monkeypatch.setattr(gadget.adapter, "_offered", set())  # ops is taken off the offer
+        try:
+            gadget.run(gadget.adapter._push_dashboard(b_session))
+            assert _dashboard_labels(b, 0.5) == [[]]
+        finally:
+            gadget.loop.call_soon_threadsafe(stuck.set)
+            older.result(5)
+        assert _dashboard_labels(b, 0.5) == []  # the older push skips B: its roster still had ops
+
+
+
+@pytest.mark.parametrize("switching", [False, True], ids=["switching off", "switching on"])
+def test_a_device_stuck_in_a_dashboard_send_does_not_hold_up_another(hermes_home, gadget, monkeypatch, switching):
+    import asyncio
+    import os
+    import time
+    from hermes_gadget_plugin import dashboard, protocol
+
+    if not switching:
+        monkeypatch.setattr(gadget.adapter, "_offer_all", False)
+        monkeypatch.setattr(gadget.adapter, "_offered", None)
+    caps = {"dashboard": {"v": dashboard.VERSION}, "profiles": True}
+    keys = os.urandom(32), os.urandom(32)
+    gadget.authorized.update(protocol.device_id_for_key(k) for k in keys)
+    stuck = asyncio.Event()  # never set before the end: A's socket accepts nothing
+
+    async def send_dashboard(_msg):
+        await stuck.wait()
+        return True
+
+    with _RawDevice(gadget.url, keys[0], caps):
+        a = gadget.adapter.hub.get(protocol.device_id_for_key(keys[0]))
+        monkeypatch.setattr(a, "send_dashboard", send_dashboard)
+        pushing = asyncio.run_coroutine_threadsafe(gadget.adapter._push_dashboard(), gadget.loop)
+        try:
+            with _RawDevice(gadget.url, keys[1], caps) as b:
+                b.ws.send(json.dumps({"type": "text", "id": "m1", "text": "from b"}))
+                end = time.monotonic() + 3
+                while not any(e.text == "from b" for e in gadget.events) and time.monotonic() < end:
+                    time.sleep(0.02)
+                assert any(e.text == "from b" for e in gadget.events)  # B's input runs while A's send waits
+        finally:
+            gadget.loop.call_soon_threadsafe(stuck.set)
+            pushing.exception(5)  # the push may then find a closed socket; only its end matters
+
+
+
+def test_a_device_that_leaves_takes_its_push_order_with_it(hermes_home, gadget):
+    import os
+    import time
+    from hermes_gadget_plugin import dashboard, protocol
+
+    keys = os.urandom(32), os.urandom(32)
+    gone, stays = (protocol.device_id_for_key(k) for k in keys)
+    gadget.authorized.update((gone, stays))
+    caps = {"dashboard": {"v": dashboard.VERSION}, "profiles": True}
+    with _RawDevice(gadget.url, keys[1], caps):
+        with _RawDevice(gadget.url, keys[0], caps):
+            end = time.monotonic() + 5
+            while not {gone, stays} <= set(gadget.adapter._pushed_seq) and time.monotonic() < end:
+                time.sleep(0.02)
+            assert {gone, stays} <= set(gadget.adapter._pushed_seq)
+        end = time.monotonic() + 5
+        while gone in gadget.adapter._pushed_seq and time.monotonic() < end:
+            time.sleep(0.02)
+        assert gone not in gadget.adapter._pushed_seq and stays in gadget.adapter._pushed_seq
+    gadget.adapter._pushed_seq["hg-0000000000000000"] = 1  # as a push still finishing at shutdown leaves
+    gadget.run(gadget.adapter.disconnect())
+    assert gadget.adapter._pushed_seq == {}
+
+
+
+def test_a_push_queued_while_a_device_leaves_does_not_remember_it(hermes_home, gadget):
+    import asyncio
+    import os
+    import time
+    from hermes_gadget_plugin import dashboard, protocol
+
+    keys = os.urandom(32), os.urandom(32)
+    stays, gone = (protocol.device_id_for_key(k) for k in keys)
+    gadget.authorized.update((stays, gone))
+    caps = {"dashboard": {"v": dashboard.VERSION}, "profiles": True}
+    adapter = gadget.adapter
+
+    def until(check):
+        end = time.monotonic() + 5
+        while not check() and time.monotonic() < end:
+            time.sleep(0.02)
+        return check()
+
+    with _RawDevice(gadget.url, keys[0], caps):
+        with _RawDevice(gadget.url, keys[1], caps):
+            assert until(lambda: {stays, gone} <= set(adapter._pushed_seq))
+            gadget.run(adapter._roster_lock.acquire())  # another push is reading the roster
+            queued = asyncio.run_coroutine_threadsafe(adapter._push_dashboard(), gadget.loop)  # both devices
+            time.sleep(0.1)
+        assert until(lambda: gone not in adapter.hub.sessions and gone not in adapter._pushed_seq)
+        gadget.loop.call_soon_threadsafe(adapter._roster_lock.release)
+        queued.result(5)
+        assert gone not in adapter._pushed_seq and stays in adapter._pushed_seq
+
+
+def test_a_device_that_cannot_switch_leaves_the_switching_ones_listening(hermes_home, gadget, monkeypatch):
+    import os
+    from hermes_gadget_plugin import adapter as adapter_module, dashboard, protocol
+
+    monkeypatch.setattr(adapter_module, "DASHBOARD_POLL_S", 60)  # only a wake can carry the change below
+    monkeypatch.setattr(dashboard.BOARD, "_sessions", {})
+    ops = _profile_board(monkeypatch, "ops")
+    ops.on_session_start(session_id="s_ops1", platform="telegram")
+    caps = {"dashboard": {"v": dashboard.VERSION}}
+    keys = os.urandom(32), os.urandom(32)
+    gadget.authorized.update(protocol.device_id_for_key(k) for k in keys)
+    with _RawDevice(gadget.url, keys[0], {**caps, "profiles": True}) as switching:
+        assert _dashboard_labels(switching, 2.5)[-1] == ["telegram ops1"]  # outlasts the poll begun before
+        with _RawDevice(gadget.url, keys[1], caps) as plain:
+            assert _dashboard_labels(plain, 1.0) == [[]]  # its own first dashboard has been pushed
+            ops.pre_llm_call(session_id="s_ops1", platform="telegram")
+            msgs = []
+            end = time.monotonic() + 1.5
+            while time.monotonic() < end and not msgs:
+                try:
+                    msg = json.loads(switching.ws.recv(timeout=end - time.monotonic()))
+                except TimeoutError:
+                    break
+                if msg.get("type") == "dashboard":
+                    msgs.append(msg)
+            assert [row["state"] for row in msgs[-1]["sessions"]] == ["busy"]  # the ops change woke it
+
+
+def test_a_device_that_cannot_switch_gets_the_rows_from_after_the_roster_wait(hermes_home, gadget, monkeypatch):
+    import os
+    from hermes_gadget_plugin import adapter as adapter_module, dashboard, protocol
+
+    monkeypatch.setattr(adapter_module, "DASHBOARD_POLL_S", 60)  # only a wake sends a dashboard below
+    monkeypatch.setattr(dashboard.BOARD, "_sessions", {})
+    _profile_board(monkeypatch, "ops")
+    caps = {"dashboard": {"v": dashboard.VERSION}}
+    keys = os.urandom(32), os.urandom(32)
+    gadget.authorized.update(protocol.device_id_for_key(k) for k in keys)
+    with _RawDevice(gadget.url, keys[0], {**caps, "profiles": True}) as switching, \
+            _RawDevice(gadget.url, keys[1], caps) as plain:
+        _dashboard_labels(switching, 2.5), _dashboard_labels(plain, 0.5)  # their first dashboards
+        reading, release = _paused_roster(monkeypatch, gadget.adapter)
+        dashboard.BOARD.pre_llm_call(session_id="s_aaa1", platform="cli")  # wakes an update to both
+        assert reading.wait(5)  # that update waits for the roster
+        dashboard.BOARD.pre_llm_call(session_id="s_bbb2", platform="cli")  # changes during the wait
+        release.set()
+        # One dashboard, with both sessions: no stale one taken before the wait goes out first.
+        assert _dashboard_labels(plain, 1.5) == [["cli bbb2", "cli aaa1"]]
+
+
+@pytest.mark.parametrize("late_roster", [False, True], ids=["last device leaves", "a roster read ends after"])
+def test_the_last_switching_device_leaving_drops_the_other_profiles_listeners(hermes_home, gadget, monkeypatch,
+                                                                              late_roster):
+    import asyncio
+    import os
+    from hermes_gadget_plugin import dashboard, protocol
+
+    key = os.urandom(32)
+    gadget.authorized.add(protocol.device_id_for_key(key))
+    caps = {"dashboard": {"v": dashboard.VERSION}, "profiles": True}
+    with _RawDevice(gadget.url, key, caps) as device:
+        if late_roster:
+            _dashboard_labels(device, 0.5)  # its first dashboard, before ops's copy of the plugin loads
+            ops = _profile_board(monkeypatch, "ops")
+            reading, release = _paused_roster(monkeypatch, gadget.adapter)
+            broadcast = asyncio.run_coroutine_threadsafe(gadget.adapter._push_dashboard(), gadget.loop)
+            assert reading.wait(5)
+        else:
+            ops = _profile_board(monkeypatch, "ops")
+            end = time.monotonic() + 5
+            while not ops._listeners and time.monotonic() < end:
+                time.sleep(0.02)
+            assert ops._listeners
+    if late_roster:
+        release.set()  # the read ends after the device has gone, and subscribes to ops
+        broadcast.exception(5)
+        assert ops._listeners
+    end = time.monotonic() + 3  # a poll or two
+    while ops._listeners and time.monotonic() < end:
+        time.sleep(0.05)
+    assert ops._listeners == []  # nothing left to wake for
+
+
+def _sessions_mine_and_ops(monkeypatch):
+    from hermes_gadget_plugin import dashboard
+
+    monkeypatch.setattr(dashboard.BOARD, "_sessions", {})
+    dashboard.BOARD.pre_llm_call(session_id="s_mine", platform="cli")  # the default profile's own
+    _profile_board(monkeypatch, "ops").pre_llm_call(session_id="s_ops1", platform="telegram")
+
+
+@pytest.mark.parametrize("offered", [None, set()], ids=["switching off", "ops served but not offered"])
+def test_without_the_offer_a_device_gets_only_the_default_profiles_sessions(hermes_home, gadget, monkeypatch,
+                                                                            offered):
+    import os
+    from hermes_gadget_plugin import dashboard, protocol
+
+    monkeypatch.setattr(gadget.adapter, "_offer_all", False)
+    monkeypatch.setattr(gadget.adapter, "_offered", offered)  # no `profiles` key, or `profiles: []`
+    _sessions_mine_and_ops(monkeypatch)
+    key = os.urandom(32)
+    gadget.authorized.add(protocol.device_id_for_key(key))
+    with _RawDevice(gadget.url, key, {"dashboard": {"v": dashboard.VERSION}, "profiles": True}) as device:
+        assert _dashboard_labels(device, 2.5) == [["cli mine"]]  # exactly today's
+
+
+def test_a_routed_device_gets_only_the_default_profiles_sessions(live_rig, monkeypatch):
+    from hermes_gadget_plugin import dashboard
+
+    _sessions_mine_and_ops(monkeypatch)
+    live_rig.route()  # to ops, with switching on for every other device
+    live_rig.approve("ops")
+    with live_rig.connect({"dashboard": {"v": dashboard.VERSION}, "profiles": True}, profile="default") as device:
+        assert device.welcome["paired"] is True
+        assert _dashboard_labels(device, 2.5) == [["cli mine"]]  # exactly today's
+
+
+def _paused_roster(monkeypatch, adapter):
+    """Hold the dashboard's roster lookup (``profiles()`` with no session) until ``release`` is set."""
+    import threading
+
+    reading, release, roster = threading.Event(), threading.Event(), adapter.profiles
+
+    def profiles(session=None):
+        if session is None:
+            reading.set()
+            release.wait(10)
+        return roster(session)
+
+    monkeypatch.setattr(adapter, "profiles", profiles)
+    return reading, release
+
+
+def test_a_device_revoked_while_the_roster_is_read_gets_no_dashboard(hermes_home, gadget, monkeypatch):
+    import os
+    from hermes_gadget_plugin import dashboard, protocol
+
+    _profile_board(monkeypatch, "ops").pre_llm_call(session_id="s_ops1", platform="telegram")
+    reading, release = _paused_roster(monkeypatch, gadget.adapter)
+    key = os.urandom(32)
+    device_id = protocol.device_id_for_key(key)
+    gadget.authorized.add(device_id)
+    with _RawDevice(gadget.url, key, {"dashboard": {"v": dashboard.VERSION}, "profiles": True}) as device:
+        assert reading.wait(5)  # the first dashboard is waiting for the roster
+        gadget.authorized.discard(device_id)  # revoked in the default profile
+        while json.loads(device.ws.recv(timeout=10)).get("type") != "unpaired":
+            pass
+        release.set()
+        assert _dashboard_labels(device, 1.0) == []
+
+
+def test_a_roster_read_still_running_at_disconnect_leaves_no_listener(hermes_home, gadget, monkeypatch):
+    import asyncio
+    import os
+    import time
+    from hermes_gadget_plugin import dashboard, protocol
+
+    ops = _profile_board(monkeypatch, "ops")
+    reading, release = _paused_roster(monkeypatch, gadget.adapter)
+    key = os.urandom(32)
+    gadget.authorized.add(protocol.device_id_for_key(key))
+    with _RawDevice(gadget.url, key, {"dashboard": {"v": dashboard.VERSION}, "profiles": True}):
+        assert reading.wait(5)  # the first dashboard is waiting for the roster
+        stopping = asyncio.run_coroutine_threadsafe(gadget.adapter.disconnect(), gadget.loop)
+        time.sleep(0.3)  # disconnect has dropped its listeners and waits for the connection to end
+        release.set()
+        stopping.result(10)
+        time.sleep(0.3)
+    assert ops._listeners == []  # nothing keeps calling the stopped adapter
+
+
+def test_a_board_no_longer_offered_or_replaced_loses_its_listener(hermes_home, gadget, monkeypatch):
+    import os
+    import time
+    from hermes_gadget_plugin import adapter as adapter_module, dashboard, protocol
+
+    monkeypatch.setattr(adapter_module, "DASHBOARD_POLL_S", 60)  # only a wake sends a dashboard below
+    monkeypatch.setattr(dashboard.BOARD, "_sessions", {})
+    ops = _profile_board(monkeypatch, "ops")
+    ops.pre_llm_call(session_id="s_ops1", platform="telegram")
+    key = os.urandom(32)
+    gadget.authorized.add(protocol.device_id_for_key(key))
+    with _RawDevice(gadget.url, key, {"dashboard": {"v": dashboard.VERSION}, "profiles": True}) as device:
+        assert _dashboard_labels(device, 2.5)[-1] == ["telegram ops1"]
+        assert len(ops._listeners) == 1
+        reloaded = _profile_board(monkeypatch, "ops")  # a reloaded copy of ops's plugin registers anew
+        dashboard.BOARD.pre_llm_call(session_id="s_mine", platform="cli")  # wakes the dashboard
+        _dashboard_labels(device, 1.0)
+        assert ops._listeners == [] and len(reloaded._listeners) == 1
+        monkeypatch.setattr(gadget.adapter, "_offer_all", False)
+        monkeypatch.setattr(gadget.adapter, "_offered", {"default"})  # ops is taken off the list
+        dashboard.BOARD.pre_llm_call(session_id="s_min2", platform="cli")
+        assert _dashboard_labels(device, 1.0)[-1] == ["cli min2", "cli mine"]
+        time.sleep(0.1)
+        assert reloaded._listeners == []  # nothing wakes the dashboard for a profile it no longer shows
 
 
 DEVICE = "hg-cccccccccccccccc"
@@ -216,33 +616,25 @@ def test_a_routed_device_keeps_its_route_and_gets_no_switching(routing_rig, ops)
     assert adapter.profiles(session) != []
 
 
-def test_owner_check_ignores_routes_and_ops_only_approval(routing_rig):
-    # Real Hermes callbacks: the adapter's routed one trusts an ops-only approval through a static
-    # route; the default-bound owner check the plugin uses for every profile decision does not.
+def test_owner_check_is_the_adapters_own_check_and_ignores_other_profiles(routing_rig):
+    # The default profile's verdict comes from the adapter's own sender check (no private runner call):
+    # without a route it is the default profile's answer, and an approval that only ops holds doesn't count.
     from gateway.config import Platform
     from gateway.pairing import PairingStore
     from gateway.run import _profile_runtime_scope
 
     runner, adapter, home = routing_rig
-    runner.config.profile_routes = _ops_route(DEVICE)
     ops = PairingStore(profile="ops")
-    runner.pairing_stores["ops"] = ops  # Hermes picks per-profile stores from this map
-    with _profile_runtime_scope(home / "profiles" / "ops"):  # as _grant does: never touch default's allowlist
+    runner.pairing_stores["ops"] = ops
+    with _profile_runtime_scope(home / "profiles" / "ops"):
         ops.approve_code("gadget", ops.generate_code("gadget", DEVICE, "Kitchen"))
-    routed = runner._make_adapter_auth_check(Platform("gadget"))
-    owner = runner._make_adapter_auth_check(Platform("gadget"), profile_name="default")
-    assert routed(DEVICE, "dm", DEVICE) is True
-    assert owner(DEVICE, "dm", DEVICE) is False
-    adapter._owner_check = owner
-    assert adapter._owner_trusts(DEVICE) is False
-    adapter.set_authorization_check(routed)
+    adapter.set_authorization_check(runner._make_adapter_auth_check(Platform("gadget")))
     capable = _session("default")
-    assert adapter._verdict(capable) is True  # routed: the route's approval keeps it paired
-    runner.config.profile_routes = []
+    assert adapter._owner_trusts(DEVICE) is False
     assert adapter._verdict(capable) is False  # it switches: only the default profile counts
     default = runner.pairing_store
     default.approve_code("gadget", default.generate_code("gadget", DEVICE, "Kitchen"))
-    assert owner(DEVICE, "dm", DEVICE) is True
+    assert adapter._owner_trusts(DEVICE) is True
     assert adapter._verdict(capable) is True
 
 
@@ -344,13 +736,13 @@ def _admitted(rig, wait_s=1.5):
     return [(e.text, e.source.profile) for e in rig.events if rig.admits(e.source)]
 
 
-def test_dropping_the_profile_flag_does_not_reuse_a_plugin_grant(live_rig):
+def test_dropping_the_profile_flag_does_not_reach_ops(live_rig):
     rig = live_rig
     rig.approve()
     with rig.connect({"profiles": True}) as device:
         assert device.welcome["paired"] is True
         session = rig.adapter.hub.get(rig.device)
-        assert rig.run(rig.adapter.select_profile(session, "ops")) is None  # the plugin approves it in ops
+        assert rig.run(rig.adapter.select_profile(session, "ops")) is None
     rig.route()
     rig.runner.pairing_store.revoke("gadget", rig.device)
     with rig.connect({}) as device:  # older firmware, same key, an old ops route
@@ -391,40 +783,42 @@ def test_a_replaced_connection_cannot_send_voice_after_revocation(live_rig, monk
         assert _admitted(rig) == []
 
 
-def test_a_device_is_bound_to_the_default_profile_before_any_grant_is_visible(live_rig, monkeypatch):
-    import asyncio
-    import threading
+def test_switching_writes_nothing_into_the_target_profile_which_pairs_on_its_own(live_rig):
+    # Profiles stay islands: the switch only binds the device to the default profile in the plugin's own
+    # store. Ops refuses its turns until ops itself approves the device (hermes -p ops pairing approve ...).
+    rig = live_rig
+    rig.approve()
+    with rig.connect({"profiles": True}):
+        session = rig.adapter.hub.get(rig.device)
+        assert rig.run(rig.adapter.select_profile(session, "ops")) is None
+        assert not rig.runner.pairing_stores["ops"].is_approved("gadget", rig.device)
+        assert rig.adapter._store.owner_bound(rig.device)
+        rig.run(rig.adapter.on_text(session, "m1", "hi"))
+        assert [(e.text, e.source.profile) for e in rig.events if e.text == "hi"] == [("hi", "ops")]
+        assert _admitted(rig) == []
+        rig.approve("ops")
+        assert _admitted(rig) == [("hi", "ops")]
 
-    from hermes_gadget_plugin.adapter import GadgetAdapter
+
+def test_the_target_profiles_pairing_code_reaches_the_device_as_its_command(live_rig):
+    from gateway.run_inbound_unauthorized import pairing_code_reply, pairing_profile_arg
 
     rig = live_rig
     rig.approve()
-    granted, release = threading.Event(), threading.Event()
-    grant = GadgetAdapter._grant
-
-    def paused_grant(*args):
-        result = grant(*args)  # the ops approval is on disk from here
-        granted.set()
-        release.wait(10)
-        return result
-
-    monkeypatch.setattr(GadgetAdapter, "_grant", staticmethod(paused_grant))
-    with rig.connect({"profiles": True}):
+    with rig.connect({"profiles": True}) as device:
         session = rig.adapter.hub.get(rig.device)
-
-        async def start():
-            return asyncio.ensure_future(rig.adapter.select_profile(session, "ops"))
-
-        switch = rig.run(start())
-        assert granted.wait(10)
-        rig.route()
-        rig.runner.pairing_store.revoke("gadget", rig.device)
-        with rig.connect({}) as legacy:  # older firmware, same key, an old ops route
-            assert legacy.welcome["paired"] is False
-            rig.run(rig.adapter.on_text(rig.adapter.hub.get(rig.device), "m1", "grant-gap"))
-            assert _admitted(rig) == []
-            release.set()
-            assert rig.run(asyncio.wait_for(switch, 10)) == "unpaired"
+        assert rig.run(rig.adapter.select_profile(session, "ops")) is None
+        offer = pairing_code_reply("gadget", "ABCD2345", pairing_profile_arg(rig.runner.pairing_stores["ops"]))
+        assert rig.run(rig.adapter.send(rig.device, offer)).success
+        seen = []
+        while not any(m["type"] == "reply" for m in seen):
+            seen.append(json.loads(device.ws.recv(timeout=5)))
+        assert {"type": "turn.end", "turn": "", "outcome": "cancelled"}.items() <= next(
+            m for m in seen if m["type"] == "turn.end").items()  # no turn runs: the device settles
+        reply = next(m for m in seen if m["type"] == "reply")["text"]
+        assert "hermes -p ops pairing approve gadget ABCD2345" in reply
+        assert session.paired and session.profile == "ops"  # still paired on default, still on ops
+        assert rig.adapter._store.pairing_for(rig.device) is None  # default's pairing state untouched
 
 
 def test_a_switch_that_cannot_bind_the_device_mints_nothing(live_rig, monkeypatch):
@@ -464,40 +858,6 @@ def test_forget_from_a_stale_store_keeps_the_device_bound(live_rig):
         assert _admitted(rig) == []
 
 
-@pytest.mark.parametrize("hermes", ["no factory", "old factory signature"])
-def test_a_hermes_without_the_owner_check_refuses_instead_of_dropping_the_device(live_rig, monkeypatch, hermes):
-    rig = live_rig
-    rig.approve()
-    if hermes == "no factory":
-        owner = next(c for c in type(rig.runner).__mro__ if "_make_adapter_auth_check" in c.__dict__)
-        monkeypatch.delattr(owner, "_make_adapter_auth_check")
-    else:
-        monkeypatch.setattr(rig.runner, "_make_adapter_auth_check", lambda platform: None)
-    with rig.connect({"profiles": True}, profile="ops") as device:
-        assert device.welcome["type"] == "welcome"
-        assert device.welcome["paired"] is False and device.welcome["profile"] == "default"
-        assert rig.adapter.hub.get(rig.device) is not None  # still connected
-    assert not rig.runner.pairing_stores["ops"].is_approved("gadget", rig.device)
-    assert all(e.text == "/status" and e.source.profile == "default" for e in rig.events)  # the pairing trigger only
-
-
-def test_a_hermes_without_profile_dirs_refuses_the_switch_and_keeps_the_device(live_rig, monkeypatch):
-    import hermes_cli.profiles as profiles
-
-    rig = live_rig
-    rig.approve()
-    with rig.connect({"profiles": True}) as device:
-        assert device.welcome["paired"] is True
-        monkeypatch.delattr(profiles, "get_profile_dir")
-        device.ws.send(json.dumps({"type": "profile.select", "profile": "ops"}))
-        while (reply := json.loads(device.ws.recv(timeout=5)))["type"] != "profile":
-            pass
-        assert reply == {"type": "profile", "profile": "default", "error": "unpaired"}
-        assert rig.adapter.hub.get(rig.device) is not None  # still connected
-    assert not rig.runner.pairing_stores["ops"].is_approved("gadget", rig.device)
-    assert all(e.text == "/status" and e.source.profile == "default" for e in rig.events)  # the pairing trigger only
-
-
 def test_an_upgraded_routed_device_keeps_its_route_and_pairing(live_rig):
     rig = live_rig
     rig.route()
@@ -513,18 +873,3 @@ def test_an_upgraded_routed_device_keeps_its_route_and_pairing(live_rig):
             pass
         assert reply == {"type": "profile", "profile": "default", "error": "routed"}
     assert not rig.adapter._store.owner_bound(rig.device)
-
-
-def test_a_failed_grant_leaves_the_device_where_it_was(live_rig, hermes_home, monkeypatch):
-    from hermes_gadget_plugin.adapter import GadgetAdapter
-
-    rig = live_rig
-    rig.approve()
-    (hermes_home / "profiles" / "lab").mkdir()  # a third served profile, whose grant will fail
-    (hermes_home / "profiles" / "lab" / "config.yaml").write_text("{}\n")
-    with rig.connect({"profiles": True}):
-        session = rig.adapter.hub.get(rig.device)
-        assert rig.run(rig.adapter.select_profile(session, "ops")) is None
-        monkeypatch.setattr(GadgetAdapter, "_grant", staticmethod(lambda *a: False))  # rate limited, say
-        assert rig.run(rig.adapter.select_profile(session, "lab")) == "unpaired"
-        assert session.profile == "ops"

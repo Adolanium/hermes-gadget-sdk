@@ -87,6 +87,22 @@ def test_order_is_waiting_busy_idle_and_old_idle_sessions_expire():
     assert board.sessions() == []  # turns that never reported their end don't stay forever
 
 
+def test_other_profiles_boards_merge_in_the_same_order_up_to_the_limit():
+    clock = Clock()
+    mine, ops = SessionBoard(clock=clock), SessionBoard(clock=clock)
+    mine.on_session_start(session_id="mine", platform="cli")
+    clock.t += 1
+    ops.pre_llm_call(session_id="ops1", platform="cli")
+    clock.t += 1
+    mine.pre_llm_call(session_id="busy", platform="gadget")
+    ops.pre_approval_request(session_id="ops2")
+    assert [r["label"] for r in mine.sessions(ops)] == ["session ops2", "gadget busy", "cli ops1", "cli mine"]
+    assert [r["label"] for r in mine.sessions()] == ["gadget busy", "cli mine"]
+    for n in range(dashboard.MAX_SESSIONS):
+        ops.on_session_start(session_id=f"x{n:03d}")
+    assert len(mine.sessions(ops)) == dashboard.MAX_SESSIONS
+
+
 def test_listeners_hear_changes_only():
     board = SessionBoard()
     calls = []
@@ -110,7 +126,11 @@ def test_a_failing_listener_never_reaches_the_agent():
     assert board.pre_llm_call(session_id="s1") is None  # pre_llm_call results become turn context
 
 
-def test_the_board_registers_every_hook_it_handles():
+def test_the_board_registers_every_hook_it_handles(monkeypatch):
+    from hermes_gadget_plugin import runtime
+
+    monkeypatch.setitem(runtime._boards, "default", None)  # its registration is undone after the test
+
     class Ctx:
         def __init__(self):
             self.hooks = {}
@@ -124,6 +144,17 @@ def test_the_board_registers_every_hook_it_handles():
                               "post_approval_response", "on_session_finalize", "on_session_reset"}
     # Hermes adds keyword arguments over time; the hooks take whatever comes.
     ctx.hooks["pre_llm_call"](session_id="x", future_field=1, telemetry_schema_version=2)
+
+
+def test_each_profiles_copy_registers_its_board_by_profile(monkeypatch):
+    from types import SimpleNamespace
+
+    from hermes_gadget_plugin import runtime
+
+    monkeypatch.setitem(runtime._boards, "ops", None)
+    board = SessionBoard()
+    board.register(SimpleNamespace(profile_name="ops", register_hook=lambda name, callback: None))
+    assert runtime.boards(["ops"]) == [board]  # what the default profile's adapter reads for ops
 
 
 # -- tiles -------------------------------------------------------------------------------------
@@ -187,7 +218,7 @@ def online(devserver, loop_thread):
     devices = []
 
     def connect(**kw):
-        device = Device(url, **kw)
+        device = Device(url, **{"dashboard": True, **kw})  # replays need a device that draws dashboards
         devices.append(device)
         assert _wait(lambda: device.device_id in hub.sessions)
         return device, hub.sessions[device.device_id]
@@ -227,6 +258,42 @@ def test_a_dark_screen_gets_only_the_latest_dashboard_when_it_lights_up(online, 
     assert types(frames) == ["dashboard", "display"]  # the card stays on top of it
 
 
+def test_a_dashboard_sent_while_the_held_status_goes_out_replaces_the_held_one(online, loop_thread):
+    import asyncio
+
+    hub, connect = online
+    device, session = connect()
+    device.frames()
+    device.screen(True)
+    assert _wait(lambda: session.display_sleeping)
+    loop_thread.run(session.send_status("Thinking"))
+    loop_thread.run(session.send_dashboard(SNAPSHOT))
+    loop_thread.run(session._send_lock.acquire())  # another write is still going out
+    device.screen(False)  # the wake queues the held status behind it
+    assert _wait(lambda: not session.display_sleeping)
+    time.sleep(0.1)
+    newer = asyncio.run_coroutine_threadsafe(session.send_dashboard(NEWER), loop_thread.loop)
+    time.sleep(0.1)
+    loop_thread.loop.call_soon_threadsafe(session._send_lock.release)
+    newer.result(5)
+    frames = device.frames()
+    assert types(frames)[0] == "status" and dashboards(frames) == [NEWER]  # never the older one after it
+
+
+
+def test_a_dashboard_held_for_a_device_that_is_then_unpaired_is_never_sent(online, loop_thread):
+    hub, connect = online
+    device, session = connect()
+    loop_thread.run(session.set_paired(True))
+    device.frames()
+    device.screen(True)
+    assert _wait(lambda: session.display_sleeping)
+    loop_thread.run(session.send_dashboard(SNAPSHOT))
+    loop_thread.run(session.set_paired(False))  # revoked while the screen was dark
+    device.screen(False)
+    assert dashboards(device.frames()) == []
+
+
 def test_a_held_dashboard_survives_a_reconnect(online, loop_thread):
     hub, connect = online
     device, session = connect(sleeping=True)
@@ -239,9 +306,41 @@ def test_a_held_dashboard_survives_a_reconnect(online, loop_thread):
     assert loop_thread.run(session2.send_dashboard(NEWER)) is True
 
 
+def test_a_held_dashboard_is_not_replayed_to_a_device_that_reconnects_unpaired(devserver, loop_thread):
+    hub, brain, url = devserver()
+    device = Device(url, sleeping=True, dashboard=True)
+    assert _wait(lambda: device.device_id in hub.sessions)
+    loop_thread.run(hub.sessions[device.device_id].send_dashboard(SNAPSHOT))
+    device.close()
+    assert _wait(lambda: device.device_id not in hub.sessions)
+    brain.require_pairing = True  # revoked while it was away
+    again = Device(url, key=device.key, sleeping=False, dashboard=True)
+    try:
+        assert _wait(lambda: device.device_id in hub.sessions)
+        assert dashboards(again.frames()) == []
+    finally:
+        again.close()
+
+
+def test_a_held_dashboard_is_not_replayed_to_a_connection_that_cannot_draw_one(devserver, loop_thread):
+    hub, _brain, url = devserver()
+    device = Device(url, sleeping=True, dashboard=True)
+    assert _wait(lambda: device.device_id in hub.sessions)
+    loop_thread.run(hub.sessions[device.device_id].send_dashboard(SNAPSHOT))
+    device.close()
+    assert _wait(lambda: device.device_id not in hub.sessions)
+    again = Device(url, key=device.key, sleeping=False)  # paired, lit, and no `dashboard` in its caps
+    try:
+        assert _wait(lambda: device.device_id in hub.sessions)
+        assert hub.sessions[device.device_id].paired
+        assert dashboards(again.frames()) == []
+    finally:
+        again.close()
+
+
 def test_capabilities_name_the_dashboard_version(online):
     _hub, connect = online
-    _device, session = connect()
+    _device, session = connect(dashboard=False)
     assert session.dashboard_version == 0  # this test device doesn't draw one
     session.caps["dashboard"] = {"v": 1, "rows": 6}
     assert session.dashboard_version == 1
