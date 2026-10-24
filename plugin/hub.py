@@ -425,7 +425,7 @@ class DeviceSession:
         if self.caps.get("faces") != 1:
             return None
         state = self.face_state()
-        if found_for != state:
+        if found_for != state or (isinstance(face, ProfileFace) and not face.valid()):
             face = _LOOK_UP
         if self._face_task:
             self._face_task.cancel()
@@ -435,7 +435,8 @@ class DeviceSession:
     async def _send_face(self, state: tuple, face: ProfileFace | None | object) -> None:
         """Send the face for ``state``, or the mascot, unless the device holds it already."""
         # Switched, (un)paired or replaced since: whatever changed started its own update.
-        stale = lambda: self.face_state() != state or not self.current()  # noqa: E731
+        stale = lambda: (self.face_state() != state or not self.current()  # noqa: E731
+                         or isinstance(face, ProfileFace) and not face.valid())
         if stale():
             return
         if face is _LOOK_UP:
@@ -862,7 +863,7 @@ class DeviceHub:
             if roster:
                 welcome.update(profile=session.profile, profiles=roster)
             if (isinstance(face, ProfileFace) and session.paired and hello.get("face") == face.hash
-                    and session.device_profile == named):
+                    and session.device_profile == named and face.valid()):
                 welcome["face"] = face.hash
             await session.send_json(protocol.message("welcome", **welcome))
             session.face_hash = welcome.get("face")  # the welcome keeps that face, or drops the device's

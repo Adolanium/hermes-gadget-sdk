@@ -162,10 +162,12 @@ def digest(data: bytes) -> str:
 @dataclass(frozen=True)
 class ProfileFace:
     """A profile's face, named before it is made: `hash` comes from the source file, read at once,
-    and `load()` makes the face's bytes, which for an avatar means converting it."""
+    and `load()` makes the face's bytes, which for an avatar means converting it. `valid()` says
+    whether the face may still be shown, as when the profile it is from still approves the device."""
 
     hash: str
     load: Callable[[], bytes]
+    valid: Callable[[], bool] = lambda: True
 
     @classmethod
     def of(cls, data: bytes) -> "ProfileFace":

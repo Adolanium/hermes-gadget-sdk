@@ -40,7 +40,7 @@ import re
 import ssl
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from agent.i18n import get_language, t
@@ -453,7 +453,11 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             else:
                 from hermes_cli.profiles import get_profile_dir
                 home = get_profile_dir(profile)
-            return await asyncio.to_thread(faces.for_profile, home, self._convert_avatars)
+            found = await asyncio.to_thread(faces.for_profile, home, self._convert_avatars)
+            if found is None or profile == "default":  # the default profile's approval is session.paired
+                return found
+            # Found while the profile approved the device: a revocation since then makes it stale.
+            return replace(found, valid=lambda: self._face_profile(session) == profile)
         except Exception as exc:  # an unreadable picture shows the mascot; never block a connection on it
             logger.warning("[%s] no face for profile %s: %s", self.name, profile, exc)
             return None

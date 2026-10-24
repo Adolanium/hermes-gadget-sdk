@@ -960,3 +960,77 @@ def test_the_default_profiles_face_needs_only_its_own_approval(live_rig, hermes_
     assert sim.wait_for(lambda: any(m["type"] == "face" and m.get("hash") == digest["default"]
                                     for m in sim.received[before:]), timeout=5)
     assert held() == digest["default"]
+
+
+def _revoked_during_the_welcome_lookup(rig, hermes_home, make_sim, monkeypatch, held_before):
+    """A device on ops, which approved it, reconnects; while the welcome's lookup reads ops's face file,
+    ops revokes the device and the pairing check reacts. Returns the face the device then holds."""
+    import asyncio
+    import struct
+    import threading
+
+    from hermes_gadget_plugin import face as faces
+
+    anchors = struct.pack("<10h", 607, 293, 262, 620, 801, 107, 396, 508, 586, 649)
+    ops_face = bytes([0x55]) * (faces.FACE_BYTES - 20) + anchors
+    ops_file = hermes_home / "profiles" / "ops" / faces.FACE_FILE
+    sim = make_sim(rig.url)
+
+    def held():
+        """The face the device holds, as the hello of a reconnect names it."""
+        sim.console("reconnect")
+        assert sim.wait_screen("connecting", timeout=5)
+        assert sim.wait_screen("ready", timeout=10)
+        return [m for m in sim.sent if m["type"] == "hello"][-1].get("face")
+
+    assert sim.wait_screen("pairing", "ready", timeout=10)
+    device_id = sim.status()["device_id"]
+    rig.approve("default", device_id)
+    rig.approve("ops", device_id)
+    assert sim.wait_screen("ready", timeout=10)
+    if held_before:
+        ops_file.write_bytes(ops_face)
+    session = rig.adapter.hub.get(device_id)
+    assert rig.run(rig.adapter.select_profile(session, "ops")) is None
+    rig.run(session.send_profile())
+    if held_before:
+        assert sim.wait_for(lambda: (sim.last_received("face") or {}).get("profile") == "ops", timeout=5)
+        assert held() == faces.ProfileFace.of(ops_face).hash
+    else:
+        sim.run_for(0.5)
+        assert held() is None
+        ops_file.write_bytes(ops_face)
+
+    entered, release = threading.Event(), threading.Event()
+    read = faces.for_profile
+
+    def held_read(home, convert=True):  # the welcome's lookup of ops's face, held until released
+        if home == ops_file.parent and not entered.is_set():
+            entered.set()
+            release.wait(10)
+        return read(home, convert)
+    monkeypatch.setattr(faces, "for_profile", held_read)
+
+    welcomes = len([m for m in sim.received if m["type"] == "welcome"])
+    sim.console("reconnect")
+    assert sim.wait_for(entered.is_set, timeout=10)
+    rig.revoke("ops", device_id)
+    current = rig.adapter.hub.get(device_id)
+
+    async def pairing_check_reacts():  # what the 2 s pairing check does when it sees the revocation
+        await asyncio.gather(current.update_face(), return_exceptions=True)
+    rig.run(pairing_check_reacts())
+    release.set()
+    assert sim.wait_for(lambda: len([m for m in sim.received if m["type"] == "welcome"]) > welcomes, timeout=10)
+    sim.run_for(3)  # past the next pairing check
+    return held()
+
+
+@requires_sim
+def test_a_revocation_during_the_welcome_lookup_installs_no_face(live_rig, hermes_home, make_sim, monkeypatch):
+    assert _revoked_during_the_welcome_lookup(live_rig, hermes_home, make_sim, monkeypatch, held_before=False) is None
+
+
+@requires_sim
+def test_a_revocation_during_the_welcome_lookup_drops_the_held_face(live_rig, hermes_home, make_sim, monkeypatch):
+    assert _revoked_during_the_welcome_lookup(live_rig, hermes_home, make_sim, monkeypatch, held_before=True) is None
