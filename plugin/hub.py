@@ -394,10 +394,12 @@ class DeviceSession:
         await self.send_json(protocol.message("prompt.close", id=prompt_id))
 
     async def send_profile(self, error: str | None = None) -> None:
-        await self.send_json(protocol.message("profile", profile=self.profile, error=error))
+        profile, before = self.profile, self.device_profile
+        await self.send_json(protocol.message("profile", profile=profile, error=error))
         if error is None:
-            self.device_profile = self.profile
-            self.face_hash = None  # a device that changes profile drops its face
+            self.device_profile = profile
+            if profile != before:
+                self.face_hash = None  # a device that changes profile drops its face; the same one keeps it
             self.update_face()
 
     async def find_face(self) -> ProfileFace | None:

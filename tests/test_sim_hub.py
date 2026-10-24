@@ -1080,7 +1080,7 @@ class _HeldLookup(_TwoProfiles):
             hold, self.hold = self.hold, None
             self.waiting = True
             await hold.wait()
-        return ProfileFace.of(self.faces[session.profile])
+        return ProfileFace.of(self.faces[session.profile]) if session.profile in self.faces else None
 
 
 def test_a_profile_reset_during_the_welcome_lookup_leaves_the_device_its_face(loop_thread, tmp_path, make_sim):
@@ -1141,6 +1141,39 @@ def test_an_unpair_and_a_quick_reapproval_leave_the_device_its_face(loop_thread,
         assert _held_face(sim) == default
     finally:
         loop_thread.run(hub.stop())
+
+
+def _announce_default_again(loop_thread, tmp_path, make_sim, remove_face):
+    """Settles default's face, announces default again, and returns the face messages it caused and the
+    face the device then holds. ``remove_face`` removes default's face file and avatar first."""
+    delegate = _HeldLookup()
+    hub = _hub(loop_thread, tmp_path, delegate)
+    faces = lambda: [m for m in sim.received if m.get("type") == "face"]  # noqa: E731
+    try:
+        sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget")
+        assert sim.wait_screen("ready", timeout=10)
+        assert sim.wait_for(lambda: faces() and faces()[-1].get("hash") == _digest(delegate.faces["default"]),
+                            timeout=5)
+        sent = len(faces())
+        if remove_face:
+            del delegate.faces["default"]
+        loop_thread.run(hub.get(sim.status()["device_id"]).send_profile())  # the profile it is already on
+        sim.run_for(0.5)
+        return faces()[sent:], _held_face(sim)
+    finally:
+        loop_thread.run(hub.stop())
+
+
+def test_announcing_the_same_profile_again_does_not_resend_its_face(loop_thread, tmp_path, make_sim):
+    """The device keeps its face when the profile it is on is announced again, so the hub must too."""
+    caused, held = _announce_default_again(loop_thread, tmp_path, make_sim, remove_face=False)
+    assert caused == [] and held == _digest(_face(0x3C))
+
+
+def test_announcing_the_same_profile_again_clears_a_face_whose_source_is_gone(loop_thread, tmp_path, make_sim):
+    caused, held = _announce_default_again(loop_thread, tmp_path, make_sim, remove_face=True)
+    assert [("bits" in m) for m in caused] == [False]  # one explicit clear
+    assert held is None
 
 
 def test_a_server_without_profiles_sends_no_roster(devserver, make_sim):
