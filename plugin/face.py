@@ -22,6 +22,8 @@ SIZES = (64, 96, 144, 192)
 FRAMES = ("idle", "blink", "talk")
 THRESHOLD = 110  # alpha above this is ink after downsampling
 MASTER_SIZE = 1024  # a drawing's side, in pixels, before it is cut down to SIZES
+ONE_COLOUR = 16  # a picture's solid pixels whose brightness spans at most this are one colour
+SOLID = 250  # alpha from which a source pixel counts as solid, not an edge blended with transparency
 
 
 def ink_box(alpha, threshold: int = THRESHOLD) -> tuple[int, int, int, int]:
@@ -151,7 +153,7 @@ FACE_FILE = "gadget-face.bin"
 # hash. Change AVATAR_DRAWING when from_picture draws differently, so devices that hold the old
 # drawing get the new one.
 FACE_FILE_KIND = b"hermes-gadget face file\n"
-AVATAR_DRAWING = b"hermes-gadget avatar 1\n"
+AVATAR_DRAWING = b"hermes-gadget avatar 2\n"
 
 
 def digest(data: bytes) -> str:
@@ -189,14 +191,17 @@ def from_picture(path: Path | io.BytesIO) -> bytes:
 
     The screen draws light ink on dark, so a picture on a light background gives its dark parts
     as ink, and one on a dark background its light parts. The cut is the picture's own average
-    brightness, so a dim photo keeps its features. A still face has no eyes or mouth placed by
-    hand, so it neither blinks nor talks: a face file does.
+    brightness, so a dim photo keeps its features. A drawing in one colour on transparency has no
+    parts on either side of that cut, so its visible pixels are the shape instead; whether it is one
+    colour is judged on the picture as given, before resizing blends its edges. A still face has no
+    eyes or mouth placed by hand, so it neither blinks nor talks: a face file does.
     """
     from PIL import Image, ImageOps, ImageStat
 
     with Image.open(path) as src:
-        art = ImageOps.fit(ImageOps.exif_transpose(src).convert("RGBA"), (MASTER_SIZE, MASTER_SIZE),
-                           Image.Resampling.LANCZOS)
+        src = ImageOps.exif_transpose(src).convert("RGBA")
+        art = ImageOps.fit(src, (MASTER_SIZE, MASTER_SIZE), Image.Resampling.LANCZOS)
+    solid = src.getchannel("A").point(lambda v: 255 if v >= SOLID else 0)
     opaque = art.getchannel("A").point(lambda v: 255 if v > THRESHOLD else 0)
     lum = Image.composite(art.convert("L"), Image.new("L", art.size, 0), opaque)
     cut = ImageStat.Stat(lum, opaque).mean[0] if opaque.getbbox() else THRESHOLD
@@ -206,6 +211,10 @@ def from_picture(path: Path | io.BytesIO) -> bytes:
     light_background = ImageStat.Stat(lum, frame).mean[0] > cut
     ink = lum.point(lambda v: 255 if (v < cut if light_background else v > cut) else 0)
     ink = Image.composite(ink, Image.new("L", art.size, 0), opaque)
+    if opaque.getextrema()[0] == 0 and solid.getbbox():  # some of it is transparent
+        low, high = ImageStat.Stat(src.convert("L"), solid).extrema[0]
+        if high - low <= ONE_COLOUR:
+            ink = opaque  # a drawing in one colour: the cut finds nothing but its blended edge
     return pack(dict.fromkeys(FRAMES, ink), measure(ink, Options()))
 
 
