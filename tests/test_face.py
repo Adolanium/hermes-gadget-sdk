@@ -219,7 +219,7 @@ def test_the_avatar_drawing_is_pinned_to_its_version(tmp_path):
     """A different drawing from the same picture must come with a new AVATAR_DRAWING, or devices that
     hold the old drawing keep it."""
     drawn = profile_faces.digest(profile_faces.from_picture(_disc(tmp_path / "a.png", (240, 240, 240), (10, 10, 10))))
-    assert (profile_faces.AVATAR_DRAWING, drawn) == (b"hermes-gadget avatar 1\n", PINNED_DRAWING), (
+    assert (profile_faces.AVATAR_DRAWING, drawn) == (b"hermes-gadget avatar 2\n", PINNED_DRAWING), (
         "from_picture draws differently: bump AVATAR_DRAWING in plugin/face.py, then record the new digest here")
 
 
@@ -242,6 +242,22 @@ def test_profiles_that_are_gone_leave_no_faces_behind(tmp_path, monkeypatch):
         assert tracemalloc.get_traced_memory()[0] - start < 200_000  # forty kept faces would hold over 1 MB
     finally:
         tracemalloc.stop()
+
+
+@pytest.mark.parametrize("colour", [(255, 255, 255, 255), (0, 0, 0, 255)], ids=["white", "black"])
+def test_a_solid_drawing_on_a_transparent_background_keeps_its_shape(tmp_path, colour):
+    """Its visible pixels are the shape, whatever their colour: one colour gives no light or dark parts."""
+    from PIL import Image, ImageDraw
+
+    path = tmp_path / "avatar.png"
+    img = Image.new("RGBA", (300, 300), (0, 0, 0, 0))
+    ImageDraw.Draw(img).ellipse((50, 40, 250, 260), fill=colour)
+    img.save(path)
+    data = profile_faces.from_picture(path)
+    sizes = {64: data[:512], 192: data[3 * (512 + 1152 + 2592):3 * (512 + 1152 + 2592) + 4608]}  # idle frames
+    for size, bits in sizes.items():
+        ink = sum(bin(b).count("1") for b in bits) / (size * size)
+        assert 0.3 < ink < 0.7, f"{size} px: {ink:.0%} ink, not the disc"
 
 
 def test_a_profile_shows_its_face_file_then_its_avatar_then_the_mascot(tmp_path, caplog):

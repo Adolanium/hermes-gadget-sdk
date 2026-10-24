@@ -151,7 +151,7 @@ FACE_FILE = "gadget-face.bin"
 # hash. Change AVATAR_DRAWING when from_picture draws differently, so devices that hold the old
 # drawing get the new one.
 FACE_FILE_KIND = b"hermes-gadget face file\n"
-AVATAR_DRAWING = b"hermes-gadget avatar 1\n"
+AVATAR_DRAWING = b"hermes-gadget avatar 2\n"
 
 
 def digest(data: bytes) -> str:
@@ -187,10 +187,11 @@ def pack(frames, anchors: dict, threshold: int = THRESHOLD) -> bytes:
 def from_picture(path: Path | io.BytesIO) -> bytes:
     """A still face from a picture not drawn for the device, such as a Hermes avatar.
 
-    The screen draws light ink on dark, so a picture on a light background gives its dark parts
-    as ink, and one on a dark background its light parts. The cut is the picture's own average
-    brightness, so a dim photo keeps its features. A still face has no eyes or mouth placed by
-    hand, so it neither blinks nor talks: a face file does.
+    A picture with transparency gives its visible pixels as ink: a drawing in one colour has no
+    light or dark parts to tell apart. Otherwise the screen draws light ink on dark, so a picture
+    on a light background gives its dark parts as ink, and one on a dark background its light
+    parts. The cut is the picture's own average brightness, so a dim photo keeps its features. A
+    still face has no eyes or mouth placed by hand, so it neither blinks nor talks: a face file does.
     """
     from PIL import Image, ImageOps, ImageStat
 
@@ -198,6 +199,8 @@ def from_picture(path: Path | io.BytesIO) -> bytes:
         art = ImageOps.fit(ImageOps.exif_transpose(src).convert("RGBA"), (MASTER_SIZE, MASTER_SIZE),
                            Image.Resampling.LANCZOS)
     opaque = art.getchannel("A").point(lambda v: 255 if v > THRESHOLD else 0)
+    if opaque.getextrema()[0] == 0:  # some of it is transparent
+        return pack(dict.fromkeys(FRAMES, opaque), measure(opaque, Options()))
     lum = Image.composite(art.convert("L"), Image.new("L", art.size, 0), opaque)
     cut = ImageStat.Stat(lum, opaque).mean[0] if opaque.getbbox() else THRESHOLD
     edge = MASTER_SIZE // 25
