@@ -19,7 +19,6 @@ constexpr uint32_t kMinUtteranceMs = 350;
 constexpr uint32_t kMaxUtteranceMs = 30000;
 constexpr uint32_t kThinkingTimeoutMs = 180000;
 constexpr uint32_t kSettleAfterReplyMs = 6000;
-constexpr uint32_t kReplyLingerMs = 20000;    // reply text stays up this long before the mascot returns
 constexpr uint32_t kNewSessionHoldMs = 2000;  // hold CANCEL this long to start a new session
 constexpr uint32_t kNewSessionHintMs = 600;   // ...and show the countdown after this long
 constexpr uint32_t kPromptArmMs = 600;        // presses this soon after a question appears don't answer it
@@ -39,7 +38,8 @@ constexpr uint32_t kOtaRestartMs = 1000;    // time for ota.done to leave before
 constexpr uint32_t kBackoffMs[] = {1000, 2000, 4000, 8000, 15000, 30000};
 constexpr size_t kBackoffSteps = sizeof(kBackoffMs) / sizeof(kBackoffMs[0]);
 
-const char* const kSettingKeys[] = {"name", "server", "token", "talk_mode", "volume", "brightness", "screen_timeout", "battery_display", "battery_estimate", "language", "wifi_ssid", "wifi_pass"};
+const char* const kSettingKeys[] = {"name", "server", "token", "talk_mode", "volume", "brightness", "screen_timeout", "battery_display", "battery_estimate", "language", "wifi_ssid", "wifi_pass",
+                                    "face_down_sleep"};
 
 // NVS limits storage keys to 15 characters; keep the public setting name unchanged.
 std::string_view setting_storage_key(std::string_view key) {
@@ -132,7 +132,7 @@ void App::load_settings() {
   volume_ = static_cast<uint8_t>(std::max(0, std::min(100, vol)));
   if (hal_.speaker) hal_.speaker->set_volume(volume_);
   brightness_ = static_cast<uint8_t>(std::max(5, std::min(100, std::atoi(setting("brightness", "100").c_str()))));
-  if (hal_.display && hal_.display->info().has_backlight) hal_.display->set_backlight(brightness_);
+  if (!face_down_ && hal_.display && hal_.display->info().has_backlight) hal_.display->set_backlight(brightness_);
   screen_timeout_ms_ = static_cast<uint32_t>(std::max(0, std::min(3600, std::atoi(setting("screen_timeout", "0").c_str())))) * 1000;
   const std::string indicator = setting("battery_display", "off");
   battery_display_ = indicator == "icon" ? BatteryIndicator::Icon
@@ -142,6 +142,8 @@ void App::load_settings() {
   const std::string language = setting("language", "en");
   lang_auto_ = language == "auto";
   lang_ = lang_auto_ ? hermes_lang_.value_or(i18n::Lang::En) : i18n::parse(language).value_or(i18n::Lang::En);
+  face_down_sleep_ = setting("face_down_sleep", "off") == "on";
+  if (face_down_) return;  // a face-down screen stays dark until the gadget is turned over
   activity_at_ = now();
   display_dimmed_ = display_sleeping_ = false;
 }
@@ -213,8 +215,9 @@ void App::begin() {
         return false;
       }
       int p = static_cast<int>(std::max<int64_t>(5, std::min<int64_t>(100, args["percent"].as_int())));
-      hal_.display->set_backlight(static_cast<uint8_t>(p));
       brightness_ = static_cast<uint8_t>(p);
+      // Face down, the level is only stored: the turn-over (wake_display) applies it.
+      if (!face_down_) hal_.display->set_backlight(static_cast<uint8_t>(p));
       if (hal_.storage && !hal_.storage->set("brightness", std::to_string(p))) log(LogLevel::Warn, "could not save brightness");
       result.set("percent", p);
       return true;
@@ -703,6 +706,7 @@ void App::h_transcript(const json::Value& m) {
 
 void App::h_reply_delta(const json::Value& m) {
   wake_display();
+  if (face_down_) reply_while_face_down_ = true;  // shown from the top on the turn-over
   if (mode_ == Mode::Listening) return;
   reply_ = m["text"].as_string();
   scroll_ = -1;
@@ -715,6 +719,7 @@ void App::h_reply_delta(const json::Value& m) {
 
 void App::h_reply(const json::Value& m) {
   wake_display();
+  if (face_down_ && !m["interim"].as_bool()) reply_while_face_down_ = true;
   last_turn_rx_ = now();
   const std::string& text = m["text"].as_string();
   if (m["interim"].as_bool()) {
@@ -732,6 +737,7 @@ void App::h_reply(const json::Value& m) {
 }
 
 void App::h_audio_start(const json::Value& m) {
+  if (face_down_) return;  // face down mutes Hermes; the stream is never begun, its frames are dropped
   alarm_ringing_ = false;  // Hermes speaks now: the alarm stays on screen, quiet
   close_setup_screens();
   wake_display();
@@ -1581,6 +1587,7 @@ void App::h_ota_abort(const json::Value&) {
 void App::tick() {
   const uint32_t t = now();
   power_tick();
+  motion_tick();
   settings_tick();
   phone_tick();
 
@@ -1989,6 +1996,7 @@ json::Value App::status_value() const {
       .set("server", server_url_)
       .set("network", network_up_);
   s.set("display_sleeping", display_sleeping_);
+  if (can_sleep_face_down()) s.set("face_down", face_down_);
   // The language the screen is in, and whether it follows Hermes's (`language` auto).
   s.set("language", i18n::info(lang_).code).set("language_auto", lang_auto_);
   if (hal_.power) s.set("power", power_value());
@@ -2097,6 +2105,8 @@ std::string App::console(std::string_view raw) {
       return "@error battery_display must be icon, percentage, both or off";
     if (key == "battery_estimate" && !value.empty() && value != "off" && value != "liion")
       return "@error battery_estimate must be off or liion";
+    if (key == "face_down_sleep" && !value.empty() && value != "on" && value != "off")
+      return "@error face_down_sleep must be on or off";
     if (key == "language" && !value.empty() && value != "auto" && !i18n::parse(value))
       return "@error language must be one of:" + language_codes();
     if (!hal_.storage) return "@error no storage";

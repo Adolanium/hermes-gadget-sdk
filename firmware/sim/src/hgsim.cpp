@@ -231,6 +231,7 @@ hgsim* hgsim_create(const hgsim_config* cfg, const hgsim_host* host) {
     if (!cfg->cancel_label) profile.cancel_label = "Swipe down";
     profile.extra_settings = {"touch_cancel"};
   }
+  profile.motion_sensor = cfg->motion != 0;
   sim->app = std::make_unique<hg::App>(sim->hal, profile);
   if (cfg->touch) {
     sim->touch = std::make_unique<hg::TouchGestures>(*sim->app);
@@ -294,6 +295,10 @@ void hgsim_button(hgsim* sim, int button, int pressed) {
 }
 void hgsim_touch(hgsim* sim, int touching, int x, int y) {
   if (sim->touch) sim->touch->update(touching != 0, x, y, sim->hal.system->now_ms());
+}
+void hgsim_motion(hgsim* sim, int x_mg, int y_mg, int z_mg) {
+  auto clamp = [](int v) { return static_cast<int16_t>(v < -16000 ? -16000 : v > 16000 ? 16000 : v); };
+  sim->app->on_motion(clamp(x_mg), clamp(y_mg), clamp(z_mg));
 }
 void hgsim_mic_samples(hgsim* sim, const int16_t* samples, size_t count) { sim->app->on_mic_samples(samples, count); }
 void hgsim_submit_text(hgsim* sim, const char* text) { sim->app->submit_text(text ? text : ""); }

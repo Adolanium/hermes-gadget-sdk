@@ -191,6 +191,14 @@ protects pulse timing, and uses explicit microsecond delays for backlight reset
 and startup. The panel command lengths are stored separately from their values.
 The full upstream license is in LICENSES/LilyGO-MIT.txt.
 
+The QMI8658 register facts in firmware/drivers/qmi8658.cpp (the WHO_AM_I
+value, the soft-reset command and its 15 ms boot time, the control register
+settings and the little-endian accelerometer data layout) come from QST's
+QMI8658A datasheet Rev A,
+https://qstcorp.com/upload/pdf/202301/13-52-25%20QMI8658A%20Datasheet%20Rev%20A.pdf,
+Copyright (c) 2022 QST Corporation. Hardware facts only; no QST code is
+included.
+
 The QR code encoder in firmware/core/third_party/qrcode/ is vendored from
 Richard Moore's QRCode library, https://github.com/ricmoo/QRCode,
 revision eafbde494979abc2445c363cc2602230bcbe299c,

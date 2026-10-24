@@ -92,6 +92,14 @@ CoreS3 has a separate `CoreS3Control` in `firmware/drivers/cores3.cpp`. It enabl
 
 A display that advertises `has_backlight` must accept zero percent to turn dark. An OLED or AMOLED driver sets `emissive`, so the UI draws its background true black and leaves those pixels unlit. `screen_timeout` dims and then darkens an idle display while keeping the device connected. Raw touch drivers should use `TouchGestures`, which consumes the first touch when waking. Button input through `App::on_button` does the same.
 
+## Motion
+
+Boards with an accelerometer can offer face-down sleep. Set `DeviceProfile::motion_sensor` when the sensor starts, and call `App::on_motion(x_mg, y_mg, z_mg)` from the app task 5-25 times a second with lightly smoothed milli-g values in the device frame: `+x` towards the right of the picture, `+y` towards its top, `+z` out of the screen towards the viewer. A board lying flat with the screen up reads about `(0, 0, +1000)`. Samples older than two seconds are ignored, so a stalled sensor cannot keep the screen dark.
+
+`firmware/drivers/qmi8658.cpp` with `port_motion.cpp` is the QMI8658 reference: a 10 Hz task reads the chip on its own device handle on the shared I2C bus, and the app loop polls it and forwards only new samples. Fill in `BoardConfig::imu` (`ImuConfig`): the I2C address, which chip axis feeds each device axis (`x_from` and friends), and its sign. Add the `imu` entry only after `diag` confirms the axes on a real board: lying face down, `motion.z` reads near `-1000`; lying screen up, near `+1000`; standing with the picture's top edge up, `motion.y` near `+1000`. The `face_down_sleep` setting turns the sleep on; it is off by default. On a board that can sleep face down, the console's `status` includes `"face_down": true|false`.
+
+A 10 Hz motion task wakes a light-sleeping chip every 100 ms. A slower poll while dozing must stay under the core's two-second stale limit, or the screen lights.
+
 ## Audio through a codec chip
 
 Boards like the ESP32-S3-BOX family and the ESP32-S3-Touch-AMOLED-1.75 route audio through codecs (ES7210 ADC, ES8311 DAC) configured over I2C. `CodecAudio`, `CodecMic` and `CodecSpeaker` in `port_codec.cpp` implement `hg::AudioIn` and `hg::AudioOut` on top of `esp_codec_dev` for that pair: fill in `BoardConfig::codec` and `BoardConfig::i2c`. Other codecs follow the same contracts:

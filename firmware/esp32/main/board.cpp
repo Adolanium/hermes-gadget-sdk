@@ -119,6 +119,17 @@ BoardConfig make() {
   b.buttons = {0, -1, -1, -1};  // BOOT also works as TALK
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";
+#if CONFIG_HG_BOARD_AMOLED_175
+  // QMI8658 (0x6B) on the shared bus, behind the display. Measured on a non-C
+  // board standing with its USB-C port at the bottom, which puts the picture's
+  // right edge up: chip y +1018 mg; lying face down: chip z +968 mg. So device
+  // x = +chip y and z = -chip z; device y = +chip x follows from the right-hand
+  // rule (no sideways tilt was measured). Face-down sleep reads z and the sizes
+  // of x and y only.
+  b.imu.enabled = true;
+  b.imu.x_from = 1; b.imu.y_from = 0; b.imu.z_from = 2;
+  b.imu.x_sign = 1; b.imu.y_sign = 1; b.imu.z_sign = -1;
+#endif
 #if CONFIG_HG_BOARD_AMOLED_175C
   b.amoled.rst = 1;
   b.touch.rst = 2;

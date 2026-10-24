@@ -64,6 +64,7 @@ hgp::CodecMic g_codec_mic;
 hgp::CodecSpeaker g_codec_speaker;
 hgp::OpusSpeakerDecoder g_opus;
 hgp::TouchInput g_touch;
+hgp::MotionInput g_motion;
 hgp::AxpPower g_power;
 hgp::LatchPower g_latch_power;
 hgp::CoreS3Board g_cores3;
@@ -305,6 +306,7 @@ extern "C" void app_main(void) {
     ESP_LOGE(TAG, "microphone did not start: not enough internal RAM for its buffers");
   }
   constexpr bool touch = false;
+  constexpr bool imu = false;  // no I2C bus: no motion sensor to bring up
   hgp::diag::Parts parts;
   parts.display = hal.display ? g_display.controller_name() : "none";
   parts.mic = hal.mic == &g_mic ? (board.mic.pdm ? "pdm" : "i2s") : "none";
@@ -361,6 +363,7 @@ extern "C" void app_main(void) {
     if (board.light_sleep && g_codec.mic_link().switchable) g_codec_speaker.allow_power_down(g_codec.mic_link().format);
   }
   if (hal.speaker) hal.speaker_decoder = &g_opus;  // Opus replies when Hermes offers them
+  const bool imu = peripherals_ready && board.imu.enabled && g_motion.begin(board.imu, i2c_bus);
   const bool touch = peripherals_ready && (board.touch.enabled || board.pwr_key.enabled || board.encoder.a >= 0) &&
                      g_touch.begin(board.touch, board.pwr_key, board.encoder,
                                    board.touch.bus.sda >= 0 ? hgp::i2c::touch_bus(board.touch.bus) : i2c_bus);
@@ -390,6 +393,8 @@ extern "C" void app_main(void) {
   parts.touch = touch && g_touch.has_touch();
   parts.key = touch && g_touch.has_key();
   parts.i2c = i2c_bus;
+  parts.imu = imu ? "qmi8658" : "none";
+  parts.motion = imu ? &g_motion : nullptr;
 #endif
   g_buttons.begin(board.buttons);
   hgp::diag::set_parts(parts);
@@ -420,6 +425,7 @@ extern "C" void app_main(void) {
     profile.touch_ppi = board.touch.ppi;
     profile.extra_settings = {"touch_cancel"};
   }
+  profile.motion_sensor = imu;
 #if !CONFIG_HG_BOARD_ESP32_CYD
   if (hal.mic == &g_codec_mic) {
     profile.mic_rate = hgp::CodecAudio::kRate;
@@ -477,6 +483,11 @@ extern "C" void app_main(void) {
   app.begin();
   hgp::console::begin();
 
+#if !CONFIG_HG_BOARD_ESP32_CYD
+  TickType_t motion_at = 0;     // last motion poll (the loop runs at ~10 ms)
+  uint32_t motion_samples = 0;  // the motion task's count at the last forwarded sample
+#endif
+
   for (;;) {
     hgp::Event ev;
     // Block briefly for events, then run the core's timers and animations.
@@ -500,5 +511,20 @@ extern "C" void app_main(void) {
     g_wifi.tick(app, g_system.now_ms());
     if (g_gestures) g_gestures->tick(g_system.now_ms());
     app.tick();
+#if !CONFIG_HG_BOARD_ESP32_CYD
+    // The motion task keeps the latest sample; poll it about every 100 ms instead
+    // of letting 10 Hz events fill the queue. Only new reads go to the app, so a
+    // sensor that stops answering still goes stale there.
+    if (imu && xTaskGetTickCount() - motion_at >= pdMS_TO_TICKS(100)) {
+      motion_at = xTaskGetTickCount();
+      const uint32_t n = g_motion.samples();
+      if (n != motion_samples) {
+        motion_samples = n;
+        int16_t mx, my, mz;
+        g_motion.latest(mx, my, mz);
+        app.on_motion(mx, my, mz);
+      }
+    }
+#endif
   }
 }

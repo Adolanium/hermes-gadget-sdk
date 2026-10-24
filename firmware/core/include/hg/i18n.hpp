@@ -70,6 +70,9 @@ namespace hg::i18n {
   X(ScreenTimeout,          "Screen timeout") \
   X(TimeoutSeconds,         "{0} seconds\nDims halfway; first input wakes.") \
   X(TimeoutAlwaysOn,        "Always on\nSelect to enable automatic dimming and screen sleep.") \
+  X(FaceDownSleep,          "Face-down sleep") \
+  X(FaceDownSleepOn,        "On\nFace down, the screen sleeps and Hermes stays quiet.") \
+  X(FaceDownSleepOff,       "Off\nSelect to sleep when the gadget lies face down.") \
   X(PowerOff,               "Power off") \
   X(PowerOffIntro,          "Shut down the board. Use its PWR key to turn it on again.") \
   X(WifiSetup,              "Wi-Fi setup") \

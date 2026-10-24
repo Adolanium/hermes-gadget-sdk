@@ -179,8 +179,8 @@ void log_boot_summary() {
            kb(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)), kb(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
            kb(heap_caps_get_free_size(MALLOC_CAP_DMA)), kb(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
            kb(heap_caps_get_total_size(MALLOC_CAP_SPIRAM)));
-  ESP_LOGI(TAG, "parts: display %s, microphone %s, speaker %s, touch %s, key %s", g_parts.display, g_parts.mic,
-           g_parts.speaker, g_parts.touch ? "yes" : "no", g_parts.key ? "yes" : "no");
+  ESP_LOGI(TAG, "parts: display %s, microphone %s, speaker %s, touch %s, key %s, imu %s", g_parts.display,
+           g_parts.mic, g_parts.speaker, g_parts.touch ? "yes" : "no", g_parts.key ? "yes" : "no", g_parts.imu);
 }
 
 void report(hg::json::Value& r) {
@@ -194,7 +194,8 @@ void report(hg::json::Value& r) {
       .set("microphone", g_parts.mic)
       .set("speaker", g_parts.speaker)
       .set("touch", g_parts.touch)
-      .set("key", g_parts.key);
+      .set("key", g_parts.key)
+      .set("imu", g_parts.imu);
   r.set("build", build)
       .set("uptime_s", static_cast<long long>(esp_timer_get_time() / 1000000))
       .set("reset_reason", reset_reason())
@@ -203,6 +204,13 @@ void report(hg::json::Value& r) {
       .set("parts", parts)
       .set("i2c", i2c_scan())
       .set("stacks", stacks());
+  if (g_parts.motion) {
+    int16_t x = 0, y = 0, z = 0;
+    g_parts.motion->latest(x, y, z);
+    hg::json::Value motion = hg::json::Value::object();
+    motion.set("x", x).set("y", y).set("z", z);
+    r.set("motion", motion);
+  }
 }
 
 std::string recent_log() {

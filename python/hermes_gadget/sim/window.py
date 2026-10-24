@@ -220,6 +220,11 @@ class SimulatorWindow:
         self.net_var = tk.BooleanVar(value=self.sim.network_up)
         tk.Checkbutton(row, text="Wi-Fi", variable=self.net_var, selectcolor=BG, activebackground=PANEL,
                        command=lambda: self.sim.set_network(self.net_var.get())).pack(side="right")
+        if self.sim.board.motion:
+            self.face_down_var = tk.BooleanVar(value=self.sim.face_down)
+            tk.Checkbutton(row, text="Face down", variable=self.face_down_var, selectcolor=BG,
+                           activebackground=PANEL,
+                           command=lambda: self.sim.set_face_down(self.face_down_var.get())).pack(side="right")
         sensors = tk.Frame(device, bg=PANEL)
         sensors.pack(fill="x")
         for key, label, low, high, value in [("battery_pct", "Telemetry battery %", 0, 100, self.sim.peripherals.battery),
