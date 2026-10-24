@@ -191,10 +191,10 @@ def from_picture(path: Path | io.BytesIO) -> bytes:
     A picture with transparency is a drawing: its visible pixels are the ink, and its eyes, mouth
     and other features, the pixels far lighter or darker than the drawing's own colour, are holes,
     as in the mascot. The drawing's colour is that of its outline, which features inside it don't
-    touch, so even a mouth bigger than the rest of the face stays the hole. An opaque picture has no such outline, so the screen's light ink on
-    dark decides: a picture on a light background gives its dark parts as ink, and one on a dark
-    background its light parts, cut at the picture's own average brightness so a dim photo keeps
-    its features. A still face has no eyes or mouth placed by hand, so it neither blinks nor talks:
+    touch, so even a mouth bigger than the rest of the face stays the hole. An opaque picture has
+    no such outline, so the screen's light ink on dark decides: a picture on a light background
+    gives its dark parts as ink, and one on a dark background its light parts, cut at the picture's
+    own average brightness so a dim photo keeps its features. A still face has no eyes or mouth placed by hand, so it neither blinks nor talks:
     a face file does.
     """
     from PIL import Image, ImageChops, ImageFilter, ImageOps, ImageStat
