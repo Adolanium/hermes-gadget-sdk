@@ -3950,3 +3950,178 @@ TEST("language: the agent can set auto through screen.language") {
   CHECK_EQ(r.fake.kv["language"], std::string("auto"));
   CHECK(r.app.model().lang == hg::i18n::Lang::Es);
 }
+
+namespace {
+// A face message (docs/protocol.md#faces) whose every bitmap byte is `ink`.
+std::string face_message(const std::string& profile, const std::string& hash, uint8_t ink = 0xff,
+                         std::vector<int> anchors = {607, 293, 262, 620, 801, 107, 396, 508, 586, 649}) {
+  std::vector<uint8_t> data(3 * (512 + 1152 + 2592 + 4608), ink);
+  for (int v : anchors) {
+    data.push_back(static_cast<uint8_t>(v & 0xff));
+    data.push_back(static_cast<uint8_t>(v >> 8));
+  }
+  return R"({"type":"face","profile":")" + profile + R"(","hash":")" + hash + R"(","bits":")" +
+         hg::crypto::base64_encode(data.data(), data.size()) + R"("})";
+}
+size_t pixels_changed(const std::vector<uint16_t>& a, const std::vector<uint16_t>& b) {
+  size_t n = 0;
+  for (size_t i = 0; i < a.size(); ++i) n += a[i] != b[i];
+  return n;
+}
+}  // namespace
+
+TEST("faces: a face replaces the mascot until a face without bits brings it back") {
+  Rig r;
+  r.bring_online(true);
+  const Value* hello = r.fake.last("hello");
+  CHECK(hello && (*hello)["caps"]["faces"].as_int() == 1);
+  r.advance(100);
+  const std::vector<uint16_t> mascot = r.fake.fb;
+  r.server(face_message("default", "a1"));
+  r.advance(100);
+  CHECK(r.app.model().face && r.app.model().face->hash == "a1");
+  CHECK(pixels_changed(mascot, r.fake.fb) > 5000);  // a solid square where the mascot was
+  r.server(R"({"type":"face","profile":"default"})");
+  r.advance(100);
+  CHECK(r.app.model().face == nullptr);
+  CHECK(pixels_changed(mascot, r.fake.fb) < 300);  // at most a blink apart
+}
+
+TEST("faces: a malformed face shows the mascot") {
+  Rig r;
+  r.bring_online(true);
+  r.server(face_message("default", "a1"));
+  r.server(R"({"type":"face","profile":"default","hash":"b2","bits":"AAAA"})");
+  CHECK(r.app.model().face == nullptr);
+  r.server(face_message("default", ""));
+  CHECK(r.app.model().face == nullptr);
+  r.server(R"({"type":"face","profile":"default","hash":"c3","bits":")" + std::string(400000, 'A') + R"("})");
+  CHECK(r.app.model().face == nullptr);
+  r.server(face_message("default", "d4", 0xff, {607, 293, 262, 620, 801, 107, 32767, 32767, 586, 649}));
+  CHECK(r.app.model().face == nullptr);  // eye rows off the bitmap: the blink would never repaint
+  r.server(face_message("default", "e5", 0xff, {607, 293, 262, 620, 801, 107, 508, 396, 586, 649}));
+  CHECK(r.app.model().face == nullptr);  // eye rows upside down
+  r.server(face_message("default", "f6", 0xff, {-5, 293, 262, 620, 801, 107, 396, 508, 586, 649}));
+  CHECK(r.app.model().face == nullptr);
+  r.server(face_message("default", "a7", 0xff, {0, 0, 1000, 1000, 0, 1000, 0, 1000, 500, 500}));
+  CHECK(r.app.model().face != nullptr);  // the edges are fine
+}
+
+TEST("faces: a late face or clear for the previous profile leaves this one's alone") {
+  Rig r;
+  r.bring_online_with_profiles(true, "ops");
+  r.server(R"({"type":"profile","profile":"default"})");
+  r.server(face_message("ops", "a1"));  // sent before the switch, read after it
+  CHECK(r.app.model().face == nullptr);
+  r.server(face_message("default", "b2"));
+  r.server(R"({"type":"face","profile":"ops"})");
+  CHECK(r.app.model().face && r.app.model().face->hash == "b2");
+}
+
+TEST("faces: an unpaired device shows the mascot and names no face") {
+  Rig r;
+  r.bring_online(true);
+  r.server(face_message("default", "a1"));
+  r.server(R"({"type":"unpaired"})");
+  CHECK(r.app.model().face == nullptr);
+  r.server(face_message("default", "a1"));  // a face still on its way
+  CHECK(r.app.model().face == nullptr);
+
+  Rig away;  // revoked while offline: the welcome says so
+  away.bring_online(true);
+  away.server(face_message("default", "a1"));
+  away.app.on_transport_closed("network flap");
+  away.advance(5000);
+  away.app.on_transport_open();
+  away.server(R"({"type":"challenge","nonce":"bjI=","enrolled":true})");
+  away.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":false,"face":"a1"})");  // even named
+  CHECK(away.app.model().face == nullptr);
+  away.fake.sent.clear();
+  away.app.on_transport_closed("network flap");
+  away.advance(5000);
+  away.app.on_transport_open();
+  const Value* hello = away.fake.last("hello");
+  CHECK(hello && !hello->has("face"));
+}
+
+TEST("faces: a board without the memory for a face offers none and ignores one") {
+  hg::DeviceProfile p = Rig::profile("ws://hermes.local:8765/gadget");
+  p.faces = false;
+  Rig r(p);
+  r.bring_online(true);
+  const Value* hello = r.fake.last("hello");
+  CHECK(hello && !(*hello)["caps"].has("faces"));
+  r.server(face_message("default", "a1"));
+  CHECK(r.app.model().face == nullptr);
+}
+
+TEST("faces: a reconnect keeps the face only when the welcome names it") {
+  Rig r;
+  r.bring_online_with_profiles(true, "ops");
+  // Reconnects with `named` in the welcome; returns the face the hello named.
+  auto reconnect = [&](const std::string& named) {
+    r.fake.sent.clear();
+    r.app.on_transport_closed("network flap");
+    r.advance(5000);
+    r.app.on_transport_open();
+    const Value* hello = r.fake.last("hello");
+    const std::string held = hello ? (*hello)["face"].as_string() : "";
+    r.server(R"({"type":"challenge","nonce":"bjI=","enrolled":true})");
+    r.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":true,)" + named +
+             R"("profile":"ops","profiles":[{"id":"default","name":"Hermes"},{"id":"ops","name":"Ops"}]})");
+    return held;
+  };
+  r.server(face_message("ops", "a1"));
+  CHECK_EQ(reconnect(R"("face":"a1",)"), std::string("a1"));
+  CHECK(r.app.model().face && r.app.model().face->hash == "a1");  // the same face stays
+  CHECK_EQ(reconnect(R"("face":"b2",)"), std::string("a1"));
+  CHECK(r.app.model().face == nullptr);  // another one is coming: the mascot meanwhile
+  r.server(face_message("ops", "a1"));
+  CHECK_EQ(reconnect(""), std::string("a1"));
+  CHECK(r.app.model().face == nullptr);  // none named: a new route, or a server without faces
+}
+
+TEST("faces: another profile shows the mascot until its own face arrives") {
+  Rig r;
+  r.bring_online_with_profiles(true, "ops");
+  r.server(face_message("ops", "a1"));
+  r.server(R"({"type":"profile","profile":"default","error":"busy"})");  // a refusal keeps it
+  CHECK(r.app.model().face != nullptr);
+  r.server(R"({"type":"profile","profile":"default"})");
+  CHECK(r.app.model().face == nullptr);
+  r.server(face_message("default", "b2"));
+  CHECK(r.app.model().face && r.app.model().face->hash == "b2");
+
+  // A welcome that names another profile than the face's drops it too.
+  r.app.on_transport_closed("network flap");
+  r.advance(5000);
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bjI=","enrolled":true})");
+  r.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":true,"profile":"ops",)"
+           R"("profiles":[{"id":"default","name":"Hermes"},{"id":"ops","name":"Ops"}]})");
+  CHECK(r.app.model().face == nullptr);
+}
+
+TEST("faces: a face made of the mascot's own bitmaps draws the mascot") {
+  std::vector<uint8_t> data;
+  for (int size : {64, 96, 144, 192})
+    for (auto frame : {hg::mascot::Frame::Idle, hg::mascot::Frame::Blink, hg::mascot::Frame::Talk}) {
+      const hg::mascot::Bitmap* b = hg::mascot::pick(size, frame);
+      data.insert(data.end(), b->bits, b->bits + (size + 7) / 8 * size);
+    }
+  const hg::mascot::Anchors& a = hg::mascot::anchors();
+  for (int v : {a.ear_cup.x, a.ear_cup.y, a.mouth.x, a.mouth.y, a.head_top_right.x, a.head_top_right.y, a.eyes_y0,
+                a.eyes_y1, a.mouth_y0, a.mouth_y1}) {
+    data.push_back(static_cast<uint8_t>(v & 0xff));
+    data.push_back(static_cast<uint8_t>(v >> 8));
+  }
+  Rig r;
+  r.bring_online(true);
+  r.advance(100);
+  const std::vector<uint16_t> mascot = r.fake.fb;
+  r.server(R"({"type":"face","profile":"default","hash":"m1","bits":")" +
+           hg::crypto::base64_encode(data.data(), data.size()) + R"("})");
+  r.advance(10);
+  CHECK(r.app.model().face != nullptr);
+  CHECK_EQ(pixels_changed(mascot, r.fake.fb), size_t(0));
+}

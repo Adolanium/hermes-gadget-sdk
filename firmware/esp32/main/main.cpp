@@ -409,6 +409,11 @@ extern "C" void app_main(void) {
   profile.frame_budget_us = CONFIG_HG_FRAME_BUDGET_US;
   profile.frame_log_ms = CONFIG_HG_FRAME_LOG_S * 1000u;
   profile.default_name = CONFIG_HG_DEFAULT_NAME;
+#if CONFIG_SPIRAM
+  profile.faces = esp_psram_is_initialized();
+#else
+  profile.faces = false;
+#endif
   profile.default_server_url = CONFIG_HG_DEFAULT_SERVER_URL;
   profile.default_access_token = CONFIG_HG_DEFAULT_ACCESS_TOKEN;
   profile.has_cancel_button = board.buttons.cancel >= 0 || touch;

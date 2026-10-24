@@ -98,6 +98,16 @@ TEST("crypto: base64 round trips every length") {
   CHECK(!hg::crypto::base64_decode("ab$d", out));
 }
 
+TEST("crypto: base64 into a buffer stops at its end") {
+  uint8_t buf[4] = {0, 0, 0, 0xEE};
+  size_t len = 0;
+  CHECK(!hg::crypto::base64_decode("AAECAwQF", buf, 3, len));  // six bytes into three
+  CHECK_EQ(buf[3], uint8_t(0xEE));
+  CHECK(hg::crypto::base64_decode("AAEC", buf, 3, len));
+  CHECK_EQ(len, size_t(3));
+  CHECK(buf[0] == 0 && buf[1] == 1 && buf[2] == 2);
+}
+
 TEST("protocol: identity and auth mac match the host implementation") {
   // Vectors shared with tests/test_protocol.py (computed with Python hashlib/hmac).
   uint8_t key[32];

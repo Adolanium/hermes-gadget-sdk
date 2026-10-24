@@ -10,6 +10,7 @@
 #include "check.hpp"
 #include "hg/app.hpp"
 #include "hg/canvas.hpp"
+#include "hg/crypto.hpp"
 
 using hg::json::Value;
 using hg::Screen;
@@ -705,4 +706,38 @@ TEST("timer: the alarm's label stays clear of the hint at the bottom") {
       CHECK(same);  // the label drew nothing into the hint's rows
     }
   }
+}
+
+namespace {
+// A face message (docs/protocol.md#faces) for the default profile, every bitmap byte solid ink.
+std::string solid_face(const std::string& hash) {
+  std::vector<uint8_t> data(3 * (512 + 1152 + 2592 + 4608), 0xff);
+  for (int v : {607, 293, 262, 620, 801, 107, 396, 508, 586, 649}) {
+    data.push_back(static_cast<uint8_t>(v & 0xff));
+    data.push_back(static_cast<uint8_t>(v >> 8));
+  }
+  return R"({"type":"face","profile":"default","hash":")" + hash + R"(","bits":")" +
+         hg::crypto::base64_encode(data.data(), data.size()) + R"("})";
+}
+size_t pixels_changed(const std::vector<uint16_t>& a, const std::vector<uint16_t>& b) {
+  size_t n = 0;
+  for (size_t i = 0; i < a.size(); ++i) n += a[i] != b[i];
+  return n;
+}
+}  // namespace
+
+TEST("timer: a face that arrives or goes while the alarm is up quietly redraws it") {
+  Rig r;
+  r.online();
+  r.action("timer.start", R"({"seconds":1})");
+  r.idle(1000);
+  r.idle(61000);  // the beeping, and the flashing with it, is over
+  CHECK(r.app.screen() == Screen::Alarm && !r.timer_status()["ringing"].as_bool());
+  const std::vector<uint16_t> mascot = r.fake.fb;
+  r.server(solid_face("a1"));
+  r.idle(1000);
+  CHECK(pixels_changed(mascot, r.fake.fb) > 1000);  // the face, a solid square, where the mascot was
+  r.server(R"({"type":"face","profile":"default"})");
+  r.idle(1000);
+  CHECK_EQ(pixels_changed(mascot, r.fake.fb), size_t(0));  // the mascot again
 }

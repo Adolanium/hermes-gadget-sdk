@@ -21,11 +21,13 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from . import audio, opus, protocol
+from .face import ProfileFace
 from .store import DeviceStore
 
 log = logging.getLogger("hermes_gadget.hub")
 
 HANDSHAKE_TIMEOUT_S = 10.0
+FACE_LOOKUP_S = 1.5          # how long a welcome waits to learn the face's hash (devices give up after 10 s)
 AUDIO_FRAME_MS = 40          # outbound audio frame duration
 PLAYBACK_LEAD_S = 0.5        # how far ahead of real time playback audio is sent
 IMAGE_CHUNK_BYTES = 4096
@@ -43,6 +45,9 @@ def short_utterance_notice(session: "DeviceSession") -> str:
     return "Didn't catch that - hold the button while speaking"
 
 
+_LOOK_UP = object()  # update_face(): find the face first
+
+
 class HubDelegate:
     """Decides what device traffic means. Every method has a no-op default."""
 
@@ -56,6 +61,11 @@ class HubDelegate:
     async def select_profile(self, session: "DeviceSession", profile: str) -> str | None:
         """Bind ``session`` to ``profile`` (set ``session.profile``); return None, or why not."""
         return "unknown"
+
+    async def face(self, session: "DeviceSession") -> ProfileFace | None:
+        """The face of the profile answering ``session`` (docs/protocol.md#faces), or None for the mascot.
+        Return quickly: the welcome waits for its hash. Slow work belongs in ``ProfileFace.load``."""
+        return None
 
     def language(self, session: "DeviceSession") -> Optional[str]:
         """The language id ``welcome`` names for a device left on ``auto`` (e.g. ``"es"``), or None."""
@@ -256,6 +266,10 @@ class DeviceSession:
         self.display_sleeping: bool = hello.get("display_sleeping") is True
         self.paired = False
         self.profile = "default"  # the Hermes profile that answers this device
+        self.face_hash: str | None = None  # the face the device holds; None is the mascot
+        # The profile the device takes as its own, which a face must name: the last `profile` or
+        # `welcome.profile`, else the one it named in hello. A gadget route doesn't change it.
+        self.device_profile = "default"
         self.connected_at = time.time()
         self.last_rx = time.monotonic()
         self.closed = False
@@ -265,6 +279,7 @@ class DeviceSession:
         self._stream_counter = 0
         self._pending: dict[str, asyncio.Future] = {}
         self._tasks: set[asyncio.Task] = set()
+        self._face_task: asyncio.Task | None = None  # update_face(): at most one, ended with the session
         self._ota_inbox: asyncio.Queue | None = None  # the device's ota.* replies, while an update runs
         self._dashboard_sent: dict | None = None  # the last dashboard this connection delivered
         self._dashboards = 0  # dashboards offered, sent or held
@@ -368,6 +383,9 @@ class DeviceSession:
         if paired:
             self.hub.store.confirm(self.device_id)
         await self.send_json(protocol.message("paired" if paired else "unpaired"))
+        if not paired:
+            self.face_hash = None  # unpaired drops the device's face
+        self.update_face()
 
     async def ask(self, prompt_id: str, title: str, text: str, ttl_s: float | None = None) -> None:
         """Show a yes/no question; the answer arrives as ``on_prompt_reply``."""
@@ -377,7 +395,65 @@ class DeviceSession:
         await self.send_json(protocol.message("prompt.close", id=prompt_id))
 
     async def send_profile(self, error: str | None = None) -> None:
-        await self.send_json(protocol.message("profile", profile=self.profile, error=error))
+        profile, before = self.profile, self.device_profile
+        await self.send_json(protocol.message("profile", profile=profile, error=error))
+        if error is None:
+            self.device_profile = profile
+            if profile != before:
+                self.face_hash = None  # a device that changes profile drops its face; the same one keeps it
+            self.update_face()
+
+    async def find_face(self) -> ProfileFace | None:
+        """The face the device should show now; unpaired devices get the mascot (None)."""
+        if not self.paired or self.caps.get("faces") != 1:
+            return None
+        return await self.hub.delegate.face(self)
+
+    def current(self) -> bool:
+        """Still the device's open connection: a reconnect replaces it."""
+        return not self.closed and self.hub.sessions.get(self.device_id) is self
+
+    def face_state(self) -> tuple:
+        """What decides the face: a face found for another state is not this one's."""
+        return self.device_profile, self.profile, self.paired
+
+    def update_face(self, face: ProfileFace | None | object = _LOOK_UP,
+                    found_for: tuple | None = None) -> asyncio.Task | None:
+        """Bring the device's face up to date, beside the messages: the session's one face operation.
+        It is for the state now; a newer one replaces it, and the session's end stops it. ``face`` is
+        what find_face() returned when the state was ``found_for``; it is looked up again otherwise."""
+        if self.caps.get("faces") != 1:
+            return None
+        state = self.face_state()
+        if found_for != state or (isinstance(face, ProfileFace) and not face.valid()):
+            face = _LOOK_UP
+        if self._face_task:
+            self._face_task.cancel()
+        self._face_task = self.spawn(self._send_face(state, face))
+        return self._face_task
+
+    async def _send_face(self, state: tuple, face: ProfileFace | None | object) -> None:
+        """Send the face for ``state``, or the mascot, unless the device holds it already."""
+        # Switched, (un)paired or replaced since: whatever changed started its own update.
+        stale = lambda: (self.face_state() != state or not self.current()  # noqa: E731
+                         or isinstance(face, ProfileFace) and not face.valid())
+        if stale():
+            return
+        if face is _LOOK_UP:
+            face = await self.find_face()
+        digest = face.hash if face else None
+        if stale() or digest == self.face_hash:
+            return
+        try:
+            data = await asyncio.to_thread(face.load) if face else None
+        except Exception as exc:  # an unreadable picture leaves the mascot, which the device shows now
+            log.warning("no face for %s: %s", self.device_id, exc)
+            return
+        if stale():
+            return
+        await self.send_json(protocol.message(
+            "face", profile=state[0], hash=digest, bits=base64.b64encode(data).decode() if data else None))
+        self.face_hash = digest
 
     async def show_card(self, title: str, body: str, ttl_s: float = 15) -> bool:
         """Show a card. False when it is held until the screen lights up."""
@@ -526,6 +602,8 @@ class DeviceSession:
 
     def _shutdown(self) -> None:
         self.closed = True
+        if self._face_task:
+            self._face_task.cancel()
         for fut in self._pending.values():
             if not fut.done():
                 fut.set_exception(ActionError(f"{self.name} disconnected"))
@@ -756,17 +834,41 @@ class DeviceHub:
             session.paired = bool(await self.delegate.is_paired(session))
             if session.paired:
                 self.store.confirm(session.device_id)
+            roster = self.delegate.profiles(session) if session.caps.get("profiles") is True else []
+            if roster:
+                wanted = hello.get("profile")
+                if isinstance(wanted, str) and wanted and wanted != session.profile:
+                    await self.delegate.select_profile(session, wanted)  # a refusal leaves "default"
+            named = hello.get("profile")
+            named = named if isinstance(named, str) and named else "default"
+            session.device_profile = session.profile if roster else named
+            # The welcome keeps the face the device holds only if it is the profile's face now. Finding
+            # its hash reads a file; a lookup that stalls counts as unknown, and is done again below.
+            face: ProfileFace | None | object = _LOOK_UP
+            looked_up = session.face_state()
+            try:
+                face = await asyncio.wait_for(session.find_face(), FACE_LOOKUP_S)
+            except asyncio.TimeoutError:
+                log.warning("device %s: the face lookup took over %.1f s", session.device_id, FACE_LOOKUP_S)
+            if not session.current():
+                return
+            if session.face_state() != looked_up:  # unpaired meanwhile, say: that face is not for now
+                face = _LOOK_UP
+            # Built after the awaits, so it says what holds now (pairing can change meanwhile).
             welcome = dict(session=session.session_id, paired=session.paired, heartbeat_s=self.heartbeat_s,
                            server="hermes", proto=protocol.VERSION)
             language = self.delegate.language(session)
             if language:
                 welcome["language"] = language
-            if session.caps.get("profiles") is True and (roster := self.delegate.profiles(session)):
-                wanted = hello.get("profile")
-                if isinstance(wanted, str) and wanted and wanted != session.profile:
-                    await self.delegate.select_profile(session, wanted)  # a refusal leaves "default"
+            if roster:
                 welcome.update(profile=session.profile, profiles=roster)
+            if (isinstance(face, ProfileFace) and session.paired and hello.get("face") == face.hash
+                    and session.device_profile == named and face.valid()):
+                welcome["face"] = face.hash
             await session.send_json(protocol.message("welcome", **welcome))
+            session.face_hash = welcome.get("face")  # the welcome keeps that face, or drops the device's
+            session.update_face(face, looked_up)  # after the welcome's send, which may let the state change
+            face = None  # the task has it; an avatar's picture goes with the task
             log.info("device %s (%s) online, paired=%s", session.device_id, session.name, session.paired)
             await self.delegate.on_ready(session)
             if not session.display_sleeping:
@@ -789,6 +891,8 @@ class DeviceHub:
                 heartbeat.cancel()
             if session is not None:
                 session._shutdown()
+                if session._face_task:
+                    await asyncio.gather(session._face_task, return_exceptions=True)
                 if self.sessions.get(session.device_id) is session:
                     del self.sessions[session.device_id]
                 log.info("device %s offline", session.device_id)

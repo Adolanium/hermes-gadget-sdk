@@ -24,6 +24,7 @@ config.yaml::
           unauthorized_dm_behavior: pair
           dashboard: true        # sessions and status tiles on devices that draw them
           profiles: [work, home] # optional: the profiles devices may switch to (default always)
+          profile_faces: true    # each profile's face (gadget-face.bin or its avatar) on devices
 
 Secrets (``~/.hermes/.env``): ``GADGET_ACCESS_TOKEN`` (optional shared token).
 """
@@ -39,7 +40,7 @@ import re
 import ssl
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from agent.i18n import get_language, t
@@ -58,6 +59,7 @@ from gateway.platforms.event import MessageEvent, MessageType
 
 from . import audio as gaudio
 from . import compat, dashboard, imaging, ota, runtime, textfmt
+from . import face as faces
 from .battery_log import BatteryLog
 from .hub import DeviceHub, DeviceSession, HubDelegate
 from .store import DeviceStore
@@ -192,6 +194,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._auto_home = _flag(extra.get("auto_home"), True)
         self._battery_log_on = _flag(extra.get("battery_log"), False)
         self._dashboard_on = _flag(extra.get("dashboard"), True)
+        self._profile_faces = _flag(extra.get("profile_faces"), True)
+        self._convert_avatars: Optional[bool] = None  # Pillow present; asked once
         # Profile switching: off without the key; "all" offers every served profile; a list offers those.
         offered = extra.get("profiles")
         self._offer_all = isinstance(offered, str) and offered.strip().lower() == "all"
@@ -206,6 +210,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._roster_lock = asyncio.Lock()  # one roster read at a time; never held across a send
         self._push_seq = 0
         self._pushed_seq: Dict[str, int] = {}  # device -> the newest push that read a roster for it
+        self._face_from: Dict[str, Optional[str]] = {}  # device -> the profile its last face lookup could show
         self._battery_log: Optional[BatteryLog] = None
         self._tls_cert = extra.get("tls_cert")
         self._tls_key = extra.get("tls_key")
@@ -444,6 +449,55 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             await session.close_prompt(prompt.id)
         await session.send_profile()
 
+    async def face(self, session: DeviceSession) -> Optional[faces.ProfileFace]:
+        if not self._profile_faces:
+            return None
+        if self._convert_avatars is None:
+            self._convert_avatars = imaging.pillow_available()
+            if not self._convert_avatars:
+                logger.info("[%s] Pillow is not installed: devices show profile face files, not avatars", self.name)
+        profile = self._face_from[session.device_id] = self._face_profile(session)
+        if profile is None:
+            return None
+        try:
+            if profile == "default":  # this gateway's own home, for a standalone profile too
+                from hermes_constants import get_hermes_home
+                home = get_hermes_home()
+            else:
+                from hermes_cli.profiles import get_profile_dir
+                home = get_profile_dir(profile)
+            found = await asyncio.to_thread(faces.for_profile, home, self._convert_avatars)
+            if found is None or profile == "default":  # the default profile's approval is session.paired
+                return found
+            # Found while the profile approved the device: a revocation since then makes it stale.
+            return replace(found, valid=lambda: self._face_profile(session) == profile)
+        except Exception as exc:  # an unreadable picture shows the mascot; never block a connection on it
+            logger.warning("[%s] no face for profile %s: %s", self.name, profile, exc)
+            return None
+
+    def _face_profile(self, session: DeviceSession) -> Optional[str]:
+        """The profile whose face the device may show: the one answering it. None: the mascot.
+
+        A device's own pick among the offered profiles shows that profile's face once the default profile
+        trusts the device, the gate switching itself uses; the profile's own pairing approval isn't needed
+        (Hermes has no public per-profile check, NousResearch/hermes-agent#143892). A gadget route's
+        profile shows once the listener's own sender check accepts the device: for a routed device that
+        check follows the route, so it is that profile's verdict."""
+        source = self._source(session)
+        if source.profile_route_rejected:
+            return None
+        if source.profile in (None, "default"):
+            return "default"  # session.paired is the default profile's approval
+        if self._switches(session):
+            return source.profile if self._still_trusted(session) else None
+        try:
+            accepted = self._is_sender_authorized(session.device_id, "dm", session.device_id) is True
+        except Exception:
+            logger.warning("[%s] cannot check %s for profile %s", self.name, session.device_id, source.profile,
+                           exc_info=True)
+            accepted = False
+        return source.profile if accepted else None
+
     def language(self, session: DeviceSession) -> Optional[str]:
         # `platforms.gadget.extra.language`, else the profile's language (HERMES_LANGUAGE > display.language > en).
         if self._language != "auto":
@@ -514,6 +568,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                         self._prompts.pop(session.device_id, None)
                         await session.set_paired(False)
                         await self.on_ready(session)
+                    # Another profile approving or revoking the device only shows here: its face follows.
+                    if (session.paired and self._profile_faces and session.device_id in self._face_from
+                            and self._face_profile(session) != self._face_from[session.device_id]):
+                        session.update_face()
                 except Exception as exc:
                     logger.debug("[%s] pairing sync failed for %s: %s", self.name, session.device_id, exc)
 
@@ -747,6 +805,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if self._hub and session.device_id not in self._hub.sessions:
             self._turns.pop(session.device_id, None)
             self._pushed_seq.pop(session.device_id, None)
+            self._face_from.pop(session.device_id, None)
 
     # -- turn lifecycle -------------------------------------------------------------
 
