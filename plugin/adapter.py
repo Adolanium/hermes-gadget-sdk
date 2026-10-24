@@ -476,22 +476,27 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             return None
 
     def _face_profile(self, session: DeviceSession) -> Optional[str]:
-        """The profile whose face the device may show: the one answering it (a gadget route's, or the
-        device's choice), once that profile approves the device. None: the mascot."""
+        """The profile whose face the device may show: the one answering it. None: the mascot.
+
+        A device's own pick among the offered profiles shows that profile's face once the default profile
+        trusts the device, the gate switching itself uses; the profile's own pairing approval isn't needed
+        (Hermes has no public per-profile check, NousResearch/hermes-agent#143892). A gadget route's
+        profile shows once the listener's own sender check accepts the device: for a routed device that
+        check follows the route, so it is that profile's verdict."""
         source = self._source(session)
         if source.profile_route_rejected:
             return None
         if source.profile in (None, "default"):
             return "default"  # session.paired is the default profile's approval
-        # Another profile approves the device itself (its pairing store, or an allowlist): ask Hermes, as it
-        # decides for the device's turns there. Without a runner to ask, no approval is known.
-        check = getattr(getattr(self, "gateway_runner", None), "_is_user_authorized_for_source", None)
+        if self._switches(session):
+            return source.profile if self._still_trusted(session) else None
         try:
-            return source.profile if check is not None and check(source) is True else None
+            accepted = self._is_sender_authorized(session.device_id, "dm", session.device_id) is True
         except Exception:
-            logger.warning("[%s] cannot check %s in profile %s", self.name, session.device_id, source.profile,
+            logger.warning("[%s] cannot check %s for profile %s", self.name, session.device_id, source.profile,
                            exc_info=True)
-            return None
+            accepted = False
+        return source.profile if accepted else None
 
     def language(self, session: DeviceSession) -> Optional[str]:
         # `platforms.gadget.extra.language`, else the profile's language (HERMES_LANGUAGE > display.language > en).

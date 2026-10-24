@@ -576,7 +576,10 @@ def test_a_routed_device_gets_the_face_of_the_profile_its_route_names(routing_ri
 
     from hermes_gadget_plugin.face import FACE_BYTES, FACE_FILE
 
+    from gateway.config import Platform
+
     runner, adapter, home = routing_rig
+    adapter.set_authorization_check(runner._make_adapter_auth_check(Platform("gadget")))  # as the gateway installs it
     (home / FACE_FILE).write_bytes(bytes([0xAA]) * FACE_BYTES)
     (home / "profiles" / "ops" / FACE_FILE).write_bytes(bytes([0x55]) * FACE_BYTES)
     session = _session("default")
@@ -937,29 +940,33 @@ def _faces_on_ops(rig, hermes_home, make_sim):
 
 
 @requires_sim
-def test_a_profile_that_has_not_approved_the_device_shows_the_mascot(live_rig, hermes_home, make_sim):
-    sim, held, _ = _faces_on_ops(live_rig, hermes_home, make_sim)
-    assert not any(m.get("profile") == "ops" and "bits" in m for m in sim.received if m["type"] == "face")
-    assert held() is None
-
-
-@requires_sim
-def test_a_profiles_approval_brings_its_face(live_rig, hermes_home, make_sim):
+def test_a_switched_device_shows_its_profiles_face_without_that_profiles_approval(live_rig, hermes_home, make_sim):
+    # The default profile trusts the device, which is the gate switching uses; ops's own approval isn't needed.
     sim, held, digest = _faces_on_ops(live_rig, hermes_home, make_sim)
-    assert held() is None
-    live_rig.approve("ops", sim.status()["device_id"])
     assert sim.wait_for(lambda: (sim.last_received("face") or {}).get("hash") == digest["ops"], timeout=8)
     assert held() == digest["ops"]
 
 
 @requires_sim
-def test_a_profiles_revocation_clears_its_face(live_rig, hermes_home, make_sim):
+def test_the_picked_profiles_own_revocation_keeps_its_face(live_rig, hermes_home, make_sim):
     sim, held, digest = _faces_on_ops(live_rig, hermes_home, make_sim)
-    live_rig.approve("ops", sim.status()["device_id"])
+    device_id = sim.status()["device_id"]
+    live_rig.approve("ops", device_id)
+    live_rig.revoke("ops", device_id)
+    sim.run_for(3)  # past the next pairing check
+    assert held() == digest["ops"]
+
+
+@requires_sim
+def test_the_default_profiles_revocation_clears_the_face(live_rig, hermes_home, make_sim):
+    sim, held, digest = _faces_on_ops(live_rig, hermes_home, make_sim)
     assert sim.wait_for(lambda: (sim.last_received("face") or {}).get("hash") == digest["ops"], timeout=8)
-    live_rig.revoke("ops", sim.status()["device_id"])
-    assert sim.wait_for(lambda: "bits" not in sim.last_received("face"), timeout=8)
-    assert held() is None
+    live_rig.revoke("default", sim.status()["device_id"])
+    assert sim.wait_screen("pairing", timeout=10)  # unpaired: the device drops its face
+    sim.console("reconnect")
+    assert sim.wait_screen("connecting", timeout=5)
+    assert sim.wait_screen("pairing", timeout=10)
+    assert "face" not in [m for m in sim.sent if m["type"] == "hello"][-1]
 
 
 @requires_sim
@@ -975,8 +982,8 @@ def test_the_default_profiles_face_needs_only_its_own_approval(live_rig, hermes_
 
 
 def _revoked_during_the_welcome_lookup(rig, hermes_home, make_sim, monkeypatch, held_before):
-    """A device on ops, which approved it, reconnects; while the welcome's lookup reads ops's face file,
-    ops revokes the device and the pairing check reacts. Returns the face the device then holds."""
+    """A device on ops reconnects; while the welcome's lookup reads ops's face file, the default profile
+    revokes the device and the pairing check reacts. Returns the face the device then holds."""
     import asyncio
     import struct
     import threading
@@ -1026,7 +1033,7 @@ def _revoked_during_the_welcome_lookup(rig, hermes_home, make_sim, monkeypatch, 
     welcomes = len([m for m in sim.received if m["type"] == "welcome"])
     sim.console("reconnect")
     assert sim.wait_for(entered.is_set, timeout=10)
-    rig.revoke("ops", device_id)
+    rig.revoke("default", device_id)
     current = rig.adapter.hub.get(device_id)
 
     async def pairing_check_reacts():  # what the 2 s pairing check does when it sees the revocation
@@ -1035,7 +1042,10 @@ def _revoked_during_the_welcome_lookup(rig, hermes_home, make_sim, monkeypatch, 
     release.set()
     assert sim.wait_for(lambda: len([m for m in sim.received if m["type"] == "welcome"]) > welcomes, timeout=10)
     sim.run_for(3)  # past the next pairing check
-    return held()
+    sim.console("reconnect")
+    assert sim.wait_screen("connecting", timeout=5)
+    assert sim.wait_screen("pairing", "ready", timeout=10)
+    return [m for m in sim.sent if m["type"] == "hello"][-1].get("face")
 
 
 @requires_sim
