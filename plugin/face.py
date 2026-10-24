@@ -22,6 +22,7 @@ SIZES = (64, 96, 144, 192)
 FRAMES = ("idle", "blink", "talk")
 THRESHOLD = 110  # alpha above this is ink after downsampling
 MASTER_SIZE = 1024  # a drawing's side, in pixels, before it is cut down to SIZES
+ONE_COLOUR = 8  # visible pixels whose brightness varies less than this (std. dev.) are one colour
 
 
 def ink_box(alpha, threshold: int = THRESHOLD) -> tuple[int, int, int, int]:
@@ -187,11 +188,12 @@ def pack(frames, anchors: dict, threshold: int = THRESHOLD) -> bytes:
 def from_picture(path: Path | io.BytesIO) -> bytes:
     """A still face from a picture not drawn for the device, such as a Hermes avatar.
 
-    A picture with transparency gives its visible pixels as ink: a drawing in one colour has no
-    light or dark parts to tell apart. Otherwise the screen draws light ink on dark, so a picture
-    on a light background gives its dark parts as ink, and one on a dark background its light
-    parts. The cut is the picture's own average brightness, so a dim photo keeps its features. A
-    still face has no eyes or mouth placed by hand, so it neither blinks nor talks: a face file does.
+    The screen draws light ink on dark, so a picture on a light background gives its dark parts as
+    ink, and one on a dark background (transparency counts as dark) its light parts. The cut is the
+    visible pixels' own average brightness, so a dim photo keeps its features. A drawing in one
+    colour on transparency has no light or dark parts to tell apart, so its visible pixels are the
+    ink. A still face has no eyes or mouth placed by hand, so it neither blinks nor talks: a face
+    file does.
     """
     from PIL import Image, ImageOps, ImageStat
 
@@ -199,9 +201,9 @@ def from_picture(path: Path | io.BytesIO) -> bytes:
         art = ImageOps.fit(ImageOps.exif_transpose(src).convert("RGBA"), (MASTER_SIZE, MASTER_SIZE),
                            Image.Resampling.LANCZOS)
     opaque = art.getchannel("A").point(lambda v: 255 if v > THRESHOLD else 0)
-    if opaque.getextrema()[0] == 0:  # some of it is transparent
-        return pack(dict.fromkeys(FRAMES, opaque), measure(opaque, Options()))
     lum = Image.composite(art.convert("L"), Image.new("L", art.size, 0), opaque)
+    if opaque.getextrema()[0] == 0 and opaque.getbbox() and ImageStat.Stat(lum, opaque).stddev[0] < ONE_COLOUR:
+        return pack(dict.fromkeys(FRAMES, opaque), measure(opaque, Options()))
     cut = ImageStat.Stat(lum, opaque).mean[0] if opaque.getbbox() else THRESHOLD
     edge = MASTER_SIZE // 25
     frame = Image.new("L", art.size, 255)

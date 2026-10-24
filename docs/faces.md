@@ -107,8 +107,9 @@ mascot, and so do boards without PSRAM, which have no room for a second face.
 
 A profile without a face file shows its Hermes avatar (`assets/avatar.png`, `.jpg` or `.webp` in
 the profile's folder), made into a still face: the light parts of a picture on a dark background,
-or the dark parts of one on a light background. A picture with transparency gives its visible
-pixels as the shape instead, so a drawing in one colour keeps its outline. A still face does not
+or the dark parts of one on a light background. Transparency counts as a dark background. A
+drawing in one colour on transparency gives its visible pixels as the shape, so it keeps its
+outline. A still face does not
 blink or move its mouth;
 the waves and dots still show. For a face that blinks and talks, make a face file. Converting an
 avatar needs Pillow on the Hermes host; without it, the plugin uses face files only and says so

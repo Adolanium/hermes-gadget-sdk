@@ -213,14 +213,17 @@ def test_a_face_file_and_an_avatar_never_share_a_hash(tmp_path):
 
 
 PINNED_DRAWING = "788c2b3a73475e59"  # from_picture's drawing of _disc's light disc, with Pillow 12.3
+PINNED_TRANSPARENT_DRAWING = "eb09c14f03399765"  # and of _smiling_disc, antialiased, on transparency
 
 
 def test_the_avatar_drawing_is_pinned_to_its_version(tmp_path):
     """A different drawing from the same picture must come with a new AVATAR_DRAWING, or devices that
-    hold the old drawing keep it."""
+    hold the old drawing keep it. One picture is opaque, the other transparent with soft edges."""
     drawn = profile_faces.digest(profile_faces.from_picture(_disc(tmp_path / "a.png", (240, 240, 240), (10, 10, 10))))
-    assert (profile_faces.AVATAR_DRAWING, drawn) == (b"hermes-gadget avatar 2\n", PINNED_DRAWING), (
-        "from_picture draws differently: bump AVATAR_DRAWING in plugin/face.py, then record the new digest here")
+    transparent = profile_faces.digest(profile_faces.from_picture(_smiling_disc(tmp_path / "b.png", scale=4)))
+    assert (profile_faces.AVATAR_DRAWING, drawn, transparent) == (
+        b"hermes-gadget avatar 2\n", PINNED_DRAWING, PINNED_TRANSPARENT_DRAWING), (
+        "from_picture draws differently: bump AVATAR_DRAWING in plugin/face.py, then record the new digests here")
 
 
 def test_profiles_that_are_gone_leave_no_faces_behind(tmp_path, monkeypatch):
@@ -242,6 +245,42 @@ def test_profiles_that_are_gone_leave_no_faces_behind(tmp_path, monkeypatch):
         assert tracemalloc.get_traced_memory()[0] - start < 200_000  # forty kept faces would hold over 1 MB
     finally:
         tracemalloc.stop()
+
+
+def _smiling_disc(path: Path, scale: int = 1) -> Path:
+    """Original art on a transparent canvas: a white disc with black eyes and a smile. With ``scale`` above
+    1 it is drawn that much larger and scaled down, so its edges are antialiased."""
+    from PIL import Image, ImageDraw
+
+    s = scale
+    img = Image.new("RGBA", (300 * s, 300 * s), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    draw.ellipse((30 * s, 30 * s, 270 * s, 270 * s), fill=(255, 255, 255, 255))
+    draw.ellipse((85 * s, 85 * s, 125 * s, 125 * s), fill=(0, 0, 0, 255))
+    draw.ellipse((175 * s, 85 * s, 215 * s, 125 * s), fill=(0, 0, 0, 255))
+    draw.arc((90 * s, 130 * s, 210 * s, 230 * s), 20, 160, fill=(0, 0, 0, 255), width=12 * s)
+    if s > 1:
+        img = img.resize((300, 300), Image.Resampling.LANCZOS)
+    img.save(path)
+    return path
+
+
+def _ink_at(face: bytes, size: int, x: float, y: float) -> bool:
+    """Whether the idle frame at ``size`` px has ink at (x, y), as fractions of the picture."""
+    offset = sum(3 * s * s // 8 for s in profile_faces.SIZES if s < size)
+    col, row = int(x * size), int(y * size)
+    return bool(face[offset + row * size // 8 + col // 8] >> (7 - col % 8) & 1)
+
+
+def test_a_drawing_with_features_on_a_transparent_background_keeps_them(tmp_path):
+    """Transparency alone doesn't make a picture one colour: its dark eyes and mouth stay holes in the ink."""
+    face = profile_faces.from_picture(_smiling_disc(tmp_path / "avatar.png"))
+    for size in (64, 192):
+        assert _ink_at(face, size, 70 / 300, 160 / 300), f"{size} px: the cheek is ink"
+        assert not _ink_at(face, size, 105 / 300, 105 / 300), f"{size} px: the left eye is a hole"
+        assert not _ink_at(face, size, 195 / 300, 105 / 300), f"{size} px: the right eye is a hole"
+        assert not _ink_at(face, size, 150 / 300, 228 / 300), f"{size} px: the mouth is a hole"
+        assert not _ink_at(face, size, 5 / 300, 5 / 300), f"{size} px: the transparent corner is no ink"
 
 
 @pytest.mark.parametrize("colour", [(255, 255, 255, 255), (0, 0, 0, 255)], ids=["white", "black"])
