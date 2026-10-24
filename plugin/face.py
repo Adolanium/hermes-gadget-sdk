@@ -22,7 +22,7 @@ SIZES = (64, 96, 144, 192)
 FRAMES = ("idle", "blink", "talk")
 THRESHOLD = 110  # alpha above this is ink after downsampling
 MASTER_SIZE = 1024  # a drawing's side, in pixels, before it is cut down to SIZES
-FEATURE_GAP = 64  # on transparency, a visible pixel this much lighter or darker than the drawing is a feature
+NEARLY_BLANK = 0.05  # a share of the visible drawing below this as ink means the cut found no parts
 
 
 def ink_box(alpha, threshold: int = THRESHOLD) -> tuple[int, int, int, int]:
@@ -188,28 +188,19 @@ def pack(frames, anchors: dict, threshold: int = THRESHOLD) -> bytes:
 def from_picture(path: Path | io.BytesIO) -> bytes:
     """A still face from a picture not drawn for the device, such as a Hermes avatar.
 
-    A picture with transparency is a drawing: its visible pixels are the ink, and its eyes, mouth
-    and other features, the pixels far lighter or darker than the drawing's own colour, are holes,
-    as in the mascot. The drawing's colour is that of its outline, which features inside it don't
-    touch, so even a mouth bigger than the rest of the face stays the hole. An opaque picture has
-    no such outline, so the screen's light ink on dark decides: a picture on a light background
-    gives its dark parts as ink, and one on a dark background its light parts, cut at the picture's
-    own average brightness so a dim photo keeps its features. A still face has no eyes or mouth placed by hand, so it neither blinks nor talks:
-    a face file does.
+    The screen draws light ink on dark, so a picture on a light background gives its dark parts
+    as ink, and one on a dark background its light parts. The cut is the picture's own average
+    brightness, so a dim photo keeps its features. A drawing in one colour on transparency has no
+    parts on either side of that cut, so its visible pixels are the shape instead. A still face has
+    no eyes or mouth placed by hand, so it neither blinks nor talks: a face file does.
     """
-    from PIL import Image, ImageChops, ImageFilter, ImageOps, ImageStat
+    from PIL import Image, ImageOps, ImageStat
 
     with Image.open(path) as src:
         art = ImageOps.fit(ImageOps.exif_transpose(src).convert("RGBA"), (MASTER_SIZE, MASTER_SIZE),
                            Image.Resampling.LANCZOS)
     opaque = art.getchannel("A").point(lambda v: 255 if v > THRESHOLD else 0)
     lum = Image.composite(art.convert("L"), Image.new("L", art.size, 0), opaque)
-    if opaque.getextrema()[0] == 0 and opaque.getbbox():  # transparency: the drawing is the ink
-        outline = ImageChops.subtract(opaque, opaque.filter(ImageFilter.MinFilter(5)))  # 2 px inside the edge
-        body = ImageStat.Stat(lum, outline if outline.getbbox() else opaque).median[0]
-        features = lum.point(lambda v: 255 if abs(v - body) > FEATURE_GAP else 0)
-        ink = ImageChops.subtract(opaque, features)
-        return pack(dict.fromkeys(FRAMES, ink), measure(ink, Options()))
     cut = ImageStat.Stat(lum, opaque).mean[0] if opaque.getbbox() else THRESHOLD
     edge = MASTER_SIZE // 25
     frame = Image.new("L", art.size, 255)
@@ -217,6 +208,8 @@ def from_picture(path: Path | io.BytesIO) -> bytes:
     light_background = ImageStat.Stat(lum, frame).mean[0] > cut
     ink = lum.point(lambda v: 255 if (v < cut if light_background else v > cut) else 0)
     ink = Image.composite(ink, Image.new("L", art.size, 0), opaque)
+    if opaque.getextrema()[0] == 0 and opaque.getbbox() and ImageStat.Stat(ink, opaque).mean[0] < 255 * NEARLY_BLANK:
+        ink = opaque  # nearly nothing of the visible drawing crossed the cut: one colour on transparency
     return pack(dict.fromkeys(FRAMES, ink), measure(ink, Options()))
 
 

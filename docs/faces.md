@@ -107,13 +107,14 @@ mascot, and so do boards without PSRAM, which have no room for a second face.
 
 A profile without a face file shows its Hermes avatar (`assets/avatar.png`, `.jpg` or `.webp` in
 the profile's folder), made into a still face: the light parts of a picture on a dark background,
-or the dark parts of one on a light background. A picture with transparency is a drawing
-instead: its visible pixels are the shape, and its eyes, mouth and other parts much lighter or
-darker than its outline are holes, as in the mascot. A still face does not
-blink or move its mouth;
-the waves and dots still show. For a face that blinks and talks, make a face file. Converting an
-avatar needs Pillow on the Hermes host; without it, the plugin uses face files only and says so
-once in the log.
+or the dark parts of one on a light background, cut at the picture's own average brightness;
+transparency counts as a dark background. A drawing in one colour on transparency has no parts on
+either side of that cut, so its visible pixels are the shape instead. Two kinds of drawing on
+transparency come out poorly: a dark one with light eyes and mouth keeps only the eyes and mouth,
+and one in two close shades keeps only the lighter shade. For those, make a face file. A still
+face does not blink or move its mouth; the waves and dots still show. For a face that blinks and
+talks, make a face file. Converting an avatar needs Pillow on the Hermes host; without it, the
+plugin uses face files only and says so once in the log.
 
 A profile shows its face only once Hermes would accept the device's turns in that profile. For the
 default profile, that is the pairing the device already has. For any other profile, whether the

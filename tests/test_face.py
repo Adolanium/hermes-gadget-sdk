@@ -213,7 +213,7 @@ def test_a_face_file_and_an_avatar_never_share_a_hash(tmp_path):
 
 
 PINNED_DRAWING = "788c2b3a73475e59"  # from_picture's drawing of _disc's light disc, with Pillow 12.3
-PINNED_TRANSPARENT_DRAWING = "1c041f85320ac581"  # and of _smiling_disc, antialiased, on transparency
+PINNED_TRANSPARENT_DRAWING = "eb09c14f03399765"  # and of _smiling_disc, antialiased, on transparency
 
 
 def test_the_avatar_drawing_is_pinned_to_its_version(tmp_path):
@@ -224,6 +224,15 @@ def test_the_avatar_drawing_is_pinned_to_its_version(tmp_path):
     assert (profile_faces.AVATAR_DRAWING, drawn, transparent) == (
         b"hermes-gadget avatar 2\n", PINNED_DRAWING, PINNED_TRANSPARENT_DRAWING), (
         "from_picture draws differently: bump AVATAR_DRAWING in plugin/face.py, then record the new digests here")
+
+
+@pytest.mark.parametrize("body, drawn", [((255, 255, 255), "eb09c14f03399765"), ((0, 51, 204), "b45b7d3fbc867878")],
+                         ids=["white", "blue"])
+def test_a_cartoon_on_transparency_converts_as_before_the_one_colour_fallback(tmp_path, body, drawn):
+    """Only a drawing with nearly nothing on either side of the cut takes the fallback: a cartoon with
+    features converts exactly as f0a6b71's converter drew it (these digests come from that converter)."""
+    face = profile_faces.from_picture(_smiling_disc(tmp_path / "avatar.png", scale=4, body=body))
+    assert profile_faces.digest(face) == drawn
 
 
 def test_profiles_that_are_gone_leave_no_faces_behind(tmp_path, monkeypatch):
@@ -273,11 +282,10 @@ def _ink_at(face: bytes, size: int, x: float, y: float) -> bool:
     return bool(face[offset + row * size // 8 + col // 8] >> (7 - col % 8) & 1)
 
 
-@pytest.mark.parametrize("body, features", [
-    ((255, 255, 255), (0, 0, 0)), ((0, 0, 0), (255, 255, 255)), ((128, 128, 128), (255, 255, 255)),
-    ((0, 0, 255), (255, 255, 255))], ids=["white-body", "black-body", "grey-body", "blue-body"])
-def test_a_drawing_with_features_on_a_transparent_background_keeps_them(tmp_path, body, features):
-    """On transparency the drawing is the ink and its eyes and mouth are holes, whichever is lighter."""
+@pytest.mark.parametrize("body", [(255, 255, 255), (0, 51, 204), (106, 13, 173)], ids=["white", "blue", "purple"])
+def test_a_drawing_with_features_on_a_transparent_background_keeps_them(tmp_path, body):
+    """A cartoon with dark eyes and a dark mouth keeps them as holes in its body."""
+    features = (0, 0, 0)
     face = profile_faces.from_picture(_smiling_disc(tmp_path / "avatar.png", body=body, features=features))
     for size in (64, 192):
         assert _ink_at(face, size, 70 / 300, 160 / 300), f"{size} px: the cheek is ink"
@@ -305,21 +313,6 @@ def test_a_large_dark_mouth_stays_a_hole_in_the_body(tmp_path, mouth_right):
         assert _ink_at(face, size, 45 / 300, 150 / 300), f"{size} px: the cheek is ink"
         assert _ink_at(face, size, 150 / 300, 45 / 300), f"{size} px: the forehead is ink"
         assert not _ink_at(face, size, 150 / 300, 190 / 300), f"{size} px: the mouth is a hole"
-
-
-def test_a_two_tone_drawing_on_a_transparent_background_stays_whole(tmp_path):
-    """Two close shades are one body, not a body and a feature: the whole disc is ink."""
-    from PIL import Image, ImageDraw
-
-    path = tmp_path / "avatar.png"
-    img = Image.new("RGBA", (300, 300), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    draw.pieslice((30, 30, 270, 270), 90, 270, fill=(120, 120, 120, 255))
-    draw.pieslice((30, 30, 270, 270), 270, 90, fill=(136, 136, 136, 255))
-    img.save(path)
-    face = profile_faces.from_picture(path)
-    for size in (64, 192):
-        assert _ink_at(face, size, 80 / 300, 150 / 300) and _ink_at(face, size, 220 / 300, 150 / 300), size
 
 
 @pytest.mark.parametrize("colour", [(255, 255, 255, 255), (0, 0, 0, 255)], ids=["white", "black"])
