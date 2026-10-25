@@ -27,6 +27,8 @@ assets/mascot/          The mascot master image and its attribution
 | Browser installer | `npm ci && npm test` in `site/` | Node.js 22 |
 | Home Assistant / MQTT examples | `pytest tests/test_automation_examples.py` | Built native library and the `mqtt` extra; local peers need no external accounts |
 
+For the gateway end to end, fetch only the pinned commit, as CI does: `git init hermes-agent && cd hermes-agent && git fetch --depth 1 https://github.com/NousResearch/hermes-agent <HERMES_REF> && git checkout FETCH_HEAD`. In a full clone, `hermes --version` reports the last release tag before that commit, such as 0.21.5, and the gateway skips the plugin because of its `requires_hermes`.
+
 The Python jobs in `.github/workflows/ci.yml` run under `xvfb-run` so the desktop controls run against the simulator core and development hub. On a headless Linux machine, use `xvfb-run -a pytest`. Without a display, the window tests skip; set `HERMES_GADGET_UI_TESTS=1` to require them.
 
 CI runs the adapter and gateway suites in `.github/workflows/hermes.yml`: against the Hermes commit pinned there (`HERMES_REF`) on every push and pull request, and against Hermes `main` once a day. To move the pin, run that workflow by hand with `hermes_ref: main`. When it passes, put the commit it printed into `HERMES_REF` and into `TESTED_HERMES_COMMIT` in `plugin/compat.py`; a test checks that the two agree.
