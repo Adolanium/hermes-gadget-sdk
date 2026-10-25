@@ -260,7 +260,8 @@ start the client in the logged-in user's graphical session with its own state
 directory. Never run it alongside the system service with the same identity.
 
 The screen uses the existing firmware renderer for pairing, conversations,
-cards, prompts and images. Audio and GPIO still use the configured real
+cards, prompts and images. The resting clock, when turned on with `set clock`,
+shows the computer's local time. Audio and GPIO still use the configured real
 devices. Software rendering and touch mapping pass automated tests; monitor,
 touch-controller and direct-console behavior still need physical verification.
 

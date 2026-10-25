@@ -208,6 +208,12 @@ struct ImuConfig {
   int8_t x_sign = 1, y_sign = 1, z_sign = 1;
 };
 
+// PCF85063 RTC on the I2C bus, keeping UTC across power loss.
+struct RtcConfig {
+  bool enabled = false;
+  uint8_t addr = 0x51;
+};
+
 // A key whose level is read from a TCA9554 or PCF8574 I/O expander input (e.g.
 // a PMIC's power key). Acts as CANCEL: a press cancels, holding 2 s starts a
 // new session.
@@ -282,6 +288,7 @@ struct BoardConfig {
   CodecAudioConfig codec;
   TouchConfig touch;
   ImuConfig imu;
+  RtcConfig rtc;
   ExpanderKeyConfig pwr_key;
   ExpanderResetConfig expander_reset;
   PowerRail power_rails[2];

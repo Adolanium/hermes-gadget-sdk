@@ -58,6 +58,18 @@ Ask Hermes for a timer, for example "set a pasta timer for nine minutes". Hermes
 - **Other screens:** a card or an image from Hermes replaces the alarm. When Hermes starts to speak, the beeps stop and the alarm stays. A question from Hermes goes first: the alarm steps back and returns, ringing, once you answer the question or it expires. A timer that ends during a recording waits until the recording ends.
 - **Limits:** one timer runs at a time, and a new timer replaces it. The timer keeps counting when the connection to Hermes drops. It lives in the device's memory, so a restart or power cut forgets it. The end of a timer does not interrupt Hermes: the device sends a `timer.done` event that the plugin only logs.
 
+## Resting clock
+
+Any board with a display can show a large clock when there is nothing else on the screen: an idle Ready screen, online and paired, after `clock` seconds of rest. It is off by default. Turn it on with the **Clock face** settings item (Off, 30 s, 1 min, 2 min, 5 min) or on the console with `set clock 60` (0 turns it off, or 5..3600 seconds).
+
+The face shows the time and the date, with the mascot (or the profile's own face, where Hermes sends one) above them, at 70 percent of the brightness setting, and shifts by a few pixels each minute to spare the panel. Anything on screen keeps it away: speech or a reply from Hermes, a card or a picture shown until dismissed, a question, a notice, a running timer, the alarm, the low-battery warning, or the settings menu. When the last of them is gone, the rest starts again.
+
+A quick tap brings Ready back and does nothing else. A hold still talks, a swipe down still cancels, and the buttons work as on Ready; the PWR key turns a lit clock's screen off. The screen timeout still applies on top: the clock first dims, then goes dark, and the next input wakes to Ready.
+
+The time comes from the network (`pool.ntp.org`, over SNTP) only while the clock is on; a device that never turns it on sends no time traffic. Boards with a clock chip (the AMOLED-1.75, 2.06 and 2.16; a PCF85063) keep the time in UTC across resets and are set from each network sync. The others wait for network time, and the settings item says so until it arrives.
+
+On ESP32 boards, `set timezone` chooses the clock's timezone as a POSIX TZ string; the default is `UTC0`. Examples: `UTC0`, `EST5EDT,M3.2.0,M11.1.0`, `CST6CDT,M3.2.0,M11.1.0`, `CET-1CEST,M3.5.0,M10.5.0/3`, `IST-5:30`. A string the firmware cannot read means UTC. `set time_format 12h` shows 12-hour time on the face; `set time_format 24h` (the default) shows 24-hour time.
+
 ## Device settings and hardware checks
 
 Hold TALK and CANCEL together for one second to open or close device settings. On a touchscreen, hold the title bar for one second. Round displays have no title bar; they show a **SETTINGS** target beneath the status dot instead. Hold it for one second. Touches in the target do not start recording. The target is hidden while a question, update or Wi-Fi setup is on screen, because holding it does nothing then. While settings is open, its label reads **BACK TO HERMES**; hold it again for one second to return. Settings also work while the device is offline. Opening settings stops the current recording or reply.
@@ -78,6 +90,7 @@ Tap CANCEL to move to the next item, then tap TALK to change it. On a touchscree
 | Battery and power | Show available power readings on boards with a power driver; select to choose what the top of the screen shows: icon, percentage, both, or off |
 | Screen timeout | Choose always on, 30, 60, 120, or 300 seconds |
 | Face-down sleep | Boards with a motion sensor: sleep and stay quiet while the gadget lies on its screen; off by default |
+| Clock face | Boards with a display: choose Off (the default), 30 seconds, 1, 2, or 5 minutes of rest before a resting clock shows |
 | Power off | Select twice to shut down a board with a power driver |
 | Wi-Fi setup | Start [phone-based setup](setup-board.md#set-up-wi-fi-with-your-phone) on ESP32 boards, with a QR code for the temporary network where the screen has room |
 | Phone app | On boards with Bluetooth: pair a phone app for two minutes; the screen shows the six-digit code to type on the phone. Shows whether a phone is paired and connected |
@@ -85,7 +98,7 @@ Tap CANCEL to move to the next item, then tap TALK to change it. On a touchscree
 
 When Hermes offers several profiles (the host turns this on; see [Hermes integration](hermes-integration.md#running-against-a-profile-or-a-multiplexed-gateway)), the idle screen greets you with the current profile's name. The device shows at most 8 profiles, the default one first. On a touchscreen in hold-to-talk mode, tap the name for the list of profiles, then tap one; swipe down to close the list without choosing. A hold that starts on the name still talks. **Hermes profile** in settings opens the same list. Boards without a touchscreen, and tap-to-talk mode, show **Change in Settings**: there, **Hermes profile** switches to the next one. The device asks Hermes and changes only when Hermes confirms; if Hermes is busy, try again once the reply is done. The first time you talk to a profile that hasn't approved this gadget yet, the screen shows the command to run on the Hermes host, such as `hermes -p work pairing approve gadget <code>`; run it, then ask again. The device keeps the profile across restarts.
 
-Volume, brightness, talk mode, battery indicator, screen timeout, face-down sleep, and language survive restarts. Unavailable drivers show as unavailable. These checks help you test the hardware; a completed tone does not prove that a physical speaker produced sound.
+Volume, brightness, talk mode, battery indicator, screen timeout, face-down sleep, clock face, time format and language survive restarts. Unavailable drivers show as unavailable. These checks help you test the hardware; a completed tone does not prove that a physical speaker produced sound.
 
 The battery indicator is off by default. When a driver percentage or explicitly enabled voltage estimate is available, each select on **Battery and power** moves to the next choice: icon only, percentage only, both, or off. It sits in the title bar, or centred at the top edge of a round display; without an available percentage it shows nothing. The icon fills green while charging and turns red at 10 percent or less with an explicit battery-only power reading; with the percentage alone, the number changes color instead. The percentage is the same value as in **Battery and power**. From the USB console, use `set battery_display icon`, `percentage`, `both` or `off`.
 

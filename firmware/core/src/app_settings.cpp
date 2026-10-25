@@ -70,6 +70,7 @@ void App::settings_input(Button button, bool pressed) {
         case Menu::Profile: return agent_profiles_.size() > 1;
         case Menu::Power: return hal_.power != nullptr;
         case Menu::FaceDownSleep: return can_sleep_face_down();
+        case Menu::Clock: return hal_.display != nullptr;
         case Menu::PowerOff: return can_power_off;
         case Menu::WifiSetup: return static_cast<bool>(on_wifi_setup);
         case Menu::Phone: return static_cast<bool>(on_phone_pair);
@@ -141,6 +142,13 @@ void App::settings_input(Button button, bool pressed) {
     case Menu::FaceDownSleep:
       console(face_down_sleep_ ? "set face_down_sleep off" : "set face_down_sleep on");
       break;
+    case Menu::Clock: {
+      // Off, then the same steps as the screen timeout, then Off again.
+      const uint32_t seconds = clock_after_ms_ / 1000;
+      const uint32_t next = seconds == 0 ? 30 : seconds < 60 ? 60 : seconds < 120 ? 120 : seconds < 300 ? 300 : 0;
+      console("set clock " + std::to_string(next));
+      break;
+    }
     case Menu::PowerOff:
       if (!power_off_armed_) {
         power_off_armed_ = true;
@@ -280,6 +288,12 @@ void App::settings_model() {
     case Menu::FaceDownSleep:
       m.detail = tr(Msg::FaceDownSleep);
       m.body = tr(face_down_sleep_ ? Msg::FaceDownSleepOn : Msg::FaceDownSleepOff);
+      break;
+    case Menu::Clock:
+      m.detail = tr(Msg::ClockFace);
+      // The body says when the face is off, or why it has not appeared yet.
+      if (!clock_after_ms_) m.body = tr(Msg::ClockOff);
+      else m.body = tr(wall_valid_ ? Msg::ClockAfterSeconds : Msg::ClockNoTime, {std::to_string(clock_after_ms_ / 1000)});
       break;
     case Menu::PowerOff:
       m.detail = tr(Msg::PowerOff);

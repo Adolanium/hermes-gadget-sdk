@@ -22,6 +22,7 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
   if (!touching) {
     switch (state_) {
       case State::Pending:  // a quick tap
+        if (from_clock_) break;  // Ready came back at touch-down; a tap does nothing else
         if (on_name_) {  // a quick tap on the name opens the list, or does nothing while it can't
           app_.open_profile_picker();
           break;
@@ -39,9 +40,14 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
   }
 
   if (state_ == State::Idle) {
+    // Before the wake: the touch that ends the clock face is only a wake, so its
+    // tap lands on nothing and its hold talks to the Ready screen it brought back.
+    from_clock_ = app_.clock_showing();
     if (app_.wake_display()) { state_ = State::Ignored; return; }
-    state_ = app_.profile_picker_open() ? State::Picker : app_.settings_title_hit(x, y) ? State::Settings : State::Pending;
-    on_name_ = state_ == State::Pending && app_.profile_name_hit(x, y);
+    state_ = app_.profile_picker_open() ? State::Picker
+              : !from_clock_ && app_.settings_title_hit(x, y) ? State::Settings
+              : State::Pending;
+    on_name_ = !from_clock_ && state_ == State::Pending && app_.profile_name_hit(x, y);
     x0_ = x;
     y0_ = y;
     t0_ = now_ms;

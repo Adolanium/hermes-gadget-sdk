@@ -134,6 +134,8 @@ class App {
   int profile_row_hit(int x, int y) const;
   void profile_tap(int x, int y);
   const std::string& agent_profile() const { return agent_profile_; }
+  // The resting clock face is up: the time, the date and the mascot.
+  bool clock_showing() const { return clock_showing_; }
   std::string agent_profile_name() const;
   // Returns true when this input only wakes a sleeping display.
   bool wake_display();
@@ -194,6 +196,9 @@ class App {
   const std::string& device_id() const { return device_id_; }
   bool paired() const { return paired_; }
   bool online() const { return phase_ == Phase::Online; }
+  // The resting clock is on (`set clock` above 0). The port runs network time
+  // only then.
+  bool clock_enabled() const { return clock_after_ms_ > 0; }
   std::string status_json() const;
 
  private:
@@ -255,6 +260,11 @@ class App {
   void settings_model();
   void stop_hardware_check();
   void power_tick();
+  // The one writer of the panel's backlight level (App::apply_backlight).
+  void apply_backlight();
+  // What keeps the panel busy for the user; the screen timeout and the resting
+  // clock share it so the two lists cannot drift.
+  bool screen_busy() const;
   // Face-down sleep (app_power.cpp): dark and quiet while the gadget lies on
   // its screen, ended only by turning it back over.
   bool can_sleep_face_down() const;
@@ -263,6 +273,10 @@ class App {
   void enter_face_down();
   void leave_face_down();
   json::Value power_value() const;
+  // The resting clock (app_power.cpp): it shows on an online, paired Ready
+  // screen once `clock_after_ms_` of rest has passed without anything on it.
+  bool clock_blocked() const;
+  void clock_tick();
   json::Value status_value() const;
   std::string diag_report();
   // frame timing (app_perf.cpp)
@@ -358,7 +372,7 @@ class App {
   bool lang_auto_ = false;
   std::optional<i18n::Lang> hermes_lang_;  // from the last `welcome` that named one this firmware has
   enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, Profile, Microphone, Speaker, Display, Inputs,
-                              Info, Power, IdleTimer, FaceDownSleep, PowerOff, WifiSetup, Phone, Language, Back };
+                              Info, Power, IdleTimer, FaceDownSleep, Clock, PowerOff, WifiSetup, Phone, Language, Back };
   enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };
   Menu menu_ = Menu::Closed;
   HardwareCheck hardware_check_ = HardwareCheck::None;
@@ -382,6 +396,12 @@ class App {
   std::optional<PowerStatus> power_status_;
   uint32_t power_read_at_ = 0, activity_at_ = 0, power_key_polled_at_ = 0;
   uint32_t screen_timeout_ms_ = 0;
+  uint32_t clock_after_ms_ = 0;  // the `clock` setting: rest before the clock face, 0 = off
+  bool clock_24h_ = true;        // the `time_format` setting
+  bool clock_showing_ = false;   // the clock face is up (App::clock_tick)
+  uint32_t clock_rest_at_ = 0;   // when the last block on the clock ended; rest counts from the later of this and activity_at_
+  bool wall_valid_ = false;      // the port knows the time of day (Hal::System::wall_time)
+  WallTime wall_{};              // the last reading behind the clock face
   // What the battery indicator shows, in the order a tap cycles through.
   enum class BatteryIndicator : uint8_t { Icon, Percentage, Both, Off };
   BatteryIndicator battery_display_ = BatteryIndicator::Off;

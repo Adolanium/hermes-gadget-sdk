@@ -295,6 +295,9 @@ class Client:
     def random_bytes(self, n: int) -> bytes:
         return os.urandom(n)
 
+    def wall_time(self) -> time.struct_time:
+        return time.localtime()  # the OS keeps the time and timezone
+
     def log(self, level: int, message: str) -> None:
         # The core logs connection state and action failures, never device keys.
         logging.getLogger("hermes_gadget.linux").log((logging.DEBUG, logging.INFO, logging.WARNING,

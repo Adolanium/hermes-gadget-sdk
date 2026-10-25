@@ -179,6 +179,7 @@ class Simulator:
         self.restarts = 0
         self._update_buf: bytearray | None = None
         self._restart_requested = False
+        self._fixed_time: time.struct_time | None = None
         self.face_down = False
         self._motion_at = 0
 
@@ -304,6 +305,10 @@ class Simulator:
     def update_confirm(self) -> None:
         self.update_confirmed = True
 
+    def wall_time(self) -> time.struct_time | None:
+        """Local time for the clock face; set_wall_time() pins it for tests and screenshots."""
+        return self._fixed_time or time.localtime()
+
     # -- virtual peripherals -------------------------------------------------------------
 
     def _register_actions(self) -> None:
@@ -425,6 +430,10 @@ class Simulator:
         """Lay the simulated board face down (or turn it back over); boards with motion only."""
         self.face_down = down
         self._motion_at = 0  # send the new orientation on the next step
+
+    def set_wall_time(self, when: time.struct_time | None) -> None:
+        """Pin the clock face's time (screenshots, tests); None follows the computer's clock."""
+        self._fixed_time = when
 
     def tap(self, button: str) -> None:
         self.press(button)

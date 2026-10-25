@@ -208,6 +208,7 @@ const char* screen_name(Screen s) {
     case Screen::Dashboard: return "dashboard";
     case Screen::Profiles: return "profiles";
     case Screen::Alarm: return "alarm";
+    case Screen::Clock: return "clock";
   }
   return "unknown";
 }
@@ -376,8 +377,12 @@ void Ui::draw_frame(const UiModel& m) {
     draw_alarm(m);
     return;
   }
-  if (alarm_shown_) {  // the alarm painted the whole panel: everything comes back
-    alarm_shown_ = false;
+  if (m.screen == Screen::Clock) {
+    draw_clock(m);
+    return;
+  }
+  if (full_face_ != FullFace::None) {  // a face painted the whole panel: everything comes back
+    full_face_ = FullFace::None;
     valid_ = false;
   }
   const int h = info_.height;
@@ -678,6 +683,7 @@ void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
     case Screen::Setup:
     case Screen::Profiles:
     case Screen::Alarm:
+    case Screen::Clock:
       break;
   }
 }
@@ -1137,9 +1143,9 @@ void Ui::draw_alarm(const UiModel& m) {
   band_shown_ = false;
   const uint32_t key = Hash().val(m.flash).add(m.headline).add(m.detail).add(m.hint).val(m.lang)
                            .add(m.face ? m.face->hash : std::string()).get();
-  if (valid_ && alarm_shown_ && key == alarm_hash_) return;  // invalidate() repaints it too
-  alarm_shown_ = true;
-  alarm_hash_ = key;
+  if (valid_ && full_face_ == FullFace::Alarm && key == face_hash_) return;  // invalidate() repaints it too
+  full_face_ = FullFace::Alarm;
+  face_hash_ = key;
   valid_ = true;  // leaving the alarm repaints everything anyway (draw_frame)
 
   const int s = layout_.scale;
@@ -1232,6 +1238,132 @@ void Ui::draw_alarm(const UiModel& m) {
       const std::string shown = fit(label, cols);
       panel.text(cx - Canvas::text_width(shown, ls) / 2, y, shown, ls, ink);
     }
+  });
+}
+
+// The resting clock face (App::clock_tick). The whole panel: the time's middle row
+// on the glass centre, the date below it, and the mascot above like a watch logo
+// when the chord there holds it; a rectangular panel centres the group and drops
+// the mascot first. Every line keeps clear of the glass at its own rows, also where
+// the per-minute shift can move it. The face changes once a minute: the burn-in
+// shift keys the hash on the minute too.
+void Ui::draw_clock(const UiModel& m) {
+  band_ = ArcSweep{};  // no arc over the clock
+  band_shown_ = false;
+  const uint32_t key = Hash().add(m.clock_time).add(m.clock_date).val(m.clock_minute).val(m.lang)
+                           .add(m.face ? m.face->hash : std::string()).get();
+  if (valid_ && full_face_ == FullFace::Clock && key == face_hash_) return;  // invalidate() repaints it too
+  full_face_ = FullFace::Clock;
+  face_hash_ = key;
+  valid_ = true;  // leaving the face repaints everything anyway (draw_frame)
+
+  const int s = layout_.scale;
+  const int W = panel_.width, H = panel_.height;
+  const int cx = W / 2, cy = H / 2, R = std::min(W, H) / 2;
+  // The burn-in shift moves the whole face a few pixels each minute.
+  const int dx = (m.clock_minute * 7) % 9 - 4, dy = (m.clock_minute * 5) % 9 - 4;
+  const int gap = 3 * s;
+  const int margin = 4;
+  // The profile's face where it has one, like the Ready screen and the alarm:
+  // the 96 px bitmap where it fits, else the 64 px one, else none.
+  auto face_at = [&m](int size) {
+    const mascot::Bitmap b = mascot::pick(size, mascot::Frame::Idle, m.face);
+    return b.size == size ? b : mascot::Bitmap{};
+  };
+
+  // The whole panel, once per framebuffer window (just once when it holds the panel).
+  each_window(0, H, [&](int, int) {
+    Canvas panel = panel_canvas();
+    panel.fill_rect(0, 0, W, H, bg_);
+
+    // The width a line may use at rows [y0, y1): the glass's chord over those rows
+    // and over the rows the shift can move it to (round panels), less a margin.
+    auto chord = [&](int y) {
+      if (!panel_.round) return W;
+      const int64_t d = y - cy;
+      return static_cast<int>(2 * isqrt(static_cast<int64_t>(R) * R - d * d));
+    };
+    auto avail = [&](int y0, int y1) {
+      int w = W;
+      if (panel_.round)
+        for (int y = y0 - 4; y <= y1 - 1 + 4; ++y) w = std::min(w, chord(y));
+      return std::max(0, w - 2 * margin);
+    };
+    // The date at the alarm label's scale, falling back to the layout's own.
+    auto date_scale_at = [&](int y) {
+      for (int ds : {s + 1, s})
+        if (Canvas::text_width(m.clock_date, ds) <= avail(y, y + Canvas::line_height(ds))) return ds;
+      return 0;
+    };
+
+    int k = 0, ds = 0, time_y = 0, date_y = 0, face_y = -1;
+    mascot::Bitmap face{};
+    if (panel_.round) {
+      for (int kk = 10; kk >= 1 && !k; --kk) {
+        const int lh = Canvas::line_height(kk);
+        const int ty = cy - (7 * kk) / 2;  // the digits span 7k rows: centred on the glass centre
+        if (Canvas::text_width(m.clock_time, kk) > avail(ty, ty + lh)) continue;
+        const int dyy = ty + lh + gap;
+        const int dsk = date_scale_at(dyy);
+        if (!dsk) continue;
+        k = kk;
+        ds = dsk;
+        time_y = ty;
+        date_y = dyy;
+      }
+      if (!k) {  // nothing fits whole: the smallest scale, cut if it must be
+        k = 1;
+        ds = s;
+        time_y = cy - 3;
+        date_y = time_y + Canvas::line_height(1) + gap;
+      } else {
+        // Two thirds of the free rows above the time go above the icon and one third
+        // below it, so the icon sits nearer the time than the top of the glass.
+        for (int size : {96, 64}) {
+          const mascot::Bitmap b = face_at(size);
+          const int y = 2 * (time_y - size) / 3;
+          if (!b.bits || y < margin || time_y - (y + size) < gap || avail(y, y + size) < size) continue;
+          face = b;
+          face_y = y;
+          break;
+        }
+      }
+    } else {
+      for (int kk = 10; kk >= 1 && !k; --kk) {
+        if (Canvas::text_width(m.clock_time, kk) > W - 2 * margin) continue;
+        int dsk = s + 1;
+        if (Canvas::text_width(m.clock_date, dsk) > W - 2 * margin) dsk = s;
+        if (Canvas::text_width(m.clock_date, dsk) > W - 2 * margin) continue;
+        if (Canvas::line_height(kk) + gap + Canvas::line_height(dsk) > H - 2 * margin) continue;
+        k = kk;
+        ds = dsk;
+      }
+      if (!k) {  // nothing fits whole: the smallest scale, cut if it must be
+        k = 1;
+        ds = s;
+        time_y = (H - (Canvas::line_height(1) + gap + Canvas::line_height(s))) / 2;
+        date_y = time_y + Canvas::line_height(1) + gap;
+      } else {
+        const int body_h = Canvas::line_height(k) + gap + Canvas::line_height(ds);
+        time_y = (H - body_h) / 2;
+        // The centred group (icon, gap, time, gap, date): the mascot is dropped
+        // first when there is no room for it.
+        for (int size : {96, 64}) {
+          const mascot::Bitmap b = face_at(size);
+          if (!b.bits || size + gap + body_h > H - 2 * margin) continue;
+          face = b;
+          face_y = (H - (size + gap + body_h)) / 2;
+          time_y = face_y + size + gap;
+          break;
+        }
+        date_y = time_y + Canvas::line_height(k) + gap;
+      }
+    }
+
+    if (face_y >= 0) panel.bitmap1(cx + dx - face.size / 2, face_y + dy, face.size, face.size, face.bits, kText);
+    panel.text(cx + dx - Canvas::text_width(m.clock_time, k) / 2, time_y + dy, m.clock_time, k, kText);
+    if (Canvas::text_width(m.clock_date, ds) <= avail(date_y, date_y + Canvas::line_height(ds)))
+      panel.text(cx + dx - Canvas::text_width(m.clock_date, ds) / 2, date_y + dy, m.clock_date, ds, kDim);
   });
 }
 

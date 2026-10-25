@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Firmware
+
+- Resting clock, off by default, on every board with a display: after the `clock` setting's seconds of rest on an online, paired Ready screen, the screen shows the time and the date, with the profile's face or the mascot, at 70 percent of the brightness setting, shifting a little each minute; a quick tap brings Ready back, and anything on screen keeps the clock away — speech or a reply, a card or a picture shown until dismissed, a question, a notice, a running timer, the alarm, the low-battery warning or the settings menu. Set it with the **Clock face** item (Off, 30 s, 1, 2 or 5 min) or `set clock` (0 or 5..3600 seconds), with `set time_format 12h` for 12-hour time and, on the ESP32 port, `set timezone` (POSIX TZ string, default `UTC0`). Network time (SNTP, `pool.ntp.org`) is fetched only while the clock is on; boards with a PCF85063 (AMOLED-1.75, 2.06, 2.16) keep UTC across resets and are set from each sync. A `screen.brightness` action no longer lights a dimmed or timed-out screen: the new level applies when it wakes. The simulator's `time` script command pins the clock's time; rebuild its native library for ABI 8. Contributed by @momoshamiko.
+
 ## 0.4.0
 
 Hermes Gadget 0.4.0 gives each Hermes profile its own face on the device, adds countdown timers that Hermes sets through device actions, and face-down sleep on boards with a motion sensor. It adds two experimental boards, the ESP32-2432S028 "Cheap Yellow Display" (the first classic ESP32 profile, drawn in bands without PSRAM) and the Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C. Profile switching no longer writes into other Hermes profiles and keeps the default profile's verdict even under a static route, and a switching device's dashboard lists the offered profiles' sessions, in order. Details by area follow.

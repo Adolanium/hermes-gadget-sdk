@@ -102,6 +102,14 @@ def _script_step(sim, cmd: str, rest: str) -> None:
         if not sim.board.motion:
             raise ScriptError(f"the {sim.board.name} board has no motion sensor")
         sim.set_face_down(rest == "on")
+    elif cmd == "time":
+        if rest == "now":
+            sim.set_wall_time(None)  # follow the computer's clock again
+        else:
+            try:
+                sim.set_wall_time(time.strptime(rest, "%Y-%m-%dT%H:%M"))
+            except ValueError as exc:
+                raise ScriptError(f"invalid time {rest!r}: use YYYY-MM-DDTHH:MM or 'now'") from exc
     elif cmd == "status":
         print(sim.status())
     elif cmd == "screenshot":
@@ -265,6 +273,11 @@ def _diag_summary(report: dict) -> list[str]:
             f"{k} {'yes' if v is True else 'no' if v is False else v}" for k, v in parts.items()))
     if isinstance(report.get("i2c"), list):
         out.append("I2C: " + (", ".join(report["i2c"]) or "nothing answered"))
+    moment = report.get("time")
+    if isinstance(moment, dict):
+        out.append(f"time: {'valid' if moment.get('valid') else 'not valid'}, "
+                   f"{'synced' if moment.get('synced') else 'not synced'}, "
+                   f"{moment.get('utc') or 'no time kept yet'}")
     wifi = report.get("wifi")
     if isinstance(wifi, dict):
         out.append(f"Wi-Fi: joined {wifi.get('ssid')} ({wifi.get('rssi')} dBm), {wifi.get('ip', 'no address')}"

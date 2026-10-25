@@ -39,6 +39,7 @@ enum class Screen : uint8_t {
   Dashboard,  // Hermes's sessions and the user's status tiles (docs/protocol.md#dashboard)
   Profiles,   // the Hermes profiles to choose from: rows in `dash` from `scroll`; `detail` labels More
   Alarm,      // TIMER DONE: the whole panel until dismissed (App::start_alarm)
+  Clock,      // the resting clock face: the time, the date and the mascot (App::clock_tick)
 };
 
 enum class Link : uint8_t { Offline, Network, Connecting, Online };
@@ -94,6 +95,10 @@ struct UiModel {
   // panel's edge arc and the rectangular top bar's line show it.
   int16_t timer_permille = -1;
   bool flash = false;  // Screen::Alarm: the green half of a beep cycle
+  // Screen::Clock: the time and the date as the app formats them, and the minute
+  // that picks the burn-in shift. No seconds: the face changes once a minute.
+  std::string clock_time, clock_date;
+  uint8_t clock_minute = 0;
 };
 
 struct UiLayout {
@@ -203,11 +208,11 @@ class Ui {
   void draw_hero(Canvas& c, const UiModel& m);
   // Rows [y0, y1) that hero animations may touch for this screen.
   void hero_anim_rows(const UiModel& m, int& y0, int& y1) const;
-  // Round panels: the edge arc, and the alarm screen (draw_alarm).
+  // Round panels: the edge arc, and the whole-panel faces (draw_alarm, draw_clock).
   void paint_band(int y0, int y1);
   void push_band_change(const ArcSweep& from, const ArcSweep& to);
   void draw_alarm(const UiModel& m);
-
+  void draw_clock(const UiModel& m);
   Display& display_;
   DisplayInfo panel_;
   DisplayInfo info_;
@@ -238,8 +243,12 @@ class Ui {
   int band_out_ = 0, band_in_ = 0;
   ArcSweep band_;
   bool band_shown_ = false;  // the arc was on the last frame
-  bool alarm_shown_ = false;
-  uint32_t alarm_hash_ = 0;
+  // The screen that owns the whole panel right now, and the hash of what it drew.
+  // Leaving it repaints everything (draw_frame); each face repaints when the flag
+  // is not itself, so Clock -> Alarm -> Clock in one minute still redraws.
+  enum class FullFace : uint8_t { None, Alarm, Clock };
+  FullFace full_face_ = FullFace::None;
+  uint32_t face_hash_ = 0;
 };
 
 }  // namespace hg

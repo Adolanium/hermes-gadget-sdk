@@ -199,6 +199,16 @@ https://qstcorp.com/upload/pdf/202301/13-52-25%20QMI8658A%20Datasheet%20Rev%20A.
 Copyright (c) 2022 QST Corporation. Hardware facts only; no QST code is
 included.
 
+The PCF85063 register facts in firmware/drivers/pcf85063.cpp (the BCD time
+registers 0x04-0x0A, the oscillator-stop flag on the seconds register and the
+burst-write behavior that restarts the clock) come from NXP's PCF85063A
+datasheet, https://www.nxp.com/docs/en/data-sheet/PCF85063A.pdf. Hardware
+facts only; no NXP code is included.
+
+The days_from_civil date conversion in firmware/drivers/pcf85063.cpp follows
+Howard Hinnant's public-domain algorithm,
+https://howardhinnant.github.io/date_algorithms.html#days_from_civil.
+
 The QR code encoder in firmware/core/third_party/qrcode/ is vendored from
 Richard Moore's QRCode library, https://github.com/ricmoo/QRCode,
 revision eafbde494979abc2445c363cc2602230bcbe299c,
