@@ -198,12 +198,13 @@ def _face(profile: str) -> bytes:
 
 
 @pytest.fixture
-def two_profile_gateway(tmp_path):
+def two_profile_gateway(tmp_path, request):
     """A multiplexed gateway serving "default" and "ops", each with its own model name and face."""
     from fakes import fake_openai
     from hermes_gadget_plugin.face import FACE_FILE
 
     api_server, api_port = fake_openai.start(0)
+    request.addfinalizer(api_server.shutdown)  # released even if a later setup step fails
     gadget_port = _free_port()
     home = tmp_path / "hermes-home"
     ops = home / "profiles" / "ops"
@@ -217,9 +218,10 @@ def two_profile_gateway(tmp_path):
     (ops / FACE_FILE).write_bytes(_face("ops"))
     env = {**os.environ, "HERMES_HOME": str(home), "PYTHONUTF8": "1"}
     log = open(tmp_path / "gateway.out", "w", encoding="utf-8")
+    request.addfinalizer(log.close)
     proc = subprocess.Popen([str(VENV_PY), "-m", "hermes_cli.main", "gateway", "run"], cwd=AGENT_DIR, env=env,
                             stdout=log, stderr=subprocess.STDOUT)
-    try:  # stop the gateway and the fake API even when startup fails, so nothing outlives the test
+    try:  # stop the gateway even when startup fails, so nothing outlives the test
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
             with socket.socket() as s:
@@ -237,8 +239,6 @@ def two_profile_gateway(tmp_path):
             proc.wait(timeout=30)
         except subprocess.TimeoutExpired:
             proc.kill()
-        log.close()
-        api_server.shutdown()
 
 
 def test_a_device_switches_to_a_second_profile_and_that_profile_answers(two_profile_gateway, make_sim):
