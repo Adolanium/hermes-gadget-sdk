@@ -1080,21 +1080,31 @@ def test_a_switched_device_a_route_later_refuses_drops_its_face(live_rig, hermes
     assert not any("bits" in m for m in sim.received[sent:] if m["type"] == "face")
 
 
-def _face_watch(hermes_home, tmp_path):
-    """A paired device's face lookups and pairing-check face tests, run step by step: no socket, no
-    pairing loop, and the device shows the face of the profile it is on. Returns the adapter, the
-    session and a function giving the hashes of the faces sent."""
+def _face_adapter(tmp_path):
+    """An adapter and its hub where a paired device shows the face of the profile it is on."""
     from gateway.config import PlatformConfig
-    from test_plugin_units import _Wire
 
     from hermes_gadget_plugin.adapter import GadgetAdapter
-    from hermes_gadget_plugin.hub import DeviceHub, DeviceSession
+    from hermes_gadget_plugin.hub import DeviceHub
     from hermes_gadget_plugin.store import DeviceStore
 
     adapter = GadgetAdapter(PlatformConfig(enabled=True, extra={}))
     adapter._face_profile = lambda session: session.profile
     adapter._convert_avatars = False
-    adapter._hub = DeviceHub(DeviceStore(tmp_path / "plugin-data"), adapter)
+    adapter._store = DeviceStore(tmp_path / "plugin-data")
+    adapter._hub = DeviceHub(adapter._store, adapter)
+    return adapter
+
+
+def _face_watch(hermes_home, tmp_path):
+    """A paired device's face lookups and pairing-check face tests, run step by step: no socket, no
+    pairing loop, and the device shows the face of the profile it is on. Returns the adapter, the
+    session and a function giving the hashes of the faces sent."""
+    from test_plugin_units import _Wire
+
+    from hermes_gadget_plugin.hub import DeviceSession
+
+    adapter = _face_adapter(tmp_path)
     wire = _Wire()
     session = DeviceSession(adapter._hub, wire, {"device_id": DEVICE, "caps": {"faces": 1}})
     session.paired = True
@@ -1140,40 +1150,6 @@ def test_a_profile_switch_starts_the_face_files_settling_afresh(hermes_home, tmp
     assert faces_sent() == [ops]
 
 
-def test_a_face_check_running_at_disconnect_leaves_nothing_behind(hermes_home, tmp_path, monkeypatch):
-    import asyncio
-    import threading
-
-    from hermes_gadget_plugin import face as faces
-    from hermes_gadget_plugin.face import FACE_FILE
-
-    adapter, session, _ = _face_watch(hermes_home, tmp_path)
-    _write_face(hermes_home / FACE_FILE, 0xAA, 1000)
-    entered, release, stamp = threading.Event(), threading.Event(), faces.stamp
-
-    def held_stamp(*a):
-        if session.closed:
-            entered.set()
-            release.wait(10)
-        return stamp(*a)
-
-    async def main():
-        await session.update_face()
-        monkeypatch.setattr(faces, "stamp", held_stamp)
-        _write_face(hermes_home / FACE_FILE, 0x55, 1001)
-        assert await adapter._follow_face(session) is None  # the first check of the new file
-        session._shutdown()  # the connection ends, as the hub ends it
-        check = asyncio.create_task(adapter._follow_face(session))
-        await asyncio.to_thread(entered.wait, 10)
-        adapter._hub.sessions.pop(DEVICE)
-        await adapter.on_disconnect(session)
-        release.set()
-        return await check
-
-    assert asyncio.run(main()) is None  # the device left: no face for it
-    assert adapter._face_from == {}  # nothing kept for it
-
-
 @pytest.mark.parametrize("when", ["before the lookup", "during its read"])
 def test_a_face_file_written_again_after_it_settled_waits_to_settle_again(hermes_home, tmp_path, monkeypatch, when):
     """The lookup a settled file starts reads that file: one written again since keeps the device its face
@@ -1213,3 +1189,99 @@ def test_a_face_file_written_again_after_it_settled_waits_to_settle_again(hermes
 
     asyncio.run(main())
     assert faces_sent() == [first, later[0]]
+
+
+class _Socket:
+    """A device's socket as DeviceHub._handle uses it: says hello, answers the challenge with the device's
+    key, and once closed ends the connection; its close waits for ``closes`` when one is given."""
+
+    remote_address = ("127.0.0.1", 1)
+
+    def __init__(self, key, closes=None):
+        import asyncio
+
+        from hermes_gadget_plugin import protocol
+
+        self.key, self.device_id, self.closes = key, protocol.device_id_for_key(key), closes
+        self.inbox, self.sent = asyncio.Queue(), []
+        self.inbox.put_nowait(json.dumps({"type": "hello", "proto": protocol.VERSION, "device_id": self.device_id,
+                                          "caps": {"faces": 1}}))
+
+    async def send(self, raw):
+        from hermes_gadget_plugin import protocol
+
+        msg = json.loads(raw)
+        self.sent.append(msg)
+        if msg["type"] == "challenge":
+            mac = protocol.auth_mac(self.key, self.device_id, msg["nonce"])
+            self.inbox.put_nowait(json.dumps({"type": "auth", "mac": mac}))
+
+    async def recv(self):
+        return await self.inbox.get()
+
+    async def close(self, code=1000, reason=""):
+        if self.closes:
+            await self.closes.wait()
+        self.inbox.put_nowait(None)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        raw = await self.inbox.get()
+        if raw is None:
+            raise StopAsyncIteration
+        return raw
+
+    def faces(self):
+        return [m.get("hash") for m in self.sent if m["type"] == "face"]
+
+
+def test_a_connection_replaced_while_it_waits_leaves_the_newest_one_following_its_face(hermes_home, tmp_path):
+    """B replaces A and waits for A to close; C replaces B and gets its face. When A's close ends, B runs
+    its welcome's face lookup late: C must still follow its face files."""
+    import asyncio
+
+    from hermes_gadget_plugin.face import FACE_FILE
+
+    adapter = _face_adapter(tmp_path)
+    hub, face_file = adapter._hub, hermes_home / FACE_FILE
+    first = _write_face(face_file, 0xAA, 1000)
+    key = bytes(range(32))
+
+    async def ready(session):  # pairing prompts and dashboards are not under test
+        pass
+    adapter.on_ready = ready
+
+    async def until(done):
+        for _ in range(500):
+            if done():
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError("timed out")
+
+    async def main():
+        a_closes = asyncio.Event()
+        a, b, c = _Socket(key, a_closes), _Socket(key), _Socket(key)
+        hub.store.enroll(a.device_id, key)
+        hub.store.confirm(a.device_id)
+        handlers = [asyncio.create_task(hub._handle(a))]
+        await until(lambda: a.faces() == [first])
+        handlers.append(asyncio.create_task(hub._handle(b)))
+        await until(lambda: hub.sessions[a.device_id]._ws is b)  # B waits for A to close
+        handlers.append(asyncio.create_task(hub._handle(c)))
+        await until(lambda: c.faces() == [first])
+        a_closes.set()
+        await until(lambda: handlers[1].done())  # B's welcome lookup ran, and B left
+        session = hub.sessions[c.device_id]
+        later = _write_face(face_file, 0x55, 1001)
+        for _ in range(2):  # two pairing checks: the new file settled
+            update = await adapter._follow_face(session)
+        if update:
+            await update
+        c.inbox.put_nowait(None)
+        await asyncio.gather(*handlers)
+        return c.faces(), later
+
+    sent, later = asyncio.run(main())
+    assert sent == [first, later]

@@ -40,6 +40,7 @@ import re
 import ssl
 import time
 import uuid
+import weakref
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -127,8 +128,7 @@ class _Prompt:
 
 @dataclass
 class _FaceLook:
-    """A device's last face lookup, and what the pairing check has seen of its files since (faces.stamp)."""
-    session: DeviceSession
+    """A connection's last face lookup, and what the pairing check has seen of its files since (faces.stamp)."""
     profile: Optional[str]  # the profile it could show; None for the mascot
     seen: Optional[tuple] = None  # the files as the lookup read them; None until stat'ed
     last: Optional[tuple] = None  # the files at the last pairing check
@@ -225,7 +225,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._roster_lock = asyncio.Lock()  # one roster read at a time; never held across a send
         self._push_seq = 0
         self._pushed_seq: Dict[str, int] = {}  # device -> the newest push that read a roster for it
-        self._face_from: Dict[str, _FaceLook] = {}  # device -> its last face lookup
+        # connection -> its last face lookup; it goes with the connection, and a replaced one keeps its own
+        self._face_from: "weakref.WeakKeyDictionary[DeviceSession, _FaceLook]" = weakref.WeakKeyDictionary()
         self._battery_log: Optional[BatteryLog] = None
         self._tls_cert = extra.get("tls_cert")
         self._tls_key = extra.get("tls_key")
@@ -472,10 +473,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             if not self._convert_avatars:
                 logger.info("[%s] Pillow is not installed: devices show profile face files, not avatars", self.name)
         profile = self._face_profile(session)
-        look = self._face_from.get(session.device_id)
-        settled = look.settled if look and look.session is session and look.profile == profile else None
+        look = self._face_from.get(session)
+        settled = look.settled if look and look.profile == profile else None
         if settled is None:
-            look = self._face_from[session.device_id] = _FaceLook(session, profile)
+            look = self._face_from[session] = _FaceLook(profile)
         if profile is None:
             return None
         try:
@@ -516,22 +517,21 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     async def _follow_face(self, session: DeviceSession) -> Optional[asyncio.Task]:
         """Another profile approving or revoking the device, or its face file or avatar changing, only
         shows at the pairing check: its face follows. Returns the face update it starts, if any."""
-        if (session.paired and self._profile_faces and session.device_id in self._face_from
-                and (self._face_profile(session) != self._face_from[session.device_id].profile
-                     or await self._face_source_changed(session.device_id))):
+        look = self._face_from.get(session)
+        if (session.paired and self._profile_faces and look
+                and (self._face_profile(session) != look.profile or await self._face_source_changed(session, look))):
             return session.update_face()
         return None
 
-    async def _face_source_changed(self, device_id: str) -> bool:
+    async def _face_source_changed(self, session: DeviceSession, look: _FaceLook) -> bool:
         """Whether the files the device's last face lookup read from have changed since, and settled:
         the same on two pairing checks in a row, so a file still being written is not read. Stat only;
         the lookup it starts sends a face only if its hash differs from the one the device holds."""
-        look = self._face_from[device_id]
         if look.profile is None or look.seen is None:
             return False
         now = await asyncio.to_thread(faces.stamp, self._profile_home(look.profile), self._convert_avatars)
-        if self._face_from.get(device_id) is not look or not look.session.current():
-            return False  # looked up again, or gone, meanwhile
+        if self._face_from.get(session) is not look:
+            return False  # looked up again meanwhile
         before, look.last = look.last, now
         if now == look.seen or now != before:
             return False
@@ -865,7 +865,6 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if self._hub and session.device_id not in self._hub.sessions:
             self._turns.pop(session.device_id, None)
             self._pushed_seq.pop(session.device_id, None)
-            self._face_from.pop(session.device_id, None)
 
     # -- turn lifecycle -------------------------------------------------------------
 
