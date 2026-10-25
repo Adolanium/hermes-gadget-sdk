@@ -214,6 +214,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         # device -> the profile its last face lookup could show, and that profile's face sources as the
         # lookup found them (faces.stamp; None until stat'ed)
         self._face_from: Dict[str, Tuple[Optional[str], Optional[tuple]]] = {}
+        self._face_stat: Dict[str, tuple] = {}  # device -> its face sources at the last pairing check
         self._battery_log: Optional[BatteryLog] = None
         self._tls_cert = extra.get("tls_cert")
         self._tls_key = extra.get("tls_key")
@@ -487,12 +488,15 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         return get_profile_dir(profile)
 
     async def _face_source_changed(self, device_id: str) -> bool:
-        """Whether the files the device's last face lookup read from have changed since: stat only."""
+        """Whether the files the device's last face lookup read from have changed since, and settled:
+        the same on two pairing checks in a row, so a file still being written is not read. Stat only;
+        the lookup it starts sends a face only if its hash differs from the one the device holds."""
         profile, seen = self._face_from[device_id]
         if profile is None or seen is None:
             return False
         now = await asyncio.to_thread(faces.stamp, self._profile_home(profile), self._convert_avatars)
-        return now != seen
+        before, self._face_stat[device_id] = self._face_stat.get(device_id), now
+        return now != seen and now == before
 
     def _face_profile(self, session: DeviceSession) -> Optional[str]:
         """The profile whose face the device may show: the one answering it. None: the mascot.
@@ -827,6 +831,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             self._turns.pop(session.device_id, None)
             self._pushed_seq.pop(session.device_id, None)
             self._face_from.pop(session.device_id, None)
+            self._face_stat.pop(session.device_id, None)
 
     # -- turn lifecycle -------------------------------------------------------------
 
