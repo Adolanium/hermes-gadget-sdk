@@ -1086,6 +1086,27 @@ def test_a_switched_device_a_route_later_refuses_drops_its_face(live_rig, hermes
     assert not any("bits" in m for m in sim.received[sent:] if m["type"] == "face")
 
 
+def test_a_device_a_route_refuses_is_told_why_and_asked_for_no_code(live_rig, hermes_home, make_sim):
+    """No pairing code can let in a switched device that a route refuses: the device is told so, now and
+    after a reconnect, rather than wait for a code, or get the notice to go look for one."""
+    sim, _held, digest = _faces_on_ops(live_rig, hermes_home, make_sim)
+    live_rig.approve("ops", sim.status()["device_id"])
+    assert sim.wait_for(lambda: (sim.last_received("face") or {}).get("hash") == digest["ops"], timeout=8)
+
+    sent = len(sim.received)
+    live_rig.runner.config.profile_routes = _ops_route(sim.status()["device_id"])
+    assert sim.wait_for(lambda: sim.status()["paired"] is False, timeout=8)
+    sim.console("reconnect")
+    assert sim.wait_for(lambda: any(m["type"] == "welcome" for m in sim.received[sent:]), timeout=10)
+    sim.run_for(8)  # past the pairing grace
+    frames = [m for m in sim.received[sent:] if m["type"] in ("welcome", "unpaired", "pairing", "notice")]
+    assert [m["type"] for m in frames] == ["unpaired", "welcome", "unpaired"]
+    assert [m for m in frames if m["type"] == "unpaired"] == [{"type": "unpaired", "reason": "routed"}] * 2
+
+    live_rig.runner.config.profile_routes = []  # the fix the device names
+    assert sim.wait_screen("ready", timeout=8)
+
+
 def _face_adapter(tmp_path):
     """An adapter and its hub where a paired device shows the face of the profile it is on."""
     from gateway.config import PlatformConfig

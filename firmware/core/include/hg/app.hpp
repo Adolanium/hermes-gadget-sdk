@@ -461,6 +461,7 @@ class App {
   bool paired_ = false;
   std::string pairing_code_;
   std::string pairing_command_;
+  std::string unpaired_reason_;  // `unpaired` reason: why no pairing code can let it in
 
   // conversation
   Mode mode_ = Mode::Idle;

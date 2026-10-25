@@ -398,6 +398,11 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             logger.warning("[%s] authorization check failed for %s", self.name, device_id, exc_info=True)
             return False
 
+    def _refusal(self, session: DeviceSession) -> Optional[str]:
+        """Why no pairing code can let this device in, or None: ``routed`` for a device that answers to
+        the default profile but a route sends elsewhere (``_owner_trusts`` refuses it)."""
+        return "routed" if self._store.owner_bound(session.device_id) and self._routed(session) else None
+
     def _routed(self, session: DeviceSession) -> bool:
         """A ``gateway.profile_routes`` entry matches this device (Hermes may also reject it)."""
         source = self._routed_source(session)
@@ -585,6 +590,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             await self._push_dashboard(session)
             return
         self._prompts.pop(session.device_id, None)  # unpaired while away: its questions are void
+        refusal = self._refusal(session)
+        if refusal:  # no pairing code can let it in: say why rather than ask Hermes for one
+            await session.set_paired(False, refusal)
+            return
         cached = self._store.pairing_for(session.device_id)
         if cached:
             await session.send_pairing(*cached)
@@ -635,8 +644,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                         await self._push_dashboard(session)
                     elif not verdict and session.paired:
                         self._prompts.pop(session.device_id, None)
-                        await session.set_paired(False)
-                        await self.on_ready(session)
+                        refusal = self._refusal(session)
+                        await session.set_paired(False, refusal)
+                        if refusal is None:  # a pairing code can let it in again
+                            await self.on_ready(session)
                     await self._follow_face(session)
                 except Exception as exc:
                     logger.debug("[%s] pairing sync failed for %s: %s", self.name, session.device_id, exc)

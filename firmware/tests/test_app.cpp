@@ -351,6 +351,30 @@ TEST("app: unpaired devices show the pairing code until approved") {
   CHECK(r.app.screen() == hg::Screen::Ready);
 }
 
+TEST("app: a device a route refuses says so until a new connection or approval") {
+  const std::string asking = "Asking Hermes for a pairing code...";
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"unpaired","reason":"routed"})");
+  CHECK(r.app.screen() == hg::Screen::Pairing);
+  CHECK_EQ(r.app.model().headline, std::string("Refused by a route"));
+  CHECK_EQ(r.app.model().detail, std::string("Remove its gateway route on the Hermes host."));
+  r.server(R"({"type":"paired"})");
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  r.server(R"({"type":"unpaired"})");  // revoked: a code can fix that
+  CHECK_EQ(r.app.model().detail, asking);
+  r.server(R"({"type":"unpaired","reason":"a-later-reason"})");  // one this firmware doesn't know
+  CHECK_EQ(r.app.model().detail, asking);
+
+  r.server(R"({"type":"unpaired","reason":"routed"})");
+  r.app.on_transport_closed("server restarted");
+  r.advance(1500);
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":true})");
+  r.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":false})");
+  CHECK_EQ(r.app.model().detail, asking);  // the new connection says again, or not
+}
+
 TEST("app: push-to-talk streams audio and shows the reply") {
   Rig r;
   r.bring_online(true);
