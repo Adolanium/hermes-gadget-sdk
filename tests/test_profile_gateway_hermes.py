@@ -1216,7 +1216,7 @@ def test_a_face_read_slower_than_the_pairing_check_is_not_restarted(hermes_home,
         assert await adapter._follow_face(session) is None
         update = await adapter._follow_face(session)  # settled: the read starts
         for _ in range(3):  # pairing checks while it reads
-            await asyncio.to_thread(lambda: None)
+            await asyncio.to_thread(lambda: None)  # the update gets to run
             await adapter._follow_face(session)
         release.set()
         await asyncio.gather(update, session._face_task, return_exceptions=True)
