@@ -527,7 +527,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         """Whether the files the device's last face lookup read from have changed since, and settled:
         the same on two pairing checks in a row, so a file still being written is not read. Stat only;
         the lookup it starts sends a face only if its hash differs from the one the device holds."""
-        if look.profile is None or look.seen is None:
+        if look.profile is None or look.seen is None or look.settled is not None:  # settled: its lookup is on
             return False
         now = await asyncio.to_thread(faces.stamp, self._profile_home(look.profile), self._convert_avatars)
         if self._face_from.get(session) is not look:

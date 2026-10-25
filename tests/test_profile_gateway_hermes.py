@@ -1191,6 +1191,40 @@ def test_a_face_file_written_again_after_it_settled_waits_to_settle_again(hermes
     assert faces_sent() == [first, later[0]]
 
 
+
+def test_a_face_read_slower_than_the_pairing_check_is_not_restarted(hermes_home, tmp_path, monkeypatch):
+    import asyncio
+    import threading
+
+    from hermes_gadget_plugin import face as faces
+    from hermes_gadget_plugin.face import FACE_FILE
+
+    adapter, session, faces_sent = _face_watch(hermes_home, tmp_path)
+    face_file = hermes_home / FACE_FILE
+    first = _write_face(face_file, 0xAA, 1000)
+    read, reads, release = faces.for_profile, [], threading.Event()
+
+    def slow_read(*a):
+        reads.append(a)
+        release.wait(10)
+        return read(*a)
+
+    async def main():
+        await session.update_face()
+        later = _write_face(face_file, 0x55, 1001)
+        monkeypatch.setattr(faces, "for_profile", slow_read)
+        assert await adapter._follow_face(session) is None
+        update = await adapter._follow_face(session)  # settled: the read starts
+        for _ in range(3):  # pairing checks while it reads
+            await asyncio.to_thread(lambda: None)
+            await adapter._follow_face(session)
+        release.set()
+        await asyncio.gather(update, session._face_task, return_exceptions=True)
+        return later
+
+    later = asyncio.run(main())
+    assert (faces_sent(), len(reads)) == ([first, later], 1)
+
 class _Socket:
     """A device's socket as DeviceHub._handle uses it: says hello, answers the challenge with the device's
     key, and once closed ends the connection; its close waits for ``closes`` when one is given."""
