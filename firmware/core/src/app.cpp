@@ -272,9 +272,10 @@ void App::begin() {
 
   add_timer_actions();  // timer.start/status/cancel, beside the built-in actions
   if (hal_.display) ui_ = std::make_unique<Ui>(*hal_.display);
-  if (ui_ && profile_.faces && profile_.colour_faces && !colour_) {
+  if (ui_ && profile_.faces && profile_.colour_face_alloc && !colour_) {
     const int px = std::min(256, ui_->face_px());
-    colour_.reset(static_cast<uint16_t*>(std::malloc(static_cast<size_t>(px) * static_cast<size_t>(px) * 2)));
+    const size_t bytes = static_cast<size_t>(px) * static_cast<size_t>(px) * 2;
+    colour_.reset(static_cast<uint16_t*>(profile_.colour_face_alloc(bytes)));
     colour_px_ = colour_ ? px : 0;
     if (!colour_) log(LogLevel::Warn, "no room for a colour face: one-colour faces only");
   }

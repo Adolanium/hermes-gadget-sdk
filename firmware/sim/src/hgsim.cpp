@@ -2,6 +2,7 @@
 #include "hgsim.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -247,7 +248,7 @@ hgsim* hgsim_create(const hgsim_config* cfg, const hgsim_host* host) {
     profile.extra_settings = {"touch_cancel"};
   }
   profile.motion_sensor = cfg->motion != 0;
-  profile.colour_faces = true;
+  profile.colour_face_alloc = std::malloc;
   sim->app = std::make_unique<hg::App>(sim->hal, profile);
   if (cfg->touch) {
     sim->touch = std::make_unique<hg::TouchGestures>(*sim->app);

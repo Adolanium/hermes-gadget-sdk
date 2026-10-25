@@ -1,5 +1,6 @@
 // Drives hg::App through a fake HAL the way a Hermes gateway would.
 #include <algorithm>
+#include <cstdlib>
 #include <deque>
 #include <map>
 #include <string>
@@ -4168,7 +4169,7 @@ namespace {
 
 hg::DeviceProfile colour_profile() {
   hg::DeviceProfile p = Rig::profile("ws://hermes.local:8765/gadget");
-  p.colour_faces = true;
+  p.colour_face_alloc = std::malloc;
   return p;
 }
 
@@ -4233,12 +4234,21 @@ TEST("colour faces: a board with room offers its Ready face size and draws the f
 }
 
 TEST("colour faces: a board without room keeps one-colour faces") {
-  Rig r;  // colour_faces off: a board without PSRAM to spare
+  Rig r;  // no colour_face_alloc: a board without PSRAM to spare
   r.bring_online(true);
   const Value* hello = r.fake.last("hello");
   CHECK(hello && (*hello)["caps"]["faces"].as_int() == 1);
   send_colour_face(r, "default", "c1", 144, kRose);
   CHECK(r.app.model().face == nullptr);
+
+  hg::DeviceProfile full = colour_profile();  // PSRAM with no room left after the framebuffer
+  full.colour_face_alloc = [](size_t) -> void* { return nullptr; };
+  Rig no_room(full);
+  no_room.bring_online(true);
+  hello = no_room.fake.last("hello");
+  CHECK(hello && (*hello)["caps"]["faces"].as_int() == 1);
+  no_room.server(face_message("default", "a1"));
+  CHECK(no_room.app.model().face && no_room.app.model().face->hash == "a1");  // one-colour faces still
 }
 
 TEST("colour faces: a bad start or a broken transfer leaves the mascot") {

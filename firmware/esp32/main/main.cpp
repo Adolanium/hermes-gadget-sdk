@@ -6,6 +6,7 @@
 
 #include "driver/gpio.h"
 #include "esp_app_desc.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_pm.h"
 #include "esp_psram.h"
@@ -424,7 +425,9 @@ extern "C" void app_main(void) {
   profile.default_name = CONFIG_HG_DEFAULT_NAME;
 #if CONFIG_SPIRAM
   profile.faces = esp_psram_is_initialized();
-  profile.colour_faces = profile.faces;  // malloc takes blocks this large from PSRAM, after the framebuffer
+  // From PSRAM only, after the framebuffer: without room there, one-colour faces.
+  if (profile.faces)
+    profile.colour_face_alloc = [](size_t n) { return heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); };
 #else
   profile.faces = false;
 #endif
