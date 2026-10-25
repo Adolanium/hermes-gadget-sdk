@@ -510,13 +510,17 @@ BoardConfig make() {
 // M5Stack StickS3: 1.14" 135x240 ST7789P3 used in landscape, one ES8311 doing
 // both directions on a duplex I2S bus, KEY1 (GPIO11) and KEY2 (GPIO12). The
 // M5PM1 on the internal I2C bus switches the LCD rail (its GPIO2) and the
-// AW8737 amplifier (its GPIO3): StickS3Board. Battery and BMI270 not read yet.
+// AW8737 amplifier (its GPIO3), reads the battery and shuts down: StickS3Board.
+// A BMI270 at 0x68 gives face-down sleep.
 // Pins: docs.m5stack.com/en/core/StickS3, and M5GFX/M5Unified's StickS3 setup.
 BoardConfig make() {
   BoardConfig b{};
   b.name = kBoardName;
   b.sticks3 = true;
   b.i2c = {47, 48, 400000};
+  b.imu.enabled = true;
+  b.imu.chip = ImuChip::Bmi270;
+  b.imu.addr = 0x68;
   b.lcd.enabled = true;
   b.lcd.width = 240;
   b.lcd.height = 135;

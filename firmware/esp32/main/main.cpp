@@ -367,6 +367,10 @@ extern "C" void app_main(void) {
 #if SOC_MIPI_DSI_SUPPORTED
   if (peripherals_ready && board.stc8_battery && g_stc8_power.begin(i2c_bus)) hal.power = &g_stc8_power;
 #endif
+  if (board.sticks3 && peripherals_ready) {  // peripherals_ready includes g_sticks3.begin()
+    hal.power = &g_sticks3;
+    g_wifi.on_battery = [] { return g_sticks3.external_power() == std::optional<bool>(false); };
+  }
   const bool audio_power = peripherals_ready && (!board.axp_audio_supply || g_power.enable_audio_supply());
   if (!audio_power) ESP_LOGE(TAG, "audio supply unavailable");
   if (board.sticks3) g_codec_speaker.board_pa = [](bool on) { g_sticks3.set_amplifier(on); };
@@ -408,7 +412,7 @@ extern "C" void app_main(void) {
   parts.touch = touch && g_touch.has_touch();
   parts.key = touch && g_touch.has_key();
   parts.i2c = i2c_bus;
-  parts.imu = imu ? "qmi8658" : "none";
+  parts.imu = imu ? g_motion.chip_name() : "none";
   parts.rtc = g_time.rtc_ready() ? "pcf85063" : "none";
   parts.motion = imu ? &g_motion : nullptr;
   parts.time = &g_time;

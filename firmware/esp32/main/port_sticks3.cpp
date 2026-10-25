@@ -15,8 +15,8 @@ bool StickS3Board::begin(i2c_master_bus_handle_t bus) {
   cfg.scl_speed_hz = 100000;  // the vendor's PM1 clock
   if (i2c_master_bus_add_device(bus, &cfg, &pm1_) != ESP_OK) return false;
   control_ = std::make_unique<hg::StickS3Control>(
-      [this](uint8_t reg, uint8_t& value) {
-        return i2c_master_transmit_receive(pm1_, &reg, 1, &value, 1, 50) == ESP_OK;
+      [this](uint8_t reg, uint8_t* data, size_t size) {
+        return i2c_master_transmit_receive(pm1_, &reg, 1, data, size, 50) == ESP_OK;
       },
       [this](uint8_t reg, uint8_t value) {
         const uint8_t data[] = {reg, value};

@@ -21,6 +21,7 @@
 #include "board.hpp"
 #include "axp2101.hpp"
 #include "band_flush.hpp"
+#include "bmi270.hpp"
 #include "cores3.hpp"
 #include "pcf85063.hpp"
 #include "qmi8658.hpp"
@@ -588,12 +589,16 @@ class MotionInput {
   // Counts good reads: the app task forwards a sample only when this moved, so a
   // sensor that stops answering goes stale in App::motion_tick instead of repeating.
   uint32_t samples() const { return samples_.load(std::memory_order_acquire); }
+  const char* chip_name() const { return cfg_.chip == ImuChip::Bmi270 ? "bmi270" : "qmi8658"; }
 
  private:
   static void task(void* arg);
+  bool start_chip();
+  bool read_chip(int16_t mg[3]);
   ImuConfig cfg_{};
   i2c_master_dev_handle_t dev_ = nullptr;
   std::unique_ptr<hg::Qmi8658> chip_;
+  std::unique_ptr<hg::Bmi270> bmi270_;
   std::atomic<int16_t> x_{0}, y_{0}, z_{0};
   std::atomic<uint32_t> samples_{0};
 };
@@ -677,10 +682,14 @@ class CoreS3Board {
   std::unique_ptr<hg::CoreS3Control> control_;
 };
 
-class StickS3Board {
+// The M5PM1's rails, amplifier and battery. Hal::power once begin() succeeded.
+class StickS3Board final : public hg::Power {
  public:
   bool begin(i2c_master_bus_handle_t bus);
   void set_amplifier(bool on);
+  std::optional<hg::PowerStatus> read() override { return control_->read(); }
+  bool power_off() override { return control_->power_off(); }
+  std::optional<bool> external_power() override { return control_->external_power(); }
 
  private:
   i2c_master_dev_handle_t pm1_ = nullptr;

@@ -49,6 +49,7 @@ idf_component_register(
         "../../drivers/axp2101.cpp"
         "../../drivers/cores3.cpp"
         "../../drivers/sticks3.cpp"
+        "../../drivers/bmi270.cpp"
         "../../drivers/pcf85063.cpp"
         "../../drivers/qmi8658.cpp"
         "port_storage.cpp"

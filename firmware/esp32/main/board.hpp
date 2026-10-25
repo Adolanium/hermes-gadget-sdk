@@ -197,15 +197,18 @@ struct TouchConfig {
   I2cBusConfig bus{};
 };
 
-// QMI8658 accelerometer on the I2C bus (face-down sleep). The port maps its
+// An accelerometer on the I2C bus (face-down sleep). The port maps its
 // axes into the device frame: +x towards the right of the picture, +y towards
 // its top, +z out of the screen towards the viewer. `*_from` picks the sensor
 // axis feeding a device axis (0 = x, 1 = y, 2 = z), `*_sign` its direction.
+enum class ImuChip { Qmi8658, Bmi270 };
+
 struct ImuConfig {
   bool enabled = false;
   uint8_t addr = 0x6B;
   int8_t x_from = 0, y_from = 1, z_from = 2;
   int8_t x_sign = 1, y_sign = 1, z_sign = 1;
+  ImuChip chip = ImuChip::Qmi8658;
 };
 
 // PCF85063 RTC on the I2C bus, keeping UTC across power loss.
