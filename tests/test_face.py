@@ -747,31 +747,58 @@ def test_either_frame_alone_moves_and_the_other_stays_still(tmp_path):
     assert face.blink is not None and face.talk is None
 
 
-def test_a_frame_that_changes_too_many_rows_is_refused_and_said_once(tmp_path, caplog):
+def test_a_frame_that_changes_too_many_rows_leaves_the_face_still_and_is_said_once(tmp_path, caplog, monkeypatch):
+    monkeypatch.setattr(profile_faces, "_refused", set())
     home = _frames_home(tmp_path, blink={"eyes": None, "shift": 40}, talk={"mouth": (195, 235)})
     found = profile_faces.for_profile(home, colour_px=144, frames=True)
     with caplog.at_level("WARNING", logger="hermes_gadget_plugin.face"):
         face = found.load()
-        assert face.blink is None and face.talk is not None  # the talk picture still moves the mouth
+        assert face.blink is None and face.talk is None  # the talk picture fits, but the face stays still
+        assert face.rgb565 == profile_faces.colour_from_picture(home / "assets" / "avatar.png", 144).rgb565
         found.load()  # a reconnect makes it again: the log does not repeat
     refusals = [r.getMessage() for r in caplog.records if "avatar-blink.png" in r.getMessage()]
     assert len(refusals) == 1
-    assert re.fullmatch(r"avatar-blink\.png differs from avatar\.png in \d+ of 144 rows, more than the 72 the "
-                        r"device has room for; draw it from the same picture with only the eyes changed",
-                        refusals[0]), refusals[0]
+    blink = re.escape(str(home / "assets" / "avatar-blink.png"))
+    assert re.fullmatch(blink + r" differs from avatar\.png in \d+ of 144 rows, more than the 72 the device has "
+                        r"room for; draw it from the same picture with only the eyes changed", refusals[0]), refusals[0]
 
 
-def test_the_bands_share_half_the_rows_and_the_one_that_does_not_fit_is_refused(tmp_path, caplog):
-    # Each fits alone in 72 rows; together they need more, so the talk picture, measured second, is refused.
+def test_bands_that_do_not_fit_together_leave_the_face_still(tmp_path, caplog, monkeypatch):
+    monkeypatch.setattr(profile_faces, "_refused", set())
+    # Each fits alone in 72 rows; together they need more.
     home = _frames_home(tmp_path, blink={"eyes": (40, 150)}, talk={"mouth": (180, 270)})
     with caplog.at_level("WARNING", logger="hermes_gadget_plugin.face"):
         face = profile_faces.for_profile(home, colour_px=144, frames=True).load()
-    assert face.blink is not None and face.talk is None
-    left = 72 - len(face.blink[1]) // (2 * 144)
-    assert f"more than the {left} the device has room for; draw it from the same picture with only the mouth " \
-           "changed" in caplog.text
+    assert face.blink is None and face.talk is None
+    assert re.search(re.escape(str(home / "assets" / "avatar-blink.png")) + " and " +
+                     re.escape(str(home / "assets" / "avatar-talk.png")) +
+                     r" differ from avatar\.png in \d+ rows together, more than the 72 the device has room for",
+                     caplog.text), caplog.text
     (home / "assets" / "avatar-blink.png").unlink()
     assert profile_faces.for_profile(home, colour_px=144, frames=True).load().talk is not None
+
+
+def test_each_profiles_refused_frame_is_said_with_its_path(tmp_path, caplog, monkeypatch):
+    monkeypatch.setattr(profile_faces, "_refused", set())
+    homes = [_frames_home(tmp_path / name, blink={"eyes": None, "shift": 40}) for name in ("ops", "default")]
+    with caplog.at_level("WARNING", logger="hermes_gadget_plugin.face"):
+        for home in homes:
+            assert profile_faces.for_profile(home, colour_px=144, frames=True).load().blink is None
+    for home in homes:  # the same picture in two profiles: two files to fix
+        assert caplog.text.count(str(home / "assets" / "avatar-blink.png") + " differs") == 1
+
+
+def test_a_frame_file_that_is_no_picture_leaves_the_still_avatar(tmp_path, caplog, monkeypatch):
+    monkeypatch.setattr(profile_faces, "_refused", set())
+    home = _frames_home(tmp_path, talk={"mouth": (195, 235)})
+    (home / "assets" / "avatar-blink.png").write_bytes(b"not a png")
+    found = profile_faces.for_profile(home, colour_px=144, frames=True)
+    with caplog.at_level("WARNING", logger="hermes_gadget_plugin.face"):
+        face = found.load()
+        found.load()
+    assert face.blink is None and face.talk is None
+    assert face.rgb565 == profile_faces.colour_from_picture(home / "assets" / "avatar.png", 144).rgb565
+    assert caplog.text.count(str(home / "assets" / "avatar-blink.png") + " is not a picture") == 1
 
 
 def test_a_frame_that_turns_black_into_transparency_changes_those_rows(tmp_path):
@@ -788,3 +815,21 @@ def test_a_frame_that_turns_black_into_transparency_changes_those_rows(tmp_path)
         img.save(home / "assets" / name)
     face = profile_faces.for_profile(home, colour_px=144, frames=True).load()
     assert face.blink is not None and face.blink[0] == 50 and len(face.blink[1]) == 10 * 2 * 144
+
+
+@pytest.mark.parametrize("channel", [1, 2], ids=["green", "blue"])
+def test_a_change_in_one_colour_counts_past_16_levels(tmp_path, channel):
+    """Rows 50-59 change 40 levels in green or blue only, rows 80-89 by 12: a band of rows 50-59."""
+    from PIL import Image, ImageDraw
+
+    home = tmp_path / "ops"
+    (home / "assets").mkdir(parents=True)
+    grey = (120, 120, 120)
+    Image.new("RGB", (144, 144), grey).save(home / "assets" / "avatar.png")  # at the device's size: no resampling
+    frame = Image.new("RGB", (144, 144), grey)
+    draw = ImageDraw.Draw(frame)
+    for (top, bottom), step in (((50, 59), 40), ((80, 89), 12)):
+        draw.rectangle((0, top, 143, bottom), fill=tuple(v + step * (i == channel) for i, v in enumerate(grey)))
+    frame.save(home / "assets" / "avatar-blink.png")
+    blink = profile_faces.for_profile(home, colour_px=144, frames=True).load().blink
+    assert blink is not None and blink[0] == 50 and len(blink[1]) == 10 * 2 * 144

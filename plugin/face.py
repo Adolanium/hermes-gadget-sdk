@@ -286,34 +286,50 @@ def _differs(a: bytes, b: bytes) -> bool:
     return False
 
 
-_refused: set[tuple] = set()  # (name, picture hash, px) of the frames already said to be refused
+_refused: set[tuple] = set()  # what the log already said: a frame's path, picture hash and px
 
 
-def moving(still: ColourFace, avatar: str, frames: dict[str, tuple[str, bytes]]) -> ColourFace:
-    """`still` with the blink and talk frames of `frames` (frame: (file name, picture)), each as only
-    the rows where it differs from the avatar. The bands share half the face's rows, blink first; a
-    frame that needs more stays still, and the log says why, once for each picture."""
+def _refuse(key: tuple, message: str, *args) -> None:
+    """Log `message` once for `key`."""
+    if key not in _refused:
+        _refused.add(key)
+        logger.warning(message, *args)
+
+
+def moving(still: ColourFace, avatar: str, frames: dict[str, tuple[Path, bytes]]) -> ColourFace:
+    """`still` with the blink and talk frames of `frames` (frame: (path, picture)), each as only the
+    rows where it differs from the avatar. The bands share half the face's rows. A frame that is no
+    picture, or needs more rows than that, leaves the whole face still, and the log says why, once for
+    each picture."""
     px, row = still.px, 2 * still.px
     room, bands = px // 2, {}
     for frame, feature in (("blink", "eyes"), ("talk", "mouth")):
         if frame not in frames:
             continue
-        name, picture = frames[frame]
-        drawn = colour_from_picture(io.BytesIO(picture), px).rgb565
+        path, picture = frames[frame]
+        try:
+            drawn = colour_from_picture(io.BytesIO(picture), px).rgb565
+        except Exception as exc:  # an optional file: the avatar still shows
+            _refuse((path, digest(picture), px), "%s is not a picture the plugin can read (%s); the face stays still",
+                    path, exc)
+            return still
         changed = [y for y in range(px) if _differs(drawn[y * row:(y + 1) * row], still.rgb565[y * row:(y + 1) * row])]
         if not changed:
             continue
         y0, y1 = changed[0], changed[-1] + 1
         if y1 - y0 > room:
-            key = (name, digest(picture), px)
-            if key not in _refused:
-                _refused.add(key)
-                logger.warning("%s differs from %s in %d of %d rows, more than the %d the device has room for; "
-                               "draw it from the same picture with only the %s changed",
-                               name, avatar, y1 - y0, px, room, feature)
-            continue
-        room -= y1 - y0
+            _refuse((path, digest(picture), px), "%s differs from %s in %d of %d rows, more than the %d the device has "
+                    "room for; draw it from the same picture with only the %s changed", path, avatar, y1 - y0, px,
+                    room, feature)
+            return still
         bands[frame] = (y0, drawn[y0 * row:y1 * row])
+    rows = sum(len(pixels) // row for _, pixels in bands.values())
+    if rows > room:
+        paths = [frames[frame][0] for frame in bands]
+        _refuse((*paths, *(digest(frames[f][1]) for f in bands), px),
+                "%s and %s differ from %s in %d rows together, more than the %d the device has room for; the face "
+                "stays still", *paths, avatar, rows, room)
+        return still
     return ColourFace(px, still.rgb565, still.anchors, **bands)
 
 
@@ -363,7 +379,7 @@ def for_profile(home: Path, convert: bool = True, colour_px: int = 0, frames: bo
     for frame in ("blink", "talk") if frames else ():
         picture = next((p for p in _pictures(home, f"avatar-{frame}") if p.is_file()), None)
         if picture:
-            found[frame] = (picture.name, picture.read_bytes())
+            found[frame] = (picture, picture.read_bytes())
     still = lambda: colour_from_picture(io.BytesIO(source), colour_px)  # noqa: E731
     size = colour_px.to_bytes(2, "little")
     if not found:

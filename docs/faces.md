@@ -132,10 +132,11 @@ open (`.jpg` or `.webp` too, each found on its own). Draw each from the avatar w
 mouth changed, and save it the way the avatar is saved: the plugin fits it like the avatar and sends only
 the rows where it differs from the avatar, by more than 16 levels in a colour or in whether it is
 transparent. A JPEG frame next to a PNG avatar differs in most rows. The two frames share half the face's
-rows (72 at 144 px, 96 at 192), the blink first. A frame that needs more is left out, and the log says so
-once for each picture, for example: `avatar-blink.png differs from avatar.png in 131 of 144 rows, more than
-the 72 the device has room for; draw it from the same picture with only the eyes changed`. A face with only
-one of the pictures keeps the other frame still. The colour face blinks and talks at the mascot's pace: a
+rows (72 at 144 px, 96 at 192). A frame that needs more, two that need more together, or a file that is
+not a picture leaves the whole face still, and the log says so once for each file, for example:
+`/home/me/.hermes/assets/avatar-blink.png differs from avatar.png in 131 of 144 rows, more than the 72 the
+device has room for; draw it from the same picture with only the eyes changed`. A face with only one of the
+pictures keeps the other frame still. The colour face blinks and talks at the mascot's pace: a
 200 ms blink about every 4.5 s, and while it speaks the mouth opens and shuts every 200 ms. It stays still
 on the resting clock and the alarm. A board with room for the picture but not for the frames keeps a still
 colour face.
