@@ -11,6 +11,15 @@
 namespace hg {
 namespace {
 
+// `v` when it is a whole number in [lo, hi], else -1. The range is checked on the double, before any
+// cast: a cast of one out of int64_t's range is undefined.
+int64_t whole_in(const json::Value& v, int64_t lo, int64_t hi) {
+  const double d = v.as_number(-1);
+  if (!(d >= static_cast<double>(lo) && d <= static_cast<double>(hi))) return -1;
+  const auto n = static_cast<int64_t>(d);
+  return static_cast<double>(n) == d ? n : -1;
+}
+
 constexpr uint32_t kBootScreenMs = 800;
 constexpr uint32_t kConnectTimeoutMs = 10000;
 constexpr uint32_t kHandshakeTimeoutMs = 10000;
@@ -596,14 +605,11 @@ void App::h_face_start(const json::Value& m) {
   const auto& a = m["anchors"].elements();
   int64_t v[10] = {};
   bool ok = a.size() == 10;
-  for (size_t i = 0; ok && i < 10; ++i) {
-    ok = a[i].is_number() && a[i].as_number() == static_cast<double>(a[i].as_int(-1));
-    v[i] = a[i].as_int(-1);
-  }
+  for (size_t i = 0; ok && i < 10; ++i) ok = (v[i] = whole_in(a[i], 0, 1000)) >= 0;
   mascot::Anchors anchors;
-  const int64_t stream = m["stream"].as_int(-1);
+  const int64_t stream = whole_in(m["stream"], 0, 255);
   if (!ok || !mascot::make_anchors(v, anchors) || hash.empty() || hash.size() > 64 || stream < 0 ||
-      stream > 255 || m["width"].as_int(0) != colour_px_ || m["height"].as_int(0) != colour_px_ ||
+      whole_in(m["width"], colour_px_, colour_px_) < 0 || whole_in(m["height"], colour_px_, colour_px_) < 0 ||
       m["format"].as_string() != "rgb565") {
     log(LogLevel::Warn, "ignored a malformed colour face");
     return;
@@ -626,7 +632,7 @@ void App::face_chunk(uint8_t stream, uint16_t seq, const uint8_t* data, size_t l
 }
 
 void App::h_face_end(const json::Value& m) {
-  if (!face_in_ || m["stream"].as_int(-1) != face_in_->stream) return;
+  if (!face_in_ || whole_in(m["stream"], 0, 255) != face_in_->stream) return;
   const bool whole = face_in_->got == static_cast<size_t>(colour_px_) * static_cast<size_t>(colour_px_) * 2;
   if (whole) {
     mascot::Face face;

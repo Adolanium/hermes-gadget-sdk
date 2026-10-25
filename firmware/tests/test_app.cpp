@@ -4178,11 +4178,18 @@ int colour_px(Rig& r) {
   return hello ? static_cast<int>((*hello)["caps"]["faces"]["px"].as_int(0)) : 0;
 }
 
-// A colour face as the server sends it (docs/protocol.md#faces): face.start, the RGB565 on binary
-// channel 4 in 4096-byte chunks, face.end. Every pixel is `pixel` except a transparent (0x0000)
-// square in the middle. Only the first `send` bytes go; `end` false leaves out face.end.
-void send_colour_face(Rig& r, const std::string& profile, const std::string& hash, int px, uint16_t pixel,
-                      size_t send = SIZE_MAX, bool end = true, int stream = 7) {
+// A colour face's face.start (docs/protocol.md#faces); `tail` is everything after the size.
+std::string colour_start(const std::string& profile, const std::string& hash, int px, int stream = 7,
+                         const std::string& tail = R"("format":"rgb565","anchors":[607,293,262,620,801,107,396,508,586,649])") {
+  return R"({"type":"face.start","stream":)" + std::to_string(stream) + R"(,"profile":")" + profile + R"(","hash":")" +
+         hash + R"(","width":)" + std::to_string(px) + R"(,"height":)" + std::to_string(px) + "," + tail + "}";
+}
+
+// Bytes [from, to) of a colour face's RGB565 on binary channel 4, in 4096-byte chunks. Every pixel is
+// `pixel` except a transparent (0x0000) square in the middle. Chunk i (counted from the face's first
+// byte) goes with sequence number `seq(i)`, i itself by default.
+void send_pixels(Rig& r, int px, uint16_t pixel, int stream = 7, size_t from = 0, size_t to = SIZE_MAX,
+                 uint16_t (*seq)(uint16_t) = nullptr) {
   std::vector<uint8_t> data;
   for (int y = 0; y < px; ++y)
     for (int x = 0; x < px; ++x) {
@@ -4191,19 +4198,28 @@ void send_colour_face(Rig& r, const std::string& profile, const std::string& has
       data.push_back(static_cast<uint8_t>(v & 0xff));
       data.push_back(static_cast<uint8_t>(v >> 8));
     }
-  r.server(R"({"type":"face.start","stream":)" + std::to_string(stream) + R"(,"profile":")" + profile +
-           R"(","hash":")" + hash + R"(","width":)" + std::to_string(px) + R"(,"height":)" + std::to_string(px) +
-           R"(,"format":"rgb565","anchors":[607,293,262,620,801,107,396,508,586,649]})");
-  uint16_t seq = 0;
-  for (size_t off = 0; off < std::min(send, data.size()); off += 4096) {
-    const size_t len = std::min<size_t>(4096, std::min(send, data.size()) - off);
+  to = std::min(to, data.size());
+  for (size_t off = from; off < to; off += 4096) {
+    const size_t len = std::min<size_t>(4096, to - off);
+    const auto i = static_cast<uint16_t>(off / 4096);
     std::vector<uint8_t> frame(hg::proto::kBinaryHeader + len);
-    hg::proto::write_binary_header(frame.data(), hg::proto::Channel::Face, static_cast<uint8_t>(stream), seq++);
+    hg::proto::write_binary_header(frame.data(), hg::proto::Channel::Face, static_cast<uint8_t>(stream),
+                                   seq ? seq(i) : i);
     std::copy(data.begin() + static_cast<long>(off), data.begin() + static_cast<long>(off + len),
               frame.begin() + hg::proto::kBinaryHeader);
     r.app.on_transport_binary(frame.data(), frame.size());
   }
-  if (end) r.server(R"({"type":"face.end","stream":)" + std::to_string(stream) + "}");
+}
+
+std::string colour_end(int stream = 7) { return R"({"type":"face.end","stream":)" + std::to_string(stream) + "}"; }
+
+// A colour face as the server sends it: face.start, the pixels, face.end. Only the first `send` bytes
+// go; `end` false leaves out face.end.
+void send_colour_face(Rig& r, const std::string& profile, const std::string& hash, int px, uint16_t pixel,
+                      size_t send = SIZE_MAX, bool end = true, int stream = 7) {
+  r.server(colour_start(profile, hash, px, stream));
+  send_pixels(r, px, pixel, stream, 0, send);
+  if (end) r.server(colour_end(stream));
 }
 
 size_t count_px(const std::vector<uint16_t>& fb, uint16_t v) {
@@ -4295,6 +4311,36 @@ TEST("colour faces: a bad start or a broken transfer leaves the mascot") {
   // Another profile's face, late after a switch, is not this profile's.
   send_colour_face(r, "ops", "c8", px, kRose);
   CHECK(r.app.model().face == nullptr);
+}
+
+TEST("colour faces: stream ids, sizes and anchors must be whole numbers in range") {
+  Rig r(colour_profile());
+  r.bring_online(true);
+  const int px = colour_px(r);
+  const std::string size = std::to_string(px);
+  const std::string anchors = R"("anchors":[607,293,262,620,801,107,396,508,586,649])";
+  // Each start is refused, so the whole face that follows on stream 7 never shows.
+  for (const std::string& bad : {
+           R"({"type":"face.start","stream":7.5,"profile":"default","hash":"c1","width":)" + size + R"(,"height":)" +
+               size + R"(,"format":"rgb565",)" + anchors + "}",
+           R"({"type":"face.start","stream":1e100,"profile":"default","hash":"c1","width":)" + size + R"(,"height":)" +
+               size + R"(,"format":"rgb565",)" + anchors + "}",
+           R"({"type":"face.start","stream":7,"profile":"default","hash":"c1","width":)" + size + R"(.5,"height":)" +
+               size + R"(,"format":"rgb565",)" + anchors + "}",
+           colour_start("default", "c1", px, 7, R"("format":"rgb565","anchors":[607.5,293,262,620,801,107,396,508,586,649])"),
+           colour_start("default", "c1", px, 7, R"("format":"rgb565","anchors":[1e100,293,262,620,801,107,396,508,586,649])")}) {
+    r.server(bad);
+    send_pixels(r, px, kRose);
+    r.server(colour_end());
+    CHECK(r.app.model().face == nullptr);
+  }
+  // face.end names its stream exactly too.
+  r.server(colour_start("default", "c2", px));
+  send_pixels(r, px, kRose);
+  r.server(R"({"type":"face.end","stream":7.5})");
+  CHECK(r.app.model().face == nullptr);
+  r.server(colour_end());
+  CHECK(r.app.model().face && r.app.model().face->hash == "c2");
 }
 
 TEST("colour faces: a switch mid-transfer shows the mascot, and a reconnect keeps a named face") {
