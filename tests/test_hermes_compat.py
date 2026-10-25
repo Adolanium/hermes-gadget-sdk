@@ -89,7 +89,7 @@ def _module_level_imports(node):
     for child in ast.iter_child_nodes(node):
         if isinstance(child, (ast.Import, ast.ImportFrom)):
             yield child
-        elif not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        elif not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
             yield from _module_level_imports(child)
 
 
@@ -111,7 +111,7 @@ def test_every_module_level_hermes_import_is_listed():
                 examined += 1
                 listed = compat.IMPORTS.get(module)
                 if listed is None or not set(names) <= set(listed):
-                    unlisted.append(f"{path.name}: {module} {list(names)}")
+                    unlisted.append(f"{path.name}: {module} {[n for n in names if n not in (listed or ())]}")
     assert examined, "no Hermes import found in plugin/*.py"
     assert not unlisted, f"not in compat.IMPORTS: {unlisted}"
 
