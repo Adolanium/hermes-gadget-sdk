@@ -4,7 +4,7 @@
 
 ### Hermes plugin
 
-- A connected device now gets a profile's new face within a few seconds when the profile's `gadget-face.bin` or Hermes avatar is added, changed or removed, and the mascot when both are removed. Before, the new face arrived only after the device reconnected or switched profile. The pairing check that already runs every 2 seconds compares the size and modification time of those files, and looks the face up again only after they change and then hold still for one more check, so a file still being written is never sent. A face the device already holds is not sent again, so touching a file or saving the same picture again sends nothing. [Faces](docs/faces.md). Contributed by @mforce.
+- A connected device now gets a profile's new face within a few seconds when the profile's `gadget-face.bin` or Hermes avatar is added, changed or removed, and the mascot when both are removed. Before, the new face arrived only after the device reconnected or switched profile. The pairing check that already runs every 2 seconds compares the size and modification time of those files, and looks the face up again only after they change and then stay the same on two checks in a row; if they change again before or while they are read, the device keeps its face until they settle once more. The new face replaces the old one directly, without the mascot in between. A face the device already holds is not sent again, so touching a file or saving the same picture again sends nothing. [Faces](docs/faces.md). Contributed by @mforce.
 
 ## 0.4.0
 

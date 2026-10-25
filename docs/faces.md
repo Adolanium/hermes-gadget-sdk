@@ -153,16 +153,20 @@ arrives.
 
 A face is known by the file it comes from, not by the picture it makes. Any change to that file,
 even one that draws the same face (a metadata edit in the avatar, or the avatar replaced by a face
-file made from it), shows the mascot for a moment and sends the face once more.
+file made from it), sends the face once more. A device that reconnects after such a change shows
+the mascot for a moment, until the face arrives.
 
 A connected device follows those files without a reconnect. Every 2 seconds the plugin compares
 the size and modification time of the profile's face file and avatars with what its last lookup
-saw. When one is added, changed or removed and then stays the same for one more check, so a file
-still being written is never read, the plugin looks the face up again. The device gets it, or the
-mascot when no source is left, about 2 to 4 seconds after the save. A face with the hash the device
-already holds is not sent, so touching a file or saving the same picture again changes nothing. A
-file replaced by one of the same size and modification time, as a copy that keeps its timestamp
-can be, goes unnoticed until the device reconnects or switches profile.
+saw. When they have changed and then stay the same on two checks in a row, the plugin looks the
+face up again; if the files change again before or while it reads them, the device keeps its face
+and the files have to settle once more. The new face replaces the old one directly, with no mascot
+in between, about 2 to 4 seconds after the save; when no source is left, the device gets the
+mascot. Two unchanged checks only debounce a write: a writer that pauses longer than that can be
+read before it has finished. A face with the hash the device already holds is not sent, so touching
+a file or saving the same picture again changes nothing. A file replaced by one of the same size
+and modification time, as a copy that keeps its timestamp can be, goes unnoticed until the device
+reconnects or switches profile.
 
 ## Placing the eye and the mouth
 
