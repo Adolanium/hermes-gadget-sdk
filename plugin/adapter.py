@@ -132,6 +132,11 @@ class _FaceLook:
     profile: Optional[str]  # the profile it could show; None for the mascot
     seen: Optional[tuple] = None  # the files as the lookup read them; None until stat'ed
     last: Optional[tuple] = None  # the files at the last pairing check
+    settled: Optional[tuple] = None  # files that held still for two checks, for the next lookup to read
+
+
+# A lookup that found the files changed after they settled: never sent, so the device keeps its face.
+_KEEP_FACE = faces.ProfileFace("", bytes, valid=lambda: False)
 
 
 def spoken_question(question: str, choices: Optional[list]) -> str:
@@ -467,14 +472,25 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             if not self._convert_avatars:
                 logger.info("[%s] Pillow is not installed: devices show profile face files, not avatars", self.name)
         profile = self._face_profile(session)
-        look = self._face_from[session.device_id] = _FaceLook(session, profile)
+        look = self._face_from.get(session.device_id)
+        settled = look.settled if look and look.session is session and look.profile == profile else None
+        if settled is None:
+            look = self._face_from[session.device_id] = _FaceLook(session, profile)
         if profile is None:
             return None
         try:
             home = self._profile_home(profile)
             # Stat'ed before the read, so a change made while reading shows at the next pairing check.
-            look.seen = await asyncio.to_thread(faces.stamp, home, self._convert_avatars)
+            now = await asyncio.to_thread(faces.stamp, home, self._convert_avatars)
+            if settled is None:
+                look.seen = now
+            elif now != settled:
+                return self._unsettled(look)
             found = await asyncio.to_thread(faces.for_profile, home, self._convert_avatars)
+            if settled is not None:
+                if await asyncio.to_thread(faces.stamp, home, self._convert_avatars) != settled:
+                    return self._unsettled(look)
+                look.seen, look.settled = settled, None
             if found is None or profile == "default":  # the default profile's approval is session.paired
                 return found
             # Found while the profile approved the device: a revocation since then makes it stale.
@@ -482,6 +498,12 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         except Exception as exc:  # an unreadable picture shows the mascot; never block a connection on it
             logger.warning("[%s] no face for profile %s: %s", self.name, profile, exc)
             return None
+
+    @staticmethod
+    def _unsettled(look: _FaceLook) -> faces.ProfileFace:
+        """The files changed after they settled, before or while they were read: they settle again."""
+        look.settled = look.last = None
+        return _KEEP_FACE
 
     @staticmethod
     def _profile_home(profile: str) -> Path:
@@ -502,7 +524,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if self._face_from.get(device_id) is not look or not look.session.current():
             return False  # looked up again, or gone, meanwhile
         before, look.last = look.last, now
-        return now != look.seen and now == before
+        if now == look.seen or now != before:
+            return False
+        look.settled = now
+        return True
 
     def _face_profile(self, session: DeviceSession) -> Optional[str]:
         """The profile whose face the device may show: the one answering it. None: the mascot.

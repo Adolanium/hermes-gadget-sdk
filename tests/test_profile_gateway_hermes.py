@@ -1171,3 +1171,43 @@ def test_a_face_check_running_at_disconnect_leaves_nothing_behind(hermes_home, t
 
     assert asyncio.run(main()) is False  # the device left: no face for it
     assert (adapter._face_from, getattr(adapter, "_face_stat", {})) == ({}, {})  # nothing kept for it
+
+
+@pytest.mark.parametrize("when", ["before the lookup", "during its read"])
+def test_a_face_file_written_again_after_it_settled_waits_to_settle_again(hermes_home, tmp_path, monkeypatch, when):
+    """The lookup a settled file starts reads that file: one written again since keeps the device its face
+    until it has settled in turn."""
+    import asyncio
+
+    from hermes_gadget_plugin import face as faces
+    from hermes_gadget_plugin.face import FACE_FILE
+
+    adapter, session, faces_sent = _face_watch(hermes_home, tmp_path)
+    face_file = hermes_home / FACE_FILE
+    first = _write_face(face_file, 0xAA, 1000)
+    read, later = faces.for_profile, []
+
+    def read_then_write(*a):
+        found = read(*a)
+        if not later:
+            later.append(_write_face(face_file, 0x77, 1002))
+        return found
+
+    async def checks():
+        return [await adapter._face_source_changed(DEVICE) for _ in range(2)]
+
+    async def main():
+        await session.update_face()
+        _write_face(face_file, 0x55, 1001)
+        assert await checks() == [False, True]  # settled: the pairing check looks the face up
+        if when == "before the lookup":
+            later.append(_write_face(face_file, 0x77, 1002))
+        else:
+            monkeypatch.setattr(faces, "for_profile", read_then_write)
+        await session.update_face()
+        assert faces_sent() == [first]  # the device keeps its face
+        assert await checks() == [False, True]  # and the new file settles
+        await session.update_face()
+
+    asyncio.run(main())
+    assert faces_sent() == [first, later[0]]
