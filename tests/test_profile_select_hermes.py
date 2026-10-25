@@ -262,11 +262,12 @@ def test_each_profile_shows_its_own_face_file_and_profile_faces_false_turns_them
     assert GadgetAdapter(PlatformConfig(enabled=True, extra={"profile_faces": False}))._profile_faces is False
 
 
-def _face_sources(hermes_home, gadget, make_sim, monkeypatch):
+def _face_sources(hermes_home, gadget, make_sim, monkeypatch, colour=True):
     """A paired device on the default profile, which has no face yet. Returns the device, a function
     drawing the profile's avatar, the faces sent (`face`, or `face.start` for a colour one), a wait for
     a face (a hash; None is the mascot), the list of face lookups made from then on, and the face the
-    profile shows now. The simulator draws colour faces, so an avatar goes in colour."""
+    profile shows now. The simulator draws colour faces; without `colour`, the server takes it for a
+    device with one-colour faces only (`caps.faces: 1`), so an avatar goes in one colour."""
     from PIL import Image, ImageDraw
 
     from hermes_gadget_plugin import face as profile_faces
@@ -274,7 +275,9 @@ def _face_sources(hermes_home, gadget, make_sim, monkeypatch):
     avatar = hermes_home / "assets" / "avatar.png"
     avatar.parent.mkdir()
     sim = _paired_sim(gadget, make_sim)
-    px = [m for m in sim.sent if m["type"] == "hello"][-1]["caps"]["faces"]["px"]
+    px = [m for m in sim.sent if m["type"] == "hello"][-1]["caps"]["faces"]["px"] if colour else 0
+    if not colour:
+        gadget.adapter.hub.get(sim.status()["device_id"]).caps["faces"] = 1
     faces = lambda: [m for m in sim.received if m["type"] in ("face", "face.start")]  # noqa: E731
     sim.run_for(1)
     assert not [f for f in faces() if f.get("hash")]  # nothing yet: the mascot
@@ -293,19 +296,21 @@ def _face_sources(hermes_home, gadget, make_sim, monkeypatch):
     return sim, draw, faces, shows, lookups, lambda: look_up(hermes_home, True, px).hash
 
 
+@pytest.mark.parametrize("colour", [False, True], ids=["one-colour", "colour"])
 def test_a_connected_device_follows_its_profiles_face_sources_without_reconnecting(hermes_home, gadget, make_sim,
-                                                                                   monkeypatch):
+                                                                                   monkeypatch, colour):
     import os
     import struct
 
     from hermes_gadget_plugin.face import FACE_BYTES, FACE_FILE
 
-    sim, draw, faces, shows, lookups, current = _face_sources(hermes_home, gadget, make_sim, monkeypatch)
+    sim, draw, faces, shows, lookups, current = _face_sources(hermes_home, gadget, make_sim, monkeypatch, colour)
     welcomes = len([m for m in sim.received if m["type"] == "welcome"])
     face_file = hermes_home / FACE_FILE
     anchors = struct.pack("<10h", 607, 293, 262, 620, 801, 107, 396, 508, 586, 649)
     draw("ellipse")  # an avatar added
     assert shows(current())
+    assert faces()[-1]["type"] == ("face.start" if colour else "face")
     draw("rectangle")  # replaced
     assert shows(current())
     face_file.write_bytes(bytes([0xAA]) * (FACE_BYTES - 20) + anchors)  # a face file comes first
@@ -344,8 +349,9 @@ def test_a_face_file_still_being_written_is_not_looked_up(hermes_home, gadget, m
     assert shows(ProfileFace.of(data).hash)
 
 
-def test_profile_faces_false_leaves_a_changed_avatar_alone(hermes_home, gadget, make_sim, monkeypatch):
-    sim, draw, faces, shows, lookups, current = _face_sources(hermes_home, gadget, make_sim, monkeypatch)
+@pytest.mark.parametrize("colour", [False, True], ids=["one-colour", "colour"])
+def test_profile_faces_false_leaves_a_changed_avatar_alone(hermes_home, gadget, make_sim, monkeypatch, colour):
+    sim, draw, faces, shows, lookups, current = _face_sources(hermes_home, gadget, make_sim, monkeypatch, colour)
     draw("ellipse")
     assert shows(current())
     gadget.adapter._profile_faces = False  # as profile_faces: false sets it
