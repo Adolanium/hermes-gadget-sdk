@@ -374,3 +374,8 @@ def test_a_colour_face_follows_a_replaced_avatar_and_a_touched_one_sends_nothing
     assert sim.wait_for(lambda: lookups, timeout=8)
     sim.run_for(1)
     assert not [m for m in sim.received[received:] if m["type"] in ("face", "face.start", "face.end")]
+
+    sim.console("reconnect")  # the device holds the replacement: its pixels arrived whole
+    assert sim.wait_screen("connecting", timeout=5)
+    assert sim.wait_screen("ready", timeout=10)
+    assert [m for m in sim.sent if m["type"] == "hello"][-1].get("face") == replaced["hash"]
