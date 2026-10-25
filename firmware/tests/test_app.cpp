@@ -379,6 +379,22 @@ TEST("app: a device a route refuses says so until a new connection or approval")
   CHECK_EQ(r.app.model().detail, asking);  // the new connection says again, or not
 }
 
+TEST("app: a refusal for a route drops a pairing code shown before") {
+  Rig r;
+  r.bring_online(false);
+  r.server(R"({"type":"pairing","code":"ABCD2345","command":"hermes pairing approve gadget ABCD2345"})");
+  r.app.on_transport_closed("route configured");
+  r.advance(3000);
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":true})");
+  r.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":false})");
+  CHECK_EQ(r.app.model().code, std::string("ABCD2345"));  // revoked, not refused: the code still works
+  r.server(R"({"type":"unpaired","reason":"routed"})");
+  CHECK_EQ(r.app.model().headline, std::string("Refused by a route"));
+  CHECK(r.app.model().code.empty());
+  CHECK(r.app.console("status").find("pairing_code") == std::string::npos);
+}
+
 TEST("app: push-to-talk streams audio and shows the reply") {
   Rig r;
   r.bring_online(true);

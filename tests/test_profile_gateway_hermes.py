@@ -1108,6 +1108,47 @@ def test_a_device_a_route_refuses_is_told_why_and_asked_for_no_code(live_rig, he
     assert sim.wait_screen("ready", timeout=8)
 
 
+def test_a_route_added_or_removed_while_a_device_is_unpaired_reaches_it(live_rig, hermes_home, make_sim):
+    """With the default profile's approval revoked too, the refusal still follows the route: added, the
+    device is told once and gets no notice; removed, it drops the reason and pairing starts again."""
+    sim, _held, _digest = _faces_on_ops(live_rig, hermes_home, make_sim)
+    device = sim.status()["device_id"]
+    live_rig.revoke("default", device)
+    assert sim.wait_for(lambda: sim.status()["paired"] is False, timeout=8)
+    sim.run_for(7)  # the graces started so far, unrefused, may send their notice
+
+    sent = len(sim.received)
+    live_rig.runner.config.profile_routes = _ops_route(device)
+    sim.run_for(8)  # several pairing checks
+    assert [m for m in sim.received[sent:] if m["type"] in ("unpaired", "pairing", "notice")] == \
+        [{"type": "unpaired", "reason": "routed"}]
+    assert sim.status().get("unpaired_reason") == "routed"
+
+    sent = len(sim.received)
+    live_rig.runner.config.profile_routes = []
+    sim.run_for(8)
+    assert "unpaired_reason" not in sim.status()
+    assert any(m["type"] in ("pairing", "notice") for m in sim.received[sent:])  # a code, or where to find one
+
+
+def test_a_pairing_grace_from_before_a_refusal_sends_no_notice(live_rig, make_sim):
+    """A device approved within the pairing grace, then refused for a route: the grace that its first,
+    unpaired connection started must not send the device the notice to go look for a code."""
+    sim = make_sim(live_rig.url)
+    assert sim.wait_screen("pairing", timeout=8)
+    device = sim.status()["device_id"]
+    live_rig.approve("default", device)
+    assert sim.wait_screen("ready", timeout=8)
+    session = live_rig.adapter.hub.get(device)
+    assert live_rig.run(live_rig.adapter.select_profile(session, "ops")) is None
+    live_rig.run(session.send_profile())
+    live_rig.runner.config.profile_routes = _ops_route(device)
+    assert sim.wait_for(lambda: sim.status().get("unpaired_reason") == "routed", timeout=8)
+    sent = len(sim.received)
+    sim.run_for(7)  # past the grace
+    assert not [m for m in sim.received[sent:] if m["type"] == "notice"]
+
+
 def _face_adapter(tmp_path):
     """An adapter and its hub where a paired device shows the face of the profile it is on."""
     from gateway.config import PlatformConfig

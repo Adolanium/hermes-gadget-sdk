@@ -610,7 +610,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
 
     async def _pairing_grace(self, session: DeviceSession) -> None:
         await asyncio.sleep(PAIRING_GRACE_S)
-        if session.closed or session.paired or self._store.pairing_for(session.device_id):
+        if (session.closed or session.paired or session.unpaired_reason
+                or self._store.pairing_for(session.device_id)):
             return
         await session.send_notice(
             f"No pairing code yet. On the Hermes host run 'hermes pairing list', or allow "
@@ -642,12 +643,13 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                         logger.info("[%s] device %s approved", self.name, session.device_id)
                         await self._claim_home(session)
                         await self._push_dashboard(session)
-                    elif not verdict and session.paired:
-                        self._prompts.pop(session.device_id, None)
+                    elif not verdict:
                         refusal = self._refusal(session)
-                        await session.set_paired(False, refusal)
-                        if refusal is None:  # a pairing code can let it in again
-                            await self.on_ready(session)
+                        if session.paired or refusal != session.unpaired_reason:
+                            self._prompts.pop(session.device_id, None)
+                            await session.set_paired(False, refusal)
+                            if refusal is None:  # a pairing code can let it in again
+                                await self.on_ready(session)
                     await self._follow_face(session)
                 except Exception as exc:
                     logger.debug("[%s] pairing sync failed for %s: %s", self.name, session.device_id, exc)

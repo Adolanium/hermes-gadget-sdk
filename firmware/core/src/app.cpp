@@ -744,6 +744,10 @@ void App::h_paired(const json::Value&) {
 void App::h_unpaired(const json::Value& m) {
   paired_ = false;
   unpaired_reason_ = m["reason"].as_string();
+  if (unpaired_reason_ == "routed") {  // no code can let it in: drop one shown before
+    pairing_code_.clear();
+    pairing_command_.clear();
+  }
   drop_face();
   mode_ = Mode::Idle;
   stop_playback();
