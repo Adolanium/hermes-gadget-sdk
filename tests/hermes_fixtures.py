@@ -100,6 +100,16 @@ def _paired_sim(gadget, make_sim, **kw):
     return sim
 
 
+def _select_next_profile(sim):
+    """Step the device to its next profile from the settings menu."""
+    sim.console("settings")
+    for _ in range(3):
+        sim.console("cancel")
+    sim.console("talk")
+    sim.console("release")
+    sim.console("settings close")
+
+
 @pytest.fixture
 def hermes_home(tmp_path, monkeypatch):
     """A multiplexed Hermes home serving 'default' and 'ops', with a parked 'old' profile that must not be offered."""
