@@ -219,24 +219,26 @@ def two_profile_gateway(tmp_path):
     log = open(tmp_path / "gateway.out", "w", encoding="utf-8")
     proc = subprocess.Popen([str(VENV_PY), "-m", "hermes_cli.main", "gateway", "run"], cwd=AGENT_DIR, env=env,
                             stdout=log, stderr=subprocess.STDOUT)
-    deadline = time.monotonic() + 120
-    while time.monotonic() < deadline:
-        with socket.socket() as s:
-            if s.connect_ex(("127.0.0.1", gadget_port)) == 0:
-                break
-        if proc.poll() is not None:
-            pytest.fail(f"gateway exited: {(tmp_path / 'gateway.out').read_text(errors='replace')[-3000:]}")
-        time.sleep(0.5)
-    else:
-        pytest.fail("gateway did not open the gadget port")
-    yield {"url": f"ws://127.0.0.1:{gadget_port}/gadget", "home": home, "api": fake_openai.Handler.requests_log}
-    proc.terminate()
-    try:
-        proc.wait(timeout=30)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-    log.close()
-    api_server.shutdown()
+    try:  # stop the gateway and the fake API even when startup fails, so nothing outlives the test
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            with socket.socket() as s:
+                if s.connect_ex(("127.0.0.1", gadget_port)) == 0:
+                    break
+            if proc.poll() is not None:
+                pytest.fail(f"gateway exited: {(tmp_path / 'gateway.out').read_text(errors='replace')[-3000:]}")
+            time.sleep(0.5)
+        else:
+            pytest.fail("gateway did not open the gadget port")
+        yield {"url": f"ws://127.0.0.1:{gadget_port}/gadget", "home": home, "api": fake_openai.Handler.requests_log}
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        log.close()
+        api_server.shutdown()
 
 
 def test_a_device_switches_to_a_second_profile_and_that_profile_answers(two_profile_gateway, make_sim):
@@ -253,8 +255,10 @@ def test_a_device_switches_to_a_second_profile_and_that_profile_answers(two_prof
         """Type text and return the reply's text."""
         sim.received.clear()
         sim.type_text(text)
-        assert sim.wait_for(lambda: sim.last_received("turn.end") is not None, timeout=90), sim.received
-        return (sim.last_received("reply") or {}).get("text", "")
+        # Both: an approved turn sends its reply before turn.end, an unapproved one (the approve command) after.
+        assert sim.wait_for(lambda: sim.last_received("turn.end") is not None
+                            and sim.last_received("reply") is not None, timeout=90), sim.received
+        return sim.last_received("reply").get("text", "")
 
     assert sim.wait_for(lambda: sim.status().get("pairing_code"), timeout=60)
     approved = _hermes(gateway["home"], "pairing", "approve", "gadget", sim.status()["pairing_code"])
