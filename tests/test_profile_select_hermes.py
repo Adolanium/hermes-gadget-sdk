@@ -354,3 +354,23 @@ def test_profile_faces_false_leaves_a_changed_avatar_alone(hermes_home, gadget, 
     sim.run_for(5)
     assert (len(faces()), lookups) == (sent, [])
 
+
+def test_a_colour_face_follows_a_replaced_avatar_and_a_touched_one_sends_nothing(hermes_home, gadget, make_sim,
+                                                                                monkeypatch):
+    import os
+
+    sim, draw, faces, shows, lookups, current = _face_sources(hermes_home, gadget, make_sim, monkeypatch)
+    draw("ellipse")
+    assert shows(current())
+    first = faces()[-1]
+    draw("rectangle")  # replaced: settles, then the new colour face replaces the old one
+    assert shows(current())
+    replaced = faces()[-1]
+    assert first["type"] == replaced["type"] == "face.start" and replaced["hash"] != first["hash"]
+    assert sim.wait_for(lambda: (sim.last_received("face.end") or {}).get("stream") == replaced["stream"], timeout=5)
+
+    received, lookups[:] = len(sim.received), []
+    os.utime(hermes_home / "assets" / "avatar.png")  # touched: looked up again, but the same face
+    assert sim.wait_for(lambda: lookups, timeout=8)
+    sim.run_for(1)
+    assert not [m for m in sim.received[received:] if m["type"] in ("face", "face.start", "face.end")]
