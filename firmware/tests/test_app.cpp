@@ -4273,7 +4273,9 @@ TEST("colour faces: a bad start or a broken transfer leaves the mascot") {
   const int px = colour_px(r);
   send_colour_face(r, "default", "c1", px, kRose);
   CHECK(r.app.model().face != nullptr);
-  send_colour_face(r, "default", "c2", px + 1, kRose);  // not the size the device asked for
+  r.server(colour_start("default", "c2", px + 1));  // not the size the device asked for,
+  send_pixels(r, px, kRose);                        // even when the device's size follows
+  r.server(colour_end());
   CHECK(r.app.model().face == nullptr);
   send_colour_face(r, "default", "", px, kRose);  // no hash
   CHECK(r.app.model().face == nullptr);
@@ -4286,20 +4288,30 @@ TEST("colour faces: a bad start or a broken transfer leaves the mascot") {
   r.server(R"({"type":"face.end","stream":7})");
   CHECK(r.app.model().face && r.app.model().face->hash == "c4");
 
-  // Anchors off the face, or not ten of them, or another format: refused like a malformed one-bit face.
+  // Anchors off the face, or not ten of them, or another format: refused like a malformed one-bit face,
+  // even when a whole face follows on the start's stream.
   for (const char* bad : {R"("anchors":[607,293,262,620,801,107,508,396,586,649],"format":"rgb565")",
                           R"("anchors":[607,293,262,620,801,107,396,508,586],"format":"rgb565")",
                           R"("anchors":[607,293,262,620,801,107,396,508,586,1001],"format":"rgb565")",
                           R"("anchors":[607,293,262,620,801,107,396,508,586,649],"format":"jpeg")"}) {
     send_colour_face(r, "default", "c5", px, kRose);
-    r.server(R"({"type":"face.start","stream":9,"profile":"default","hash":"c6","width":)" + std::to_string(px) +
-             R"(,"height":)" + std::to_string(px) + "," + bad + "}");
+    r.server(colour_start("default", "c6", px, 9, bad));
     CHECK(r.app.model().face == nullptr);
-    r.server(R"({"type":"face.end","stream":9})");
+    send_pixels(r, px, kRose, 9);
+    r.server(colour_end(9));
     CHECK(r.app.model().face == nullptr);
   }
 
-  // A chunk out of sequence, or one too many bytes, drops the transfer.
+  // A chunk skipped or sent twice drops the transfer, even when the bytes add up to a whole face.
+  for (uint16_t (*seq)(uint16_t) : {+[](uint16_t i) -> uint16_t { return i < 2 ? i : i + 1; },
+                                    +[](uint16_t i) -> uint16_t { return i < 2 ? i : i - 1; }}) {
+    r.server(colour_start("default", "c9", px));
+    send_pixels(r, px, kRose, 7, 0, SIZE_MAX, seq);
+    r.server(colour_end());
+    CHECK(r.app.model().face == nullptr);
+  }
+
+  // One byte too many drops the transfer.
   send_colour_face(r, "default", "c7", px, kRose, SIZE_MAX, false);
   std::vector<uint8_t> extra(hg::proto::kBinaryHeader + 2, 0);
   const auto next_seq = static_cast<uint16_t>((px * px * 2 + 4095) / 4096);
@@ -4310,6 +4322,49 @@ TEST("colour faces: a bad start or a broken transfer leaves the mascot") {
 
   // Another profile's face, late after a switch, is not this profile's.
   send_colour_face(r, "ops", "c8", px, kRose);
+  CHECK(r.app.model().face == nullptr);
+}
+
+TEST("colour faces: a new start replaces a transfer, and nothing resumes one that was cut off") {
+  constexpr uint16_t kTeal = hg::rgb565(40, 180, 170);
+  Rig r(colour_profile());
+  r.bring_online(true);
+  const int px = colour_px(r);
+  const size_t half = static_cast<size_t>(px * px) / 4096 * 4096;  // whole chunks, about half the face
+
+  // A new face takes over mid-way; the old stream's late chunks and end change nothing.
+  r.server(colour_start("default", "c1", px, 7));
+  send_pixels(r, px, kRose, 7, 0, half);
+  r.server(colour_start("default", "c2", px, 8));
+  send_pixels(r, px, kRose, 7, half);  // the rest of c1, late
+  r.server(colour_end(7));
+  CHECK(r.app.model().face == nullptr);
+  send_pixels(r, px, kTeal, 8);
+  r.server(colour_end(8));
+  CHECK(r.app.model().face && r.app.model().face->hash == "c2");
+  r.advance(100);
+  CHECK_EQ(count_px(r.fake.fb, kRose), size_t(0));
+  CHECK_EQ(count_px(r.fake.fb, kTeal), static_cast<size_t>(px * px - (px / 2) * (px / 2)));
+
+  // A reconnect cuts a transfer: its remaining chunks and end on the new connection install nothing.
+  r.server(colour_start("default", "c3", px));
+  send_pixels(r, px, kRose, 7, 0, half);
+  r.app.on_transport_closed("network flap");
+  r.advance(5000);
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bjI=","enrolled":true})");
+  r.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":true,"face":"c2"})");
+  send_pixels(r, px, kRose, 7, half);
+  r.server(colour_end());
+  CHECK(r.app.model().face == nullptr);
+
+  // So does an unpair, even when the device is paired again before the rest arrives.
+  r.server(colour_start("default", "c4", px));
+  send_pixels(r, px, kRose, 7, 0, half);
+  r.server(R"({"type":"unpaired"})");
+  r.server(R"({"type":"paired"})");
+  send_pixels(r, px, kRose, 7, half);
+  r.server(colour_end());
   CHECK(r.app.model().face == nullptr);
 }
 
