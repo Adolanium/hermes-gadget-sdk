@@ -293,7 +293,7 @@ def _face_sources(hermes_home, gadget, make_sim, monkeypatch, colour=True):
 
     lookups, look_up = [], profile_faces.for_profile
     monkeypatch.setattr(profile_faces, "for_profile", lambda *a: lookups.append(a) or look_up(*a))
-    return sim, draw, faces, shows, lookups, lambda: look_up(hermes_home, True, px).hash
+    return sim, draw, faces, shows, lookups, lambda: look_up(hermes_home, True, px, colour).hash
 
 
 @pytest.mark.parametrize("colour", [False, True], ids=["one-colour", "colour"])
@@ -329,6 +329,28 @@ def test_a_connected_device_follows_its_profiles_face_sources_without_reconnecti
 
     (hermes_home / "assets" / "avatar.png").unlink()
     assert shows(None)
+    assert len([m for m in sim.received if m["type"] == "welcome"]) == welcomes  # never reconnected
+
+
+def test_a_colour_face_follows_its_blink_picture_without_reconnecting(hermes_home, gadget, make_sim, monkeypatch):
+    from PIL import Image, ImageDraw
+
+    sim, draw, faces, shows, lookups, current = _face_sources(hermes_home, gadget, make_sim, monkeypatch)
+    assert [m for m in sim.sent if m["type"] == "hello"][-1]["caps"]["faces"]["frames"] is True
+    welcomes = len([m for m in sim.received if m["type"] == "welcome"])
+    draw("ellipse")
+    assert shows(current())
+    still = faces()[-1]
+    assert "blink" not in still and "talk" not in still
+    blink = Image.open(hermes_home / "assets" / "avatar.png").copy()
+    ImageDraw.Draw(blink).rectangle((40, 56, 88, 64), fill=(240, 240, 240))  # the eyes close
+    blink.save(hermes_home / "assets" / "avatar-blink.png")
+    assert shows(current())
+    moving = faces()[-1]
+    assert moving["hash"] != still["hash"] and moving["blink"][1] > 0 and "talk" not in moving
+    (hermes_home / "assets" / "avatar-blink.png").unlink()  # gone: the still face again
+    assert shows(still["hash"])
+    assert "blink" not in faces()[-1]
     assert len([m for m in sim.received if m["type"] == "welcome"]) == welcomes  # never reconnected
 
 

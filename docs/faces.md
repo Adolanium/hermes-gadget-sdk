@@ -123,9 +123,22 @@ black: an LCD's dark blue-grey, or the timer alarm's green flash.
 The listening waves and the thinking dots draw over the colour face where they would on a one-colour face
 made from the same outline. On the resting clock it moves a few pixels each minute and dims with the clock,
 like the mascot. Firmware from before colour faces, and boards without PSRAM, keep the one-colour face. A
-face file still wins over the avatar, in one colour, because it blinks and talks; there are no colour blink
-or talk frames yet. Colour faces need the plugin and firmware from the same release: an older plugin sends
-colour firmware no face at all, so it shows the mascot.
+face file still wins over the avatar, in one colour. Colour faces need the plugin and firmware from the
+same release: an older plugin sends colour firmware no face at all, so it shows the mascot.
+
+A colour face blinks and talks when the avatar has a blink and a talk picture next to it:
+`assets/avatar-blink.png`, the avatar with its eyes closed, and `assets/avatar-talk.png`, with its mouth
+open (`.jpg` or `.webp` too, each found on its own). Draw each from the avatar with only the eyes or the
+mouth changed, and save it the way the avatar is saved: the plugin fits it like the avatar and sends only
+the rows where it differs from the avatar, by more than 16 levels in a colour or in whether it is
+transparent. A JPEG frame next to a PNG avatar differs in most rows. The two frames share half the face's
+rows (72 at 144 px, 96 at 192), the blink first. A frame that needs more is left out, and the log says so
+once for each picture, for example: `avatar-blink.png differs from avatar.png in 131 of 144 rows, more than
+the 72 the device has room for; draw it from the same picture with only the eyes changed`. A face with only
+one of the pictures keeps the other frame still. The colour face blinks and talks at the mascot's pace: a
+200 ms blink about every 4.5 s, and while it speaks the mouth opens and shuts every 200 ms. It stays still
+on the resting clock and the alarm. A board with room for the picture but not for the frames keeps a still
+colour face.
 
 Some drawings on transparency come out poorly in one colour; for those, make a face file:
 
@@ -137,7 +150,7 @@ Some drawings on transparency come out poorly in one colour; for those, make a f
   filled in. Draw them fully opaque.
 
 A still face does not blink or move its mouth; the waves and dots still show. For a face that
-blinks and talks, make a face file. Converting an avatar needs Pillow on the Hermes host; without
+blinks and talks, add the blink and talk pictures on a colour board, or make a face file. Converting an avatar needs Pillow on the Hermes host; without
 it, the plugin uses face files only and says so once in the log.
 
 Which profile's face shows depends on how the device reaches that profile:
@@ -166,14 +179,14 @@ An unchanged face stays through reconnects and gateway restarts. When you switch
 gadget route sends the device to another profile, it shows the mascot until the new profile's face
 arrives.
 
-A face is known by the file it comes from, not by the picture it makes. Any change to that file,
+A face is known by the files it comes from, not by the picture it makes. Any change to one of them,
 even one that draws the same face (a metadata edit in the avatar, or the avatar replaced by a face
 file made from it), sends the face once more. A device that reconnects after such a change shows
 the mascot for a moment, until the face arrives.
 
 A connected device follows those files without a reconnect. Every 2 seconds the plugin compares
-the size and modification time of the profile's face file and avatars with what its last lookup
-saw. When they have changed and then stay the same on two checks in a row, the plugin looks the
+the size and modification time of the profile's face file, avatars, and blink and talk pictures with
+what its last lookup saw. When they have changed and then stay the same on two checks in a row, the plugin looks the
 face up again; if the files change again before or while it reads them, the device keeps its face
 and the files have to settle once more. The new face arrives about 2 to 4 seconds after the save.
 A one-colour face replaces the old one directly, with no mascot in between; for a colour face the

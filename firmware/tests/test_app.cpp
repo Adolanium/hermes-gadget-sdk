@@ -4188,16 +4188,24 @@ std::string colour_start(const std::string& profile, const std::string& hash, in
 // Bytes [from, to) of a colour face's RGB565 on binary channel 4, in 4096-byte chunks. Every pixel is
 // `pixel` except a transparent (0x0000) square in the middle. Chunk i (counted from the face's first
 // byte) goes with sequence number `seq(i)`, i itself by default.
-void send_pixels(Rig& r, int px, uint16_t pixel, int stream = 7, size_t from = 0, size_t to = SIZE_MAX,
-                 uint16_t (*seq)(uint16_t) = nullptr) {
+void push_pixel(std::vector<uint8_t>& data, uint16_t v) {
+  data.push_back(static_cast<uint8_t>(v & 0xff));
+  data.push_back(static_cast<uint8_t>(v >> 8));
+}
+
+std::vector<uint8_t> idle_pixels(int px, uint16_t pixel) {
   std::vector<uint8_t> data;
   for (int y = 0; y < px; ++y)
     for (int x = 0; x < px; ++x) {
       const bool hole = x >= px / 4 && x < 3 * px / 4 && y >= px / 4 && y < 3 * px / 4;
-      const uint16_t v = hole ? 0 : pixel;
-      data.push_back(static_cast<uint8_t>(v & 0xff));
-      data.push_back(static_cast<uint8_t>(v >> 8));
+      push_pixel(data, hole ? 0 : pixel);
     }
+  return data;
+}
+
+// Bytes [from, to) of `data` on binary channel 4, in 4096-byte chunks, as send_pixels sends them.
+void send_bytes(Rig& r, const std::vector<uint8_t>& data, int stream = 7, size_t from = 0, size_t to = SIZE_MAX,
+                uint16_t (*seq)(uint16_t) = nullptr) {
   to = std::min(to, data.size());
   for (size_t off = from; off < to; off += 4096) {
     const size_t len = std::min<size_t>(4096, to - off);
@@ -4209,6 +4217,11 @@ void send_pixels(Rig& r, int px, uint16_t pixel, int stream = 7, size_t from = 0
               frame.begin() + hg::proto::kBinaryHeader);
     r.app.on_transport_binary(frame.data(), frame.size());
   }
+}
+
+void send_pixels(Rig& r, int px, uint16_t pixel, int stream = 7, size_t from = 0, size_t to = SIZE_MAX,
+                 uint16_t (*seq)(uint16_t) = nullptr) {
+  send_bytes(r, idle_pixels(px, pixel), stream, from, to, seq);
 }
 
 std::string colour_end(int stream = 7) { return R"({"type":"face.end","stream":)" + std::to_string(stream) + "}"; }
@@ -4435,6 +4448,128 @@ TEST("colour faces: a switch mid-transfer shows the mascot, and a reconnect keep
   r.app.on_transport_open();
   hello = r.fake.last("hello");
   CHECK(hello && !hello->has("face"));
+}
+
+namespace {
+
+constexpr uint16_t kTeal = hg::rgb565(40, 180, 170);
+constexpr uint16_t kAmber = hg::rgb565(240, 160, 40);
+const std::string kAnchors = R"("format":"rgb565","anchors":[607,293,262,620,801,107,396,508,586,649])";
+
+// A moving colour face's pixels: the idle picture send_pixels sends, then `blink_rows` rows of kTeal, then
+// `talk_rows` rows of kAmber.
+std::vector<uint8_t> moving_pixels(int px, int blink_rows, int talk_rows) {
+  std::vector<uint8_t> data = idle_pixels(px, kRose);
+  for (int i = 0; i < blink_rows * px; ++i) push_pixel(data, kTeal);
+  for (int i = 0; i < talk_rows * px; ++i) push_pixel(data, kAmber);
+  return data;
+}
+
+}  // namespace
+
+TEST("colour frames: a board with room for the bands offers frames; one with room for the still face only does not") {
+  Rig r(colour_profile());
+  r.bring_online(true);
+  const Value* hello = r.fake.last("hello");
+  CHECK(hello && (*hello)["caps"]["faces"]["frames"].as_bool());
+
+  hg::DeviceProfile still = colour_profile();  // the 320x240 fake draws the face at 144: room for that alone
+  still.colour_face_alloc = [](size_t n) -> void* { return n > 144 * 144 * 2 ? nullptr : std::malloc(n); };
+  Rig s(still);
+  s.bring_online(true);
+  hello = s.fake.last("hello");
+  CHECK(hello && (*hello)["caps"]["faces"]["v"].as_int() == 2 && (*hello)["caps"]["faces"]["px"].as_int() == 144);
+  CHECK(hello && !(*hello)["caps"]["faces"].has("frames"));
+  s.server(colour_start("default", "m1", 144, 7, kAnchors + R"(,"blink":[10,4])"));  // refused: no room for it
+  send_bytes(s, moving_pixels(144, 4, 0));
+  s.server(colour_end());
+  CHECK(s.app.model().face == nullptr);
+  send_colour_face(s, "default", "c1", 144, kRose);
+  CHECK(s.app.model().face && s.app.model().face->hash == "c1");
+}
+
+TEST("colour frames: face.start names the bands, and the device takes exactly their bytes") {
+  Rig r(colour_profile());
+  r.bring_online(true);
+  const int px = colour_px(r);
+  const std::string bands = R"(,"blink":[10,6],"talk":[100,4])";
+  const std::vector<uint8_t> whole = moving_pixels(px, 6, 4);
+  auto start = [&](const std::string& hash, const std::string& tail) {
+    r.server(colour_start("default", hash, px, 7, kAnchors + tail));
+  };
+
+  start("m1", bands);
+  send_bytes(r, whole);
+  r.server(colour_end());
+  const hg::mascot::Face* f = r.app.model().face;
+  CHECK(f && f->hash == "m1");
+  CHECK(f && f->blink.y == 10 && f->blink.rows == 6 && f->talk.y == 100 && f->talk.rows == 4);
+  CHECK(f && f->blink.rgb565[0] == kTeal && f->blink.rgb565[6 * px - 1] == kTeal);
+  CHECK(f && f->talk.rgb565[0] == kAmber && f->talk.rgb565[4 * px - 1] == kAmber);
+
+  // Short of the bands, or a byte past them: dropped.
+  for (size_t len : {static_cast<size_t>(px * px * 2), whole.size() - 2 * px}) {
+    start("m2", bands);
+    send_bytes(r, whole, 7, 0, len);
+    r.server(colour_end());
+    CHECK(r.app.model().face == nullptr);
+  }
+  start("m3", bands);
+  std::vector<uint8_t> extra = whole;
+  extra.push_back(0);
+  send_bytes(r, extra);
+  r.server(colour_end());
+  CHECK(r.app.model().face == nullptr);
+
+  // A band that is not two whole numbers inside the face, or bands past half the face's rows together:
+  // the start is refused, so even the bytes it names, sent after it, show nothing.
+  const std::string half = std::to_string(px / 2);
+  for (auto [bad, rows] : std::initializer_list<std::pair<std::string, int>>{
+           {R"(,"blink":[10,0])", 0}, {R"(,"blink":[)" + std::to_string(px) + ",1]", 1},
+           {R"(,"blink":[)" + std::to_string(px - 3) + ",4]", 4}, {R"(,"blink":[-1,4])", 4},
+           {R"(,"blink":[10.5,4])", 4}, {R"(,"blink":[10,4,1])", 4}, {R"(,"blink":"10,4")", 4}, {R"(,"blink":[10])", 0},
+           {R"(,"blink":[0,)" + half + R"(],"talk":[100,1])", px / 2 + 1}}) {
+    start("m4", bad);
+    send_bytes(r, moving_pixels(px, rows, 0));
+    r.server(colour_end());
+    CHECK(r.app.model().face == nullptr);
+  }
+  start("m5", R"(,"blink":[0,)" + std::to_string(px / 2) + "]");  // half the rows exactly: fits
+  send_bytes(r, moving_pixels(px, px / 2, 0));
+  r.server(colour_end());
+  CHECK(r.app.model().face && r.app.model().face->blink.rows == px / 2);
+
+  // Either band alone.
+  start("m6", R"(,"talk":[100,4])");
+  send_bytes(r, moving_pixels(px, 0, 4));
+  r.server(colour_end());
+  f = r.app.model().face;
+  CHECK(f && f->blink.rows == 0 && f->talk.rows == 4 && f->talk.rgb565[0] == kAmber);
+}
+
+TEST("colour frames: the device blinks a colour face that has a blink band, and never one without") {
+  Rig r(colour_profile());
+  r.bring_online(true);
+  const int px = colour_px(r);
+  auto blinks = [&]() {
+    int seen = 0;
+    for (int i = 0; i < 90; ++i) {
+      r.advance(100);
+      seen += count_px(r.fake.fb, kTeal) > 0;
+    }
+    return seen;
+  };
+  r.server(colour_start("default", "m1", px, 7, kAnchors + R"(,"blink":[30,6])"));
+  send_bytes(r, moving_pixels(px, 6, 0));
+  r.server(colour_end());
+  const int with_band = blinks();
+  CHECK(with_band > 0 && with_band <= 6);  // two frames in every 45, as the mascot blinks
+  r.server(colour_start("default", "m2", px, 7, kAnchors + R"(,"talk":[30,6])"));
+  send_bytes(r, moving_pixels(px, 0, 6));
+  r.server(colour_end());
+  CHECK(r.app.model().face && r.app.model().face->hash == "m2");
+  CHECK_EQ(blinks(), 0);
+  CHECK_EQ(count_px(r.fake.fb, kAmber), size_t(0));  // not speaking: the mouth stays shut
 }
 
 TEST("clock: off by default, a long rest keeps the Ready screen") {

@@ -270,6 +270,65 @@ TEST("ready: a colour face is sent at the largest size Ready draws it, so it is 
   CHECK(shrunk > 0);  // the case this guards: some panels draw Ready's face smaller while switching
 }
 
+TEST("ready: a colour face blinks and talks at the mascot's cadence, and repaints every row its bands change") {
+  constexpr uint16_t kRose = hg::rgb565(220, 60, 120);
+  constexpr uint16_t kTeal = hg::rgb565(40, 180, 170);
+  constexpr uint16_t kAmber = hg::rgb565(240, 160, 40);
+  for (auto [w, h, round] : {std::tuple{240, 240, true}, {320, 240, false}, {360, 360, true}, {466, 466, true}}) {
+    for (int lines : {1, 2}) {  // two lines draw the face smaller than px, so the bands' rows are scaled
+      const int px = Face(w, h, round).ui.face_px();
+      // Bands at rows that do not fall on whole drawn rows when scaled, one row more than a multiple of 3.
+      const int by = px / 3 + 1, br = px / 9 + 1, ty = 2 * px / 3 + 1, tr = px / 12 + 1;
+      std::vector<uint16_t> idle(static_cast<size_t>(px * px), kRose), blink(static_cast<size_t>(br * px), kTeal),
+          talk(static_cast<size_t>(tr * px), kAmber);
+      hg::mascot::Face colour;
+      colour.hash = "m1";
+      colour.rgb565 = idle.data();
+      colour.px = static_cast<uint16_t>(px);
+      colour.anchors = hg::mascot::anchors();
+      colour.blink = {blink.data(), static_cast<uint16_t>(by), static_cast<uint16_t>(br)};
+      colour.talk = {talk.data(), static_cast<uint16_t>(ty), static_cast<uint16_t>(tr)};
+      hg::UiModel m;
+      m.hero = true;
+      m.headline = "Hi, I'm Hermes";
+      m.detail = lines == 2 ? "Tap the name to switch profile. Ask me anything" : "Ask me anything";
+      m.caption_lines = static_cast<uint8_t>(lines);
+      m.face = &colour;
+      Face f(w, h, round);
+      // Rendered after the frame before, so only the rows the face changes repaint; a fresh Ui draws it whole.
+      auto step = [&](Screen screen, bool speaking, uint32_t frame) {
+        m.screen = screen;
+        m.speaking = speaking;
+        m.frame = frame;
+        f.ui.render(m);
+        Face fresh(w, h, round);
+        fresh.ui.render(m);
+        CHECK(f.display.fb == fresh.display.fb);
+      };
+      int blinks = 0, talks = 0;
+      for (uint32_t frame = 2; frame < 92; ++frame) {
+        step(Screen::Ready, false, frame);
+        blinks += count_of(f, kTeal) > 0;
+        CHECK_EQ(count_of(f, kAmber), size_t(0));
+      }
+      CHECK_EQ(blinks, 4);  // 2 frames in 45, as the mascot blinks
+      for (uint32_t frame = 0; frame < 8; ++frame) {
+        step(Screen::Responding, true, frame);
+        talks += count_of(f, kAmber) > 0;
+      }
+      CHECK_EQ(talks, 4);  // the mouth toggles every 2 frames (200 ms) while speaking
+
+      colour.blink = {};  // only a talk band: no blink, and nothing repaints for one
+      colour.hash = "m2";
+      step(Screen::Ready, false, 2);
+      const std::vector<uint16_t> still = f.display.fb;
+      const int flushed = f.display.flushed;
+      step(Screen::Ready, false, 45);
+      CHECK(f.display.fb == still && f.display.flushed == flushed);
+    }
+  }
+}
+
 // The vertical bands of kText ink (rows with any of it, split where two or more
 // rows are empty), top to bottom: the icon's band, then the time's.
 std::vector<Box> text_bands(const Face& f) {

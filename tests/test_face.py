@@ -663,3 +663,126 @@ def test_a_colour_face_is_named_by_its_picture_and_its_size_and_a_face_file_stil
     assert cli.main(["face", "--out", str(home / profile_faces.FACE_FILE), "--preview", str(tmp_path / "p.png")]) == 0
     made = (home / profile_faces.FACE_FILE).read_bytes()
     assert profile_faces.for_profile(home, colour_px=144).load() == made
+
+
+def _moving_face(path: Path, eyes=(100, 120), mouth=(200, 206), shift: int = 0) -> Path:
+    """An original picture: a rose disc on sky blue with black eyes and mouth across the rows given (of
+    300), or none where None. `shift` moves all of it down."""
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGB", (400, 300), (90, 170, 240))
+    draw = ImageDraw.Draw(img)
+    draw.ellipse((100, 30 + shift, 300, 270 + shift), fill=(220, 60, 120))
+    for rows, x0, x1 in ((eyes, 150, 250), (mouth, 170, 230)):
+        if rows:
+            draw.rectangle((x0, rows[0] + shift, x1, rows[1] + shift), fill=(0, 0, 0))
+    img.save(path)
+    return path
+
+
+def _frames_home(tmp_path: Path, avatar: str = "avatar.png", **frames) -> Path:
+    """A profile whose avatar is _moving_face(), with `blink`/`talk` pictures as _moving_face keywords:
+    `blink={"eyes": None}` saves avatar-blink.png with the eyes gone. A `name` key sets the file name."""
+    home = tmp_path / avatar
+    (home / "assets").mkdir(parents=True)
+    _moving_face(home / "assets" / avatar)
+    for frame, kw in frames.items():
+        kw = dict(kw)
+        _moving_face(home / "assets" / kw.pop("name", f"avatar-{frame}.png"), **kw)
+    return home
+
+
+def _rows(face, data: bytes, y0: int, y1: int) -> bytes:
+    return data[y0 * 2 * face.px: y1 * 2 * face.px]
+
+
+def _most(a: bytes, b: bytes) -> int:
+    """The largest difference between two runs of RGB565 pixels, in levels of 255; 255 where one is
+    transparent and the other not."""
+    most = 0
+    for (p,), (q,) in zip(struct.iter_unpack("<H", a), struct.iter_unpack("<H", b)):
+        most = max(most, 255 if (not p) != (not q) else max(abs((p >> 11) - (q >> 11)) * 8,
+                                                             abs((p >> 5 & 63) - (q >> 5 & 63)) * 4,
+                                                             abs((p & 31) - (q & 31)) * 8))
+    return most
+
+
+def test_blink_and_talk_pictures_send_only_the_rows_they_change(tmp_path):
+    home = _frames_home(tmp_path, blink={"eyes": None}, talk={"mouth": (195, 235)})
+    face = profile_faces.for_profile(home, colour_px=144, frames=True).load()
+    still = profile_faces.colour_from_picture(home / "assets" / "avatar.png", 144)
+    assert face.rgb565 == still.rgb565 and face.anchors == still.anchors
+    for name, band in (("avatar-blink.png", face.blink), ("avatar-talk.png", face.talk)):
+        whole = profile_faces.colour_from_picture(home / "assets" / name, 144).rgb565
+        y, pixels = band
+        n = len(pixels) // (2 * 144)
+        assert 0 < n and y + n <= 144 and pixels == _rows(face, whole, y, y + n)
+        # The band is exactly the rows that change by more than 16 levels: its first and last rows do, and
+        # outside it nothing does.
+        assert _most(_rows(face, whole, y, y + 1), _rows(face, still.rgb565, y, y + 1)) > 16
+        assert _most(_rows(face, whole, y + n - 1, y + n), _rows(face, still.rgb565, y + n - 1, y + n)) > 16
+        assert _most(_rows(face, whole, 0, y), _rows(face, still.rgb565, 0, y)) <= 16
+        assert _most(_rows(face, whole, y + n, 144), _rows(face, still.rgb565, y + n, 144)) <= 16
+    assert face.blink[0] < face.talk[0]  # the eyes are above the mouth
+    assert (len(face.blink[1]) + len(face.talk[1])) // (2 * 144) <= 144 // 2
+
+    # A device without frames gets the still face, named as before; the pictures name a face that moves.
+    plain = profile_faces.for_profile(home, colour_px=144)
+    assert plain.load().blink is None and plain.load().talk is None
+    moving = profile_faces.for_profile(home, colour_px=144, frames=True).hash
+    for name in ("avatar-blink.png", "avatar-talk.png"):
+        (home / "assets" / name).unlink()
+    assert profile_faces.for_profile(home, colour_px=144, frames=True).hash == plain.hash != moving
+
+
+def test_either_frame_alone_moves_and_the_other_stays_still(tmp_path):
+    # JPEG and WebP too: saved like the avatar, the rows they leave alone come out the same.
+    home = _frames_home(tmp_path, "avatar.jpg", talk={"mouth": (195, 235), "name": "avatar-talk.jpg"})
+    face = profile_faces.for_profile(home, colour_px=144, frames=True).load()
+    assert face.blink is None and face.talk is not None
+    home = _frames_home(tmp_path, "avatar.webp", blink={"eyes": None, "name": "avatar-blink.webp"})
+    face = profile_faces.for_profile(home, colour_px=144, frames=True).load()
+    assert face.blink is not None and face.talk is None
+
+
+def test_a_frame_that_changes_too_many_rows_is_refused_and_said_once(tmp_path, caplog):
+    home = _frames_home(tmp_path, blink={"eyes": None, "shift": 40}, talk={"mouth": (195, 235)})
+    found = profile_faces.for_profile(home, colour_px=144, frames=True)
+    with caplog.at_level("WARNING", logger="hermes_gadget_plugin.face"):
+        face = found.load()
+        assert face.blink is None and face.talk is not None  # the talk picture still moves the mouth
+        found.load()  # a reconnect makes it again: the log does not repeat
+    refusals = [r.getMessage() for r in caplog.records if "avatar-blink.png" in r.getMessage()]
+    assert len(refusals) == 1
+    assert re.fullmatch(r"avatar-blink\.png differs from avatar\.png in \d+ of 144 rows, more than the 72 the "
+                        r"device has room for; draw it from the same picture with only the eyes changed",
+                        refusals[0]), refusals[0]
+
+
+def test_the_bands_share_half_the_rows_and_the_one_that_does_not_fit_is_refused(tmp_path, caplog):
+    # Each fits alone in 72 rows; together they need more, so the talk picture, measured second, is refused.
+    home = _frames_home(tmp_path, blink={"eyes": (40, 150)}, talk={"mouth": (180, 270)})
+    with caplog.at_level("WARNING", logger="hermes_gadget_plugin.face"):
+        face = profile_faces.for_profile(home, colour_px=144, frames=True).load()
+    assert face.blink is not None and face.talk is None
+    left = 72 - len(face.blink[1]) // (2 * 144)
+    assert f"more than the {left} the device has room for; draw it from the same picture with only the mouth " \
+           "changed" in caplog.text
+    (home / "assets" / "avatar-blink.png").unlink()
+    assert profile_faces.for_profile(home, colour_px=144, frames=True).load().talk is not None
+
+
+def test_a_frame_that_turns_black_into_transparency_changes_those_rows(tmp_path):
+    """Black is one green step from transparent in RGB565, well inside the noise allowed; it still counts."""
+    from PIL import Image, ImageDraw
+
+    home = tmp_path / "ops"
+    (home / "assets").mkdir(parents=True)
+    for name, eye in (("avatar.png", (0, 0, 0, 255)), ("avatar-blink.png", (0, 0, 0, 0))):
+        img = Image.new("RGBA", (144, 144), (0, 0, 0, 0))  # drawn at the device's size: nothing is resampled
+        draw = ImageDraw.Draw(img)
+        draw.rectangle((24, 24, 119, 119), fill=(220, 60, 120, 255))
+        draw.rectangle((48, 50, 95, 59), fill=eye)
+        img.save(home / "assets" / name)
+    face = profile_faces.for_profile(home, colour_px=144, frames=True).load()
+    assert face.blink is not None and face.blink[0] == 50 and len(face.blink[1]) == 10 * 2 * 144
