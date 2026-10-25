@@ -487,11 +487,17 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 look.seen = now
             elif now != settled:
                 return self._unsettled(look)
-            found = await asyncio.to_thread(faces.for_profile, home, self._convert_avatars)
+            error = None
+            try:
+                found = await asyncio.to_thread(faces.for_profile, home, self._convert_avatars)
+            except Exception as exc:  # a file that went while it was read is a change, checked below
+                found, error = None, exc
             if settled is not None:
                 if await asyncio.to_thread(faces.stamp, home, self._convert_avatars) != settled:
                     return self._unsettled(look)
                 look.seen, look.settled = settled, None
+            if error:
+                raise error
             if found is None or profile == "default":  # the default profile's approval is session.paired
                 return found
             # Found while the profile approved the device: a revocation since then makes it stale.

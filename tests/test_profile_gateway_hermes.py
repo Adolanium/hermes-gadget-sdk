@@ -1225,6 +1225,37 @@ def test_a_face_read_slower_than_the_pairing_check_is_not_restarted(hermes_home,
     later = asyncio.run(main())
     assert (faces_sent(), len(reads)) == ([first, later], 1)
 
+
+def test_a_face_file_gone_during_its_read_keeps_the_face_until_it_stays_gone(hermes_home, tmp_path, monkeypatch):
+    import asyncio
+    from pathlib import Path
+
+    from hermes_gadget_plugin.face import FACE_FILE
+
+    adapter, session, faces_sent = _face_watch(hermes_home, tmp_path)
+    face_file = hermes_home / FACE_FILE
+    first = _write_face(face_file, 0xAA, 1000)
+    read_bytes, gone = Path.read_bytes, []
+
+    def vanishing(path):  # the file goes between the lookup finding it and reading it
+        if path == face_file and not gone:
+            gone.append(path)
+            path.unlink()
+        return read_bytes(path)
+
+    async def main():
+        await session.update_face()
+        _write_face(face_file, 0x55, 1001)
+        monkeypatch.setattr(Path, "read_bytes", vanishing)
+        assert await adapter._follow_face(session) is None
+        await (await adapter._follow_face(session))  # settled: read, but gone meanwhile
+        assert (gone, faces_sent()) == ([face_file], [first])  # the device keeps its face
+        assert await adapter._follow_face(session) is None  # gone at one check
+        await (await adapter._follow_face(session))  # and still at the next: the mascot
+
+    asyncio.run(main())
+    assert faces_sent() == [first, None]
+
 class _Socket:
     """A device's socket as DeviceHub._handle uses it: says hello, answers the challenge with the device's
     key, and once closed ends the connection; its close waits for ``closes`` when one is given."""
