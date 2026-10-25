@@ -46,6 +46,7 @@ def short_utterance_notice(session: "DeviceSession") -> str:
 
 
 _LOOK_UP = object()  # update_face(): find the face first
+_UNSURE = object()  # face_hash while a face is on its way: the device may hold the old one, the new one or none
 
 
 class HubDelegate:
@@ -266,7 +267,7 @@ class DeviceSession:
         self.display_sleeping: bool = hello.get("display_sleeping") is True
         self.paired = False
         self.profile = "default"  # the Hermes profile that answers this device
-        self.face_hash: str | None = None  # the face the device holds; None is the mascot
+        self.face_hash: str | None | object = None  # the face the device holds; None is the mascot
         # The profile the device takes as its own, which a face must name: the last `profile` or
         # `welcome.profile`, else the one it named in hello. A gadget route doesn't change it.
         self.device_profile = "default"
@@ -465,9 +466,9 @@ class DeviceSession:
             return
         if stale():
             return
+        self.face_hash = _UNSURE  # until the last message is out: a cancelled send leaves it unknown
         if isinstance(data, ColourFace):
             stream = self._next_stream()
-            self.face_hash = None  # the device drops the face it holds at face.start
             await self.send_json(protocol.message(
                 "face.start", stream=stream, profile=state[0], hash=digest, width=data.px, height=data.px,
                 format="rgb565", anchors=list(data.anchors)))

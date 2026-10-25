@@ -417,6 +417,47 @@ def test_a_colour_face_goes_as_face_start_chunks_and_face_end(tmp_path):
     assert session.face_hash == "c0ffee"
 
 
+@pytest.mark.parametrize("held_at", ["face.start", "face.end"])
+def test_a_colour_face_cut_off_mid_send_is_cleared_when_the_profile_has_none(tmp_path, held_at):
+    """The device may hold the old face, the new one, or nothing: a later "no face" must clear it."""
+    from hermes_gadget_plugin.face import ColourFace, ProfileFace
+    from hermes_gadget_plugin.hub import DeviceHub, DeviceSession, HubDelegate
+
+    colour = ColourFace(px=64, rgb565=bytes(64 * 64 * 2), anchors=(607, 293, 262, 620, 801, 107, 396, 508, 586, 649))
+
+    class HeldWire(_MediaWire):
+        """Takes each message, but holds the socket at ``held_at`` until released."""
+
+        def __init__(self):
+            super().__init__()
+            self.holding, self.release = asyncio.Event(), asyncio.Event()
+
+        async def send(self, raw):
+            await super().send(raw)
+            if not isinstance(raw, bytes) and self.sent[-1]["type"] == held_at:
+                self.holding.set()
+                await self.release.wait()
+
+    async def main():
+        wire = HeldWire()
+        hub = DeviceHub(DeviceStore(tmp_path), HubDelegate())
+        session = DeviceSession(hub, wire, {"device_id": "hg-1", "caps": {"faces": {"v": 2, "px": 64}}})
+        session.paired = True
+        session.face_hash = "already-on-device"
+        hub.sessions[session.device_id] = session
+        state = session.face_state()
+        first = session.update_face(ProfileFace("new-colour", lambda: colour), state)
+        await wire.holding.wait()
+        second = session.update_face(None, state)  # the profile has no face now: the mascot
+        wire.release.set()
+        await asyncio.gather(first, second, return_exceptions=True)
+        return session, wire.sent
+
+    session, sent = asyncio.run(main())
+    assert sent[-1] == {"type": "face", "profile": "default"}  # cleared, whatever the device holds
+    assert session.face_hash is None
+
+
 def test_a_face_found_before_an_unpair_is_not_sent_after_it(tmp_path):
     """The welcome's face was found while paired; an unpair during the welcome's send must not let it go out."""
     from hermes_gadget_plugin.face import ProfileFace
