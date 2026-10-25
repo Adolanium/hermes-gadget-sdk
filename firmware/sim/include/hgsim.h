@@ -22,9 +22,17 @@ extern "C" {
 #define HGSIM_API __attribute__((visibility("default")))
 #endif
 
-#define HGSIM_ABI_VERSION 7
+#define HGSIM_ABI_VERSION 8
 
 typedef struct hgsim hgsim;
+
+/* Local wall-clock time (see hg::WallTime). */
+typedef struct hgsim_wall_time {
+  int year, month, day; /* month 1-12, day 1-31 */
+  int weekday;          /* 0 = Sunday */
+  int hour, minute, second;
+} hgsim_wall_time;
+
 
 typedef struct hgsim_host {
   void* user;
@@ -62,6 +70,8 @@ typedef struct hgsim_host {
   void (*update_abort)(void* user);
   void (*update_restart)(void* user);
   void (*update_confirm)(void* user);
+  /* local time of day; return 1 and fill `out` when known, 0 otherwise */
+  int (*wall_time)(void* user, hgsim_wall_time* out);
 } hgsim_host;
 
 typedef struct hgsim_config {

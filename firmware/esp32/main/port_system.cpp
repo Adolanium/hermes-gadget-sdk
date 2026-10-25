@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <string>
+#include <ctime>
 
 #include "esp_log.h"
 #include "esp_random.h"
@@ -12,6 +13,22 @@ namespace hgp {
 uint32_t EspSystem::now_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
 
 uint64_t EspSystem::now_us() { return static_cast<uint64_t>(esp_timer_get_time()); }
+
+bool local_wall_time(hg::WallTime& out) {
+  const time_t t = time(nullptr);
+  struct tm tm{};
+  // A fresh boot without RTC and network still reads 1970; a real date is
+  // 2025 or later.
+  if (!localtime_r(&t, &tm) || tm.tm_year + 1900 < 2025) return false;
+  out.year = static_cast<uint16_t>(tm.tm_year + 1900);
+  out.month = static_cast<uint8_t>(tm.tm_mon + 1);
+  out.day = static_cast<uint8_t>(tm.tm_mday);
+  out.weekday = static_cast<uint8_t>(tm.tm_wday);
+  out.hour = static_cast<uint8_t>(tm.tm_hour);
+  out.minute = static_cast<uint8_t>(tm.tm_min);
+  out.second = static_cast<uint8_t>(tm.tm_sec);
+  return true;
+}
 
 void EspSystem::random_bytes(uint8_t* out, size_t len) {
   // Hardware RNG; entropy is good once the radio is up, and the device key is
@@ -88,5 +105,7 @@ void EspSystem::set_dozing(bool dozing) {
            slept_ms / 1000, dozed_ms > 0 ? static_cast<int>(slept_ms * 100 / dozed_ms) : 0,
            static_cast<unsigned>(g_sleeps.load()));
 }
+
+bool EspSystem::wall_time(hg::WallTime& out) { return local_wall_time(out); }
 
 }  // namespace hgp

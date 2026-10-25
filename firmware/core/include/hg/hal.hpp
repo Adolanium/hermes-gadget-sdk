@@ -120,6 +120,14 @@ class Storage {
   virtual void erase(std::string_view key) = 0;
 };
 
+// Local calendar time. The port knows the timezone.
+struct WallTime {
+  uint16_t year = 0;
+  uint8_t month = 1, day = 1;  // 1-based
+  uint8_t weekday = 0;         // 0 = Sunday
+  uint8_t hour = 0, minute = 0, second = 0;
+};
+
 class System {
  public:
   virtual ~System() = default;
@@ -133,6 +141,9 @@ class System {
   // battery. The port may let the chip sleep between events; input, the network
   // and the power key still reach the app, only less often (App::kDozeWaitMs).
   virtual void set_dozing(bool dozing) { (void)dozing; }
+  // Local time of day. False until the port knows it (network time or a
+  // battery-backed clock); the clock face stays off until then.
+  virtual bool wall_time(WallTime& out) { (void)out; return false; }
 };
 
 // The slot a firmware update is written to. The core authorizes and checks the

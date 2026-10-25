@@ -21,6 +21,13 @@ struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Stor
   // System
   uint32_t clock = 1000;
   uint32_t now_ms() override { return clock; }
+  hg::WallTime wall;  // what wall_time() reports once wall_ok holds
+  bool wall_ok = false;
+  bool wall_time(hg::WallTime& out) override {
+    if (!wall_ok) return false;
+    out = wall;
+    return true;
+  }
   bool dozing = false;
   int doze_changes = 0;
   void set_dozing(bool d) override {
@@ -2062,7 +2069,7 @@ TEST("power: failed readings replace stale data and shutdown requires a second l
   CHECK(status["power"]["battery_mv"].is_null());
   CHECK((*r.fake.last("state"))["sensors"]["battery_mv"].is_null());
   r.app.open_settings();
-  for (int i = 0; i < 10; ++i) r.app.console("cancel");
+  for (int i = 0; i < 11; ++i) r.app.console("cancel");  // the Clock face item sits before Power off
   CHECK_EQ(r.app.model().detail, std::string("Power off"));
   r.app.console("talk"); r.app.console("release");
   CHECK_EQ(battery.shutdowns, 0);
@@ -2821,6 +2828,33 @@ static void same_screens_banded(int width, int height, bool round, int band_rows
     r.advance(300);
   }, "the alarm dismissed");
   CHECK(banded.app.screen() != hg::Screen::Alarm);
+  both([](Rig& r) {
+    r.fake.wall = hg::WallTime{2026, 10, 24, 6, 9, 41, 0};
+    r.fake.wall_ok = true;
+    r.app.console("set clock 5");
+    r.advance(40000);  // the reply's linger runs out, then the 5 s rest
+  }, "the clock");
+  CHECK(banded.app.screen() == hg::Screen::Clock);
+  both([](Rig& r) {
+    r.server(R"({"type":"action","id":"t2","name":"timer.start","args":{"seconds":1}})");
+    r.advance(1200);  // the timer takes the screen back from the clock
+  }, "the timer over the clock");
+  CHECK(banded.app.screen() != hg::Screen::Clock);
+  both([](Rig& r) { r.advance(400); }, "the alarm over the clock");
+  CHECK(banded.app.screen() == hg::Screen::Alarm);
+  both([](Rig& r) {
+    r.app.on_button(hg::Button::Talk, true);
+    r.app.on_button(hg::Button::Talk, false);
+    r.advance(300);
+  }, "the alarm dismissed again");
+  CHECK(banded.app.screen() != hg::Screen::Alarm);
+  both([](Rig& r) { r.advance(6000); }, "the clock again");
+  CHECK(banded.app.screen() == hg::Screen::Clock);  // the same minute: the face must repaint
+  both([](Rig& r) {
+    r.server(R"({"type":"notice","text":"Back soon","ttl_s":30})");
+    r.advance(300);
+  }, "the clock leaving");
+  CHECK(banded.app.screen() != hg::Screen::Clock);
   both([](Rig& r) { wifi_setup_with_code(r); r.advance(300); }, "Wi-Fi setup");
   CHECK(banded.app.screen() == hg::Screen::Setup);
   CHECK_EQ(full.fake.stray_flushes, 0);
@@ -3968,6 +4002,10 @@ size_t pixels_changed(const std::vector<uint16_t>& a, const std::vector<uint16_t
   for (size_t i = 0; i < a.size(); ++i) n += a[i] != b[i];
   return n;
 }
+// Saturday, 24 October 2026 at 09:41 — the wall time behind the clock tests.
+const hg::WallTime kWallSaturday{2026, 10, 24, 6, 9, 41, 0};
+// Sunday, 25 October 2026 at 00:05 — midnight in both time formats.
+const hg::WallTime kWallMidnight{2026, 10, 25, 0, 0, 5, 0};
 }  // namespace
 
 TEST("faces: a face replaces the mascot until a face without bits brings it back") {
@@ -4124,4 +4162,439 @@ TEST("faces: a face made of the mascot's own bitmaps draws the mascot") {
   r.advance(10);
   CHECK(r.app.model().face != nullptr);
   CHECK_EQ(pixels_changed(mascot, r.fake.fb), size_t(0));
+}
+
+TEST("clock: off by default, a long rest keeps the Ready screen") {
+  Rig r;
+  r.fake.backlight = true;
+  r.fake.wall = kWallSaturday;
+  r.fake.wall_ok = true;
+  r.bring_online(true);
+  CHECK(!r.app.clock_enabled());
+  r.advance(40000);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.fake.brightness, 100);
+}
+
+TEST("clock: the console checks clock and time_format, and both survive a restart") {
+  Rig r;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set clock 60"), std::string("@ok clock"));
+  CHECK(r.app.clock_enabled());
+  CHECK_EQ(r.app.console("get clock"), std::string(R"(@value {"key":"clock","value":"60"})"));
+  CHECK_EQ(r.app.console("set clock 4"), std::string("@error clock must be 0 (off) or 5..3600 seconds"));
+  CHECK_EQ(r.app.console("set clock 3601"), std::string("@error clock must be 0 (off) or 5..3600 seconds"));
+  CHECK_EQ(r.app.console("set clock soon"), std::string("@error clock must be 0 (off) or 5..3600 seconds"));
+  CHECK_EQ(r.app.console("set clock 0"), std::string("@ok clock"));
+  CHECK(!r.app.clock_enabled());
+  CHECK_EQ(r.app.console("set clock 3600"), std::string("@ok clock"));
+  CHECK_EQ(r.app.console("set time_format 12h"), std::string("@ok time_format"));
+  CHECK_EQ(r.app.console("set time_format 25h"), std::string("@error time_format must be 12h or 24h"));
+  CHECK_EQ(r.app.console("set time_format hour"), std::string("@error time_format must be 12h or 24h"));
+  hg::Hal hal = r.fake.hal();
+  hg::App again(hal, Rig::profile("ws://hermes.local:8765/gadget"));
+  again.begin();
+  CHECK(again.clock_enabled());
+  CHECK_EQ(again.console("get clock"), std::string(R"(@value {"key":"clock","value":"3600"})"));
+  CHECK_EQ(again.console("get time_format"), std::string(R"(@value {"key":"time_format","value":"12h"})"));
+}
+
+TEST("clock: it needs the time, and the settings body says so until then") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set clock 5"), std::string("@ok clock"));
+  r.advance(10000);  // no time of day yet
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 20 && r.app.model().detail != "Clock face"; ++i) r.app.on_button(hg::Button::Down, true);
+  CHECK_EQ(r.app.model().detail, std::string("Clock face"));
+  CHECK_EQ(r.app.model().body, std::string("5 seconds\nThe clock starts once the gadget knows the time."));
+  r.app.close_settings();
+  r.fake.wall = kWallSaturday;
+  r.fake.wall_ok = true;
+  r.advance(6000);
+  CHECK(r.app.screen() == hg::Screen::Clock);
+  // It also needs a paired session: the pairing screen keeps it away.
+  Rig pairing;
+  pairing.fake.backlight = true;
+  pairing.fake.wall = kWallSaturday;
+  pairing.fake.wall_ok = true;
+  pairing.bring_online(false);
+  CHECK_EQ(pairing.app.console("set clock 5"), std::string("@ok clock"));
+  pairing.advance(10000);
+  CHECK(pairing.app.screen() == hg::Screen::Pairing);
+  CHECK(!pairing.app.clock_showing());  // no dim face behind the pairing screen
+  CHECK_EQ(pairing.fake.brightness, 100);
+  // A board without a display never runs the clock at all.
+  Rig blind;
+  blind.hal.display = nullptr;
+  blind.bring_online(true);
+  blind.fake.wall = kWallSaturday;
+  blind.fake.wall_ok = true;
+  CHECK_EQ(blind.app.console("set clock 5"), std::string("@ok clock"));
+  blind.advance(6000);
+  CHECK(!blind.app.clock_showing());
+  CHECK(blind.app.status_json().find("\"screen\":\"clock\"") == std::string::npos);
+}
+
+TEST("clock: after a rest it shows at 70% of the brightness setting") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  r.fake.wall = kWallSaturday;
+  r.fake.wall_ok = true;
+  CHECK_EQ(r.app.console("set clock 5"), std::string("@ok clock"));
+  r.advance(6000);
+  CHECK(r.app.screen() == hg::Screen::Clock);
+  CHECK_EQ(r.fake.brightness, 70);
+  CHECK_EQ(r.app.model().clock_time, std::string("09:41"));
+  CHECK_EQ(r.app.model().clock_date, std::string("SAT OCT 24"));
+  CHECK_EQ(int(r.app.model().clock_minute), 41);
+  CHECK(r.app.status_json().find("\"screen\":\"clock\"") != std::string::npos);
+  // A lit clock is a lit screen: Hermes is never told it is dark.
+  const Value* dark = last_display_state(r.fake);
+  CHECK(!dark || !(*dark)["display_sleeping"].as_bool());
+  // A very low brightness setting keeps a floor of 5.
+  Rig dim;
+  dim.fake.backlight = true;
+  dim.bring_online(true);
+  dim.fake.wall = kWallSaturday;
+  dim.fake.wall_ok = true;
+  CHECK_EQ(dim.app.console("set brightness 5"), std::string("@ok brightness"));
+  CHECK_EQ(dim.app.console("set clock 5"), std::string("@ok clock"));
+  dim.advance(6000);
+  CHECK(dim.app.screen() == hg::Screen::Clock);
+  CHECK_EQ(dim.fake.brightness, 5);
+}
+
+TEST("clock: a tap ends it and records nothing; the name opens nothing; a hold talks; TALK records") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online_with_profiles();
+  const auto [nx, ny] = name_point(r);  // where the name sits on Ready, before any clock
+  CHECK(nx >= 0);
+  r.fake.wall = kWallSaturday;
+  r.fake.wall_ok = true;
+  // In tap mode a quick tap on Ready records, so a tap that does nothing proves the swallow.
+  CHECK_EQ(r.app.console("set talk_mode tap"), std::string("@ok talk_mode"));
+  CHECK_EQ(r.app.console("set clock 5"), std::string("@ok clock"));
+  r.advance(6000);
+  CHECK(r.app.screen() == hg::Screen::Clock);
+  CHECK_EQ(r.fake.brightness, 70);
+  hg::TouchGestures touch(r.app);
+  // A quick tap brings Ready back at full brightness and records nothing.
+  touch.update(true, 160, 120, r.fake.clock);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.fake.brightness, 100);
+  touch.update(false, 0, 0, r.fake.clock + 30);
+  CHECK(r.fake.last("audio.start") == nullptr);
+  CHECK(!r.fake.mic_on);
+  // The name is no target on the clock: a tap there opens nothing either.
+  r.advance(6000);
+  CHECK(r.app.screen() == hg::Screen::Clock);
+  touch.update(true, nx, ny, r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock + 30);
+  CHECK(!r.app.profile_picker_open());
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.app.console("set talk_mode hold"), std::string("@ok talk_mode"));
+  // The TALK button ends the clock and the press goes on, as on Ready.
+  r.advance(6000);
+  CHECK(r.app.screen() == hg::Screen::Clock);
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK(r.app.screen() == hg::Screen::Listening);
+  CHECK(r.fake.mic_on);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.last("audio.start") != nullptr);
+  r.server(R"({"type":"reply","text":"Done."})");
+  for (int i = 0; i < 40 && r.app.screen() != hg::Screen::Clock; ++i) r.advance(1000);  // reply, linger, rest
+  CHECK(r.app.screen() == hg::Screen::Clock);
+  // A hold on the clock still talks: the touch-down ends the clock, the hold records.
+  touch.update(true, 160, 120, r.fake.clock);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  r.advance(200);
+  touch.tick(r.fake.clock);
+  CHECK(r.fake.mic_on);
+  CHECK(r.app.screen() == hg::Screen::Listening);
+  touch.update(false, 0, 0, r.fake.clock);
+}
+
+TEST("clock: it gives way to whatever needs the screen, and comes back after a new rest") {
+  struct Battery : hg::Power {
+    std::optional<hg::PowerStatus> status = hg::PowerStatus{true, 3850, 65, false, false};
+    std::optional<hg::PowerStatus> read() override { return status; }
+    bool power_off() override { return true; }
+  } battery;
+  Rig r(Rig::motion_profile());
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  r.fake.wall = kWallSaturday;
+  r.fake.wall_ok = true;
+  CHECK_EQ(r.app.console("set clock 5"), std::string("@ok clock"));
+  CHECK_EQ(r.app.console("set face_down_sleep on"), std::string("@ok face_down_sleep"));
+  const auto showing = [&] {
+    for (int i = 0; i < 40 && r.app.screen() != hg::Screen::Clock; ++i) r.advance(1000);
+    CHECK(r.app.screen() == hg::Screen::Clock);
+  };
+  showing();
+  // A card shown until dismissed
+  r.server(R"({"type":"display","title":"Timer","body":"Pasta: 9 min","ttl_s":0})");
+  r.advance(200);
+  CHECK(r.app.screen() == hg::Screen::Card);
+  CHECK(!r.app.clock_showing());  // no dim face behind it
+  CHECK_EQ(r.fake.brightness, 100);
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Cancel, false);  // dismisses the card
+  showing();
+  // A reply, spoken and then read
+  r.server(R"({"type":"reply","text":"It is sunny."})");
+  r.server(R"({"type":"audio.start","stream":3,"rate":16000,"format":"pcm16"})");
+  CHECK(r.app.in_turn());
+  r.fake.spk_draining = true;
+  r.advance(3000);
+  CHECK(r.app.screen() != hg::Screen::Clock);
+  r.fake.spk_draining = false;
+  r.server(R"({"type":"audio.end","stream":3})");
+  showing();
+  // A prompt
+  r.server(R"({"type":"prompt","id":"q1","title":"Allow?","text":"rm -rf build"})");
+  CHECK(r.app.screen() == hg::Screen::Prompt);
+  r.server(R"({"type":"prompt.close","id":"q1"})");
+  showing();
+  // A turn that stays thinking, and the hint its cancel flashes
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK(r.app.screen() == hg::Screen::Listening);
+  r.advance(400);  // long enough to be sent
+  r.app.on_button(hg::Button::Talk, false);
+  r.server(R"({"type":"turn.start","turn":"t1"})");
+  r.advance(6000);  // past the rest: the turn still holds the screen, lit
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  CHECK(!r.app.clock_showing());
+  CHECK_EQ(r.fake.brightness, 100);
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Cancel, false);  // cancelled: a hint flashes
+  r.advance(2000);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  r.advance(4000);
+  CHECK(r.app.screen() == hg::Screen::Ready);  // the hint flash holds the rest off
+  showing();
+  // A timer, and the alarm it becomes (never drawn at the clock's dim level)
+  r.server(R"({"type":"action","id":"t1","name":"timer.start","args":{"seconds":1,"label":"Tea"}})");
+  r.advance(200);
+  CHECK(r.app.screen() != hg::Screen::Clock);
+  r.advance(1500);
+  CHECK(r.app.screen() == hg::Screen::Alarm);
+  CHECK_EQ(r.fake.brightness, 100);  // the alarm wakes the screen, so never 70%
+  r.app.on_button(hg::Button::Talk, true);  // dismisses it
+  r.app.on_button(hg::Button::Talk, false);
+  showing();
+  // The settings menu
+  CHECK(r.app.open_settings());
+  r.advance(6000);  // a held-open menu keeps the clock off it
+  CHECK(r.app.screen() == hg::Screen::Settings);
+  CHECK(!r.app.clock_showing());
+  CHECK_EQ(r.fake.brightness, 100);
+  r.app.close_settings();
+  showing();
+  // A notice
+  r.server(R"({"type":"notice","text":"Back soon","ttl_s":1})");
+  r.advance(200);
+  CHECK(r.app.screen() != hg::Screen::Clock);
+  showing();
+  // The low-battery caption (10% or less, not on USB)
+  battery.status = hg::PowerStatus{true, 3600, 8, false, false};
+  r.advance(5100);  // the next power reading
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  battery.status = hg::PowerStatus{true, 3850, 65, false, false};
+  r.advance(5100);
+  showing();
+  // Face down
+  r.hold_still(0, 0, -1000, 1200);
+  CHECK_EQ(r.fake.brightness, 0);
+  CHECK(r.app.screen() != hg::Screen::Clock);
+  r.hold_still(0, 0, 1000, 500);  // turn it back over
+  CHECK_EQ(r.fake.brightness, 100);
+  showing();
+  // A dropped connection ends a showing clock; its screens take over, lit.
+  r.app.on_transport_closed("bye");
+  r.advance(300);
+  CHECK(!r.app.clock_showing());
+  CHECK_EQ(r.fake.brightness, 100);
+  // A fatal server error keeps the Error screen up, also lit, with no clock under it.
+  Rig err;
+  err.fake.backlight = true;
+  err.bring_online(true);
+  err.fake.wall = kWallSaturday;
+  err.fake.wall_ok = true;
+  CHECK_EQ(err.app.console("set clock 5"), std::string("@ok clock"));
+  err.advance(6000);
+  CHECK(err.app.screen() == hg::Screen::Clock);
+  err.server(R"({"type":"error","code":"protocol","message":"bad handshake"})");
+  CHECK(err.app.screen() == hg::Screen::Error);
+  err.advance(6000);
+  CHECK(err.app.screen() == hg::Screen::Error);
+  CHECK(!err.app.clock_showing());
+  CHECK_EQ(err.fake.brightness, 100);
+}
+
+TEST("clock: rest counts from the end of the speech and of the reply text") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  r.fake.wall = kWallSaturday;
+  r.fake.wall_ok = true;
+  CHECK_EQ(r.app.console("set clock 10"), std::string("@ok clock"));
+  r.server(R"({"type":"reply","text":"It is sunny."})");
+  r.server(R"({"type":"audio.start","stream":3,"rate":16000,"format":"pcm16"})");
+  CHECK(r.app.in_turn());
+  r.fake.spk_draining = true;  // the speech is still playing
+  r.advance(15000);
+  CHECK(r.app.screen() != hg::Screen::Clock);
+  r.fake.spk_draining = false;
+  r.server(R"({"type":"audio.end","stream":3})");
+  r.advance(100);
+  CHECK(!r.app.in_turn());
+  // The reply text stays up for 20 s; the clock's own 10 s never start under it.
+  r.advance(9000);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  r.advance(11000);  // the linger runs out here
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  r.advance(11000);  // and only now the 10 s of rest have passed
+  CHECK(r.app.screen() == hg::Screen::Clock);
+}
+
+TEST("clock: the screen timeout dims and darkens it, and what wakes it comes back at the setting") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  r.fake.wall = kWallSaturday;
+  r.fake.wall_ok = true;
+  CHECK_EQ(r.app.console("set clock 10"), std::string("@ok clock"));
+  CHECK_EQ(r.app.console("set screen_timeout 60"), std::string("@ok screen_timeout"));
+  r.advance(11000);
+  CHECK(r.app.screen() == hg::Screen::Clock);
+  CHECK_EQ(r.fake.brightness, 70);
+  r.advance(20000);  // half of the timeout: dim
+  CHECK_EQ(r.fake.brightness, 10);
+  // The session sits silent for over a minute: keep the heartbeat fed.
+  r.server(R"({"type":"ping"})");
+  r.advance(30000);  // the timeout: dark, and the dark ends the clock
+  CHECK_EQ(r.fake.brightness, 0);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  const Value* dark = last_display_state(r.fake);
+  CHECK(dark && (*dark)["display_sleeping"].as_bool());
+  r.app.on_button(hg::Button::Talk, true);  // the next input wakes to Ready
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  r.app.on_button(hg::Button::Talk, false);
+  // A clock that starts on a dimmed screen keeps the dim level.
+  CHECK_EQ(r.app.console("set screen_timeout 40"), std::string("@ok screen_timeout"));
+  CHECK_EQ(r.app.console("set clock 25"), std::string("@ok clock"));
+  r.server(R"({"type":"ping"})");
+  r.advance(21000);
+  CHECK_EQ(r.fake.brightness, 10);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  r.advance(5000);
+  CHECK(r.app.screen() == hg::Screen::Clock);
+  CHECK_EQ(r.fake.brightness, 10);
+  r.advance(15000);  // the timeout darkens the dimmed clock
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  r.app.on_button(hg::Button::Talk, false);
+  // The PWR key turns a lit clock's screen off; the next press wakes to Ready.
+  CHECK_EQ(r.app.console("set screen_timeout 3600"), std::string("@ok screen_timeout"));
+  CHECK_EQ(r.app.console("set clock 5"), std::string("@ok clock"));
+  r.advance(6000);
+  CHECK(r.app.screen() == hg::Screen::Clock);
+  CHECK_EQ(r.fake.brightness, 70);
+  r.app.on_power_key();
+  CHECK_EQ(r.fake.brightness, 0);
+  r.advance(100);
+  CHECK(r.app.screen() != hg::Screen::Clock);
+  r.app.on_power_key();
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  // A settings change on a dark screen lights it at the brightness setting.
+  r.app.on_power_key();
+  CHECK_EQ(r.fake.brightness, 0);
+  CHECK_EQ(r.app.console("set volume 40"), std::string("@ok volume"));
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+}
+
+TEST("clock: a screen.brightness action on the clock keeps 70% of the new level") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  r.fake.wall = kWallSaturday;
+  r.fake.wall_ok = true;
+  CHECK_EQ(r.app.console("set clock 5"), std::string("@ok clock"));
+  r.advance(6000);
+  CHECK(r.app.screen() == hg::Screen::Clock);
+  CHECK_EQ(r.fake.brightness, 70);
+  r.server(R"({"type":"action","id":"b1","name":"screen.brightness","args":{"percent":50}})");
+  CHECK_EQ(r.fake.brightness, 35);
+  CHECK(r.app.screen() == hg::Screen::Clock);
+}
+
+TEST("clock: the settings item cycles Off, 30 s, 1 min, 2 min and 5 min") {
+  Rig r;
+  r.fake.backlight = true;
+  r.fake.wall = kWallSaturday;
+  r.fake.wall_ok = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 20 && r.app.model().detail != "Clock face"; ++i) r.app.on_button(hg::Button::Down, true);
+  CHECK_EQ(r.app.model().detail, std::string("Clock face"));
+  CHECK_EQ(r.app.model().body, std::string("Off\nSelect to show a clock after a rest."));
+  const auto select = [&] {
+    r.app.on_button(hg::Button::Talk, true);
+    r.app.on_button(hg::Button::Talk, false);
+  };
+  select();
+  CHECK_EQ(r.fake.kv["clock"], std::string("30"));
+  CHECK_EQ(r.app.model().body, std::string("30 seconds\nA dim clock appears after this much rest."));
+  select();
+  CHECK_EQ(r.fake.kv["clock"], std::string("60"));
+  select();
+  CHECK_EQ(r.fake.kv["clock"], std::string("120"));
+  select();
+  CHECK_EQ(r.fake.kv["clock"], std::string("300"));
+  CHECK_EQ(r.app.model().body, std::string("300 seconds\nA dim clock appears after this much rest."));
+  select();
+  CHECK_EQ(r.fake.kv["clock"], std::string("0"));
+  CHECK_EQ(r.app.model().body, std::string("Off\nSelect to show a clock after a rest."));
+}
+
+TEST("clock: the face's strings in 12- and 24-hour time and in Spanish") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  r.fake.wall_ok = true;
+  CHECK_EQ(r.app.console("set clock 5"), std::string("@ok clock"));
+  CHECK_EQ(r.app.console("set time_format 12h"), std::string("@ok time_format"));
+  r.fake.wall = kWallSaturday;  // Saturday 09:41
+  r.advance(6000);
+  CHECK(r.app.screen() == hg::Screen::Clock);
+  CHECK_EQ(r.app.model().clock_time, std::string("9:41"));
+  CHECK_EQ(r.app.model().clock_date, std::string("SAT OCT 24"));
+  r.fake.wall = kWallMidnight;  // Sunday 00:05
+  r.advance(200);
+  CHECK_EQ(r.app.model().clock_time, std::string("12:05"));
+  CHECK_EQ(r.app.model().clock_date, std::string("SUN OCT 25"));
+  CHECK_EQ(r.app.console("set time_format 24h"), std::string("@ok time_format"));
+  CHECK(r.app.screen() != hg::Screen::Clock);  // a setting change ends the clock
+  r.advance(6000);
+  CHECK_EQ(r.app.model().clock_time, std::string("00:05"));
+  CHECK_EQ(r.app.console("set language es"), std::string("@ok language"));
+  r.advance(6000);
+  CHECK(r.app.screen() == hg::Screen::Clock);
+  CHECK_EQ(r.app.model().clock_date, std::string("DOM 25 OCT"));
+  r.fake.wall = kWallSaturday;
+  r.advance(200);
+  CHECK_EQ(r.app.model().clock_date, std::string("SÁB 24 OCT"));
+  CHECK_EQ(r.app.model().clock_time, std::string("09:41"));
 }

@@ -39,7 +39,7 @@ constexpr uint32_t kBackoffMs[] = {1000, 2000, 4000, 8000, 15000, 30000};
 constexpr size_t kBackoffSteps = sizeof(kBackoffMs) / sizeof(kBackoffMs[0]);
 
 const char* const kSettingKeys[] = {"name", "server", "token", "talk_mode", "volume", "brightness", "screen_timeout", "battery_display", "battery_estimate", "language", "wifi_ssid", "wifi_pass",
-                                    "face_down_sleep"};
+                                    "face_down_sleep", "clock", "time_format"};
 
 // NVS limits storage keys to 15 characters; keep the public setting name unchanged.
 std::string_view setting_storage_key(std::string_view key) {
@@ -81,6 +81,14 @@ bool same_secret(std::string_view a, std::string_view b) {
   unsigned diff = 0;
   for (size_t i = 0; i < a.size(); ++i) diff |= static_cast<unsigned char>(a[i] ^ b[i]);
   return diff == 0;
+}
+
+// The clock face's time: 24-hour HH:MM, or 12-hour H:MM (midnight is 12), with no AM/PM.
+std::string clock_time_text(const WallTime& w, bool h24) {
+  char buf[8];  // room for any two uint8_t fields: the ESP-IDF compiler checks the worst case
+  if (h24) std::snprintf(buf, sizeof buf, "%02u:%02u", unsigned(w.hour), unsigned(w.minute));
+  else std::snprintf(buf, sizeof buf, "%u:%02u", unsigned(w.hour % 12 ? w.hour % 12 : 12), unsigned(w.minute));
+  return buf;
 }
 
 std::string lower(std::string s) {
@@ -132,7 +140,7 @@ void App::load_settings() {
   volume_ = static_cast<uint8_t>(std::max(0, std::min(100, vol)));
   if (hal_.speaker) hal_.speaker->set_volume(volume_);
   brightness_ = static_cast<uint8_t>(std::max(5, std::min(100, std::atoi(setting("brightness", "100").c_str()))));
-  if (!face_down_ && hal_.display && hal_.display->info().has_backlight) hal_.display->set_backlight(brightness_);
+  // The panel level itself is applied once, below, after the sleep flags clear.
   screen_timeout_ms_ = static_cast<uint32_t>(std::max(0, std::min(3600, std::atoi(setting("screen_timeout", "0").c_str())))) * 1000;
   const std::string indicator = setting("battery_display", "off");
   battery_display_ = indicator == "icon" ? BatteryIndicator::Icon
@@ -143,9 +151,13 @@ void App::load_settings() {
   lang_auto_ = language == "auto";
   lang_ = lang_auto_ ? hermes_lang_.value_or(i18n::Lang::En) : i18n::parse(language).value_or(i18n::Lang::En);
   face_down_sleep_ = setting("face_down_sleep", "off") == "on";
+  clock_after_ms_ = static_cast<uint32_t>(std::max(0, std::min(3600, std::atoi(setting("clock", "0").c_str())))) * 1000;
+  clock_24h_ = setting("time_format", "24h") != "12h";
   if (face_down_) return;  // a face-down screen stays dark until the gadget is turned over
   activity_at_ = now();
   display_dimmed_ = display_sleeping_ = false;
+  clock_showing_ = false;  // a setting change is activity: the clock starts its rest again
+  apply_backlight();
 }
 
 void App::add_action(Action action) {
@@ -217,7 +229,8 @@ void App::begin() {
       int p = static_cast<int>(std::max<int64_t>(5, std::min<int64_t>(100, args["percent"].as_int())));
       brightness_ = static_cast<uint8_t>(p);
       // Face down, the level is only stored: the turn-over (wake_display) applies it.
-      if (!face_down_) hal_.display->set_backlight(static_cast<uint8_t>(p));
+      // A dimmed or timed-out screen keeps its level too; the wake applies the new one.
+      if (!face_down_) apply_backlight();
       if (hal_.storage && !hal_.storage->set("brightness", std::to_string(p))) log(LogLevel::Warn, "could not save brightness");
       result.set("percent", p);
       return true;
@@ -1588,6 +1601,7 @@ void App::tick() {
   const uint32_t t = now();
   power_tick();
   motion_tick();
+  clock_tick();
   settings_tick();
   phone_tick();
 
@@ -1699,6 +1713,8 @@ void App::tick() {
 
   if (t - frame_at_ >= kFrameMs) {
     frame_at_ = t;
+    // The port's time of day feeds the clock face; read once per frame.
+    wall_valid_ = hal_.system && hal_.system->wall_time(wall_);
     ++model_.frame;
     update_model();
   }
@@ -1709,6 +1725,8 @@ void App::update_model() {
   m.title = name_;
   m.lang = lang_;
   m.code.clear();
+  m.clock_time.clear();
+  m.clock_date.clear();
   m.detail.clear();
   m.body.clear();
   m.yes.clear();
@@ -1959,6 +1977,21 @@ void App::update_model() {
         m.caption_lines = 2;
       }
     }
+    if (clock_showing_) {
+      // The resting clock owns the whole panel: the time, the date and the mascot.
+      m.screen = Screen::Clock;
+      m.clock_time = clock_time_text(wall_, clock_24h_);
+      m.clock_date = tr(Msg::ClockDate,
+                        {tr(static_cast<Msg>(static_cast<int>(Msg::WeekdaySun) + std::min<unsigned>(wall_.weekday, 6))),
+                         tr(static_cast<Msg>(static_cast<int>(Msg::MonthJan) + std::clamp<int>(wall_.month, 1, 12) - 1)),
+                         std::to_string(wall_.day)});
+      m.clock_minute = wall_.minute;
+      m.hero = false;
+      m.name_target = false;
+      m.hint.clear();
+      m.detail.clear();
+      m.body.clear();
+    }
   }
   bool keeps_detail = m.screen == Screen::Pairing || m.screen == Screen::Boot || m.screen == Screen::Prompt ||
                       m.screen == Screen::Profiles;
@@ -2107,6 +2140,12 @@ std::string App::console(std::string_view raw) {
       return "@error battery_estimate must be off or liion";
     if (key == "face_down_sleep" && !value.empty() && value != "on" && value != "off")
       return "@error face_down_sleep must be on or off";
+    if (key == "clock" && !value.empty() &&
+        (value.size() > 4 || value.find_first_not_of("0123456789") != std::string::npos ||
+         (std::atoi(value.c_str()) != 0 && (std::atoi(value.c_str()) < 5 || std::atoi(value.c_str()) > 3600))))
+      return "@error clock must be 0 (off) or 5..3600 seconds";
+    if (key == "time_format" && !value.empty() && value != "12h" && value != "24h")
+      return "@error time_format must be 12h or 24h";
     if (key == "language" && !value.empty() && value != "auto" && !i18n::parse(value))
       return "@error language must be one of:" + language_codes();
     if (!hal_.storage) return "@error no storage";

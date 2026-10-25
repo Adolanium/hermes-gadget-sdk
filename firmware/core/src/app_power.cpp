@@ -12,6 +12,9 @@ namespace {
 constexpr int kDownZ = -700, kDownTiltMg = 500, kUpZ = -300;
 constexpr uint32_t kFaceDownMs = 800, kFaceUpMs = 300;
 constexpr uint32_t kMotionStaleMs = 2000;  // a silent sensor never keeps the screen dark
+// The resting clock's share of the brightness setting: AMOLED care, with a floor
+// so a very low setting keeps the face readable.
+constexpr int kClockPercent = 70;
 
 }  // namespace
 
@@ -29,6 +32,17 @@ std::optional<uint8_t> App::display_battery_percent() const {
   return std::nullopt;
 }
 
+// The one writer of the panel's backlight level: the brightness setting, capped
+// by the resting clock, by the dim step, and dark while asleep or face down.
+void App::apply_backlight() {
+  if (!hal_.display || !hal_.display->info().has_backlight) return;
+  int level = brightness_;
+  if (clock_showing_) level = std::min(level, std::max(5, brightness_ * kClockPercent / 100));
+  if (display_dimmed_) level = std::min(level, 10);
+  if (display_sleeping_ || face_down_) level = 0;
+  hal_.display->set_backlight(static_cast<uint8_t>(level));
+}
+
 bool App::wake_display() {
   if (face_down_) {
     // Lying face down, only turning the gadget over lights the screen. Ending a
@@ -39,11 +53,13 @@ bool App::wake_display() {
   }
   activity_at_ = now();
   const bool sleeping = display_sleeping_;
-  if (display_dimmed_ || sleeping) {
+  const bool was_clock = clock_showing_;
+  clock_showing_ = false;  // the clock ends at once, with the dim and sleep states
+  if (display_dimmed_ || sleeping || was_clock) {
     display_dimmed_ = display_sleeping_ = false;
     on_battery_ = false;  // checked afresh before the next doze
     set_dozing(false);  // before drawing: the port wakes its peripherals
-    hal_.display->set_backlight(brightness_);
+    apply_backlight();
     if (ui_) ui_->invalidate();
     update_model();
   }
@@ -63,7 +79,16 @@ void App::on_power_key() {
     return;
   }
   display_sleeping_ = true;
-  hal_.display->set_backlight(0);
+  apply_backlight();
+}
+
+// A turn, speech, held buttons, a prompt, Wi-Fi setup, phone pairing, an update
+// or any overlay: something for the user is on the screen. Side-effect free, so
+// the screen timeout and the resting clock can both ask.
+bool App::screen_busy() const {
+  return mode_ != Mode::Idle || speaking() || talk_held_ || cancel_held_ || prompt_showing() ||
+         !wifi_setup_text_.empty() || phone_pairing_ || ota_busy() || ota_ == Ota::Restarting ||
+         overlay_ != Overlay::None;
 }
 
 void App::power_tick() {
@@ -88,8 +113,7 @@ void App::power_tick() {
   // Without a timeout, only a screen the power key turned off needs watching.
   if (hal_.display && hal_.display->info().has_backlight && (screen_timeout_ms_ || display_sleeping_)) {
     // The settings menu can sleep too; the wake input leaves it on the same item.
-    const bool busy = mode_ != Mode::Idle || speaking() || talk_held_ || cancel_held_ || prompt_showing() ||
-                      !wifi_setup_text_.empty() || phone_pairing_ || ota_busy() || ota_ == Ota::Restarting || overlay_ != Overlay::None;
+    const bool busy = screen_busy();
     const bool settled = phase_ == Phase::NoNetwork || (phase_ == Phase::Online && paired_);
     // A ringing alarm keeps the screen lit without counting as activity itself, so once it is
     // quiet the screen dims and sleeps on the normal timeout.
@@ -106,10 +130,10 @@ void App::power_tick() {
       const uint32_t elapsed = now() - activity_at_;
       if (elapsed >= screen_timeout_ms_ && !display_sleeping_) {
         display_sleeping_ = true;
-        hal_.display->set_backlight(0);
+        apply_backlight();
       } else if (elapsed >= screen_timeout_ms_ / 2 && !display_dimmed_ && !display_sleeping_) {
         display_dimmed_ = true;
-        hal_.display->set_backlight(std::min<uint8_t>(brightness_, 10));
+        apply_backlight();
       }
     }
     // Online, or waiting for Wi-Fi between join attempts (the port holds the chip
@@ -170,7 +194,8 @@ void App::enter_face_down() {
   // dark screen (the model, Hermes, the status) stays right without new branches.
   display_dimmed_ = false;
   display_sleeping_ = true;
-  hal_.display->set_backlight(0);
+  clock_showing_ = false;
+  apply_backlight();
   log(LogLevel::Info, "face down: screen off, Hermes muted");
   update_model();
 }
@@ -187,6 +212,45 @@ void App::leave_face_down() {
   reply_while_face_down_ = false;
   wake_display();  // lights at the brightness setting, ends a doze, redraws
   log(LogLevel::Info, "face up: screen on");
+}
+
+// The clock rests only on an online, paired Ready screen that nothing else is
+// using: no turn, no overlay, no settings, no message waiting to be read.
+bool App::clock_blocked() const {
+  if (!clock_after_ms_ || !hal_.display || !wall_valid_) return true;
+  if (phase_ != Phase::Online || !paired_) return true;
+  if (screen_busy() || settings_open()) return true;
+  if (alarm_ || timer_active()) return true;
+  if (!fatal_.empty() || !notice_.empty()) return true;
+  // The low-battery caption (update_model) holds the Ready screen the same way.
+  if (power_status_ && power_status_->battery_percent && *power_status_->battery_percent <= 10 &&
+      power_status_->external_power == false)
+    return true;
+  if (!reply_.empty() && static_cast<int32_t>(reply_until_ - now()) > 0) return true;  // the reply text lingers
+  if (!hint_flash_.empty()) return true;
+  if (display_sleeping_) return true;  // face-down sleep holds this flag until the turn-over
+  return false;
+}
+
+void App::clock_tick() {
+  if (clock_blocked()) {
+    // Rest starts when the block ends, never during it.
+    clock_rest_at_ = now();
+    if (clock_showing_) {
+      clock_showing_ = false;
+      apply_backlight();  // keeps the dim or dark state: what ended the clock decides
+      update_model();
+    }
+    return;
+  }
+  if (clock_showing_) return;
+  // Rest counts from the later of the last blocked frame and the last activity
+  // (signed ages, like the timers), so speech and a reply's text hold it off.
+  const uint32_t rest_at = static_cast<int32_t>(clock_rest_at_ - activity_at_) >= 0 ? clock_rest_at_ : activity_at_;
+  if (static_cast<int32_t>(now() - rest_at) < static_cast<int32_t>(clock_after_ms_)) return;
+  clock_showing_ = true;
+  apply_backlight();  // a clock that starts on a dimmed screen keeps the dim level
+  update_model();
 }
 
 json::Value App::power_value() const {

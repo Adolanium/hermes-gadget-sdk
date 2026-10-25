@@ -36,7 +36,7 @@
 | `ui.*`, `canvas.*`, `font5x7.cpp` | Deterministic renderer: a `UiModel` is drawn in four horizontal bands (top bar, header, content, hint bar). Only bands whose inputs changed are redrawn and flushed |
 | `vad.*` | Energy VAD that ends hands-free (tap) utterances on silence |
 
-The round panel's edge arc lies in the ring around the UI square, which no band owns. Every flush repaints the arc's pixels for the rows it sends, so no band or battery strip can erase it. The alarm takes the whole panel and is drawn before the bands.
+The round panel's edge arc lies in the ring around the UI square, which no band owns. Every flush repaints the arc's pixels for the rows it sends, so no band or battery strip can erase it. The alarm and the resting clock (`Screen::Clock`, on an online, paired Ready screen after the `clock` setting's rest) each take the whole panel and are drawn before the bands; one full-panel face flag records which face owns the panel, and leaving it repaints everything. The clock keeps its own rest stamp, so its rest counts from the end of the last speech, reply or overlay rather than the last input.
 
 ### Threading model
 

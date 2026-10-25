@@ -120,6 +120,21 @@ class SimHal final : public hg::Display,
   void log(hg::LogLevel level, std::string_view message) override {
     if (host_.log) host_.log(host_.user, static_cast<int>(level), std::string(message).c_str());
   }
+  bool wall_time(hg::WallTime& out) override {
+    hgsim_wall_time w{};
+    if (!host_.wall_time || !host_.wall_time(host_.user, &w)) return false;
+    if (w.month < 1 || w.month > 12 || w.day < 1 || w.day > 31 || w.weekday < 0 || w.weekday > 6 || w.hour < 0 ||
+        w.hour > 23 || w.minute < 0 || w.minute > 59 || w.second < 0 || w.second > 60 || w.year < 1 || w.year > 9999)
+      return false;
+    out.year = static_cast<uint16_t>(w.year);
+    out.month = static_cast<uint8_t>(w.month);
+    out.day = static_cast<uint8_t>(w.day);
+    out.weekday = static_cast<uint8_t>(w.weekday);
+    out.hour = static_cast<uint8_t>(w.hour);
+    out.minute = static_cast<uint8_t>(w.minute);
+    out.second = static_cast<uint8_t>(std::min(w.second, 59));
+    return true;
+  }
 
  private:
   hgsim_host host_;

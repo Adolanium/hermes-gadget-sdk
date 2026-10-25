@@ -106,6 +106,26 @@ TEST("i18n: drawn text is in the font: ASCII and Latin-1, as written") {
   CHECK_EQ(std::string(hg::i18n::text(Lang::Es, Msg::ToneFinished)), std::string("Tono terminado. ¿Lo oíste?"));
 }
 
+TEST("i18n: weekday and month names are at most 3 columns in every language") {
+  // The clock face budgets three columns per name (Msg::ClockDate).
+  const Msg names[] = {
+      Msg::WeekdaySun, Msg::WeekdayMon, Msg::WeekdayTue, Msg::WeekdayWed,
+      Msg::WeekdayThu, Msg::WeekdayFri, Msg::WeekdaySat,
+      Msg::MonthJan,   Msg::MonthFeb,   Msg::MonthMar,   Msg::MonthApr,
+      Msg::MonthMay,   Msg::MonthJun,   Msg::MonthJul,   Msg::MonthAug,
+      Msg::MonthSep,   Msg::MonthOct,   Msg::MonthNov,   Msg::MonthDec,
+  };
+  for (size_t l = 0; l < hg::i18n::kLangCount; ++l) {
+    const auto lang = static_cast<Lang>(l);
+    for (Msg m : names) {
+      const std::string_view t = hg::i18n::text(lang, m);
+      if (hg::font::length(t) > 3)
+        check::fail(__FILE__, __LINE__,
+                    std::string(hg::i18n::info(lang).code) + " \"" + std::string(t) + "\" is longer than 3 columns");
+    }
+  }
+}
+
 TEST("i18n: folding to the font keeps Latin-1 and replaces the rest") {
   using hg::i18n::fold_to_font;
   CHECK_EQ(fold_to_font("¿Cómo estás? ¡Sí! Ñandú"), std::string("¿Cómo estás? ¡Sí! Ñandú"));

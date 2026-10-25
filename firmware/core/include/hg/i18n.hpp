@@ -73,6 +73,10 @@ namespace hg::i18n {
   X(FaceDownSleep,          "Face-down sleep") \
   X(FaceDownSleepOn,        "On\nFace down, the screen sleeps and Hermes stays quiet.") \
   X(FaceDownSleepOff,       "Off\nSelect to sleep when the gadget lies face down.") \
+  X(ClockFace,              "Clock face") \
+  X(ClockAfterSeconds,      "{0} seconds\nA dim clock appears after this much rest.") \
+  X(ClockNoTime,            "{0} seconds\nThe clock starts once the gadget knows the time.") \
+  X(ClockOff,               "Off\nSelect to show a clock after a rest.") \
   X(PowerOff,               "Power off") \
   X(PowerOffIntro,          "Shut down the board. Use its PWR key to turn it on again.") \
   X(WifiSetup,              "Wi-Fi setup") \
@@ -195,6 +199,27 @@ namespace hg::i18n {
   X(TimerLeft,              "Timer {0}") \
   X(TimerDone,              "TIMER DONE") \
   X(TapScreenToStop,        "Tap the screen to stop") \
+  /* The resting clock's date: weekday, month and day, each name at most 3 letters */ \
+  X(ClockDate,              "{0} {1} {2}") \
+  X(WeekdaySun,             "SUN") \
+  X(WeekdayMon,             "MON") \
+  X(WeekdayTue,             "TUE") \
+  X(WeekdayWed,             "WED") \
+  X(WeekdayThu,             "THU") \
+  X(WeekdayFri,             "FRI") \
+  X(WeekdaySat,             "SAT") \
+  X(MonthJan,               "JAN") \
+  X(MonthFeb,               "FEB") \
+  X(MonthMar,               "MAR") \
+  X(MonthApr,               "APR") \
+  X(MonthMay,               "MAY") \
+  X(MonthJun,               "JUN") \
+  X(MonthJul,               "JUL") \
+  X(MonthAug,               "AUG") \
+  X(MonthSep,               "SEP") \
+  X(MonthOct,               "OCT") \
+  X(MonthNov,               "NOV") \
+  X(MonthDec,               "DEC") \
   /* Hermes profiles */ \
   X(ProfileSetting,         "Hermes profile") \
   X(ProfileSettingNext,     "{0}\nSelect to switch to the next profile.") \

@@ -100,6 +100,10 @@ Boards with an accelerometer can offer face-down sleep. Set `DeviceProfile::moti
 
 A 10 Hz motion task wakes a light-sleeping chip every 100 ms. A slower poll while dozing must stay under the core's two-second stale limit, or the screen lights.
 
+## Clock
+
+Boards with a display can offer the resting clock ([using-gadget.md](using-gadget.md#resting-clock)). Implement `System::wall_time(WallTime&)` (`hal.hpp`) to return the local time; it returns false until the port knows the time, and the clock face stays off until then. On the ESP32 port, `port_time.cpp` is the reference: a board declares its clock chip with `BoardConfig::rtc` (`RtcConfig`, I2C address), and at boot the port probes the PCF85063 on the shared bus and seeds the system clock from its UTC time — a chip that does not answer, or one whose backup power was lost, is skipped and the port waits for the network instead. While the `clock` setting is above 0 and the network is up, SNTP (`pool.ntp.org`) runs, and each sync writes the time back to the chip. The `timezone` extra setting is a POSIX TZ string applied through `TZ` and `tzset()`; a string newlib cannot read means UTC.
+
 ## Audio through a codec chip
 
 Boards like the ESP32-S3-BOX family and the ESP32-S3-Touch-AMOLED-1.75 route audio through codecs (ES7210 ADC, ES8311 DAC) configured over I2C. `CodecAudio`, `CodecMic` and `CodecSpeaker` in `port_codec.cpp` implement `hg::AudioIn` and `hg::AudioOut` on top of `esp_codec_dev` for that pair: fill in `BoardConfig::codec` and `BoardConfig::i2c`. Other codecs follow the same contracts:

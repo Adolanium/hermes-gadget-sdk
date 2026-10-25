@@ -245,3 +245,26 @@ def test_the_simulated_firmware_sleeps_face_down(devserver, make_sim):
     plain = make_sim(url, state="no-motion")
     assert plain.wait_screen("ready", timeout=10)
     assert "face_down" not in plain.status()
+
+
+def test_the_simulated_firmware_rests_on_a_clock(devserver, make_sim):
+    """End to end with the C++ core: after a rest the round board shows the clock at 70% of the
+    brightness setting; a tap brings Ready back at full brightness without recording."""
+    hub, _brain, url = devserver()
+    sim = make_sim(url, board="sim-466x466-round")
+    assert sim.wait_screen("ready", timeout=10)
+    session = next(iter(hub.sessions.values()))
+    sim.set_wall_time(time.strptime("2026-10-24T09:41", "%Y-%m-%dT%H:%M"))
+    assert sim.console("set talk_mode tap").startswith("@ok")  # a tap on Ready would record
+    assert sim.console("set clock 5").startswith("@ok")
+    assert sim.wait_screen("clock", timeout=10)
+    assert sim.peripherals.backlight == 70
+    assert not session.display_sleeping  # a lit screen: Hermes still sends what it has
+
+    sim.touch(True, 233, 233)
+    sim.run_for(0.05)
+    sim.touch(False, 233, 233)
+    assert sim.wait_screen("ready", timeout=5)
+    sim.run_for(0.5)
+    assert sim.status()["screen"] == "ready", "the tap only brought Ready back"
+    assert sim.peripherals.backlight == 100

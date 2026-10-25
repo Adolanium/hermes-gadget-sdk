@@ -72,6 +72,7 @@ hgp::PhoneLink g_phone;
 #endif
 hgp::Buttons g_buttons;
 hgp::Wifi g_wifi;
+hgp::TimePort g_time;
 hgp::EspUpdater g_updater;
 hg::TouchGestures* g_gestures = nullptr;
 
@@ -177,13 +178,16 @@ void dispatch(hg::App& app, hgp::Event& ev) {
     case EventType::NetUp:
       g_wifi.connected(app);
       app.on_network(true, text ? text : "");
+      g_time.set_network(true);
       break;
     case EventType::NetDown:
       app.on_network(false, text ? text : "");
+      g_time.set_network(false);
       break;
     case EventType::WifiDisconnected:
       g_wifi.disconnected();
       app.on_network(false, text ? text : "");
+      g_time.set_network(false);
       break;
     case EventType::WifiStarted: g_wifi.reconfigure(); break;
     case EventType::WifiScanDone: g_wifi.scan_done(); break;
@@ -231,6 +235,9 @@ void dispatch(hg::App& app, hgp::Event& ev) {
           case hgp::PhoneSample::Kind::Status: app.on_phone_status(phone->paired, phone->connected); break;
         }
       }
+      break;
+    case EventType::TimeSynced:
+      g_time.on_synced();  // writes the RTC from the now-set clock
       break;
   }
 }
@@ -305,11 +312,14 @@ extern "C" void app_main(void) {
     // framebuffer band: lower kCydFrameRows in port_display.cpp if this appears.
     ESP_LOGE(TAG, "microphone did not start: not enough internal RAM for its buffers");
   }
+  // No I2C bus on this board; the timezone setting and network time still apply.
+  g_time.begin(board.rtc, nullptr, g_storage);
   constexpr bool touch = false;
   constexpr bool imu = false;  // no I2C bus: no motion sensor to bring up
   hgp::diag::Parts parts;
   parts.display = hal.display ? g_display.controller_name() : "none";
   parts.mic = hal.mic == &g_mic ? (board.mic.pdm ? "pdm" : "i2s") : "none";
+  parts.time = &g_time;
 #else
   bool io_rail_ready = true;
 #if SOC_MIPI_DSI_SUPPORTED
@@ -364,6 +374,7 @@ extern "C" void app_main(void) {
   }
   if (hal.speaker) hal.speaker_decoder = &g_opus;  // Opus replies when Hermes offers them
   const bool imu = peripherals_ready && board.imu.enabled && g_motion.begin(board.imu, i2c_bus);
+  g_time.begin(board.rtc, i2c_bus, g_storage);
   const bool touch = peripherals_ready && (board.touch.enabled || board.pwr_key.enabled || board.encoder.a >= 0) &&
                      g_touch.begin(board.touch, board.pwr_key, board.encoder,
                                    board.touch.bus.sda >= 0 ? hgp::i2c::touch_bus(board.touch.bus) : i2c_bus);
@@ -394,7 +405,9 @@ extern "C" void app_main(void) {
   parts.key = touch && g_touch.has_key();
   parts.i2c = i2c_bus;
   parts.imu = imu ? "qmi8658" : "none";
+  parts.rtc = g_time.rtc_ready() ? "pcf85063" : "none";
   parts.motion = imu ? &g_motion : nullptr;
+  parts.time = &g_time;
 #endif
   g_buttons.begin(board.buttons);
   hgp::diag::set_parts(parts);
@@ -425,6 +438,7 @@ extern "C" void app_main(void) {
     profile.touch_ppi = board.touch.ppi;
     profile.extra_settings = {"touch_cancel"};
   }
+  profile.extra_settings.push_back("timezone");  // the port keeps its own time
   profile.motion_sensor = imu;
 #if !CONFIG_HG_BOARD_ESP32_CYD
   if (hal.mic == &g_codec_mic) {
@@ -449,6 +463,8 @@ extern "C" void app_main(void) {
     if (key == "wifi_ssid" || key == "wifi_pass") app.close_wifi_setup();
     if (key == "wifi_ssid" || key == "wifi_pass" || key == "wifi_nets") g_wifi.networks_changed();
     if (key == "touch_cancel") apply_touch_cancel();
+    if (key == "clock") g_time.set_wanted(app.clock_enabled());
+    if (key == "timezone") g_time.apply_timezone(g_storage);
 #if !CONFIG_HG_BOARD_ESP32_CYD
     if (key == "name" && hgp::board_config().bluetooth) g_phone.set_name(device_name());
 #endif
@@ -481,6 +497,7 @@ extern "C" void app_main(void) {
   };
 #endif
   app.begin();
+  g_time.set_wanted(app.clock_enabled());  // SNTP only while the clock face is on
   hgp::console::begin();
 
 #if !CONFIG_HG_BOARD_ESP32_CYD

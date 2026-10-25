@@ -80,7 +80,7 @@ Power starts unavailable. In **Developer tools → Power (simulated)**, select *
 
 The **Telemetry battery %** slider remains an independent generic sensor, not the header battery source. No estimator or indicator is automatically enabled. To preview the LCD-1.54's approximate display estimate, use `sim-240x240`, name `Waveshare 1.54`, enter `set battery_estimate liion` then `set battery_display percentage` in the console, and apply 3750 mV with no native percentage: the header shows 50%. See the [fitted-battery caveat and estimate limitations](using-gadget.md#device-settings-and-hardware-checks) before enabling this on hardware.
 
-Rebuilding the window for a board change or starting a new simulator resets the power fixture to unavailable. Firmware settings persist in `nvs.json`; fixtures do not. Rebuild the simulator library after this ABI 7 update; Linux native-core clients still default to no power device.
+Rebuilding the window for a board change or starting a new simulator resets the power fixture to unavailable. Firmware settings persist in `nvs.json`; fixtures do not. Rebuild the simulator library after this ABI 8 update, which adds the host's wall-clock time for the resting clock; Linux native-core clients still default to no power device.
 
 Like a board, the simulated device takes firmware updates (`hermes gadget update`, or `update <path>` in the dev server). It checks the image the way the core does and keeps only ESP32 app images. Then it "restarts": it drops the connection and connects again, still running the simulator.
 
@@ -123,9 +123,10 @@ Script commands, one per line:
 | `screenshot <file.png>` | Save the screen |
 | `power <JSON-object-or-null>` | Replace the simulated power reading; `null` makes it unavailable; wait at least five seconds for polling |
 | `facedown <on\|off>` | Lay the board face down, or turn it back over; boards with a motion sensor only |
+| `time <YYYY-MM-DDTHH:MM>` \| `time now` | Pin the simulated clock's time at that moment, or follow the computer's clock again |
 | `expect <text>` | Fail unless the last reply contains `<text>` |
 
-Screens are `boot`, `offline`, `connecting`, `pairing`, `ready`, `listening`, `thinking`, `responding`, `card`, `image`, `prompt`, `updating`, `settings`, `setup`, `dashboard` and `error`. The `setup` screen belongs to the ESP32 phone-setup flow; the simulator does not start a Wi-Fi access point.
+Screens are `boot`, `offline`, `connecting`, `pairing`, `ready`, `listening`, `thinking`, `responding`, `card`, `image`, `prompt`, `updating`, `settings`, `setup`, `dashboard`, `profiles`, `alarm`, `clock` and `error`. The `setup` screen belongs to the ESP32 phone-setup flow; the simulator does not start a Wi-Fi access point.
 
 For example, after `wait ready 20`:
 

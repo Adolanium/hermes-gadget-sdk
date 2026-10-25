@@ -9,6 +9,7 @@ from __future__ import annotations
 import ctypes
 import json
 import logging
+import time
 from ctypes import (
     CFUNCTYPE, POINTER, Structure, c_char, c_char_p, c_double, c_int, c_size_t, c_uint8, c_uint16,
     c_uint32, c_void_p, c_int16,
@@ -20,7 +21,7 @@ from .. import paths
 
 log = logging.getLogger("hermes_gadget.sim")
 
-ABI_VERSION = 7
+ABI_VERSION = 8
 
 BUTTON_TALK, BUTTON_CANCEL, BUTTON_UP, BUTTON_DOWN = 0, 1, 2, 3
 BUTTONS = {"talk": BUTTON_TALK, "cancel": BUTTON_CANCEL, "up": BUTTON_UP, "down": BUTTON_DOWN}
@@ -43,6 +44,13 @@ _LOG = CFUNCTYPE(None, c_void_p, c_int, c_char_p)
 _ACTION = CFUNCTYPE(c_int, c_void_p, c_char_p, POINTER(c_char), c_size_t)
 _UPDATE_BEGIN = CFUNCTYPE(c_int, c_void_p, c_size_t)
 _UPDATE_WRITE = CFUNCTYPE(c_int, c_void_p, POINTER(c_uint8), c_size_t)
+
+
+class _WallTime(Structure):
+    _fields_ = [(name, c_int) for name in ("year", "month", "day", "weekday", "hour", "minute", "second")]
+
+
+_WALL_TIME_CB = CFUNCTYPE(c_int, c_void_p, POINTER(_WallTime))
 
 
 class _Host(Structure):
@@ -74,6 +82,7 @@ class _Host(Structure):
         ("update_abort", _VOID),
         ("update_restart", _VOID),
         ("update_confirm", _VOID),
+        ("wall_time", _WALL_TIME_CB),
     ]
 
 
@@ -135,6 +144,7 @@ class Host(AudioHost, Protocol):
     def update_abort(self) -> None: ...
     def update_restart(self) -> None: ...
     def update_confirm(self) -> None: ...
+    def wall_time(self) -> time.struct_time | None: ...
 
 
 def _guard(default):
@@ -299,6 +309,17 @@ class NativeDevice:
         def update_finish(_u):
             return int(bool(h.update_finish()))
 
+        @_guard(0)
+        def wall_time(_u, out):
+            t = h.wall_time()
+            if t is None:
+                return 0
+            w = out.contents
+            w.year, w.month, w.day = t.tm_year, t.tm_mon, t.tm_mday  # Python's tm_year is the full year
+            w.weekday = (t.tm_wday + 1) % 7  # Python counts from Monday, the core from Sunday
+            w.hour, w.minute, w.second = t.tm_hour, t.tm_min, t.tm_sec
+            return 1
+
         return _Host(
             None,
             _TRANSPORT_CONNECT(transport_connect),
@@ -327,6 +348,7 @@ class NativeDevice:
             _VOID(_guard(None)(lambda _u: h.update_abort())),
             _VOID(_guard(None)(lambda _u: h.update_restart())),
             _VOID(_guard(None)(lambda _u: h.update_confirm())),
+            _WALL_TIME_CB(wall_time),
         )
 
     # -- lifecycle --------------------------------------------------------------------
