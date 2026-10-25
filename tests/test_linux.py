@@ -132,7 +132,8 @@ def test_service_socket_is_private_exclusive_and_stops_on_sigterm(tmp_path):
     directory = tmp_path / "device"
     config = tmp_path / "config.json"
     config.write_text('{"server":"ws://127.0.0.1:1/gadget","name":"Offline"}')
-    env = {**os.environ, "PYTHONPATH": str(REPO / "python")}
+    pythonpath = filter(None, [str(REPO / "python"), os.environ.get("PYTHONPATH")])
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(pythonpath)}
     process = subprocess.Popen([sys.executable, "-m", "hermes_gadget", "linux", "--state-dir", str(directory),
                                 "run", "--config", str(config)], env=env)
     try:

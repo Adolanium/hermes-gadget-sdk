@@ -564,7 +564,9 @@ def test_picker_command_runs_in_the_shell_and_preserves_the_picture(tmp_path, pl
     picker.skip()
 
     command = picker.command(src) + " --out face.cpp --preview preview.png --check check.png"
-    env = dict(os.environ, PYTHONPATH=str(REPO / "python"))
+    # Keep the parent's PYTHONPATH: it may be what makes hermes_gadget_plugin importable.
+    pythonpath = filter(None, [str(REPO / "python"), os.environ.get("PYTHONPATH")])
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join(pythonpath))
     env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env["PATH"]
     shell = (["powershell", "-NoProfile", "-NonInteractive", "-Command", command]
              if os.name == "nt" else ["/bin/sh", "-c", command])
