@@ -530,6 +530,7 @@ extern "C" void app_main(void) {
     if (key == "wifi_ssid" || key == "wifi_pass") app.close_wifi_setup();
     if (key == "wifi_ssid" || key == "wifi_pass" || key == "wifi_nets") g_wifi.networks_changed();
     if (key == "touch_cancel") apply_touch_cancel();
+    if (key == "touch_wake") g_touch.set_wakes(app.touch_wake());
     if (key == "clock") g_time.set_wanted(app.clock_enabled());
     if (key == "timezone") g_time.apply_timezone(g_storage);
 #if !CONFIG_HG_BOARD_ESP32_CYD
@@ -565,11 +566,13 @@ extern "C" void app_main(void) {
 #if !CONFIG_HG_BOARD_ESP32_CYD
   g_system.on_doze_start = [] { g_codec_speaker.power_down(); };
   g_system.on_doze_end = [] {
+    g_touch.nudge();
     g_codec_speaker.power_up();
     g_wifi.retry_now();
   };
 #endif
   app.begin();
+  g_touch.set_wakes(app.touch_wake());
   g_time.set_wanted(app.clock_enabled());  // SNTP only while the clock face is on
   hgp::console::begin();
 
