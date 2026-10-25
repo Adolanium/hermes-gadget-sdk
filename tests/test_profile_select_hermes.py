@@ -261,7 +261,6 @@ def test_each_profile_shows_its_own_face_file_and_profile_faces_false_turns_them
     assert GadgetAdapter(PlatformConfig(enabled=True, extra={"profile_faces": False}))._profile_faces is False
 
 
-
 def _face_sources(hermes_home, gadget, make_sim, monkeypatch):
     """A paired device on the default profile, which has no face yet. Returns the device, a function
     drawing the profile's avatar, the faces sent, a wait for a face (a hash; None is the mascot), and
