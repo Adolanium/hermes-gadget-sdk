@@ -66,8 +66,8 @@ struct DeviceProfile {
   // Room for a face from Hermes (docs/protocol.md#faces): about 27 KB, and its message at once.
   // Boards without PSRAM don't offer faces.
   bool faces = true;
-  // Faces in colour too: begin() sets aside px*px*2 bytes for one (72 KB at 192 px) with this, and
-  // offers one-colour faces when it returns null. Null: one-colour faces only. The block goes to free().
+  // Faces in colour too: begin() takes px*px*2 bytes for one (72 KB at 192 px) from this, and free()
+  // releases them. Without it, or when it returns null, the board offers one-colour faces.
   void* (*colour_face_alloc)(size_t) = nullptr;
 };
 
