@@ -832,3 +832,54 @@ def test_a_change_in_one_colour_counts_past_16_levels(tmp_path, channel):
     frame.save(home / "assets" / "avatar-blink.png")
     blink = profile_faces.for_profile(home, colour_px=144, frames=True).load().blink
     assert blink is not None and blink[:2] == (50, 10)
+
+
+def _sent_faces(tmp_path: Path, home: Path, change=None) -> list:
+    """What a paired colour device with frames is sent for `home`'s face: once, and once more after
+    `change()` when given."""
+    import asyncio
+
+    from hermes_gadget_plugin.hub import DeviceHub, DeviceSession, HubDelegate
+    from hermes_gadget_plugin.store import DeviceStore
+    from test_plugin_units import _MediaWire
+
+    class Profile(HubDelegate):
+        async def face(self, session):
+            return profile_faces.for_profile(home, colour_px=144, frames=True)
+
+    async def run():
+        wire = _MediaWire()
+        hub = DeviceHub(DeviceStore(tmp_path / "store"), Profile())
+        session = DeviceSession(hub, wire, {"device_id": "hg-1", "caps": {"faces": {"v": 2, "px": 144, "frames": True}}})
+        session.paired = True
+        hub.sessions[session.device_id] = session
+        await session.update_face()
+        if change:
+            change()
+            await session.update_face()
+        return wire.sent
+
+    return asyncio.run(run())
+
+
+def test_a_frame_file_that_is_no_picture_sends_the_avatar_alone(tmp_path):
+    from hermes_gadget_plugin.protocol import parse_binary
+
+    home = _frames_home(tmp_path, talk={"mouth": (195, 235)})
+    (home / "assets" / "avatar-blink.png").write_bytes(b"not a png")
+    still = profile_faces.colour_from_picture(home / "assets" / "avatar.png", 144)
+    start, *chunks, end = _sent_faces(tmp_path, home)
+    assert start["type"] == "face.start" and "blink" not in start and "talk" not in start
+    assert start["anchors"] == list(still.anchors)
+    assert b"".join(parse_binary(chunk).payload for chunk in chunks) == still.rgb565
+    assert end == {"type": "face.end", "stream": start["stream"]}
+
+
+def test_removing_an_empty_frame_file_lets_the_other_frame_move(tmp_path):
+    """An empty blink file leaves the face still; once it goes, the talk picture moves the mouth."""
+    home = _frames_home(tmp_path, talk={"mouth": (195, 235)})
+    blink = home / "assets" / "avatar-blink.png"
+    blink.write_bytes(b"")
+    starts = [m for m in _sent_faces(tmp_path, home, blink.unlink)
+              if isinstance(m, dict) and m["type"] == "face.start"]
+    assert len(starts) == 2 and "talk" not in starts[0] and "talk" in starts[1]

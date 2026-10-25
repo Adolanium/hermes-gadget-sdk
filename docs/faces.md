@@ -131,9 +131,11 @@ A colour face blinks and talks when the avatar has a blink and a talk picture ne
 open (`.jpg` or `.webp` too, each found on its own). Draw each from the avatar with only the eyes or the
 mouth changed, and save it the way the avatar is saved: the plugin fits it like the avatar and sends only
 the rows where it differs from the avatar, by more than 16 levels in a colour or in whether it is
-transparent. A JPEG frame next to a PNG avatar differs in most rows. The two frames share half the face's
-rows (72 at 144 px, 96 at 192). A frame that needs more, two that need more together, or a file that is
-not a picture leaves the whole face still, and the log says so once for each file, for example:
+transparent. Compression noise, as in a JPEG frame next to a PNG avatar, can widen those rows. The two
+frames share half the face's rows (72 at 144 px, 96 at 192): the rows from the first to the last that a
+frame changes count, whatever lies between them. A frame that needs more, two that need more together, or
+a file that cannot be read or is not a picture leaves the whole face still, and the log says so once for
+each file, for example:
 `/home/me/.hermes/assets/avatar-blink.png differs from avatar.png in 131 of 144 rows, more than the 72 the
 device has room for; draw it from the same picture with only the eyes changed`. A face with only one of the
 pictures keeps the other frame still. The colour face blinks and talks at the mascot's pace: a

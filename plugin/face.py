@@ -375,15 +375,23 @@ def for_profile(home: Path, convert: bool = True, colour_px: int = 0, frames: bo
     source = avatar.read_bytes()
     if not colour_px:
         return ProfileFace(digest(AVATAR_DRAWING + source), lambda: from_picture(io.BytesIO(source)))
+    still = lambda: colour_from_picture(io.BytesIO(source), colour_px)  # noqa: E731
+    size = colour_px.to_bytes(2, "little")
+    plain = ProfileFace(digest(COLOUR_AVATAR + size + source), still)
     found = {}
     for frame in ("blink", "talk") if frames else ():
         picture = next((p for p in _pictures(home, f"avatar-{frame}") if p.is_file()), None)
-        if picture:
+        if not picture:
+            continue
+        try:
             found[frame] = (picture, picture.read_bytes())
-    still = lambda: colour_from_picture(io.BytesIO(source), colour_px)  # noqa: E731
-    size = colour_px.to_bytes(2, "little")
+        except OSError as exc:  # an optional file: the avatar still shows
+            _refuse((picture, str(exc)), "%s cannot be read (%s); the face stays still", picture, exc)
+            return plain
     if not found:
-        return ProfileFace(digest(COLOUR_AVATAR + size + source), still)
-    pictures = (source, *(found[frame][1] if frame in found else b"" for frame in ("blink", "talk")))
-    named = b"".join(len(data).to_bytes(4, "little") + data for data in pictures)
+        return plain
+    # Each frame is there (1, then its length and bytes) or not (0), so an empty file is not a missing one.
+    named = len(source).to_bytes(4, "little") + source + b"".join(
+        b"\1" + len(found[frame][1]).to_bytes(4, "little") + found[frame][1] if frame in found else b"\0"
+        for frame in ("blink", "talk"))
     return ProfileFace(digest(COLOUR_FRAMES + size + named), lambda: moving(still(), avatar.name, found))

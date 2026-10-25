@@ -354,6 +354,25 @@ def test_a_colour_face_follows_its_blink_picture_without_reconnecting(hermes_hom
     assert len([m for m in sim.received if m["type"] == "welcome"]) == welcomes  # never reconnected
 
 
+def test_a_frame_file_that_cannot_be_read_keeps_the_avatar(hermes_home, gadget, make_sim, monkeypatch):
+    sim, draw, faces, shows, lookups, current = _face_sources(hermes_home, gadget, make_sim, monkeypatch)
+    draw("ellipse")
+    assert shows(current())
+    frame = hermes_home / "assets" / "avatar-blink.png"
+    frame.write_bytes((hermes_home / "assets" / "avatar.png").read_bytes())
+    frame.chmod(0)
+    lookups.clear()
+    try:
+        with pytest.raises(PermissionError):  # as for any user but root
+            frame.read_bytes()
+        assert sim.wait_for(lambda: lookups, timeout=8)
+        sim.run_for(1)
+        assert faces()[-1].get("hash") is not None  # the avatar, still: not the mascot
+        assert "blink" not in faces()[-1]
+    finally:
+        frame.chmod(0o600)
+
+
 def test_a_face_file_still_being_written_is_not_looked_up(hermes_home, gadget, make_sim, monkeypatch):
     import struct
 
