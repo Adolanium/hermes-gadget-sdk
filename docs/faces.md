@@ -112,8 +112,10 @@ transparency counts as a dark background. A drawing in one colour on transparenc
 either side of that cut, so its visible pixels are the shape instead. One colour means its fully
 opaque pixels differ by at most 16 brightness levels, so shades that close stay one whole body.
 
-On a board with PSRAM, the avatar shows in colour instead, as a still picture at the size of the face
-on the Ready screen (at most 192 px on today's screens). A picture without transparency is cropped to a
+On a board with PSRAM, the avatar shows in colour instead, as a still picture at the largest size the
+Ready screen draws the face at (at most 192 px on today's screens). Where a screen has less room, as Ready
+has while the device offers profiles to switch between, the device scales the picture down by dropping
+rows and columns, which looks rougher than the picture itself. A picture without transparency is cropped to a
 square from its middle. A picture with transparency is shown whole, and the screen's background shows
 through it: its pixels more than half transparent are left out, so its edge is hard, and its softened
 edge pixels are laid on black, which can leave a dark rim a pixel wide where the background is not
