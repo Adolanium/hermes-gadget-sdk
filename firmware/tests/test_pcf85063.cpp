@@ -79,6 +79,25 @@ TEST("PCF85063: a stopped oscillator, a dead bus, a time that cannot be and out-
   chip.regs[0x09] = 0x12;
   chip.regs[0x07] = 0x00;  // day 0
   CHECK(!rtc.read(out));
+  // A table that holds no real time: digits past 9, and days past the month's end.
+  chip.regs[0x07] = 0x31;  // December 31 again
+  chip.regs[0x05] = 0x1A;  // minutes 1 and 10: would decode to 20
+  CHECK(!rtc.read(out));
+  chip.regs[0x05] = 0x59;
+  chip.regs[0x0A] = 0x2A;  // years 2 and 10: would decode to 2030
+  CHECK(!rtc.read(out));
+  chip.regs[0x0A] = 0x26;  // 2026, not a leap year
+  chip.regs[0x09] = 0x02;
+  chip.regs[0x07] = 0x31;  // February 31
+  CHECK(!rtc.read(out));
+  chip.regs[0x07] = 0x29;  // February 29, 2026
+  CHECK(!rtc.read(out));
+  chip.regs[0x0A] = 0x28;  // 2028 is a leap year, so February 29 reads
+  CHECK(rtc.read(out));
+  CHECK(out.year == 2028 && out.month == 2 && out.day == 29);
+  chip.regs[0x09] = 0x04;
+  chip.regs[0x07] = 0x31;  // April 31
+  CHECK(!rtc.read(out));
   hg::WallTime far_future = out;
   far_future.year = 2100;  // the years register holds 00-99
   CHECK(!rtc.write(far_future));

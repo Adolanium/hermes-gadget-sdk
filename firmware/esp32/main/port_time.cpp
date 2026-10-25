@@ -91,9 +91,10 @@ void TimePort::sync_sntp() {
     }
     return;
   }
-  // Stop only a service that started: deinit on a never-started one fails.
-  // Init may run again later, when the clock is wanted once more.
-  if (!wanted_ && sntp_started_) {
+  // Stop only a service that started: deinit on a never-started one fails. Init
+  // runs again once the clock is wanted and the network is up, so a reconnect
+  // asks for the time at once instead of on the old client's retry schedule.
+  if (sntp_started_) {
     esp_netif_sntp_deinit();
     sntp_started_ = false;
   }

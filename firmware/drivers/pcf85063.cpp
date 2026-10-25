@@ -1,5 +1,7 @@
 #include "pcf85063.hpp"
 
+#include <initializer_list>
+
 namespace hg {
 namespace {
 
@@ -10,6 +12,14 @@ constexpr uint16_t kYearBase = 2000;          // the years register holds 00-99
 
 uint8_t to_bcd(uint8_t v) { return static_cast<uint8_t>(((v / 10) << 4) | (v % 10)); }
 uint8_t from_bcd(uint8_t v) { return static_cast<uint8_t>(((v >> 4) * 10) + (v & 0x0F)); }
+// Both digits 0-9: a table that holds no real time can hold 0xA-0xF.
+bool bcd_digits(uint8_t v) { return (v & 0x0F) <= 9 && (v >> 4) <= 9; }
+
+uint8_t days_in_month(uint16_t year, uint8_t month) {  // month 1-12
+  static constexpr uint8_t kDays[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  const bool leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+  return month == 2 && leap ? 29 : kDays[month - 1];
+}
 
 }  // namespace
 
@@ -17,17 +27,23 @@ bool Pcf85063::read(WallTime& utc) {
   uint8_t r[7];
   if (!read_(kSeconds, r, sizeof(r))) return false;
   if (r[0] & kOscillatorStopped) return false;
-  utc.second = from_bcd(r[0] & 0x7F);
-  utc.minute = from_bcd(r[1] & 0x7F);
-  utc.hour = from_bcd(r[2] & 0x3F);  // 24 h mode, the reset default (Control_1's 12_24 bit clear)
-  utc.day = from_bcd(r[3] & 0x3F);
-  utc.weekday = static_cast<uint8_t>(r[4] & 0x07);  // plain 0-6, 0 = Sunday
-  utc.month = from_bcd(r[5] & 0x1F);
-  utc.year = static_cast<uint16_t>(kYearBase + from_bcd(r[6]));
+  const uint8_t second = r[0] & 0x7F, minute = r[1] & 0x7F, hour = r[2] & 0x3F, day = r[3] & 0x3F,
+                month = r[5] & 0x1F;
   // A table that holds no real time would seed a wrong clock until network time
   // corrects it: waiting for the network is better.
-  return utc.second <= 59 && utc.minute <= 59 && utc.hour <= 23 && utc.day >= 1 && utc.day <= 31 &&
-         utc.weekday <= 6 && utc.month >= 1 && utc.month <= 12;
+  for (uint8_t v : {second, minute, hour, day, month, r[6]})
+    if (!bcd_digits(v)) return false;
+  utc.second = from_bcd(second);
+  utc.minute = from_bcd(minute);
+  utc.hour = from_bcd(hour);  // 24 h mode, the reset default (Control_1's 12_24 bit clear)
+  utc.day = from_bcd(day);
+  utc.weekday = static_cast<uint8_t>(r[4] & 0x07);  // plain 0-6, 0 = Sunday
+  utc.month = from_bcd(month);
+  utc.year = static_cast<uint16_t>(kYearBase + from_bcd(r[6]));
+  if (utc.second > 59 || utc.minute > 59 || utc.hour > 23 || utc.weekday > 6 || utc.month < 1 ||
+      utc.month > 12)
+    return false;
+  return utc.day >= 1 && utc.day <= days_in_month(utc.year, utc.month);
 }
 
 bool Pcf85063::write(const WallTime& utc) {
