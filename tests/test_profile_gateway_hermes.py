@@ -549,9 +549,14 @@ def routing_rig(hermes_home, tmp_path):
     return runner, adapter, hermes_home
 
 
+class _Connection(types.SimpleNamespace):
+    """A stand-in DeviceSession: one object per connection, as the adapter keys face lookups by it."""
+
+    __eq__, __hash__ = object.__eq__, object.__hash__
+
+
 def _session(profile, capable=True):
-    return types.SimpleNamespace(device_id=DEVICE, name="Kitchen", profile=profile,
-                                 caps={"profiles": True} if capable else {})
+    return _Connection(device_id=DEVICE, name="Kitchen", profile=profile, caps={"profiles": True} if capable else {})
 
 
 def test_a_device_on_ops_runs_in_the_ops_home_and_replies_through_the_gadget_adapter(routing_rig):
