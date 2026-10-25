@@ -897,6 +897,7 @@ class DeviceHub:
                     and session.device_profile == named and face.valid()):
                 welcome["face"] = face.hash
             await session.send_json(protocol.message("welcome", **welcome))
+            session.unpaired_reason = None  # the welcome clears it on the device; on_ready sends it again
             session.face_hash = welcome.get("face")  # the welcome keeps that face, or drops the device's
             session.update_face(face, looked_up)  # after the welcome's send, which may let the state change
             face = None  # the task has it; an avatar's picture goes with the task

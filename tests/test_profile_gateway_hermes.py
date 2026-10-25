@@ -1149,6 +1149,40 @@ def test_a_pairing_grace_from_before_a_refusal_sends_no_notice(live_rig, make_si
     assert not [m for m in sim.received[sent:] if m["type"] == "notice"]
 
 
+def test_a_refusal_sent_before_a_welcome_is_sent_again_after_it(live_rig, hermes_home, make_sim, monkeypatch):
+    """A reconnect's welcome waits on the face lookup, and the pairing check may refuse the device
+    meanwhile. The welcome clears the reason on the device, so the refusal must follow it again."""
+    import threading
+
+    from hermes_gadget_plugin import face
+
+    sim, _held, _digest = _faces_on_ops(live_rig, hermes_home, make_sim)
+    device = sim.status()["device_id"]
+    looking, release = threading.Event(), threading.Event()
+    for_profile = face.for_profile
+
+    def held_lookup(home, convert=True, colour_px=0):
+        if home == hermes_home / "profiles" / "ops" and not looking.is_set():
+            looking.set()
+            release.wait(5)
+        return for_profile(home, convert, colour_px)
+
+    monkeypatch.setattr(face, "for_profile", held_lookup)
+    sent = len(sim.received)
+    try:
+        sim.console("reconnect")
+        assert sim.wait_for(looking.is_set, timeout=8)
+        live_rig.runner.config.profile_routes = _ops_route(device)
+        assert sim.wait_for(lambda: any(m["type"] == "unpaired" for m in sim.received[sent:]), timeout=3)
+    finally:
+        release.set()
+    assert sim.wait_for(lambda: any(m["type"] == "welcome" for m in sim.received[sent:]), timeout=8)
+    sim.run_for(4)
+    assert [m["type"] for m in sim.received[sent:] if m["type"] in ("welcome", "unpaired")][:2] == \
+        ["unpaired", "welcome"]  # the refusal came before the welcome
+    assert sim.status().get("unpaired_reason") == "routed"
+
+
 def _face_adapter(tmp_path):
     """An adapter and its hub where a paired device shows the face of the profile it is on."""
     from gateway.config import PlatformConfig
