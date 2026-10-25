@@ -155,6 +155,12 @@ A face is known by the file it comes from, not by the picture it makes. Any chan
 even one that draws the same face (a metadata edit in the avatar, or the avatar replaced by a face
 file made from it), shows the mascot for a moment and sends the face once more.
 
+A connected device follows those files. Every 2 seconds the plugin compares the size and
+modification time of the profile's face file and avatars with what its last lookup saw. When one
+is added, changed or removed, the device gets the new face, or the mascot when none is left,
+without a reconnect. A file replaced by one of the same size and modification time, as a copy that
+keeps its timestamp can be, goes unnoticed until the device reconnects or switches profile.
+
 ## Placing the eye and the mouth
 
 The device blinks and talks, so the generator has to know where the face's features are. It

@@ -41,6 +41,7 @@ import ssl
 import time
 import uuid
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from agent.i18n import get_language, t
@@ -210,7 +211,9 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._roster_lock = asyncio.Lock()  # one roster read at a time; never held across a send
         self._push_seq = 0
         self._pushed_seq: Dict[str, int] = {}  # device -> the newest push that read a roster for it
-        self._face_from: Dict[str, Optional[str]] = {}  # device -> the profile its last face lookup could show
+        # device -> the profile its last face lookup could show, and that profile's face sources as the
+        # lookup found them (faces.stamp; None until stat'ed)
+        self._face_from: Dict[str, Tuple[Optional[str], Optional[tuple]]] = {}
         self._battery_log: Optional[BatteryLog] = None
         self._tls_cert = extra.get("tls_cert")
         self._tls_key = extra.get("tls_key")
@@ -456,16 +459,16 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             self._convert_avatars = imaging.pillow_available()
             if not self._convert_avatars:
                 logger.info("[%s] Pillow is not installed: devices show profile face files, not avatars", self.name)
-        profile = self._face_from[session.device_id] = self._face_profile(session)
+        profile = self._face_profile(session)
+        self._face_from[session.device_id] = (profile, None)
         if profile is None:
             return None
         try:
-            if profile == "default":  # this gateway's own home, for a standalone profile too
-                from hermes_constants import get_hermes_home
-                home = get_hermes_home()
-            else:
-                from hermes_cli.profiles import get_profile_dir
-                home = get_profile_dir(profile)
+            home = self._profile_home(profile)
+            # Stat'ed before the read, so a change made while reading shows at the next pairing check.
+            seen = await asyncio.to_thread(faces.stamp, home, self._convert_avatars)
+            if self._face_from.get(session.device_id) == (profile, None):  # not a newer lookup's
+                self._face_from[session.device_id] = (profile, seen)
             found = await asyncio.to_thread(faces.for_profile, home, self._convert_avatars)
             if found is None or profile == "default":  # the default profile's approval is session.paired
                 return found
@@ -474,6 +477,22 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         except Exception as exc:  # an unreadable picture shows the mascot; never block a connection on it
             logger.warning("[%s] no face for profile %s: %s", self.name, profile, exc)
             return None
+
+    @staticmethod
+    def _profile_home(profile: str) -> Path:
+        if profile == "default":  # this gateway's own home, for a standalone profile too
+            from hermes_constants import get_hermes_home
+            return get_hermes_home()
+        from hermes_cli.profiles import get_profile_dir
+        return get_profile_dir(profile)
+
+    async def _face_source_changed(self, device_id: str) -> bool:
+        """Whether the files the device's last face lookup read from have changed since: stat only."""
+        profile, seen = self._face_from[device_id]
+        if profile is None or seen is None:
+            return False
+        now = await asyncio.to_thread(faces.stamp, self._profile_home(profile), self._convert_avatars)
+        return now != seen
 
     def _face_profile(self, session: DeviceSession) -> Optional[str]:
         """The profile whose face the device may show: the one answering it. None: the mascot.
@@ -568,9 +587,11 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                         self._prompts.pop(session.device_id, None)
                         await session.set_paired(False)
                         await self.on_ready(session)
-                    # Another profile approving or revoking the device only shows here: its face follows.
+                    # Another profile approving or revoking the device, or its face file or avatar
+                    # changing, only shows here: its face follows.
                     if (session.paired and self._profile_faces and session.device_id in self._face_from
-                            and self._face_profile(session) != self._face_from[session.device_id]):
+                            and (self._face_profile(session) != self._face_from[session.device_id][0]
+                                 or await self._face_source_changed(session.device_id))):
                         session.update_face()
                 except Exception as exc:
                     logger.debug("[%s] pairing sync failed for %s: %s", self.name, session.device_id, exc)

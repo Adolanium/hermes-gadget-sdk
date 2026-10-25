@@ -259,3 +259,48 @@ def test_each_profile_shows_its_own_face_file_and_profile_faces_false_turns_them
     assert "face" not in sim.last_received("welcome")  # this reconnect's welcome drops it
     assert held() is None
     assert GadgetAdapter(PlatformConfig(enabled=True, extra={"profile_faces": False}))._profile_faces is False
+
+
+def test_a_connected_device_follows_its_profiles_face_sources_without_reconnecting(hermes_home, gadget, make_sim,
+                                                                                   monkeypatch):
+    import struct
+
+    from PIL import Image, ImageDraw
+
+    from hermes_gadget_plugin import face as profile_faces
+    from hermes_gadget_plugin.face import FACE_BYTES, FACE_FILE, for_profile
+
+    avatar = hermes_home / "assets" / "avatar.png"
+    avatar.parent.mkdir()
+    face_file = hermes_home / FACE_FILE
+    anchors = struct.pack("<10h", 607, 293, 262, 620, 801, 107, 396, 508, 586, 649)
+    faces = lambda: [m for m in sim.received if m["type"] == "face"]  # noqa: E731
+
+    def draw(shape):
+        picture = Image.new("RGB", (128, 128), (240, 240, 240))
+        getattr(ImageDraw.Draw(picture), shape)((24, 24, 104, 104), fill=(10, 10, 10))
+        picture.save(avatar)
+
+    def shows(expected):
+        """The device is sent `expected` (a hash; None is the mascot) within a few pairing checks."""
+        return sim.wait_for(lambda: faces() and faces()[-1].get("hash") == expected, timeout=8)
+
+    sim = _paired_sim(gadget, make_sim)
+    welcomes = len([m for m in sim.received if m["type"] == "welcome"])
+    sim.run_for(1)
+    assert not [f for f in faces() if f.get("hash")]  # nothing yet: the mascot
+    draw("ellipse")  # an avatar added
+    assert shows(for_profile(hermes_home).hash)
+    draw("rectangle")  # replaced
+    assert shows(for_profile(hermes_home).hash)
+    face_file.write_bytes(bytes([0xAA]) * (FACE_BYTES - 20) + anchors)  # a face file comes first
+    assert shows(for_profile(hermes_home).hash)
+    face_file.unlink()  # back to the avatar
+    assert shows(for_profile(hermes_home).hash)
+    sent, reads = len(faces()), []
+    monkeypatch.setattr(profile_faces, "for_profile", lambda *a: reads.append(a) or for_profile(*a))
+    sim.run_for(5)  # unchanged sources: nothing read, nothing sent
+    assert (len(faces()), reads) == (sent, [])
+    avatar.unlink()
+    assert shows(None)
+    assert len([m for m in sim.received if m["type"] == "welcome"]) == welcomes  # never reconnected

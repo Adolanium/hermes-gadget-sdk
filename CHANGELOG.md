@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Hermes plugin
+
+- A connected device now gets a profile's new face within a few seconds when the profile's `gadget-face.bin` or Hermes avatar is added, changed or removed, and the mascot when both are removed. Before, the new face arrived only after the device reconnected or switched profile. The pairing check that already runs every 2 seconds compares the size and modification time of those files and looks the face up again only when they change. [Faces](docs/faces.md). Contributed by @mforce.
+
 ## 0.4.0
 
 Hermes Gadget 0.4.0 gives each Hermes profile its own face on the device, adds countdown timers that Hermes sets through device actions, face-down sleep on boards with a motion sensor, and a resting clock kept by network time and the board's RTC. It adds two experimental boards, the ESP32-2432S028 "Cheap Yellow Display" (the first classic ESP32 profile, drawn in bands without PSRAM) and the Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C. Profile switching no longer writes into other Hermes profiles and keeps the default profile's verdict even under a static route, and a switching device's dashboard lists the offered profiles' sessions, in order. Details by area follow.
