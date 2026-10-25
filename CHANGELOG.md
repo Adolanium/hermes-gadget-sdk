@@ -2,9 +2,17 @@
 
 ## Unreleased
 
+## 0.4.1
+
+Hermes Gadget 0.4.1 fixes `hermes gadget update --latest`, which could install an older release over a device running newer firmware, such as a build from `main`. The firmware is unchanged from 0.4.0 apart from its version number.
+
 ### Hermes plugin
 
 - `hermes gadget update <device> --latest` no longer installs an older release over a device that runs newer firmware. It compares the leading `MAJOR.MINOR.PATCH` numbers, so 0.10.0 is newer than 0.9.0 and a source build such as `0.4.0-12-gabc1234` counts as at least 0.4.0. A device on the release's version or a newer one gets a one-line message and nothing installed; a device whose version is missing or unreadable is refused with a message. `--force` installs the release in every case. Reported by @mforce.
+
+### Upgrade
+
+Update the plugin with the commit-pinned command in the release notes, in every Hermes profile that has a copy. Devices on 0.4.0 don't need new firmware; `--latest` will offer 0.4.1, and taking it changes nothing but the reported version.
 
 ## 0.4.0
 
