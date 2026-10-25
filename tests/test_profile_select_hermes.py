@@ -220,9 +220,10 @@ def test_a_refused_message_does_not_leave_the_device_thinking(hermes_home, gadge
     adapter._owner_check = lambda *a, **kw: False
     gadget.events.clear()
     sim.type_text("hi")
+    # The screen was Ready before the message, so wait for the refusal itself, then check the screen.
+    assert sim.wait_for(lambda: "not approved" in (sim.last_received("notice") or {}).get("text", ""), timeout=3)
     assert sim.wait_for(lambda: sim.status()["screen"] == "ready", timeout=3)
     assert gadget.events == []
-    assert "not approved" in (sim.last_received("notice") or {}).get("text", "")
 
 
 def test_each_profile_shows_its_own_face_file_and_profile_faces_false_turns_them_off(hermes_home, gadget, make_sim):
