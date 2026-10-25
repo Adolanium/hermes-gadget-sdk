@@ -513,6 +513,15 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         from hermes_cli.profiles import get_profile_dir
         return get_profile_dir(profile)
 
+    async def _follow_face(self, session: DeviceSession) -> Optional[asyncio.Task]:
+        """Another profile approving or revoking the device, or its face file or avatar changing, only
+        shows at the pairing check: its face follows. Returns the face update it starts, if any."""
+        if (session.paired and self._profile_faces and session.device_id in self._face_from
+                and (self._face_profile(session) != self._face_from[session.device_id].profile
+                     or await self._face_source_changed(session.device_id))):
+            return session.update_face()
+        return None
+
     async def _face_source_changed(self, device_id: str) -> bool:
         """Whether the files the device's last face lookup read from have changed since, and settled:
         the same on two pairing checks in a row, so a file still being written is not read. Stat only;
@@ -622,12 +631,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                         self._prompts.pop(session.device_id, None)
                         await session.set_paired(False)
                         await self.on_ready(session)
-                    # Another profile approving or revoking the device, or its face file or avatar
-                    # changing, only shows here: its face follows.
-                    if (session.paired and self._profile_faces and session.device_id in self._face_from
-                            and (self._face_profile(session) != self._face_from[session.device_id].profile
-                                 or await self._face_source_changed(session.device_id))):
-                        session.update_face()
+                    await self._follow_face(session)
                 except Exception as exc:
                     logger.debug("[%s] pairing sync failed for %s: %s", self.name, session.device_id, exc)
 

@@ -1128,15 +1128,15 @@ def test_a_profile_switch_starts_the_face_files_settling_afresh(hermes_home, tmp
 
     async def main():
         await session.update_face()  # default has no face: the mascot
-        assert await adapter._face_source_changed(DEVICE) is False  # default's files, as they were
+        assert await adapter._follow_face(session) is None  # default's files, as they were
         session.profile = "ops"
         await session.send_profile()
         await session._face_task
         assert faces_sent() == [ops]
         ops_face.unlink()  # being replaced
-        return await adapter._face_source_changed(DEVICE)
+        return await adapter._follow_face(session)
 
-    assert asyncio.run(main()) is False
+    assert asyncio.run(main()) is None
     assert faces_sent() == [ops]
 
 
@@ -1161,16 +1161,16 @@ def test_a_face_check_running_at_disconnect_leaves_nothing_behind(hermes_home, t
         await session.update_face()
         monkeypatch.setattr(faces, "stamp", held_stamp)
         _write_face(hermes_home / FACE_FILE, 0x55, 1001)
-        assert await adapter._face_source_changed(DEVICE) is False  # the first check of the new file
+        assert await adapter._follow_face(session) is None  # the first check of the new file
         session._shutdown()  # the connection ends, as the hub ends it
-        check = asyncio.create_task(adapter._face_source_changed(DEVICE))
+        check = asyncio.create_task(adapter._follow_face(session))
         await asyncio.to_thread(entered.wait, 10)
         adapter._hub.sessions.pop(DEVICE)
         await adapter.on_disconnect(session)
         release.set()
         return await check
 
-    assert asyncio.run(main()) is False  # the device left: no face for it
+    assert asyncio.run(main()) is None  # the device left: no face for it
     assert adapter._face_from == {}  # nothing kept for it
 
 
@@ -1195,20 +1195,21 @@ def test_a_face_file_written_again_after_it_settled_waits_to_settle_again(hermes
         return found
 
     async def checks():
-        return [await adapter._face_source_changed(DEVICE) for _ in range(2)]
+        """Two pairing checks: the face update the second starts, not yet run."""
+        assert await adapter._follow_face(session) is None
+        return await adapter._follow_face(session)
 
     async def main():
         await session.update_face()
         _write_face(face_file, 0x55, 1001)
-        assert await checks() == [False, True]  # settled: the pairing check looks the face up
+        if when == "during its read":
+            monkeypatch.setattr(faces, "for_profile", read_then_write)
+        update = await checks()  # settled: the pairing check looks the face up
         if when == "before the lookup":
             later.append(_write_face(face_file, 0x77, 1002))
-        else:
-            monkeypatch.setattr(faces, "for_profile", read_then_write)
-        await session.update_face()
+        await update
         assert faces_sent() == [first]  # the device keeps its face
-        assert await checks() == [False, True]  # and the new file settles
-        await session.update_face()
+        await (await checks())  # until the new file settles
 
     asyncio.run(main())
     assert faces_sent() == [first, later[0]]
