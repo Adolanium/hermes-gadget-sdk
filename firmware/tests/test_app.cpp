@@ -3410,7 +3410,7 @@ TEST("language: English by default, and set language switches the device's own t
   CHECK_EQ(r.fake.kv["language"], std::string("es"));
   CHECK(r.app.model().lang == hg::i18n::Lang::Es);
   CHECK_EQ(r.app.model().headline, std::string("Hola, soy Hermes"));
-  CHECK_EQ(r.app.model().detail, std::string("Pregúntame lo que sea"));  // drawn with its accent (Latin-1 font)
+  CHECK_EQ(r.app.model().detail, std::string("Pregúntame algo"));  // drawn with its accent (Latin-1 font)
   CHECK_EQ(r.app.model().hint, std::string("mantén TALK y habla"));
   CHECK_EQ(r.app.console("get language"), std::string(R"(@value {"key":"language","value":"es"})"));
   // An empty value goes back to English.
@@ -3504,7 +3504,7 @@ TEST("language: a touch board's control phrase is translated with the rest") {
   CHECK(r.app.screen() == hg::Screen::Listening);
   CHECK_EQ(r.app.model().headline, std::string("Escuchando"));
   CHECK_EQ(r.app.model().detail, std::string("Suelta para enviar"));
-  CHECK_EQ(r.app.model().hint, std::string("Desliza abajo: descartar"));
+  CHECK_EQ(r.app.model().hint, std::string("Desliza: descartar"));
 }
 
 TEST("language: the dashboard's headings and states are translated") {
