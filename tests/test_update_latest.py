@@ -97,14 +97,16 @@ def test_a_device_at_least_as_new_as_the_latest_release_is_left_alone_unless_for
     assert _staged(store) == app
 
 
-def test_a_device_with_an_unknown_version_is_refused_unless_forced(github, store):
+@pytest.mark.parametrize("firmware, shown", [("dev", "dev"), (None, "not reported")])
+def test_a_device_with_an_unknown_version_is_refused_unless_forced(github, store, firmware, shown):
     app = github("0.2.0")
-    store.enroll("hg-0000000000000001", KEY, name="Lamp", board=BOARD)  # never reported a version
-    store.touch(DEVICE_ID, firmware="dev")
-    for device, shown in (("Desk", "dev"), ("Lamp", "not reported")):
-        with pytest.raises(SystemExit) as stop:
-            _update(device=device)
-        assert str(stop.value) == f"{device}'s firmware version is unknown ({shown}). --force installs 0.2.0 anyway."
+    if firmware is None:
+        store.enroll(DEVICE_ID, KEY, name="Desk", board=BOARD)  # a fresh record: no version reported yet
+    else:
+        store.touch(DEVICE_ID, firmware=firmware)
+    with pytest.raises(SystemExit) as stop:
+        _update()
+    assert str(stop.value) == f"Desk's firmware version is unknown ({shown}). --force installs 0.2.0 anyway."
     assert _staged(store) is None
     _update(force=True)
     assert _staged(store) == app
