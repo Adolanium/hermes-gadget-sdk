@@ -175,10 +175,11 @@ A connected device follows those files without a reconnect. Every 2 seconds the 
 the size and modification time of the profile's face file and avatars with what its last lookup
 saw. When they have changed and then stay the same on two checks in a row, the plugin looks the
 face up again; if the files change again before or while it reads them, the device keeps its face
-and the files have to settle once more. The new face replaces the old one about 2 to 4 seconds
-after the save: a one-colour face directly, with no mascot in between, and a colour face after the
-mascot shows while its pixels arrive. When no source is left, the device gets the mascot. Two unchanged checks only debounce a write: a writer that pauses longer than that can be
-read before it has finished. A face with the hash the device already holds is not sent, so touching
+and the files have to settle once more. The new face arrives about 2 to 4 seconds after the save.
+A one-colour face replaces the old one directly, with no mascot in between; for a colour face the
+mascot shows while its pixels arrive. When no source is left, the device gets the mascot. Two
+unchanged checks only debounce a write: a writer that pauses longer than that can be read before it
+has finished. A face with the hash the device already holds is not sent, so touching
 a file or saving the same picture again changes nothing. A file replaced by one of the same size
 and modification time, as a copy that keeps its timestamp can be, goes unnoticed until the device
 reconnects or switches profile.
