@@ -564,7 +564,10 @@ def test_picker_command_runs_in_the_shell_and_preserves_the_picture(tmp_path, pl
     picker.skip()
 
     command = picker.command(src) + " --out face.cpp --preview preview.png --check check.png"
-    env = dict(os.environ, PYTHONPATH=str(REPO / "python"))
+    # Extend PYTHONPATH, don't replace it: the plugin package may reach the parent through it, and
+    # without it the child could import a different checkout's plugin from an editable install.
+    paths = [str(REPO / "python"), os.environ.get("PYTHONPATH", "")]
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join(p for p in paths if p))
     env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env["PATH"]
     shell = (["powershell", "-NoProfile", "-NonInteractive", "-Command", command]
              if os.name == "nt" else ["/bin/sh", "-c", command])
