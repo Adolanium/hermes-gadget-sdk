@@ -2,9 +2,13 @@
 
 ## Unreleased
 
+### Firmware
+
+- Profile faces in colour: on boards with PSRAM, a profile's Hermes avatar shows as a still colour picture, at the largest size the Ready screen draws the face at, instead of the one-colour conversion. A picture with transparency keeps its shape on the screen's background; an opaque one is cropped to a square. The listening and thinking effects draw over it, and on the resting clock it shifts and dims like the mascot. A profile's `gadget-face.bin` still wins, in one colour. The protocol adds `caps.faces: {"v": 2, "px": N}`, the `face.start` and `face.end` messages and binary channel 4, and stays at version 1. Boards without PSRAM and older firmware keep one-colour faces. Update the plugin and the firmware together: a plugin from before this release compares `caps.faces` with 1, so it sends colour firmware no face and the device shows the mascot. [Faces](docs/faces.md#a-face-for-each-hermes-profile). Contributed by @mforce.
+
 ### Hermes plugin
 
-- A connected device now gets a profile's new face within a few seconds when the profile's `gadget-face.bin` or Hermes avatar is added, changed or removed, and the mascot when both are removed. Before, the new face arrived only after the device reconnected or switched profile. The pairing check that already runs every 2 seconds compares the size and modification time of those files, and looks the face up again only after they change and then stay the same on two checks in a row; if they change again before or while they are read, the device keeps its face until they settle once more. The new face replaces the old one directly, without the mascot in between. A face the device already holds is not sent again, so touching a file or saving the same picture again sends nothing. [Faces](docs/faces.md). Contributed by @mforce.
+- A connected device now gets a profile's new face within a few seconds when the profile's `gadget-face.bin` or Hermes avatar is added, changed or removed, and the mascot when both are removed. Before, the new face arrived only after the device reconnected or switched profile. The pairing check that already runs every 2 seconds compares the size and modification time of those files, and looks the face up again only after they change and then stay the same on two checks in a row; if they change again before or while they are read, the device keeps its face until they settle once more. A new one-colour face replaces the old one directly, without the mascot in between; a colour face shows the mascot while its pixels arrive. A face the device already holds is not sent again, so touching a file or saving the same picture again sends nothing. [Faces](docs/faces.md). Contributed by @mforce.
 
 ## 0.4.1
 

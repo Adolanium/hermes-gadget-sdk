@@ -612,3 +612,54 @@ def test_the_picker_says_what_it_needs_when_there_is_no_tk(tmp_path, monkeypatch
     with pytest.raises(SystemExit) as exc:
         face.pick_features(src, face.Options(mask="bright"))
     assert "Tk" in str(exc.value) and "brew install python-tk" in str(exc.value)
+
+
+def _badge(path: Path, transparent: bool) -> Path:
+    """An original drawing: a rose disc with a black eye, on transparency or on a sky-blue square."""
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGBA", (400, 300), (0, 0, 0, 0) if transparent else (90, 170, 240, 255))
+    draw = ImageDraw.Draw(img)
+    draw.ellipse((100, 50, 300, 250), fill=(220, 60, 120, 255))
+    draw.ellipse((160, 120, 190, 150), fill=(0, 0, 0, 255))
+    img.save(path)
+    return path
+
+
+def _px(face, x: int, y: int) -> int:
+    i = 2 * (y * face.px + x)
+    return face.rgb565[i] | face.rgb565[i + 1] << 8
+
+
+def test_a_colour_avatar_keeps_its_shape_on_transparency_and_is_cropped_when_opaque(tmp_path):
+    rose = (220 & 0xF8) << 8 | (60 & 0xFC) << 3 | 120 >> 3
+    shape = profile_faces.colour_from_picture(_badge(tmp_path / "t.png", True), 144)
+    assert shape.px == 144 and len(shape.rgb565) == 144 * 144 * 2
+    assert _px(shape, 0, 0) == 0 and _px(shape, 143, 143) == 0  # transparent corners: the screen shows through
+    assert _px(shape, 72, 72) == rose
+    # The whole disc is in the square: its 400x300 canvas is fitted, not cropped (the disc spans 72 px of 144).
+    row = [_px(shape, x, 80) for x in range(144)]
+    assert row.count(rose) > 60 and row[0] == row[143] == 0
+    assert _px(shape, 63, 66) == 0x0020  # the black eye stays black, not transparent
+
+    opaque = profile_faces.colour_from_picture(_badge(tmp_path / "o.png", False), 144)
+    sky = (90 & 0xF8) << 8 | (170 & 0xFC) << 3 | 240 >> 3
+    assert _px(opaque, 0, 0) == sky  # cropped to the square, background and all
+    assert 0 not in {_px(opaque, x, y) for x in range(144) for y in range(144)}
+    assert all(0 <= v <= 1000 for v in opaque.anchors) and len(opaque.anchors) == 10
+
+
+def test_a_colour_face_is_named_by_its_picture_and_its_size_and_a_face_file_still_wins(tmp_path):
+    home = tmp_path / "ops"
+    (home / "assets").mkdir(parents=True)
+    _badge(home / "assets" / "avatar.png", True)
+    one_colour = profile_faces.for_profile(home)
+    colour = profile_faces.for_profile(home, colour_px=144)
+    assert isinstance(colour.load(), profile_faces.ColourFace) and colour.load().px == 144
+    assert len({one_colour.hash, colour.hash, profile_faces.for_profile(home, colour_px=192).hash}) == 3
+    assert profile_faces.for_profile(home, colour_px=144).hash == colour.hash  # a reconnect finds it again
+    assert profile_faces.for_profile(home, convert=False, colour_px=144) is None  # no Pillow: face files only
+
+    assert cli.main(["face", "--out", str(home / profile_faces.FACE_FILE), "--preview", str(tmp_path / "p.png")]) == 0
+    made = (home / profile_faces.FACE_FILE).read_bytes()
+    assert profile_faces.for_profile(home, colour_px=144).load() == made

@@ -66,6 +66,9 @@ struct DeviceProfile {
   // Room for a face from Hermes (docs/protocol.md#faces): about 27 KB, and its message at once.
   // Boards without PSRAM don't offer faces.
   bool faces = true;
+  // Faces in colour too: begin() takes px*px*2 bytes for one (72 KB at 192 px) from this, and free()
+  // releases them. Without it, or when it returns null, the board offers one-colour faces.
+  void* (*colour_face_alloc)(size_t) = nullptr;
 };
 
 // A device-side capability the agent may invoke. `params` is a JSON-schema
@@ -243,6 +246,10 @@ class App {
   void h_ota_abort(const json::Value& m);
   void h_profile(const json::Value& m);
   void h_face(const json::Value& m);
+  void h_face_start(const json::Value& m);
+  void h_face_end(const json::Value& m);
+  void face_chunk(uint8_t stream, uint16_t seq, const uint8_t* data, size_t len);
+  void drop_face();
   bool can_switch_profile() const;
   void set_agent_profile(const std::string& id);
   void profile_notice(std::string text);
@@ -364,6 +371,18 @@ class App {
   std::vector<AgentProfile> agent_profiles_;  // offered in welcome; empty = no switching
   std::string agent_profile_ = "default";
   std::optional<mascot::Face> face_;  // agent_profile_'s, from Hermes; kept through reconnects
+  // Where a colour face's pixels live (colour_face_alloc): set aside once, so a face never allocates.
+  std::unique_ptr<uint16_t, mascot::Face::Free> colour_;
+  int colour_px_ = 0;  // 0: no colour faces
+  // A colour face on its way into colour_; face_ holds none of it until all of it arrived.
+  struct FaceTransfer {
+    int stream;
+    std::string hash;
+    mascot::Anchors anchors;
+    size_t got = 0;
+    uint16_t seq = 0;
+  };
+  std::optional<FaceTransfer> face_in_;
   // A profile.select awaiting Hermes's answer; one at a time (empty: none).
   std::string profile_pending_;
   uint32_t profile_pending_at_ = 0;

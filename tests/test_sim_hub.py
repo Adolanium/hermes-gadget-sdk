@@ -1,10 +1,12 @@
 """The production device core (in the simulator) against the production hub."""
 
+import io
 import json
 import math
 import struct
 import threading
 import weakref
+from array import array
 
 import pytest
 
@@ -694,6 +696,60 @@ def test_a_profile_face_is_sent_once_and_the_mascot_comes_back_on_a_switch(loop_
         loop_thread.run(device.send_profile())
         assert sim.wait_for(lambda: len(faces()) == 2, timeout=5)
         assert faces()[1]["hash"] == sent["hash"]
+    finally:
+        loop_thread.run(hub.stop())
+
+
+class _ColourFaces(_TwoProfiles):
+    """The default profile's avatar, made at the size the device asks for: a rose disc on transparency."""
+
+    def __init__(self, picture: bytes):
+        self.picture, self.made = picture, []
+
+    async def face(self, session):
+        from hermes_gadget_plugin.face import ProfileFace, colour_from_picture
+
+        if session.profile != "default" or not session.face_px:
+            return None
+        px = session.face_px
+
+        def load():
+            self.made.append(px)
+            return colour_from_picture(io.BytesIO(self.picture), px)
+
+        return ProfileFace(f"rose-{px}", load)
+
+
+def test_a_colour_board_shows_the_avatar_in_colour_and_keeps_it_through_a_reconnect(loop_thread, tmp_path, make_sim):
+    pytest.importorskip("PIL")
+    from PIL import Image, ImageDraw
+
+    from hermes_gadget_plugin.hub import DeviceHub
+    from hermes_gadget_plugin.store import DeviceStore
+
+    art = Image.new("RGBA", (300, 300), (0, 0, 0, 0))
+    ImageDraw.Draw(art).ellipse((30, 30, 270, 270), fill=(220, 60, 120, 255))
+    picture = io.BytesIO()
+    art.save(picture, "PNG")
+    delegate = _ColourFaces(picture.getvalue())
+    hub = DeviceHub(DeviceStore(tmp_path / "server"), delegate, host="127.0.0.1", port=0, heartbeat_s=5)
+    loop_thread.run(hub.start())
+    starts = lambda: [m for m in sim.received if m.get("type") == "face.start"]  # noqa: E731
+    try:
+        sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget")
+        assert sim.wait_screen("ready", timeout=10)
+        hello = [m for m in sim.sent if m.get("type") == "hello"][-1]
+        assert hello["caps"]["faces"]["v"] == 2 and 64 <= hello["caps"]["faces"]["px"] <= 256
+        assert sim.wait_for(lambda: starts(), timeout=5)
+        assert starts()[0]["width"] == hello["caps"]["faces"]["px"]
+        sim.run_for(0.3)
+        pixels = array("H", sim.device.framebuffer_rows())
+        assert pixels.count((220 & 0xF8) << 8 | (60 & 0xFC) << 3 | 120 >> 3) > 1000  # the disc, in its own colour
+        assert not [m for m in sim.received if m.get("type") == "face"]
+
+        assert _held_face(sim) == f"rose-{hello['caps']['faces']['px']}"  # kept, and not sent again
+        sim.run_for(0.3)
+        assert len(starts()) == 1 and len(delegate.made) == 1
     finally:
         loop_thread.run(hub.stop())
 

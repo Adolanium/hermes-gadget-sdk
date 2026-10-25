@@ -21,7 +21,7 @@ constexpr const char* kDeviceIdPrefix = "hg-";
 
 // Binary frame layout: [channel u8][stream u8][seq u16 LE][payload ...]
 constexpr size_t kBinaryHeader = 4;
-enum class Channel : uint8_t { Audio = 0x01, Image = 0x02, Firmware = 0x03 };
+enum class Channel : uint8_t { Audio = 0x01, Image = 0x02, Firmware = 0x03, Face = 0x04 };
 
 struct BinaryFrame {
   Channel channel;

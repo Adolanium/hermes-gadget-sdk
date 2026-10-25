@@ -112,7 +112,22 @@ transparency counts as a dark background. A drawing in one colour on transparenc
 either side of that cut, so its visible pixels are the shape instead. One colour means its fully
 opaque pixels differ by at most 16 brightness levels, so shades that close stay one whole body.
 
-Some drawings on transparency come out poorly; for those, make a face file:
+On a board with PSRAM, the avatar shows in colour instead, as a still picture at the largest size the
+Ready screen draws the face at (at most 192 px on today's screens). Where a screen has less room, as Ready
+has while the device offers profiles to switch between, the device scales the picture down by dropping
+rows and columns, which looks rougher than the picture itself. A picture without transparency is cropped to a
+square from its middle. A picture with transparency is shown whole, and the screen's background shows
+through it: its pixels more than half transparent are left out, so its edge is hard, and its softened
+edge pixels are laid on black, which can leave a dark rim a pixel wide where the background is not
+black: an LCD's dark blue-grey, or the timer alarm's green flash.
+The listening waves and the thinking dots draw over the colour face where they would on a one-colour face
+made from the same outline. On the resting clock it moves a few pixels each minute and dims with the clock,
+like the mascot. Firmware from before colour faces, and boards without PSRAM, keep the one-colour face. A
+face file still wins over the avatar, in one colour, because it blinks and talks; there are no colour blink
+or talk frames yet. Colour faces need the plugin and firmware from the same release: an older plugin sends
+colour firmware no face at all, so it shows the mascot.
+
+Some drawings on transparency come out poorly in one colour; for those, make a face file:
 
 - A dark drawing with light eyes and mouth keeps only the eyes and mouth.
 - A drawing in two shades more than 16 levels apart keeps only the lighter shade.
@@ -160,10 +175,11 @@ A connected device follows those files without a reconnect. Every 2 seconds the 
 the size and modification time of the profile's face file and avatars with what its last lookup
 saw. When they have changed and then stay the same on two checks in a row, the plugin looks the
 face up again; if the files change again before or while it reads them, the device keeps its face
-and the files have to settle once more. The new face replaces the old one directly, with no mascot
-in between, about 2 to 4 seconds after the save; when no source is left, the device gets the
-mascot. Two unchanged checks only debounce a write: a writer that pauses longer than that can be
-read before it has finished. A face with the hash the device already holds is not sent, so touching
+and the files have to settle once more. The new face arrives about 2 to 4 seconds after the save.
+A one-colour face replaces the old one directly, with no mascot in between; for a colour face the
+mascot shows while its pixels arrive. When no source is left, the device gets the mascot. Two
+unchanged checks only debounce a write: a writer that pauses longer than that can be read before it
+has finished. A face with the hash the device already holds is not sent, so touching
 a file or saving the same picture again changes nothing. A file replaced by one of the same size
 and modification time, as a copy that keeps its timestamp can be, goes unnoticed until the device
 reconnects or switches profile.

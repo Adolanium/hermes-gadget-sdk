@@ -27,6 +27,7 @@ BINARY_HEADER = 4
 CHANNEL_AUDIO = 0x01
 CHANNEL_IMAGE = 0x02
 CHANNEL_FIRMWARE = 0x03
+CHANNEL_FACE = 0x04
 
 
 @dataclass(frozen=True)
@@ -38,7 +39,7 @@ class BinaryFrame:
 
 
 def parse_binary(data: bytes) -> BinaryFrame | None:
-    if len(data) < BINARY_HEADER or data[0] not in (CHANNEL_AUDIO, CHANNEL_IMAGE, CHANNEL_FIRMWARE):
+    if len(data) < BINARY_HEADER or data[0] not in (CHANNEL_AUDIO, CHANNEL_IMAGE, CHANNEL_FIRMWARE, CHANNEL_FACE):
         return None
     channel, stream, seq = struct.unpack_from("<BBH", data)
     return BinaryFrame(channel, stream, seq, bytes(data[BINARY_HEADER:]))

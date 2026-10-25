@@ -12,7 +12,7 @@ This is the contract between a device and the gadget plugin running inside the H
 
   | Offset | Size | Field                                 |
   |--------|------|---------------------------------------|
-  | 0      | u8   | channel: `0x01` audio, `0x02` image, `0x03` firmware |
+  | 0      | u8   | channel: `0x01` audio, `0x02` image, `0x03` firmware, `0x04` face |
   | 1      | u8   | stream id (from the matching `*.start` or `ota.offer`) |
   | 2      | u16 LE | sequence number (wraps)             |
   | 4      | ...  | payload                               |
@@ -20,6 +20,7 @@ This is the contract between a device and the gadget plugin running inside the H
   - Audio payload: mono PCM16, little-endian, at the rate announced by `audio.start`.
   - Image payload: RGB565, little-endian, row-major. Each chunk continues where the previous one stopped.
   - Firmware payload: the next bytes of the image; see [Firmware updates](#firmware-updates).
+  - Face payload: a colour face's RGB565, as for images; see [Faces](#faces).
 
 ## Handshake
 
@@ -71,7 +72,7 @@ Because the id is derived from the key, nobody can claim another device's id wit
 - `caps.dashboard` (`{"v": 1, "rows": 6}`) means the device draws the [dashboard](#dashboard). `v` is the newest layout it draws, and `rows` is how many lines fit on its screen at once.
 - `actions` is the device's tool manifest. Each action has a JSON-Schema `params` object and a `description` written for the model.
 - `caps.profiles: true` means the device can switch Hermes profiles (see [Profiles](#profiles)). `profile` is the profile it used last; it is omitted for `default`.
-- `caps.faces: 1` means the device draws a face that the server sends for the profile answering it (see [Faces](#faces)). `face` is the `hash` of the face it holds from an earlier connection; it is omitted when it shows the mascot.
+- `caps.faces: 1` means the device draws a face that the server sends for the profile answering it (see [Faces](#faces)). `caps.faces: {"v": 2, "px": 192}` means it also draws colour faces, at `px` pixels square (at most 256): the largest size its Ready screen draws the face at. Where Ready has less room, for example with a second caption line while the device offers profiles, the device scales the face down. `face` is the `hash` of the face it holds from an earlier connection; it is omitted when it shows the mascot.
 - `token` is required only when the host sets `GADGET_ACCESS_TOKEN`. A mismatch is rejected with error code `bad_token`.
 - `display_sleeping: true` means the screen is dark as the device connects; it is omitted while the screen is lit. See [Screen sleep](#screen-sleep).
 
@@ -134,7 +135,7 @@ A refusal changes nothing on the device. `error` is `routed` when the server's c
 
 ### Faces
 
-A device that sends `caps.faces: 1` can show each profile with its own face instead of the built-in mascot:
+A device that sends `caps.faces` can show each profile with its own face instead of the built-in mascot. A one-colour face is one message:
 
 ```json
 {"type": "face", "profile": "ops", "hash": "3f2a91c0d4e5b6a7", "bits": "<base64 26612 bytes>"}
@@ -154,7 +155,21 @@ A device that sends `caps.faces: 1` can show each profile with its own face inst
 - The server sends nothing when the device already has the right face: when the welcome named it, or when the device shows the mascot and the profile has no face.
 - A device without `caps.faces` gets no `face` messages. The reference firmware sends `caps.faces` only on boards with PSRAM: a face takes about 27 KB, and its message about 36 KB more while it arrives.
 
-The Hermes plugin sends a profile's `gadget-face.bin`, or else the profile's Hermes avatar made into a still face; see [Faces](faces.md#a-face-for-each-hermes-profile).
+A device that sends `caps.faces: {"v": 2, "px": N}` also takes a still colour face, `N` pixels square, sent like an image:
+
+| Message | Meaning |
+|---|---|
+| `{"type": "face.start", "stream": 9, "profile": "ops", "hash": "11f58ca2bca107e6", "width": 192, "height": 192, "format": "rgb565", "anchors": [620, 300, 500, 620, 820, 110, 370, 430, 521, 719]}` | A colour face begins; its pixels follow on binary channel 4, on `stream`, then `face.end` |
+| `{"type": "face.end", "stream": 9}` | End of the face's pixels |
+
+`profile` and `hash` mean what they mean in `face`. `width` and `height` are the device's `px`. The pixels are `px * px` RGB565 values, little-endian and row-major, in chunks of up to 4096 bytes whose sequence numbers count up from 0. `0x0000` is transparent: the device leaves its background there. `anchors` are the ten effect anchors of a one-colour face, in the same order and range.
+
+- A `face.start` makes the device drop the face it holds, as `face` does, and show the mascot until `face.end` brings the whole new face. The device ignores a `face.start` for another profile or while unpaired, as it ignores `face`.
+- The device ignores a `face.start` with another size, another `format`, a `hash` that is empty or longer than 64 characters, or anchors that are not ten integers in range, and shows the mascot. It drops a face whose chunks skip a sequence number or bring more than `px * px * 2` bytes, or whose `face.end` comes before them all, or that a reconnect, a profile switch, `unpaired` or another face interrupts.
+- Everything else is as for `face`: the hash, `hello.face` and `welcome.face` keep an unchanged colour face through reconnects, and `face` without `bits` brings the mascot back. A v2 device takes one-colour faces too: a profile's face file is sent as `face`.
+- The reference firmware sets the face's memory aside at start-up, after the framebuffer, on boards with PSRAM, and sends `"v": 2` only when that worked. A server that predates colour faces compares `caps.faces` with 1, so it sends such a device no faces at all.
+
+The Hermes plugin sends a profile's `gadget-face.bin`, or else the profile's Hermes avatar made into a still face: in colour where the device draws colour faces. See [Faces](faces.md#a-face-for-each-hermes-profile).
 
 ## Conversation
 

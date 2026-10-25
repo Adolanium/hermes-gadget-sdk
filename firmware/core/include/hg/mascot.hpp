@@ -41,14 +41,17 @@ struct Anchors {
 };
 const Anchors& anchors();
 
-// A face Hermes sent for the profile that answers (docs/protocol.md#faces). It has the mascot's
-// sizes and frames and replaces it while the app holds one.
+// A face Hermes sent for the profile that answers (docs/protocol.md#faces). A one-colour face has the
+// mascot's sizes and frames; a colour face is one still px*px picture. It replaces the mascot while
+// the app holds one.
 struct Face {
   struct Free {
-    void operator()(uint8_t* p) const { std::free(p); }
+    void operator()(void* p) const { std::free(p); }
   };
   std::string hash;
-  std::unique_ptr<uint8_t, Free> bits;  // every size, smallest first, each as idle, blink, talk
+  std::unique_ptr<uint8_t, Free> bits;  // one colour: every size, smallest first, each as idle, blink, talk
+  const uint16_t* rgb565 = nullptr;     // colour: px*px, row-major, 0x0000 transparent; the app owns it
+  uint16_t px = 0;
   Anchors anchors;
 };
 // The face message's `bits`: base64 of the bitmaps, then of the anchors as ten little-endian int16
@@ -56,7 +59,10 @@ struct Face {
 // false when there is no memory for it, and when an anchor is outside 0..1000 or a row range is
 // upside down.
 bool parse(std::string_view base64, Face& out);
-// pick() and anchors() for `face`, or for the mascot when it is null.
+// Anchors from ten values in Anchors' field order; false under the same rules as parse().
+bool make_anchors(const int64_t (&v)[10], Anchors& out);
+// pick() and anchors() for `face`, or for the mascot when it is null. A colour face picks the
+// mascot's size and bits: Ui draws its pixels instead.
 Bitmap pick(int max_size, Frame frame, const Face* face);
 const Anchors& anchors(const Face* face);
 

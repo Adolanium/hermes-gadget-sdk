@@ -137,10 +137,17 @@ int tri(uint32_t frame, int period) {
 }
 
 mascot::Frame mascot_frame(const UiModel& m) {
+  if (m.face && m.face->rgb565) return mascot::Frame::Idle;  // a colour face is a still picture
   if (m.screen == Screen::Responding && m.speaking) {
     return (m.frame / 2) % 2 ? mascot::Frame::Talk : mascot::Frame::Idle;
   }
   return m.frame % 45 < 2 ? mascot::Frame::Blink : mascot::Frame::Idle;  // blink every ~4.5 s
+}
+
+// `b` (from mascot::pick) in `ink`, or the colour face at b's size.
+void draw_face(Canvas& c, int x, int y, const mascot::Bitmap& b, const mascot::Face* face, uint16_t ink) {
+  if (face && face->rgb565) c.picture(x, y, b.size, face->rgb565, face->px);
+  else c.bitmap1(x, y, b.size, b.size, b.bits, ink);
 }
 
 // Everything that changes hero pixels between frames, and nothing else, so
@@ -1024,7 +1031,7 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
   const int size = g.size, mx = g.x, my = g.y;
   const mascot::Anchors& a = mascot::anchors(m.face);
   const mascot::Bitmap b = mascot::pick(size, mascot_frame(m), m.face);
-  c.bitmap1(mx, my, b.size, b.size, b.bits, kText);
+  draw_face(c, mx, my, b, m.face, kText);
   const int stroke = std::max(2, size / 48);
   auto waves = [&](int cx, int cy, int dir, int lit, int phase, uint16_t on, uint16_t dim, int r0) {
     for (int i = 0; i < 3; ++i) {
@@ -1224,7 +1231,7 @@ void Ui::draw_alarm(const UiModel& m) {
     const int lh = Canvas::line_height(hs);
     int y = top;
     if (with_face) {
-      panel.bitmap1(cx - face_size / 2, y, face.size, face.size, face.bits, ink);
+      draw_face(panel, cx - face_size / 2, y, face, m.face, ink);
       y += face_size + gap;
     }
     for (int i = 0; i < n; ++i, y += lh) {
@@ -1360,7 +1367,7 @@ void Ui::draw_clock(const UiModel& m) {
       }
     }
 
-    if (face_y >= 0) panel.bitmap1(cx + dx - face.size / 2, face_y + dy, face.size, face.size, face.bits, kText);
+    if (face_y >= 0) draw_face(panel, cx + dx - face.size / 2, face_y + dy, face, m.face, kText);
     panel.text(cx + dx - Canvas::text_width(m.clock_time, k) / 2, time_y + dy, m.clock_time, k, kText);
     if (Canvas::text_width(m.clock_date, ds) <= avail(date_y, date_y + Canvas::line_height(ds)))
       panel.text(cx + dx - Canvas::text_width(m.clock_date, ds) / 2, date_y + dy, m.clock_date, ds, kDim);

@@ -7,9 +7,7 @@ namespace hg::proto {
 bool parse_binary(const uint8_t* data, size_t len, BinaryFrame& out) {
   if (len < kBinaryHeader) return false;
   uint8_t ch = data[0];
-  if (ch != static_cast<uint8_t>(Channel::Audio) && ch != static_cast<uint8_t>(Channel::Image) &&
-      ch != static_cast<uint8_t>(Channel::Firmware))
-    return false;
+  if (ch < static_cast<uint8_t>(Channel::Audio) || ch > static_cast<uint8_t>(Channel::Face)) return false;
   out.channel = static_cast<Channel>(ch);
   out.stream = data[1];
   out.seq = static_cast<uint16_t>(data[2] | (data[3] << 8));

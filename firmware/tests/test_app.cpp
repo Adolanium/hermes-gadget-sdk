@@ -1,5 +1,6 @@
 // Drives hg::App through a fake HAL the way a Hermes gateway would.
 #include <algorithm>
+#include <cstdlib>
 #include <deque>
 #include <map>
 #include <string>
@@ -4162,6 +4163,278 @@ TEST("faces: a face made of the mascot's own bitmaps draws the mascot") {
   r.advance(10);
   CHECK(r.app.model().face != nullptr);
   CHECK_EQ(pixels_changed(mascot, r.fake.fb), size_t(0));
+}
+
+namespace {
+
+hg::DeviceProfile colour_profile() {
+  hg::DeviceProfile p = Rig::profile("ws://hermes.local:8765/gadget");
+  p.colour_face_alloc = std::malloc;
+  return p;
+}
+
+int colour_px(Rig& r) {
+  const Value* hello = r.fake.last("hello");
+  return hello ? static_cast<int>((*hello)["caps"]["faces"]["px"].as_int(0)) : 0;
+}
+
+// A colour face's face.start (docs/protocol.md#faces); `tail` is everything after the size.
+std::string colour_start(const std::string& profile, const std::string& hash, int px, int stream = 7,
+                         const std::string& tail = R"("format":"rgb565","anchors":[607,293,262,620,801,107,396,508,586,649])") {
+  return R"({"type":"face.start","stream":)" + std::to_string(stream) + R"(,"profile":")" + profile + R"(","hash":")" +
+         hash + R"(","width":)" + std::to_string(px) + R"(,"height":)" + std::to_string(px) + "," + tail + "}";
+}
+
+// Bytes [from, to) of a colour face's RGB565 on binary channel 4, in 4096-byte chunks. Every pixel is
+// `pixel` except a transparent (0x0000) square in the middle. Chunk i (counted from the face's first
+// byte) goes with sequence number `seq(i)`, i itself by default.
+void send_pixels(Rig& r, int px, uint16_t pixel, int stream = 7, size_t from = 0, size_t to = SIZE_MAX,
+                 uint16_t (*seq)(uint16_t) = nullptr) {
+  std::vector<uint8_t> data;
+  for (int y = 0; y < px; ++y)
+    for (int x = 0; x < px; ++x) {
+      const bool hole = x >= px / 4 && x < 3 * px / 4 && y >= px / 4 && y < 3 * px / 4;
+      const uint16_t v = hole ? 0 : pixel;
+      data.push_back(static_cast<uint8_t>(v & 0xff));
+      data.push_back(static_cast<uint8_t>(v >> 8));
+    }
+  to = std::min(to, data.size());
+  for (size_t off = from; off < to; off += 4096) {
+    const size_t len = std::min<size_t>(4096, to - off);
+    const auto i = static_cast<uint16_t>(off / 4096);
+    std::vector<uint8_t> frame(hg::proto::kBinaryHeader + len);
+    hg::proto::write_binary_header(frame.data(), hg::proto::Channel::Face, static_cast<uint8_t>(stream),
+                                   seq ? seq(i) : i);
+    std::copy(data.begin() + static_cast<long>(off), data.begin() + static_cast<long>(off + len),
+              frame.begin() + hg::proto::kBinaryHeader);
+    r.app.on_transport_binary(frame.data(), frame.size());
+  }
+}
+
+std::string colour_end(int stream = 7) { return R"({"type":"face.end","stream":)" + std::to_string(stream) + "}"; }
+
+// A colour face as the server sends it: face.start, the pixels, face.end. Only the first `send` bytes
+// go; `end` false leaves out face.end.
+void send_colour_face(Rig& r, const std::string& profile, const std::string& hash, int px, uint16_t pixel,
+                      size_t send = SIZE_MAX, bool end = true, int stream = 7) {
+  r.server(colour_start(profile, hash, px, stream));
+  send_pixels(r, px, pixel, stream, 0, send);
+  if (end) r.server(colour_end(stream));
+}
+
+size_t count_px(const std::vector<uint16_t>& fb, uint16_t v) {
+  return static_cast<size_t>(std::count(fb.begin(), fb.end(), v));
+}
+
+constexpr uint16_t kRose = hg::rgb565(220, 60, 120);
+
+}  // namespace
+
+TEST("colour faces: a board with room offers its Ready face size and draws the face in colour") {
+  Rig r(colour_profile());
+  r.bring_online(true);
+  const Value* hello = r.fake.last("hello");
+  CHECK(hello && (*hello)["caps"]["faces"]["v"].as_int() == 2);
+  const int px = colour_px(r);
+  CHECK(px >= 64 && px <= 192);
+  r.advance(100);
+  send_colour_face(r, "default", "c1", px, kRose);
+  r.advance(100);
+  CHECK(r.app.model().face && r.app.model().face->hash == "c1");
+  // The ring of colour shows; the transparent middle shows the background, not black.
+  CHECK_EQ(count_px(r.fake.fb, kRose), static_cast<size_t>(px * px - (px / 2) * (px / 2)));
+  r.server(R"({"type":"face","profile":"default"})");
+  r.advance(100);
+  CHECK(r.app.model().face == nullptr);
+  CHECK_EQ(count_px(r.fake.fb, kRose), size_t(0));
+}
+
+TEST("colour faces: a board without room keeps one-colour faces") {
+  Rig r;  // no colour_face_alloc: a board without PSRAM to spare
+  r.bring_online(true);
+  const Value* hello = r.fake.last("hello");
+  CHECK(hello && (*hello)["caps"]["faces"].as_int() == 1);
+  send_colour_face(r, "default", "c1", 144, kRose);
+  CHECK(r.app.model().face == nullptr);
+
+  hg::DeviceProfile full = colour_profile();  // PSRAM with no room left after the framebuffer
+  full.colour_face_alloc = [](size_t) -> void* { return nullptr; };
+  Rig no_room(full);
+  no_room.bring_online(true);
+  hello = no_room.fake.last("hello");
+  CHECK(hello && (*hello)["caps"]["faces"].as_int() == 1);
+  no_room.server(face_message("default", "a1"));
+  CHECK(no_room.app.model().face && no_room.app.model().face->hash == "a1");  // one-colour faces still
+}
+
+TEST("colour faces: a bad start or a broken transfer leaves the mascot") {
+  Rig r(colour_profile());
+  r.bring_online_with_profiles(true, "default");
+  const int px = colour_px(r);
+  send_colour_face(r, "default", "c1", px, kRose);
+  CHECK(r.app.model().face != nullptr);
+  r.server(colour_start("default", "c2", px + 1));  // not the size the device asked for,
+  send_pixels(r, px, kRose);                        // even when the device's size follows
+  r.server(colour_end());
+  CHECK(r.app.model().face == nullptr);
+  send_colour_face(r, "default", "", px, kRose);  // no hash
+  CHECK(r.app.model().face == nullptr);
+  send_colour_face(r, "default", "c3", px, kRose, 4096 * 3);  // cut short, then face.end
+  CHECK(r.app.model().face == nullptr);
+  send_colour_face(r, "default", "c4", px, kRose, SIZE_MAX, false);  // no face.end
+  CHECK(r.app.model().face == nullptr);
+  r.server(R"({"type":"face.end","stream":8})");  // another stream's end
+  CHECK(r.app.model().face == nullptr);
+  r.server(R"({"type":"face.end","stream":7})");
+  CHECK(r.app.model().face && r.app.model().face->hash == "c4");
+
+  // Anchors off the face, or not ten of them, or another format: refused like a malformed one-bit face,
+  // even when a whole face follows on the start's stream.
+  for (const char* bad : {R"("anchors":[607,293,262,620,801,107,508,396,586,649],"format":"rgb565")",
+                          R"("anchors":[607,293,262,620,801,107,396,508,586],"format":"rgb565")",
+                          R"("anchors":[607,293,262,620,801,107,396,508,586,1001],"format":"rgb565")",
+                          R"("anchors":[607,293,262,620,801,107,396,508,586,649],"format":"jpeg")"}) {
+    send_colour_face(r, "default", "c5", px, kRose);
+    r.server(colour_start("default", "c6", px, 9, bad));
+    CHECK(r.app.model().face == nullptr);
+    send_pixels(r, px, kRose, 9);
+    r.server(colour_end(9));
+    CHECK(r.app.model().face == nullptr);
+  }
+
+  // A chunk skipped or sent twice drops the transfer, even when the bytes add up to a whole face.
+  for (uint16_t (*seq)(uint16_t) : {+[](uint16_t i) -> uint16_t { return i < 2 ? i : i + 1; },
+                                    +[](uint16_t i) -> uint16_t { return i < 2 ? i : i - 1; }}) {
+    r.server(colour_start("default", "c9", px));
+    send_pixels(r, px, kRose, 7, 0, SIZE_MAX, seq);
+    r.server(colour_end());
+    CHECK(r.app.model().face == nullptr);
+  }
+
+  // One byte too many drops the transfer.
+  send_colour_face(r, "default", "c7", px, kRose, SIZE_MAX, false);
+  std::vector<uint8_t> extra(hg::proto::kBinaryHeader + 2, 0);
+  const auto next_seq = static_cast<uint16_t>((px * px * 2 + 4095) / 4096);
+  hg::proto::write_binary_header(extra.data(), hg::proto::Channel::Face, 7, next_seq);
+  r.app.on_transport_binary(extra.data(), extra.size());
+  r.server(R"({"type":"face.end","stream":7})");
+  CHECK(r.app.model().face == nullptr);
+
+  // Another profile's face, late after a switch, is not this profile's.
+  send_colour_face(r, "ops", "c8", px, kRose);
+  CHECK(r.app.model().face == nullptr);
+}
+
+TEST("colour faces: a new start replaces a transfer, and nothing resumes one that was cut off") {
+  constexpr uint16_t kTeal = hg::rgb565(40, 180, 170);
+  Rig r(colour_profile());
+  r.bring_online(true);
+  const int px = colour_px(r);
+  const size_t half = static_cast<size_t>(px * px) / 4096 * 4096;  // whole chunks, about half the face
+
+  // A new face takes over mid-way; the old stream's late chunks and end change nothing.
+  r.server(colour_start("default", "c1", px, 7));
+  send_pixels(r, px, kRose, 7, 0, half);
+  r.server(colour_start("default", "c2", px, 8));
+  send_pixels(r, px, kRose, 7, half);  // the rest of c1, late
+  r.server(colour_end(7));
+  CHECK(r.app.model().face == nullptr);
+  send_pixels(r, px, kTeal, 8);
+  r.server(colour_end(8));
+  CHECK(r.app.model().face && r.app.model().face->hash == "c2");
+  r.advance(100);
+  CHECK_EQ(count_px(r.fake.fb, kRose), size_t(0));
+  CHECK_EQ(count_px(r.fake.fb, kTeal), static_cast<size_t>(px * px - (px / 2) * (px / 2)));
+
+  // A reconnect cuts a transfer: its remaining chunks and end on the new connection install nothing.
+  r.server(colour_start("default", "c3", px));
+  send_pixels(r, px, kRose, 7, 0, half);
+  r.app.on_transport_closed("network flap");
+  r.advance(5000);
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bjI=","enrolled":true})");
+  r.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":true,"face":"c2"})");
+  send_pixels(r, px, kRose, 7, half);
+  r.server(colour_end());
+  CHECK(r.app.model().face == nullptr);
+
+  // So does an unpair, even when the device is paired again before the rest arrives.
+  r.server(colour_start("default", "c4", px));
+  send_pixels(r, px, kRose, 7, 0, half);
+  r.server(R"({"type":"unpaired"})");
+  r.server(R"({"type":"paired"})");
+  send_pixels(r, px, kRose, 7, half);
+  r.server(colour_end());
+  CHECK(r.app.model().face == nullptr);
+}
+
+TEST("colour faces: stream ids, sizes and anchors must be whole numbers in range") {
+  Rig r(colour_profile());
+  r.bring_online(true);
+  const int px = colour_px(r);
+  const std::string size = std::to_string(px);
+  const std::string anchors = R"("anchors":[607,293,262,620,801,107,396,508,586,649])";
+  // Each start is refused, so the whole face that follows on stream 7 never shows.
+  for (const std::string& bad : {
+           R"({"type":"face.start","stream":7.5,"profile":"default","hash":"c1","width":)" + size + R"(,"height":)" +
+               size + R"(,"format":"rgb565",)" + anchors + "}",
+           R"({"type":"face.start","stream":1e100,"profile":"default","hash":"c1","width":)" + size + R"(,"height":)" +
+               size + R"(,"format":"rgb565",)" + anchors + "}",
+           R"({"type":"face.start","stream":7,"profile":"default","hash":"c1","width":)" + size + R"(.5,"height":)" +
+               size + R"(,"format":"rgb565",)" + anchors + "}",
+           colour_start("default", "c1", px, 7, R"("format":"rgb565","anchors":[607.5,293,262,620,801,107,396,508,586,649])"),
+           colour_start("default", "c1", px, 7, R"("format":"rgb565","anchors":[1e100,293,262,620,801,107,396,508,586,649])")}) {
+    r.server(bad);
+    send_pixels(r, px, kRose);
+    r.server(colour_end());
+    CHECK(r.app.model().face == nullptr);
+  }
+  // face.end names its stream exactly too.
+  r.server(colour_start("default", "c2", px));
+  send_pixels(r, px, kRose);
+  r.server(R"({"type":"face.end","stream":7.5})");
+  CHECK(r.app.model().face == nullptr);
+  r.server(colour_end());
+  CHECK(r.app.model().face && r.app.model().face->hash == "c2");
+}
+
+TEST("colour faces: a switch mid-transfer shows the mascot, and a reconnect keeps a named face") {
+  Rig r(colour_profile());
+  r.bring_online_with_profiles(true, "ops");
+  const int px = colour_px(r);
+  send_colour_face(r, "ops", "c1", px, kRose, SIZE_MAX, false);
+  r.server(R"({"type":"profile","profile":"default"})");
+  r.server(R"({"type":"face.end","stream":7})");
+  CHECK(r.app.model().face == nullptr);
+  send_colour_face(r, "default", "c2", px, kRose);
+  CHECK(r.app.model().face && r.app.model().face->hash == "c2");
+
+  r.fake.sent.clear();
+  r.app.on_transport_closed("network flap");
+  r.advance(5000);
+  r.app.on_transport_open();
+  const Value* hello = r.fake.last("hello");
+  CHECK(hello && (*hello)["face"].as_string() == "c2");
+  r.server(R"({"type":"challenge","nonce":"bjI=","enrolled":true})");
+  r.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":true,"face":"c2"})");
+  CHECK(r.app.model().face && r.app.model().face->hash == "c2");
+  r.advance(100);
+  CHECK(count_px(r.fake.fb, kRose) > 0);
+
+  // A one-colour face file replaces it, and a colour face replaces that.
+  r.server(face_message("default", "a1"));
+  CHECK(r.app.model().face && r.app.model().face->hash == "a1" && !r.app.model().face->rgb565);
+  send_colour_face(r, "default", "c3", px, kRose);
+  CHECK(r.app.model().face && r.app.model().face->hash == "c3" && r.app.model().face->rgb565);
+
+  // A transfer cut by a reconnect is not named in the hello.
+  send_colour_face(r, "default", "c4", px, kRose, 4096, false);
+  r.fake.sent.clear();
+  r.app.on_transport_closed("network flap");
+  r.advance(5000);
+  r.app.on_transport_open();
+  hello = r.fake.last("hello");
+  CHECK(hello && !hello->has("face"));
 }
 
 TEST("clock: off by default, a long rest keeps the Ready screen") {

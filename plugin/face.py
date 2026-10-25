@@ -1,9 +1,11 @@
-"""Faces for the device: its three frames at four sizes, as the `face` message carries them.
+"""Faces for the device: its three frames at four sizes, as the `face` message carries them, or a
+still colour picture, as `face.start` does.
 
 `hermes-gadget face` makes a face from a drawing and writes it into the firmware or, as
 `gadget-face.bin`, into a Hermes profile's folder. The plugin sends a profile's face to devices
-that draw faces: that file, or else the profile's Hermes avatar made into a still face. Pillow is
-needed to make a face from a picture, not to send a face file.
+that draw faces: that file, or else the profile's Hermes avatar made into a still face, in colour
+where the device draws colour faces. Pillow is needed to make a face from a picture, not to send a
+face file.
 """
 
 from __future__ import annotations
@@ -154,6 +156,7 @@ FACE_FILE = "gadget-face.bin"
 # drawing get the new one.
 FACE_FILE_KIND = b"hermes-gadget face file\n"
 AVATAR_DRAWING = b"hermes-gadget avatar 2\n"
+COLOUR_AVATAR = b"hermes-gadget colour avatar 1\n"  # followed by the size, as two little-endian bytes
 
 
 def digest(data: bytes) -> str:
@@ -168,7 +171,7 @@ class ProfileFace:
     whether the face may still be shown, as when the profile it is from still approves the device."""
 
     hash: str
-    load: Callable[[], bytes]
+    load: Callable[[], "bytes | ColourFace"]
     valid: Callable[[], bool] = lambda: True
 
     @classmethod
@@ -177,12 +180,27 @@ class ProfileFace:
         return cls(digest(FACE_FILE_KIND + data), lambda: data)
 
 
+@dataclass(frozen=True)
+class ColourFace:
+    """A still colour face (docs/protocol.md#faces): px*px little-endian RGB565, row-major, where
+    0x0000 is transparent; and the effect anchors in thousandths, in the firmware's order."""
+
+    px: int
+    rgb565: bytes
+    anchors: tuple[int, ...]
+
+
+def anchor_values(anchors: dict) -> list[int]:
+    """measure()'s anchors as the thousandths the device takes, held to its 0..1000."""
+    return [min(1000, max(0, thousandths(v))) for name in ANCHOR_FIELDS for v in anchors[name]]
+
+
 def pack(frames, anchors: dict, threshold: int = THRESHOLD) -> bytes:
     """A face's bytes (docs/protocol.md#faces): every size, smallest first, each as idle, blink and
     talk; then the effect anchors as little-endian int16 thousandths, in the firmware's order, held
     to the 0..1000 the device accepts."""
     bits = b"".join(to_bits(frames[frame], size, threshold) for size in SIZES for frame in FRAMES)
-    values = [min(1000, max(0, thousandths(v))) for name in ANCHOR_FIELDS for v in anchors[name]]
+    values = anchor_values(anchors)
     return bits + struct.pack(f"<{len(values)}h", *values)
 
 
@@ -218,6 +236,39 @@ def from_picture(path: Path | io.BytesIO) -> bytes:
     return pack(dict.fromkeys(FRAMES, ink), measure(ink, Options()))
 
 
+def colour_from_picture(path: Path | io.BytesIO, px: int) -> ColourFace:
+    """A still colour face, px wide, from a picture such as a Hermes avatar.
+
+    An opaque picture is cropped to the square. One with transparency is fitted whole, so it keeps
+    its shape: its pixels under half opaque are transparent, the rest are laid on black, and black
+    itself becomes the nearest colour that is not transparent. The waves and dots go where they would
+    on a one-colour face made from the same outline.
+    """
+    from PIL import Image, ImageOps
+
+    from .imaging import rgb565_bytes
+
+    with Image.open(path) as src:
+        src = ImageOps.exif_transpose(src).convert("RGBA")
+    if src.getchannel("A").getextrema()[0] == 255:
+        art = ImageOps.fit(src, (px, px), Image.Resampling.LANCZOS)
+    else:
+        whole = ImageOps.contain(src, (px, px), Image.Resampling.LANCZOS)
+        art = Image.new("RGBA", (px, px))
+        art.paste(whole, ((px - whole.width) // 2, (px - whole.height) // 2))
+    alpha = art.getchannel("A")
+    rgb = Image.new("RGB", art.size)
+    rgb.paste(art, mask=alpha)
+    data = bytearray(rgb565_bytes(rgb))
+    for i, a in enumerate(alpha.tobytes()):
+        if a < 128:
+            data[2 * i: 2 * i + 2] = b"\0\0"
+        elif not data[2 * i] and not data[2 * i + 1]:
+            data[2 * i] = 0x20  # black, one green step up: 0x0000 means transparent
+    shape = alpha.point(lambda v: 255 if v >= 128 else 0).resize((MASTER_SIZE, MASTER_SIZE))
+    return ColourFace(px, bytes(data), tuple(anchor_values(measure(shape, Options()))))
+
+
 def sources(home: Path, convert: bool = True) -> list[Path]:
     """Where a profile's face may come from, in the order for_profile tries them: its face file,
     then its avatar (`assets/avatar.*`, as Hermes keeps it) when `convert`."""
@@ -238,9 +289,10 @@ def stamp(home: Path, convert: bool = True) -> tuple:
     return tuple(found)
 
 
-def for_profile(home: Path, convert: bool = True) -> ProfileFace | None:
-    """The face a Hermes profile shows: its face file, else its avatar when `convert`, else None
-    for the mascot. This reads one file; converting an avatar waits for `load()`."""
+def for_profile(home: Path, convert: bool = True, colour_px: int = 0) -> ProfileFace | None:
+    """The face a Hermes profile shows: its face file, else its avatar when `convert`, in colour at
+    `colour_px` when that is set, else None for the mascot. This reads one file; converting an avatar
+    waits for `load()`."""
     path, *avatars = sources(home, convert)
     if path.is_file():
         data = path.read_bytes()
@@ -251,5 +303,8 @@ def for_profile(home: Path, convert: bool = True) -> ProfileFace | None:
     for avatar in avatars:
         if avatar.is_file():
             source = avatar.read_bytes()
+            if colour_px:
+                return ProfileFace(digest(COLOUR_AVATAR + colour_px.to_bytes(2, "little") + source),
+                                   lambda: colour_from_picture(io.BytesIO(source), colour_px))
             return ProfileFace(digest(AVATAR_DRAWING + source), lambda: from_picture(io.BytesIO(source)))
     return None
