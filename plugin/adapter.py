@@ -466,7 +466,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             else:
                 from hermes_cli.profiles import get_profile_dir
                 home = get_profile_dir(profile)
-            found = await asyncio.to_thread(faces.for_profile, home, self._convert_avatars)
+            found = await asyncio.to_thread(faces.for_profile, home, self._convert_avatars, session.face_px)
             if found is None or profile == "default":  # the default profile's approval is session.paired
                 return found
             # Found while the profile approved the device: a revocation since then makes it stale.

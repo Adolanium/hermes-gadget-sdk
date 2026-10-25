@@ -34,20 +34,25 @@ bool parse(std::string_view base64, Face& out) {
   size_t len = 0;
   if (!data || !crypto::base64_decode(base64, data.get(), total, len) || len != total) return false;
   const uint8_t* a = data.get() + n;
-  int16_t v[10];
-  for (size_t i = 0; i < 10; ++i) {
-    v[i] = static_cast<int16_t>(a[2 * i] | (a[2 * i + 1] << 8));
-    if (v[i] < 0 || v[i] > 1000) return false;  // off the bitmap: the effects and blink repaints would miss
-  }
-  if (v[6] > v[7] || v[8] > v[9]) return false;  // the eye and mouth rows, top first
-  out.anchors = {{v[0], v[1]}, {v[2], v[3]}, {v[4], v[5]}, v[6], v[7], v[8], v[9]};
+  int64_t v[10];
+  for (size_t i = 0; i < 10; ++i) v[i] = static_cast<int16_t>(a[2 * i] | (a[2 * i + 1] << 8));
+  if (!make_anchors(v, out.anchors)) return false;
   out.bits = std::move(data);
+  return true;
+}
+
+bool make_anchors(const int64_t (&v)[10], Anchors& out) {
+  for (int64_t x : v)
+    if (x < 0 || x > 1000) return false;  // off the bitmap: the effects and blink repaints would miss
+  if (v[6] > v[7] || v[8] > v[9]) return false;  // the eye and mouth rows, top first
+  auto n = [&](int i) { return static_cast<int16_t>(v[i]); };
+  out = {{n(0), n(1)}, {n(2), n(3)}, {n(4), n(5)}, n(6), n(7), n(8), n(9)};
   return true;
 }
 
 Bitmap pick(int max_size, Frame frame, const Face* face) {
   const Bitmap* b = pick(max_size, frame);
-  if (!face) return *b;
+  if (!face || !face->bits) return *b;
   return {b->size, frame, face->bits.get() + offset(b->size, frame)};
 }
 

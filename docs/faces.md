@@ -112,7 +112,20 @@ transparency counts as a dark background. A drawing in one colour on transparenc
 either side of that cut, so its visible pixels are the shape instead. One colour means its fully
 opaque pixels differ by at most 16 brightness levels, so shades that close stay one whole body.
 
-Some drawings on transparency come out poorly; for those, make a face file:
+On a board with PSRAM, the avatar shows in colour instead, as a still picture at the size of the face
+on the Ready screen (at most 192 px on today's screens). A picture without transparency is cropped to a
+square from its middle. A picture with transparency is shown whole, and the screen's background shows
+through it: its pixels more than half transparent are left out, so its edge is hard, and its softened
+edge pixels are laid on black, which can leave a dark rim a pixel wide where the background is not
+black: an LCD's dark blue-grey, or the timer alarm's green flash.
+The listening waves and the thinking dots draw over the colour face where they would on a one-colour face
+made from the same outline. On the resting clock it moves a few pixels each minute and dims with the clock,
+like the mascot. Firmware from before colour faces, and boards without PSRAM, keep the one-colour face. A
+face file still wins over the avatar, in one colour, because it blinks and talks; there are no colour blink
+or talk frames yet. Colour faces need the plugin and firmware from the same release: an older plugin sends
+colour firmware no face at all, so it shows the mascot.
+
+Some drawings on transparency come out poorly in one colour; for those, make a face file:
 
 - A dark drawing with light eyes and mouth keeps only the eyes and mouth.
 - A drawing in two shades more than 16 levels apart keeps only the lighter shade.

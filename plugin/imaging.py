@@ -39,10 +39,14 @@ def to_rgb565(source, max_width: int, max_height: int) -> DeviceImage:
             img = bg
         img = img.convert("RGB")
         img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
-        w, h = img.size
-        raw = img.tobytes()
-    out = bytearray(w * h * 2)
-    for i in range(w * h):
+        return DeviceImage(img.width, img.height, rgb565_bytes(img))
+
+
+def rgb565_bytes(img) -> bytes:
+    """An RGB Pillow image as little-endian, row-major RGB565."""
+    raw = img.tobytes()
+    out = bytearray(img.width * img.height * 2)
+    for i in range(img.width * img.height):
         r, g, b = raw[3 * i], raw[3 * i + 1], raw[3 * i + 2]
         struct.pack_into("<H", out, 2 * i, ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3))
-    return DeviceImage(w, h, bytes(out))
+    return bytes(out)

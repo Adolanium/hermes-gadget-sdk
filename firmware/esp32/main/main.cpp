@@ -424,6 +424,7 @@ extern "C" void app_main(void) {
   profile.default_name = CONFIG_HG_DEFAULT_NAME;
 #if CONFIG_SPIRAM
   profile.faces = esp_psram_is_initialized();
+  profile.colour_faces = profile.faces;  // malloc takes blocks this large from PSRAM, after the framebuffer
 #else
   profile.faces = false;
 #endif

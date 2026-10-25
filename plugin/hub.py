@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from . import audio, opus, protocol
-from .face import ProfileFace
+from .face import ColourFace, ProfileFace
 from .store import DeviceStore
 
 log = logging.getLogger("hermes_gadget.hub")
@@ -309,6 +309,20 @@ class DeviceSession:
         return int(spk.get("rate") or 16000) if isinstance(spk, dict) else 16000
 
     @property
+    def face_px(self) -> int:
+        """The size the device draws a colour face at (docs/protocol.md#faces); 0: one-colour faces only."""
+        faces = self.caps.get("faces")
+        if isinstance(faces, dict) and type(faces.get("v")) is int and faces["v"] >= 2:
+            px = faces.get("px")
+            if type(px) is int and 1 <= px <= 256:
+                return px
+        return 0
+
+    def shows_faces(self) -> bool:
+        """Whether the device draws the faces the server sends: one-colour ones, or colour ones too."""
+        return self.caps.get("faces") == 1 or self.face_px > 0
+
+    @property
     def charset(self) -> str:
         return str(self.display.get("charset") or "ascii")
 
@@ -405,7 +419,7 @@ class DeviceSession:
 
     async def find_face(self) -> ProfileFace | None:
         """The face the device should show now; unpaired devices get the mascot (None)."""
-        if not self.paired or self.caps.get("faces") != 1:
+        if not self.paired or not self.shows_faces():
             return None
         return await self.hub.delegate.face(self)
 
@@ -422,7 +436,7 @@ class DeviceSession:
         """Bring the device's face up to date, beside the messages: the session's one face operation.
         It is for the state now; a newer one replaces it, and the session's end stops it. ``face`` is
         what find_face() returned when the state was ``found_for``; it is looked up again otherwise."""
-        if self.caps.get("faces") != 1:
+        if not self.shows_faces():
             return None
         state = self.face_state()
         if found_for != state or (isinstance(face, ProfileFace) and not face.valid()):
@@ -451,8 +465,17 @@ class DeviceSession:
             return
         if stale():
             return
-        await self.send_json(protocol.message(
-            "face", profile=state[0], hash=digest, bits=base64.b64encode(data).decode() if data else None))
+        if isinstance(data, ColourFace):
+            stream = self._next_stream()
+            self.face_hash = None  # the device drops the face it holds at face.start
+            await self.send_json(protocol.message(
+                "face.start", stream=stream, profile=state[0], hash=digest, width=data.px, height=data.px,
+                format="rgb565", anchors=list(data.anchors)))
+            await self._send_chunks(protocol.CHANNEL_FACE, stream, data.rgb565)
+            await self.send_json(protocol.message("face.end", stream=stream))
+        else:
+            await self.send_json(protocol.message(
+                "face", profile=state[0], hash=digest, bits=base64.b64encode(data).decode() if data else None))
         self.face_hash = digest
 
     async def show_card(self, title: str, body: str, ttl_s: float = 15) -> bool:
@@ -469,11 +492,14 @@ class DeviceSession:
         stream = self._next_stream()
         await self.send_json(protocol.message(
             "image.start", stream=stream, width=width, height=height, format="rgb565", ttl_s=ttl_s))
-        for seq, off in enumerate(range(0, len(rgb565), IMAGE_CHUNK_BYTES)):
-            await self.send_binary(protocol.binary(
-                protocol.CHANNEL_IMAGE, stream, seq, rgb565[off: off + IMAGE_CHUNK_BYTES]))
+        await self._send_chunks(protocol.CHANNEL_IMAGE, stream, rgb565)
         await self.send_json(protocol.message("image.end", stream=stream))
         return True
+
+    async def _send_chunks(self, channel: int, stream: int, data: bytes) -> None:
+        """An image's or a colour face's pixels, in binary frames after their *.start."""
+        for seq, off in enumerate(range(0, len(data), IMAGE_CHUNK_BYTES)):
+            await self.send_binary(protocol.binary(channel, stream, seq, data[off: off + IMAGE_CHUNK_BYTES]))
 
     async def send_dashboard(self, dashboard: dict) -> bool:
         """Send a dashboard snapshot if it differs from the last one delivered. False when it

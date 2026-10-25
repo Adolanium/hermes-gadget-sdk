@@ -116,6 +116,7 @@ const App::Route App::kRoutes[] = {
     {"ota.begin", &App::h_ota_begin},     {"ota.end", &App::h_ota_end},
     {"ota.abort", &App::h_ota_abort},     {"dashboard", &App::h_dashboard},
     {"profile", &App::h_profile},         {"face", &App::h_face},
+    {"face.start", &App::h_face_start},   {"face.end", &App::h_face_end},
 };
 
 App::App(Hal& hal, DeviceProfile profile) : hal_(hal), profile_(std::move(profile)) {}
@@ -271,6 +272,12 @@ void App::begin() {
 
   add_timer_actions();  // timer.start/status/cancel, beside the built-in actions
   if (hal_.display) ui_ = std::make_unique<Ui>(*hal_.display);
+  if (ui_ && profile_.faces && profile_.colour_faces && !colour_) {
+    const int px = std::min(256, ui_->face_px());
+    colour_.reset(static_cast<uint16_t*>(std::malloc(static_cast<size_t>(px) * static_cast<size_t>(px) * 2)));
+    colour_px_ = colour_ ? px : 0;
+    if (!colour_) log(LogLevel::Warn, "no room for a colour face: one-colour faces only");
+  }
   if (ui_ && profile_.touch_screen)  // about 7 mm: 7 * ppi / 25.4, rounded up
     ui_->set_touch_px((70 * (profile_.touch_ppi ? profile_.touch_ppi : DeviceProfile::kDefaultTouchPpi) + 253) / 254);
   if (profile_.frame_stats) set_frame_stats(true);
@@ -351,6 +358,7 @@ void App::drop_session(std::string_view reason) {
   mode_ = Mode::Idle;
   overlay_ = Overlay::None;
   image_stream_ = -1;
+  face_in_.reset();  // a colour face cut short; a whole one stays for the welcome to keep
   // What the dashboard showed is stale now; the next connection sends it afresh.
   dashboard_ready_ = false;
   dash_rows_.clear();
@@ -437,7 +445,10 @@ void App::send_hello() {
     caps.set("dashboard", dash);
   }
   caps.set("profiles", true);
-  if (ui_ && profile_.faces) caps.set("faces", 1);
+  if (ui_ && profile_.faces) {
+    if (colour_px_) caps.set("faces", json::Value::object().set("v", 2).set("px", colour_px_));
+    else caps.set("faces", 1);
+  }
   if (hal_.updater) {
     json::Value ota = json::Value::object();
     ota.set("max_size", hal_.updater->capacity());
@@ -557,7 +568,7 @@ void App::h_profile(const json::Value& m) {
 void App::h_face(const json::Value& m) {
   // A face or a clear for another profile is late: it must not touch this profile's face.
   if (!profile_.faces || !paired_ || m["profile"].as_string() != agent_profile_) return;
-  face_.reset();
+  drop_face();
   const std::string& bits = m["bits"].as_string();
   if (bits.empty()) return;
   const std::string& hash = m["hash"].as_string();
@@ -570,6 +581,65 @@ void App::h_face(const json::Value& m) {
   face_ = std::move(face);
 }
 
+void App::drop_face() {
+  face_.reset();
+  face_in_.reset();
+}
+
+// A colour face: checked whole before a byte of it is kept, then its pixels on channel 4 (face_chunk)
+// go straight into colour_, and face.end shows it. The mascot shows meanwhile.
+void App::h_face_start(const json::Value& m) {
+  if (!colour_px_ || !paired_ || m["profile"].as_string() != agent_profile_) return;
+  drop_face();
+  const std::string& hash = m["hash"].as_string();
+  const auto& a = m["anchors"].elements();
+  int64_t v[10] = {};
+  bool ok = a.size() == 10;
+  for (size_t i = 0; ok && i < 10; ++i) {
+    ok = a[i].is_number() && a[i].as_number() == static_cast<double>(a[i].as_int(-1));
+    v[i] = a[i].as_int(-1);
+  }
+  mascot::Anchors anchors;
+  const int64_t stream = m["stream"].as_int(-1);
+  if (!ok || !mascot::make_anchors(v, anchors) || hash.empty() || hash.size() > 64 || stream < 0 ||
+      stream > 255 || m["width"].as_int(0) != colour_px_ || m["height"].as_int(0) != colour_px_ ||
+      m["format"].as_string() != "rgb565") {
+    log(LogLevel::Warn, "ignored a malformed colour face");
+    return;
+  }
+  face_in_ = FaceTransfer{static_cast<int>(stream), hash, anchors};
+}
+
+void App::face_chunk(uint8_t stream, uint16_t seq, const uint8_t* data, size_t len) {
+  if (!face_in_ || stream != face_in_->stream) return;
+  const size_t total = static_cast<size_t>(colour_px_) * static_cast<size_t>(colour_px_) * 2;
+  if (seq != face_in_->seq || len > total - face_in_->got) {
+    log(LogLevel::Warn, "dropped a colour face: a chunk out of place");
+    face_in_.reset();
+    return;
+  }
+  // The wire is little-endian RGB565, as the framebuffer's native order is on every target.
+  std::memcpy(reinterpret_cast<uint8_t*>(colour_.get()) + face_in_->got, data, len);
+  face_in_->got += len;
+  ++face_in_->seq;
+}
+
+void App::h_face_end(const json::Value& m) {
+  if (!face_in_ || m["stream"].as_int(-1) != face_in_->stream) return;
+  const bool whole = face_in_->got == static_cast<size_t>(colour_px_) * static_cast<size_t>(colour_px_) * 2;
+  if (whole) {
+    mascot::Face face;
+    face.hash = face_in_->hash;
+    face.rgb565 = colour_.get();
+    face.px = static_cast<uint16_t>(colour_px_);
+    face.anchors = face_in_->anchors;
+    face_ = std::move(face);
+  } else {
+    log(LogLevel::Warn, "dropped a colour face that ended short");
+  }
+  face_in_.reset();
+}
+
 // The notice line and the open settings item; not the hint bar, which settings hides.
 void App::profile_notice(std::string text) {
   if (menu_ == Menu::Profile) check_result_ = text;
@@ -579,7 +649,7 @@ void App::profile_notice(std::string text) {
 
 void App::set_agent_profile(const std::string& id) {
   if (id.empty()) return;
-  if (id != agent_profile_) face_.reset();  // the mascot until the new profile's face arrives
+  if (id != agent_profile_) drop_face();  // the mascot until the new profile's face arrives
   agent_profile_ = id;
   if (!hal_.storage || setting("profile", "default") == id) return;
   if (id == "default") hal_.storage->erase("profile");
@@ -663,7 +733,7 @@ void App::h_paired(const json::Value&) {
 
 void App::h_unpaired(const json::Value&) {
   paired_ = false;
-  face_.reset();
+  drop_face();
   mode_ = Mode::Idle;
   stop_playback();
 }
@@ -804,6 +874,10 @@ void App::on_transport_binary(const uint8_t* data, size_t len) {
   last_rx_ = now();
   proto::BinaryFrame f;
   if (!proto::parse_binary(data, len, f)) return;
+  if (f.channel == proto::Channel::Face) {
+    face_chunk(f.stream, f.seq, f.payload, f.payload_len);
+    return;
+  }
   if (f.channel == proto::Channel::Firmware) {
     const Ota before = ota_;
     ota_chunk(f.stream, f.seq, f.payload, f.payload_len);

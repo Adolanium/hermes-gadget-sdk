@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Firmware
+
+- Profile faces in colour: on boards with PSRAM, a profile's Hermes avatar shows as a still colour picture, at the size of the face on the Ready screen, instead of the one-colour conversion. A picture with transparency keeps its shape on the screen's background; an opaque one is cropped to a square. The listening and thinking effects draw over it, and on the resting clock it shifts and dims like the mascot. A profile's `gadget-face.bin` still wins, in one colour. The protocol adds `caps.faces: {"v": 2, "px": N}`, the `face.start` and `face.end` messages and binary channel 4, and stays at version 1. Boards without PSRAM and older firmware keep one-colour faces. Update the plugin and the firmware together: a plugin from before this release compares `caps.faces` with 1, so it sends colour firmware no face and the device shows the mascot. [Faces](docs/faces.md#a-face-for-each-hermes-profile). Contributed by @mforce.
+
 ## 0.4.0
 
 Hermes Gadget 0.4.0 gives each Hermes profile its own face on the device, adds countdown timers that Hermes sets through device actions, face-down sleep on boards with a motion sensor, and a resting clock kept by network time and the board's RTC. It adds two experimental boards, the ESP32-2432S028 "Cheap Yellow Display" (the first classic ESP32 profile, drawn in bands without PSRAM) and the Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C. Profile switching no longer writes into other Hermes profiles and keeps the default profile's verdict even under a static route, and a switching device's dashboard lists the offered profiles' sessions, in order. Details by area follow.

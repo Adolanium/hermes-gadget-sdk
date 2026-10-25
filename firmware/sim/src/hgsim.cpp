@@ -247,6 +247,7 @@ hgsim* hgsim_create(const hgsim_config* cfg, const hgsim_host* host) {
     profile.extra_settings = {"touch_cancel"};
   }
   profile.motion_sensor = cfg->motion != 0;
+  profile.colour_faces = true;
   sim->app = std::make_unique<hg::App>(sim->hal, profile);
   if (cfg->touch) {
     sim->touch = std::make_unique<hg::TouchGestures>(*sim->app);

@@ -142,6 +142,8 @@ class Ui {
   int body_rows(const UiModel& m) const;
   // Dashboard rows that fit the content band.
   int dash_rows() const;
+  // The size the Ready screen draws the face at: a colour face is sent at this size.
+  int face_px() const { return hero_geom(UiModel{}).size; }
   // Touch targets (the name panel, list rows) are at least this many pixels tall.
   void set_touch_px(int px) { touch_px_ = px; }
   // Panel coordinates: the hero caption's panel (name_target), and the item of the Profiles row

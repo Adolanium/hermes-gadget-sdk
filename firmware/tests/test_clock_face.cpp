@@ -198,6 +198,44 @@ TEST("clock face: a profile's face takes the mascot's place, and a new face repa
   CHECK(count_of(f, kText) > mascot_ink + 2000);  // a solid icon square where the mascot's lines were
 }
 
+TEST("clock face: a colour face moves with the burn-in shift and its transparent middle shows the background") {
+  constexpr uint16_t kRose = hg::rgb565(220, 60, 120);
+  const int px = 192;
+  std::vector<uint16_t> pixels(static_cast<size_t>(px * px), kRose);
+  for (int y = px / 4; y < 3 * px / 4; ++y)
+    for (int x = px / 4; x < 3 * px / 4; ++x) pixels[static_cast<size_t>(y * px + x)] = 0;
+  hg::mascot::Face colour;
+  colour.hash = "c1";
+  colour.rgb565 = pixels.data();
+  colour.px = px;
+  colour.anchors = hg::mascot::anchors();
+
+  Face f(466, 466, true);
+  hg::UiModel m = clock_model(7);
+  m.face = &colour;
+  f.ui.render(m);
+  const Box a = ink_of(f, kRose);
+  CHECK(a.any());
+  CHECK_EQ(a.x1 - a.x0 + 1, 96);  // drawn at the clock's icon size
+  CHECK_EQ(f.at((a.x0 + a.x1) / 2, (a.y0 + a.y1) / 2), uint16_t(0));  // the background through the hole
+  m.clock_minute = 8;
+  f.ui.render(m);
+  const Box b = ink_of(f, kRose);
+  CHECK(b.any() && (b.x0 != a.x0 || b.y0 != a.y0));  // shifted with the time
+
+  // On the alarm's green flash too, the face keeps its colours and its middle shows the flash.
+  hg::UiModel alarm;
+  alarm.screen = Screen::Alarm;
+  alarm.headline = "Timer";
+  alarm.hint = "Tap to stop";
+  alarm.flash = true;
+  alarm.face = &colour;
+  f.ui.render(alarm);
+  const Box c = ink_of(f, kRose);
+  CHECK(c.any());
+  CHECK_EQ(f.at((c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2), kGreen);
+}
+
 // The vertical bands of kText ink (rows with any of it, split where two or more
 // rows are empty), top to bottom: the icon's band, then the time's.
 std::vector<Box> text_bands(const Face& f) {

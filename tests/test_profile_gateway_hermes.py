@@ -550,7 +550,7 @@ def routing_rig(hermes_home, tmp_path):
 
 
 def _session(profile, capable=True):
-    return types.SimpleNamespace(device_id=DEVICE, name="Kitchen", profile=profile,
+    return types.SimpleNamespace(device_id=DEVICE, name="Kitchen", profile=profile, face_px=0,
                                  caps={"profiles": True} if capable else {})
 
 
@@ -1023,11 +1023,11 @@ def _revoked_during_the_welcome_lookup(rig, hermes_home, make_sim, monkeypatch, 
     entered, release = threading.Event(), threading.Event()
     read = faces.for_profile
 
-    def held_read(home, convert=True):  # the welcome's lookup of ops's face, held until released
+    def held_read(home, convert=True, colour_px=0):  # the welcome's lookup of ops's face, held until released
         if home == ops_file.parent and not entered.is_set():
             entered.set()
             release.wait(10)
-        return read(home, convert)
+        return read(home, convert, colour_px)
     monkeypatch.setattr(faces, "for_profile", held_read)
 
     welcomes = len([m for m in sim.received if m["type"] == "welcome"])
