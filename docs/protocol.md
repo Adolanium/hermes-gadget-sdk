@@ -120,7 +120,7 @@ If authentication fails, the server sends `{"type": "error", "code": "auth_faile
 | `{"type": "pairing", "code": "ABCD2345", "command": "hermes pairing approve gadget ABCD2345"}` | server → device | Show this code; the owner approves it on the Hermes host |
 | `{"type": "paired"}` | server → device | Approved (no reconnect needed) |
 | `{"type": "unpaired"}` | server → device | Approval was revoked |
-| `{"type": "unpaired", "reason": "routed"}` | server → device | Refused, and no pairing code can let it in: a gateway route sends this device, which answers to the default profile, to another profile. The server sends it when the refusal starts, also to a device that is already unpaired, and after `welcome`, in place of a pairing code. The device drops any pairing code it showed and shows why until `paired`, `pairing`, a plain `unpaired` or the next `welcome`; it treats a reason it doesn't know as no reason |
+| `{"type": "unpaired", "reason": "routed"}` | server → device | Refused, and no pairing code can let it in: a gateway route sends this device, which answers to the default profile, to another profile. The server sends it when the refusal starts, also to a device that is already unpaired, and after `welcome`, in place of a pairing code. The device drops any pairing code it showed and shows why until `paired`, `pairing`, a plain `unpaired` or the next `welcome`; for a reason it doesn't know, it shows the normal pairing screen, but `status` still reports it as `unpaired_reason` |
 
 ### Profiles
 
