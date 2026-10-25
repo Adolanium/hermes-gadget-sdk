@@ -260,3 +260,96 @@ def test_each_profile_shows_its_own_face_file_and_profile_faces_false_turns_them
     assert "face" not in sim.last_received("welcome")  # this reconnect's welcome drops it
     assert held() is None
     assert GadgetAdapter(PlatformConfig(enabled=True, extra={"profile_faces": False}))._profile_faces is False
+
+
+def _face_sources(hermes_home, gadget, make_sim, monkeypatch):
+    """A paired device on the default profile, which has no face yet. Returns the device, a function
+    drawing the profile's avatar, the faces sent, a wait for a face (a hash; None is the mascot), and
+    the list of face lookups made from then on."""
+    from PIL import Image, ImageDraw
+
+    from hermes_gadget_plugin import face as profile_faces
+
+    avatar = hermes_home / "assets" / "avatar.png"
+    avatar.parent.mkdir()
+    sim = _paired_sim(gadget, make_sim)
+    faces = lambda: [m for m in sim.received if m["type"] == "face"]  # noqa: E731
+    sim.run_for(1)
+    assert not [f for f in faces() if f.get("hash")]  # nothing yet: the mascot
+
+    def draw(shape):
+        picture = Image.new("RGB", (128, 128), (240, 240, 240))
+        getattr(ImageDraw.Draw(picture), shape)((24, 24, 104, 104), fill=(10, 10, 10))
+        picture.save(avatar)
+
+    def shows(expected):
+        """The device is sent `expected` within a few pairing checks."""
+        return sim.wait_for(lambda: faces() and faces()[-1].get("hash") == expected, timeout=8)
+
+    lookups, look_up = [], profile_faces.for_profile
+    monkeypatch.setattr(profile_faces, "for_profile", lambda *a: lookups.append(a) or look_up(*a))
+    return sim, draw, faces, shows, lookups
+
+
+def test_a_connected_device_follows_its_profiles_face_sources_without_reconnecting(hermes_home, gadget, make_sim,
+                                                                                   monkeypatch):
+    import os
+    import struct
+
+    from hermes_gadget_plugin.face import FACE_BYTES, FACE_FILE, for_profile
+
+    sim, draw, faces, shows, lookups = _face_sources(hermes_home, gadget, make_sim, monkeypatch)
+    welcomes = len([m for m in sim.received if m["type"] == "welcome"])
+    face_file = hermes_home / FACE_FILE
+    anchors = struct.pack("<10h", 607, 293, 262, 620, 801, 107, 396, 508, 586, 649)
+    draw("ellipse")  # an avatar added
+    assert shows(for_profile(hermes_home).hash)
+    draw("rectangle")  # replaced
+    assert shows(for_profile(hermes_home).hash)
+    face_file.write_bytes(bytes([0xAA]) * (FACE_BYTES - 20) + anchors)  # a face file comes first
+    assert shows(for_profile(hermes_home).hash)
+    face_file.unlink()  # back to the avatar
+    assert shows(for_profile(hermes_home).hash)
+
+    sent, lookups[:] = len(faces()), []
+    os.utime(hermes_home / "assets" / "avatar.png")  # touched: looked up, but the same face
+    assert sim.wait_for(lambda: lookups, timeout=8)
+    sim.run_for(1)
+    assert len(faces()) == sent
+    lookups.clear()
+    sim.run_for(5)  # unchanged: nothing looked up, nothing sent
+    assert (len(faces()), lookups) == (sent, [])
+
+    (hermes_home / "assets" / "avatar.png").unlink()
+    assert shows(None)
+    assert len([m for m in sim.received if m["type"] == "welcome"]) == welcomes  # never reconnected
+
+
+def test_a_face_file_still_being_written_is_not_looked_up(hermes_home, gadget, make_sim, monkeypatch):
+    import struct
+
+    from hermes_gadget_plugin.face import FACE_BYTES, FACE_FILE, ProfileFace
+
+    sim, _, _, shows, lookups = _face_sources(hermes_home, gadget, make_sim, monkeypatch)
+    data = bytes([0xAA]) * (FACE_BYTES - 20) + struct.pack("<10h", 607, 293, 262, 620, 801, 107, 396, 508, 586, 649)
+    chunk = len(data) // 10 + 1
+    with open(hermes_home / FACE_FILE, "wb") as out:  # a slow copy: a piece every half second
+        for start in range(0, len(data), chunk):
+            out.write(data[start:start + chunk])
+            out.flush()
+            sim.run_for(0.5)
+    assert lookups == []  # it never stood still for two pairing checks
+    assert shows(ProfileFace.of(data).hash)
+
+
+def test_profile_faces_false_leaves_a_changed_avatar_alone(hermes_home, gadget, make_sim, monkeypatch):
+    from hermes_gadget_plugin.face import for_profile
+
+    sim, draw, faces, shows, lookups = _face_sources(hermes_home, gadget, make_sim, monkeypatch)
+    draw("ellipse")
+    assert shows(for_profile(hermes_home).hash)
+    gadget.adapter._profile_faces = False  # as profile_faces: false sets it
+    sent, lookups[:] = len(faces()), []
+    draw("rectangle")
+    sim.run_for(5)
+    assert (len(faces()), lookups) == (sent, [])
