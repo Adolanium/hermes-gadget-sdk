@@ -161,7 +161,7 @@ TEST("i18n: format fills placeholders in any order and keeps the ones it has no 
 TEST("i18n: control names in words are translated, printed button names are kept") {
   using hg::i18n::control_name;
   CHECK_EQ(control_name(Lang::En, "Swipe down"), std::string("Swipe down"));
-  CHECK_EQ(control_name(Lang::Es, "Swipe down"), std::string("Desliza abajo"));
+  CHECK_EQ(control_name(Lang::Es, "Swipe down"), std::string("Desliza"));
   CHECK_EQ(control_name(Lang::Es, "BOOT"), std::string("BOOT"));
   CHECK_EQ(control_name(Lang::Es, "PWR"), std::string("PWR"));
 }
@@ -171,10 +171,11 @@ namespace {
 struct BlankDisplay : hg::Display {
   hg::DisplayInfo d;
   std::vector<uint16_t> fb;
-  BlankDisplay(int w, int h, bool round) : fb(static_cast<size_t>(w * h)) {
+  BlankDisplay(int w, int h, bool round, uint8_t font_scale = 1) : fb(static_cast<size_t>(w * h)) {
     d.width = static_cast<uint16_t>(w);
     d.height = static_cast<uint16_t>(h);
     d.round = round;
+    d.font_scale = font_scale;
   }
   hg::DisplayInfo info() const override { return d; }
   uint16_t* framebuffer() override { return fb.data(); }
@@ -191,8 +192,8 @@ struct Columns {
 };
 
 // What ui.cpp fits on one line of each kind on this panel.
-Columns columns(int w, int h, bool round) {
-  BlankDisplay display(w, h, round);
+Columns columns(int w, int h, bool round, uint8_t font_scale = 1) {
+  BlankDisplay display(w, h, round, font_scale);
   hg::Ui ui(display);
   const hg::UiLayout& l = ui.layout();
   const int s = l.scale;
@@ -284,6 +285,7 @@ constexpr Msg kDashValues[] = {Msg::DashApproval, Msg::DashBusy, Msg::DashIdle, 
 struct Panel {
   int w, h;
   bool round;
+  uint8_t font_scale = 1;  // as the board's lcd.font_scale sets it
 };
 // Every panel a board or simulator profile uses (the AMOLEDs as their UI area).
 constexpr Panel kPanels[] = {
@@ -291,6 +293,7 @@ constexpr Panel kPanels[] = {
     {360, 360, true},  {368, 432, false}, {410, 486, false}, {466, 466, true}, {480, 320, false},
     {480, 480, false}, {800, 480, false},
     {480, 480, true},
+    {360, 360, true, 2},  // the Knob-Touch-LCD-1.8 (lcd.font_scale = 2 in board.cpp)
 };
 
 void check_fits(Lang lang, Msg m, int cols, const Panel& p) {
@@ -300,14 +303,14 @@ void check_fits(Lang lang, Msg m, int cols, const Panel& p) {
     check::fail(__FILE__, __LINE__,
                 std::string(hg::i18n::info(lang).code) + " \"" + t + "\" (" + std::to_string(t_cols) + ") is cut at " +
                     std::to_string(cols) + " columns on " + std::to_string(p.w) + "x" + std::to_string(p.h) +
-                    (p.round ? " round" : "") + ", where \"" + en + "\" fits");
+                    (p.round ? " round" : "") + (p.font_scale > 1 ? " at font scale " + std::to_string(p.font_scale) : "") + ", where \"" + en + "\" fits");
 }
 
 }  // namespace
 
 TEST("i18n: one-line text fits wherever the English fits") {
   for (const Panel& p : kPanels) {
-    const Columns c = columns(p.w, p.h, p.round);
+    const Columns c = columns(p.w, p.h, p.round, p.font_scale);
     CHECK(c.line > 0 && c.name > 0 && c.headline > 0 && c.button > 0 && c.dash_heading > 0 && c.dash_value > 0);
     for (Lang lang : translations()) {
       for (Msg m : kLines) check_fits(lang, m, c.line, p);
