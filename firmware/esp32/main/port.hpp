@@ -25,6 +25,7 @@
 #include "pcf85063.hpp"
 #include "qmi8658.hpp"
 #include "shared_reply.hpp"
+#include "sticks3.hpp"
 #include "speaker_pa.hpp"
 #include "speaker_underruns.hpp"
 #include "tag_scanner.hpp"
@@ -510,6 +511,9 @@ class CodecSpeaker final : public hg::AudioOut {
   }
   void power_down();
   void power_up();
+  // An amplifier enable that isn't an ESP32 pin (StickS3: behind the M5PM1).
+  // Used when begin() gets no PA pin; set it before begin().
+  std::function<void(bool)> board_pa;
 
  private:
   static void task(void* arg);
@@ -671,6 +675,16 @@ class CoreS3Board {
  private:
   i2c_master_dev_handle_t pmic_ = nullptr, expander_ = nullptr;
   std::unique_ptr<hg::CoreS3Control> control_;
+};
+
+class StickS3Board {
+ public:
+  bool begin(i2c_master_bus_handle_t bus);
+  void set_amplifier(bool on);
+
+ private:
+  i2c_master_dev_handle_t pm1_ = nullptr;
+  std::unique_ptr<hg::StickS3Control> control_;
 };
 
 // Opus reply audio (port_opus.cpp). It decodes on the app task, whose stack

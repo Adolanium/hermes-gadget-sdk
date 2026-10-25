@@ -1,9 +1,11 @@
+#include <algorithm>
 #include <array>
 #include <vector>
 
 #include "axp2101.hpp"
 #include "stc8_battery.hpp"
 #include "cores3.hpp"
+#include "sticks3.hpp"
 #include "check.hpp"
 #include "hg/battery.hpp"
 
@@ -237,6 +239,51 @@ TEST("CoreS3: failed power access stops initialization without releasing reset")
   CHECK_EQ(delays, 0);
   CHECK(!control.set_brightness(100));
   CHECK_EQ(writes, 2);
+}
+
+TEST("StickS3: the LCD rail comes on and the amplifier stays off; other PM1 pins are preserved") {
+  std::array<uint8_t, 256> pm1{};
+  pm1.fill(0xff);
+  pm1[0x09] = 0x01;  // I2C idle sleep left on by earlier firmware
+  pm1[0x10] = 0x00;
+  std::vector<uint32_t> delays;
+  std::vector<uint8_t> written;
+  hg::StickS3Control control(
+      [&](uint8_t reg, uint8_t& value) { value = pm1[reg]; return true; },
+      [&](uint8_t reg, uint8_t value) { written.push_back(reg); pm1[reg] = value; return true; },
+      [&](uint32_t ms) {
+        delays.push_back(ms);
+        CHECK_EQ(pm1[0x10], 0x0c);  // both pins are outputs before the wait
+      });
+  CHECK(control.begin());
+  CHECK_EQ(pm1[0x09], 0x00);
+  CHECK_EQ(pm1[0x16], 0xf3);  // GPIO2/3 plain GPIO, the rest untouched
+  CHECK_EQ(pm1[0x13], 0xf3);  // push-pull
+  CHECK_EQ(pm1[0x11], 0xf7);  // LCD rail high, amplifier low
+  CHECK(delays == std::vector<uint32_t>({100}));
+  // Levels are set before the pins become outputs.
+  const auto out = std::find(written.begin(), written.end(), uint8_t(0x11));
+  const auto mode = std::find(written.begin(), written.end(), uint8_t(0x10));
+  CHECK(out < mode);
+
+  written.clear();
+  CHECK(control.set_amplifier(true));
+  CHECK_EQ(pm1[0x11], 0xff);
+  CHECK(control.set_amplifier(true));  // no change, no write
+  CHECK_EQ(written.size(), size_t(1));
+  CHECK(control.set_amplifier(false));
+  CHECK_EQ(pm1[0x11], 0xf7);
+}
+
+TEST("StickS3: a PM1 that does not answer stops initialization") {
+  int writes = 0, delays = 0;
+  hg::StickS3Control control(
+      [&](uint8_t, uint8_t& value) { value = 0; return false; },
+      [&](uint8_t, uint8_t) { ++writes; return false; },
+      [&](uint32_t) { ++delays; });
+  CHECK(!control.begin());
+  CHECK_EQ(writes, 1);
+  CHECK_EQ(delays, 0);
 }
 
 TEST("AXP2101: the power key's short press is read once and cleared; enabling touches only interrupts") {

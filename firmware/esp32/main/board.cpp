@@ -30,6 +30,8 @@ namespace {
 #define HG_BOARD_NAME "esp32-s3-box-3"
 #elif CONFIG_HG_BOARD_CORES3
 #define HG_BOARD_NAME "m5stack-cores3"
+#elif CONFIG_HG_BOARD_STICKS3
+#define HG_BOARD_NAME "m5stack-sticks3"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_185C_V2
 #define HG_BOARD_NAME "waveshare-esp32-s3-touch-lcd-1.85c-v2"
 #elif CONFIG_HG_BOARD_WS_KNOB_LCD_18
@@ -502,6 +504,47 @@ BoardConfig make() {
   b.touch.height = 240;
   b.talk_label = "Hold screen";
   b.cancel_label = "Swipe down";
+  return b;
+}
+#elif CONFIG_HG_BOARD_STICKS3
+// M5Stack StickS3: 1.14" 135x240 ST7789P3 used in landscape, one ES8311 doing
+// both directions on a duplex I2S bus, KEY1 (GPIO11) and KEY2 (GPIO12). The
+// M5PM1 on the internal I2C bus switches the LCD rail (its GPIO2) and the
+// AW8737 amplifier (its GPIO3): StickS3Board. Battery and BMI270 not read yet.
+// Pins: docs.m5stack.com/en/core/StickS3, and M5GFX/M5Unified's StickS3 setup.
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.sticks3 = true;
+  b.i2c = {47, 48, 400000};
+  b.lcd.enabled = true;
+  b.lcd.width = 240;
+  b.lcd.height = 135;
+  b.lcd.swap_xy = true;
+  b.lcd.mirror_x = true;
+  b.lcd.mirror_y = false;
+  b.lcd.invert = true;
+  // The ST7789's 240x320 RAM around the 135x240 glass, after the axis swap.
+  // Unverified on hardware: the vertical gap is 52 or 53 depending on mirroring.
+  b.lcd.gap_x = 40;
+  b.lcd.gap_y = 53;
+  b.lcd.mosi = 39;
+  b.lcd.sclk = 40;
+  b.lcd.cs = 41;
+  b.lcd.dc = 45;
+  b.lcd.rst = 21;
+  b.lcd.backlight = 38;
+  b.codec.enabled = true;
+  b.codec.mclk = 18;
+  b.codec.bclk = 17;
+  b.codec.ws = 15;
+  b.codec.dout = 14;
+  b.codec.din = 16;
+  b.codec.mic = MicCodec::Es8311;
+  b.codec.dac_mclk = false;  // the vendor runs the ES8311 from BCLK
+  b.buttons = {11, 12, -1, -1};
+  b.talk_label = "KEY1";
+  b.cancel_label = "KEY2";
   return b;
 }
 #elif CONFIG_HG_BOARD_T_DISPLAY_S3

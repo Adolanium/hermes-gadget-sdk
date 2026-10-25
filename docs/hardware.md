@@ -502,6 +502,38 @@ The profile expects the USB-C port to be the S3's own USB Serial/JTAG, used for 
 
 The pin map follows xiaozhi-esp32's `xorigin/aipi-lite` board at commit `0d576d3`; see [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
 
+## M5Stack StickS3
+
+Board option `m5stack-sticks3`, for M5Stack's StickS3: an ESP32-S3-PICO-1-N8R8 (8 MB flash, 8 MB octal PSRAM), a 1.14" 135×240 ST7789P3 panel used in landscape, one ES8311 codec for both the speaker and the microphone, an AW8737 amplifier, two keys, a BMI270 IMU and a 250 mAh battery behind an M5PM1 power manager. This port is experimental and has not been run on a board yet.
+
+| Part | Chip | Connection |
+|---|---|---|
+| Display | ST7789P3, SPI | MOSI 39, SCLK 40, CS 41, DC 45, RST 21; backlight GPIO 38; 240×135 window at x 40, y 53 of the controller's RAM |
+| Speaker DAC + microphone ADC | ES8311 | I2C 0x18 on SDA 47, SCL 48; I2S MCLK 18, BCLK 17, WS 15, DOUT 14, DIN 16; clocked from BCLK |
+| Power manager | M5PM1 | I2C 0x6E; its GPIO2 switches the LCD rail, its GPIO3 enables the AW8737 amplifier |
+| Keys | | KEY1 GPIO 11 (TALK), KEY2 GPIO 12 (CANCEL) |
+
+The LCD rail and the amplifier are switched over I2C, not from ESP32 pins: `StickS3Board` (`port_sticks3.cpp`, `drivers/sticks3.cpp`) turns the rail on before the panel starts and the amplifier on only while audio plays. The battery level, the BMI270 and the IR transceiver aren't used yet.
+
+**Build and flash it** with PlatformIO:
+
+```bash
+cd firmware/esp32
+pio run -e m5stack-sticks3 -t upload -t monitor
+```
+
+If the board doesn't enter download mode, hold the side button until the screen goes dark and then plug in USB.
+
+### First flash: what to check
+
+1. **Boot log:** `codecs: speaker ready, microphones ready (es8311 analog)`. The `hg.diag` parts line should read `display st7789, microphone es8311, speaker es8311`. `M5PM1 initialization failed` means the power manager didn't answer on I2C, and the screen stays dark.
+2. **Screen:** the mascot is upright and not mirrored, with no stripe of noise along an edge. A one-pixel stripe means `lcd.gap_y` should be 52; an upside-down picture means `lcd.mirror_x`/`mirror_y` in `board.cpp` need flipping.
+3. **Microphone:** hold KEY1 and speak; the waves move with your voice and Hermes's transcript is right.
+4. **Speaker:** replies are clear and loud enough (`set volume 80`). Silence with a working microphone points at the M5PM1 amplifier enable; distorted audio, at the codec clock (`codec.dac_mclk`).
+5. **Console:** `hermes-gadget diag` answers over the USB-C port.
+
+The M5PM1 sequence and the panel's window follow M5Stack's M5GFX and M5Unified StickS3 setup.
+
 ## Spotpear ESP32-S3-1.54 muma
 
 Board option `spotpear-muma`, for Spotpear's 1.54" "muma" (little wooden horse) board, SKU `sp-esp32-s3-1.54-muma`: an ESP32-S3R8 (8 MB octal PSRAM) with 16 MB flash, a 240×240 ST7789 panel over SPI, one ES8311 codec for both the speaker and the microphone, a speaker, a BOOT key, a battery connector and, on the touch version, a CST816D touchscreen. It ships with the XiaoZhi firmware, whose boot log prints `SKU=sp-esp32-s3-1.54-muma`. This port is experimental.
