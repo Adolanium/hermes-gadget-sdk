@@ -46,7 +46,7 @@ def short_utterance_notice(session: "DeviceSession") -> str:
 
 
 _LOOK_UP = object()  # update_face(): find the face first
-_UNSURE = object()  # face_hash while a face is on its way: the device may hold the old one, the new one or none
+_UNSURE = object()  # face_hash while a face is on its way: the old one, the new one or none
 
 
 class HubDelegate:
