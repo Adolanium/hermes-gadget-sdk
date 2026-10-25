@@ -433,7 +433,7 @@ def test_a_moving_colour_face_names_its_bands_and_sends_them_after_the_idle_pict
 
     idle, blink, talk = bytes([1]) * 64 * 64 * 2, bytes([2]) * 64 * 2 * 5, bytes([3]) * 64 * 2 * 3
     colour = ColourFace(px=64, rgb565=idle, anchors=(607, 293, 262, 620, 801, 107, 396, 508, 586, 649),
-                        blink=(20, blink), talk=(40, talk))
+                        blink=(20, 5, blink), talk=(40, 3, talk))
 
     class Colour(HubDelegate):
         async def face(self, session):

@@ -61,6 +61,12 @@ struct Face {
   uint16_t px = 0;
   Band blink, talk;  // colour only
   Anchors anchors;
+
+  // The band `frame` lays over a colour face's picture; no rows for the idle frame.
+  const Band& band(Frame frame) const {
+    static const Band none;
+    return frame == Frame::Blink ? blink : frame == Frame::Talk ? talk : none;
+  }
 };
 // The face message's `bits`: base64 of the bitmaps, then of the anchors as ten little-endian int16
 // in Anchors' field order. False, before allocating anything, when the length is not exactly that;

@@ -151,8 +151,9 @@ Some drawings on transparency come out poorly in one colour; for those, make a f
   filled in. Draw them fully opaque.
 
 A still face does not blink or move its mouth; the waves and dots still show. For a face that
-blinks and talks, add the blink and talk pictures on a colour board, or make a face file. Converting an avatar needs Pillow on the Hermes host; without
-it, the plugin uses face files only and says so once in the log.
+blinks and talks, add the blink and talk pictures on a colour board, or make a face file. Converting
+an avatar needs Pillow on the Hermes host; without it, the plugin uses face files only and says so
+once in the log.
 
 Which profile's face shows depends on how the device reaches that profile:
 
@@ -187,9 +188,10 @@ the mascot for a moment, until the face arrives.
 
 A connected device follows those files without a reconnect. Every 2 seconds the plugin compares
 the size and modification time of the profile's face file, avatars, and blink and talk pictures with
-what its last lookup saw. When they have changed and then stay the same on two checks in a row, the plugin looks the
-face up again; if the files change again before or while it reads them, the device keeps its face
-and the files have to settle once more. The new face arrives about 2 to 4 seconds after the save.
+what its last lookup saw. When they have changed and then stay the same on two checks in a row, the
+plugin looks the face up again; if the files change again before or while it reads them, the device
+keeps its face and the files have to settle once more. The new face arrives about 2 to 4 seconds after
+the save.
 A one-colour face replaces the old one directly, with no mascot in between; for a colour face the
 mascot shows while its pixels arrive. When no source is left, the device gets the mascot. Two
 unchanged checks only debounce a write: a writer that pauses longer than that can be read before it

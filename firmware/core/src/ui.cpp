@@ -136,25 +136,18 @@ int tri(uint32_t frame, int period) {
   return p < period / 2 ? p : period - p;
 }
 
-// A colour face's band for `frame`; null for the idle frame and for a one-colour face.
-const mascot::Band* colour_band(const mascot::Face* face, mascot::Frame frame) {
-  if (!face || !face->rgb565 || frame == mascot::Frame::Idle) return nullptr;
-  return frame == mascot::Frame::Blink ? &face->blink : &face->talk;
-}
-
 mascot::Frame mascot_frame(const UiModel& m) {
   mascot::Frame f = m.frame % 45 < 2 ? mascot::Frame::Blink : mascot::Frame::Idle;  // blink every ~4.5 s
   if (m.screen == Screen::Responding && m.speaking) f = (m.frame / 2) % 2 ? mascot::Frame::Talk : mascot::Frame::Idle;
-  const mascot::Band* band = colour_band(m.face, f);
-  return band && !band->rows ? mascot::Frame::Idle : f;  // a colour face without that frame stays still
+  const bool still = m.face && m.face->rgb565 && !m.face->band(f).rows;  // a colour face without that frame
+  return still ? mascot::Frame::Idle : f;
 }
 
 // `b` (from mascot::pick) in `ink`, or the colour face at b's size, in b's frame.
 void draw_face(Canvas& c, int x, int y, const mascot::Bitmap& b, const mascot::Face* face, uint16_t ink) {
   if (face && face->rgb565) {
-    const mascot::Band* band = colour_band(face, b.frame);
-    c.picture(x, y, b.size, face->rgb565, face->px, band ? band->rgb565 : nullptr, band ? band->y : 0,
-              band ? band->rows : 0);
+    const mascot::Band& band = face->band(b.frame);
+    c.picture(x, y, b.size, face->rgb565, face->px, band.rgb565, band.y, band.rows);
   } else {
     c.bitmap1(x, y, b.size, b.size, b.bits, ink);
   }
@@ -1000,11 +993,11 @@ void Ui::hero_anim_rows(const UiModel& m, int& y0, int& y1) const {
   const mascot::Anchors& a = mascot::anchors(m.face);
   // A colour face's band, as the rows Canvas::picture draws it on at `size`.
   auto band_rows = [&](mascot::Frame frame, int& lo, int& hi) {
-    const mascot::Band* b = colour_band(m.face, frame);
-    if (!b || !b->rows) return;
+    if (!m.face || !m.face->rgb565 || !m.face->band(frame).rows) return;
+    const mascot::Band& b = m.face->band(frame);
     const int px = m.face->px;
-    lo = my + b->y * size / px;
-    hi = my + ((b->y + b->rows) * size + px - 1) / px;
+    lo = my + b.y * size / px;
+    hi = my + ((b.y + b.rows) * size + px - 1) / px;
   };
   int top = my + size * a.eyes_y0 / 1000, bottom = my + size * a.eyes_y1 / 1000;
   band_rows(mascot::Frame::Blink, top, bottom);

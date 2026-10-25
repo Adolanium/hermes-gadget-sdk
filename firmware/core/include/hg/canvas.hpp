@@ -56,8 +56,8 @@ class Canvas {
   // Draws the src_px*src_px RGB565 picture `src` (native byte order) as a size*size square, by
   // nearest pixel. 0x0000 is transparent: those pixels are left untouched. Its rows band_y to
   // band_y + band_rows - 1 come from `band`, band_rows rows of src_px pixels, instead.
-  void picture(int x, int y, int size, const uint16_t* src, int src_px, const uint16_t* band = nullptr, int band_y = 0,
-               int band_rows = 0);
+  void picture(int x, int y, int size, const uint16_t* src, int src_px, const uint16_t* band, int band_y,
+               int band_rows);
 
  private:
   uint16_t encode(uint16_t c) const { return swap_ ? static_cast<uint16_t>((c >> 8) | (c << 8)) : c; }

@@ -187,13 +187,13 @@ class ProfileFace:
 class ColourFace:
     """A colour face (docs/protocol.md#faces): px*px little-endian RGB565, row-major, where 0x0000 is
     transparent; the effect anchors in thousandths, in the firmware's order; and the rows its blink and
-    talk frames change, as (first row, their pixels), or None where the face has no such frame."""
+    talk frames change, as (first row, rows, their pixels), or None where the face has no such frame."""
 
     px: int
     rgb565: bytes
     anchors: tuple[int, ...]
-    blink: tuple[int, bytes] | None = None
-    talk: tuple[int, bytes] | None = None
+    blink: tuple[int, int, bytes] | None = None
+    talk: tuple[int, int, bytes] | None = None
 
 
 def anchor_values(anchors: dict) -> list[int]:
@@ -300,7 +300,7 @@ def moving(still: ColourFace, avatar: str, frames: dict[str, tuple[Path, bytes]]
     """`still` with the blink and talk frames of `frames` (frame: (path, picture)), each as only the
     rows where it differs from the avatar. The bands share half the face's rows. A frame that is no
     picture, or needs more rows than that, leaves the whole face still, and the log says why, once for
-    each picture."""
+    each file."""
     px, row = still.px, 2 * still.px
     room, bands = px // 2, {}
     for frame, feature in (("blink", "eyes"), ("talk", "mouth")):
@@ -322,11 +322,11 @@ def moving(still: ColourFace, avatar: str, frames: dict[str, tuple[Path, bytes]]
                     "room for; draw it from the same picture with only the %s changed", path, avatar, y1 - y0, px,
                     room, feature)
             return still
-        bands[frame] = (y0, drawn[y0 * row:y1 * row])
-    rows = sum(len(pixels) // row for _, pixels in bands.values())
+        bands[frame] = (y0, y1 - y0, drawn[y0 * row:y1 * row])
+    rows = sum(n for _, n, _ in bands.values())
     if rows > room:
         paths = [frames[frame][0] for frame in bands]
-        _refuse((*paths, *(digest(frames[f][1]) for f in bands), px),
+        _refuse((*paths, *(digest(frames[frame][1]) for frame in bands), px),
                 "%s and %s differ from %s in %d rows together, more than the %d the device has room for; the face "
                 "stays still", *paths, avatar, rows, room)
         return still
@@ -338,9 +338,9 @@ def _pictures(home: Path, name: str) -> list[Path]:
 
 
 def sources(home: Path, convert: bool = True) -> list[Path]:
-    """Where a profile's face may come from: its face file, then, when `convert`, its avatar
-    (`assets/avatar.*`, as Hermes keeps it) and the avatar's blink and talk pictures
-    (`assets/avatar-blink.*`, `assets/avatar-talk.*`)."""
+    """Where a profile's face may come from, in the order for_profile tries them: its face file, then,
+    when `convert`, its avatar (`assets/avatar.*`, as Hermes keeps it) and the avatar's blink and talk
+    pictures (`assets/avatar-blink.*`, `assets/avatar-talk.*`)."""
     names = ("avatar", "avatar-blink", "avatar-talk") if convert else ()
     return [home / FACE_FILE, *(path for name in names for path in _pictures(home, name))]
 

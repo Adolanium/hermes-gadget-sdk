@@ -716,8 +716,7 @@ def test_blink_and_talk_pictures_send_only_the_rows_they_change(tmp_path):
     assert face.rgb565 == still.rgb565 and face.anchors == still.anchors
     for name, band in (("avatar-blink.png", face.blink), ("avatar-talk.png", face.talk)):
         whole = profile_faces.colour_from_picture(home / "assets" / name, 144).rgb565
-        y, pixels = band
-        n = len(pixels) // (2 * 144)
+        y, n, pixels = band
         assert 0 < n and y + n <= 144 and pixels == _rows(face, whole, y, y + n)
         # The band is exactly the rows that change by more than 16 levels: its first and last rows do, and
         # outside it nothing does.
@@ -726,7 +725,7 @@ def test_blink_and_talk_pictures_send_only_the_rows_they_change(tmp_path):
         assert _most(_rows(face, whole, 0, y), _rows(face, still.rgb565, 0, y)) <= 16
         assert _most(_rows(face, whole, y + n, 144), _rows(face, still.rgb565, y + n, 144)) <= 16
     assert face.blink[0] < face.talk[0]  # the eyes are above the mouth
-    assert (len(face.blink[1]) + len(face.talk[1])) // (2 * 144) <= 144 // 2
+    assert face.blink[1] + face.talk[1] <= 144 // 2
 
     # A device without frames gets the still face, named as before; the pictures name a face that moves.
     plain = profile_faces.for_profile(home, colour_px=144)
@@ -814,7 +813,7 @@ def test_a_frame_that_turns_black_into_transparency_changes_those_rows(tmp_path)
         draw.rectangle((48, 50, 95, 59), fill=eye)
         img.save(home / "assets" / name)
     face = profile_faces.for_profile(home, colour_px=144, frames=True).load()
-    assert face.blink is not None and face.blink[0] == 50 and len(face.blink[1]) == 10 * 2 * 144
+    assert face.blink is not None and face.blink[:2] == (50, 10)
 
 
 @pytest.mark.parametrize("channel", [1, 2], ids=["green", "blue"])
@@ -832,4 +831,4 @@ def test_a_change_in_one_colour_counts_past_16_levels(tmp_path, channel):
         draw.rectangle((0, top, 143, bottom), fill=tuple(v + step * (i == channel) for i, v in enumerate(grey)))
     frame.save(home / "assets" / "avatar-blink.png")
     blink = profile_faces.for_profile(home, colour_px=144, frames=True).load().blink
-    assert blink is not None and blink[0] == 50 and len(blink[1]) == 10 * 2 * 144
+    assert blink is not None and blink[:2] == (50, 10)

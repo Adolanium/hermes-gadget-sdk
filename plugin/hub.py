@@ -478,9 +478,9 @@ class DeviceSession:
             await self.send_json(protocol.message(
                 "face.start", stream=stream, profile=state[0], hash=digest, width=data.px, height=data.px,
                 format="rgb565", anchors=list(data.anchors),
-                **{frame: [y, len(pixels) // (2 * data.px)] for frame, (y, pixels) in bands.items()}))
+                **{frame: [y, rows] for frame, (y, rows, _) in bands.items()}))
             await self._send_chunks(protocol.CHANNEL_FACE, stream,
-                                    data.rgb565 + b"".join(pixels for _, pixels in bands.values()))
+                                    data.rgb565 + b"".join(pixels for *_, pixels in bands.values()))
             await self.send_json(protocol.message("face.end", stream=stream))
         else:
             await self.send_json(protocol.message(
