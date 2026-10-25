@@ -118,13 +118,15 @@ def _latest_firmware(rec: dict, name: str, board: str | None, force: bool) -> tu
         version = manifest["version"]
         current = rec.get("firmware")
         if not force:
-            key = _version_key(current)
+            key, release = _version_key(current), _version_key(version)
             if key is None:
                 sys.exit(f"{name}'s firmware version is unknown ({current or 'not reported'}). --force installs {version} anyway.")
+            if release is None:
+                sys.exit(f"The latest release's version ({version}) can't be compared with {name}'s {current}. --force installs it anyway.")
             if current == version:
                 print(f"{name} already runs {version}, the latest release. --force installs it again.")
                 return None
-            if key >= _version_key(version):
+            if key >= release:
                 print(f"{name} runs {current}, at least as new as the latest release ({version}). --force installs {version} anyway.")
                 return None
         print(f"Downloading firmware {version} for {build.get('title') or board}...")

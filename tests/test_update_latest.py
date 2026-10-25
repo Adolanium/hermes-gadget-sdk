@@ -110,6 +110,16 @@ def test_a_device_with_an_unknown_version_is_refused_unless_forced(github, store
     assert _staged(store) == app
 
 
+def test_a_release_whose_version_cannot_be_compared_is_refused_unless_forced(github, store):
+    app = github("0.5")
+    with pytest.raises(SystemExit) as stop:
+        _update()
+    assert str(stop.value) == "The latest release's version (0.5) can't be compared with Desk's 0.1.0. --force installs it anyway."
+    assert _staged(store) is None
+    _update(force=True)
+    assert _staged(store) == app
+
+
 def test_a_board_the_release_lacks_is_named(github, store):
     github("0.2.0", board="esp32s3-breadboard")
     with pytest.raises(SystemExit) as stop:
