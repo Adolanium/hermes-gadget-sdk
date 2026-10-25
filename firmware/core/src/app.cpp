@@ -1956,6 +1956,7 @@ void App::update_model() {
     m.screen = Screen::Pairing;
     m.hero = true;
     m.caption_lines = kCaptionLines;
+    m.hint = tr(Msg::WaitingForApproval);
     if (!pairing_code_.empty()) {
       m.code = pairing_code_;
       m.headline = tr(Msg::PairingCode, {pairing_code_});
@@ -1963,11 +1964,11 @@ void App::update_model() {
     } else if (unpaired_reason_ == "routed") {  // no code can let it in; removing the route can
       m.headline = tr(Msg::RefusedByRoute);
       m.detail = tr(Msg::RemoveRouteOnHost);
+      m.hint = device_id_;  // what the route's user_id matches
     } else {
       m.headline = tr(Msg::PairThisDevice);
       m.detail = tr(Msg::AskingForCode);
     }
-    m.hint = tr(Msg::WaitingForApproval);
   } else if (mode_ == Mode::Listening) {
     m.screen = Screen::Listening;
     m.hero = true;
@@ -2122,6 +2123,7 @@ json::Value App::status_value() const {
   s.set("language", i18n::info(lang_).code).set("language_auto", lang_auto_);
   if (hal_.power) s.set("power", power_value());
   if (!pairing_code_.empty()) s.set("pairing_code", pairing_code_);
+  if (!unpaired_reason_.empty()) s.set("unpaired_reason", unpaired_reason_);
   if (!prompt_id_.empty()) s.set("prompt", prompt_id_);
   if (timer_active()) s.set("timer", timer_value());
   if (on_phone_pair) s.set("phone", phone_value());

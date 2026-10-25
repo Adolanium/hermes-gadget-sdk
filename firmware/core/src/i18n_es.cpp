@@ -135,8 +135,8 @@ const Entry kSpanish[] = {
     {Msg::PairThisDevice, "Vincular dispositivo"},
     {Msg::AskingForCode, "Pidiendo a Hermes un código..."},
     {Msg::WaitingForApproval, "esperando aprobación"},
-    {Msg::RefusedByRoute, "Rechazado por una ruta"},
-    {Msg::RemoveRouteOnHost, "Quita su ruta del gateway en el equipo de Hermes."},
+    {Msg::RefusedByRoute, "Rechazado por ruta"},
+    {Msg::RemoveRouteOnHost, "Quita su ruta en el host de Hermes."},
     {Msg::PairedWithHermes, "Vinculado con Hermes"},
     {Msg::ApprovePairingFirst, "Aprueba la vinculación"},
     // Talking

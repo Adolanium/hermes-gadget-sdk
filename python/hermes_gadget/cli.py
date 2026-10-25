@@ -284,6 +284,8 @@ def _diag_summary(report: dict) -> list[str]:
                    if wifi.get("joined") else "Wi-Fi: not joined")
     app, conn = report.get("app") or {}, report.get("connection") or {}
     line = f"Hermes: {app.get('phase')}, {'paired' if app.get('paired') else 'not paired'}"
+    if app.get("unpaired_reason"):
+        line += f" ({app['unpaired_reason']})"
     if conn.get("last_close"):
         line += f", last connection ended: {conn['last_close']}"
     if app.get("error"):

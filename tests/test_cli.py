@@ -228,3 +228,8 @@ def test_live_audio_without_the_extra_stops_instead_of_running_silent(monkeypatc
 
     assert cli.cmd_sim(args) == 2
     assert "audio extra" in capsys.readouterr().err
+
+
+def test_diag_summary_names_why_the_device_is_not_paired():
+    report = dict(REPORT, app=dict(REPORT["app"], phase="online", unpaired_reason="routed"))
+    assert "Hermes: online, not paired (routed), last connection ended: connection error" in cli._diag_summary(report)

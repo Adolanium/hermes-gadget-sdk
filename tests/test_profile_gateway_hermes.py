@@ -1102,6 +1102,7 @@ def test_a_device_a_route_refuses_is_told_why_and_asked_for_no_code(live_rig, he
     frames = [m for m in sim.received[sent:] if m["type"] in ("welcome", "unpaired", "pairing", "notice")]
     assert [m["type"] for m in frames] == ["unpaired", "welcome", "unpaired"]
     assert [m for m in frames if m["type"] == "unpaired"] == [{"type": "unpaired", "reason": "routed"}] * 2
+    assert sim.status()["unpaired_reason"] == "routed"
 
     live_rig.runner.config.profile_routes = []  # the fix the device names
     assert sim.wait_screen("ready", timeout=8)

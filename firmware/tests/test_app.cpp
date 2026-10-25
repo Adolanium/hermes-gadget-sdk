@@ -358,11 +358,15 @@ TEST("app: a device a route refuses says so until a new connection or approval")
   r.server(R"({"type":"unpaired","reason":"routed"})");
   CHECK(r.app.screen() == hg::Screen::Pairing);
   CHECK_EQ(r.app.model().headline, std::string("Refused by a route"));
-  CHECK_EQ(r.app.model().detail, std::string("Remove its gateway route on the Hermes host."));
+  CHECK_EQ(r.app.model().detail, std::string("Remove its route on the Hermes host."));
+  CHECK_EQ(r.app.model().hint, r.app.device_id());
+  CHECK(r.app.console("status").find(R"("unpaired_reason":"routed")") != std::string::npos);
   r.server(R"({"type":"paired"})");
   CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK(r.app.console("status").find("unpaired_reason") == std::string::npos);
   r.server(R"({"type":"unpaired"})");  // revoked: a code can fix that
   CHECK_EQ(r.app.model().detail, asking);
+  CHECK(r.app.model().hint != r.app.device_id());
   r.server(R"({"type":"unpaired","reason":"a-later-reason"})");  // one this firmware doesn't know
   CHECK_EQ(r.app.model().detail, asking);
 
