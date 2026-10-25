@@ -11,7 +11,7 @@
   This is the Hermes gateway plugin for [Hermes Gadget](https://github.com/Adolanium/hermes-gadget-sdk) devices.
   Hold a button on a small ESP32 board, ask a question, and hear your own Hermes answer.
 
-  <sub>POWERED BY <a href="https://github.com/NousResearch/hermes-agent">HERMES AGENT</a> &nbsp;·&nbsp; COMMUNITY PLUGIN &nbsp;·&nbsp; VERSION 0.4.0</sub>
+  <sub>POWERED BY <a href="https://github.com/NousResearch/hermes-agent">HERMES AGENT</a> &nbsp;·&nbsp; COMMUNITY PLUGIN &nbsp;·&nbsp; VERSION 0.4.1</sub>
 
   <br /><br />
 
