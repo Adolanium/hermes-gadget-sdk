@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import shutil
 import socket
 import struct
@@ -23,6 +24,7 @@ from pathlib import Path
 import pytest
 
 from conftest import REPO, requires_sim
+from hermes_fixtures import _select_next_profile
 
 AGENT_DIR = Path(os.environ.get("HERMES_AGENT_DIR", REPO.parent / "hermes-agent"))
 VENV_PY = AGENT_DIR / ".venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
@@ -46,7 +48,7 @@ platforms:
       host: 127.0.0.1
       port: {gadget}
       unauthorized_dm_behavior: pair
-plugins:
+{profiles}plugins:
   enabled: [gadget]
 streaming:
   enabled: true   # stream reply text to messaging platforms (the device) as it is generated
@@ -59,11 +61,34 @@ tts:
   openai: {{api_key: test-key, base_url: "http://127.0.0.1:{api}/v1", model: tts-1, voice: alloy}}
 """
 
+# A second profile beside the default one: its own model name, its gadget listener off
+# and the plugin on, as docs/hermes-integration.md asks of every profile a gadget may use.
+OPS_CONFIG = """\
+model:
+  provider: custom
+  default: fake-ops-model
+  base_url: http://127.0.0.1:{api}/v1
+  api_key: test-key
+platforms:
+  gadget:
+    enabled: false
+plugins:
+  enabled: [gadget]
+"""
+
 
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+def _face(profile: str) -> bytes:
+    """A one-colour face file, different for each profile."""
+    from hermes_gadget_plugin.face import FACE_BYTES
+
+    anchors = struct.pack("<10h", 607, 293, 262, 620, 801, 107, 396, 508, 586, 649)
+    return bytes([0xAA if profile == "default" else 0x55]) * (FACE_BYTES - 20) + anchors
 
 
 def _hermes(home: Path, *args: str, **kw) -> subprocess.CompletedProcess:
@@ -73,7 +98,7 @@ def _hermes(home: Path, *args: str, **kw) -> subprocess.CompletedProcess:
 
 
 @pytest.fixture
-def gateway(tmp_path):
+def gateway(tmp_path, request):
     from fakes import fake_openai
 
     api_server, api_port = fake_openai.start(0)
@@ -81,7 +106,18 @@ def gateway(tmp_path):
     home = tmp_path / "hermes-home"
     (home / "plugins").mkdir(parents=True)
     shutil.copytree(REPO / "plugin", home / "plugins" / "gadget", ignore=shutil.ignore_patterns("__pycache__"))
-    (home / "config.yaml").write_text(CONFIG.format(api=api_port, gadget=gadget_port), encoding="utf-8")
+    profiles = ""
+    if getattr(request, "param", None) == "multiplexed":  # serve "default" and "ops", each with its own face
+        from hermes_gadget_plugin.face import FACE_FILE
+
+        ops = home / "profiles" / "ops"
+        shutil.copytree(home / "plugins", ops / "plugins")
+        (ops / "config.yaml").write_text(OPS_CONFIG.format(api=api_port), encoding="utf-8")
+        for where, profile in ((home, "default"), (ops, "ops")):
+            (where / FACE_FILE).write_bytes(_face(profile))
+        profiles = "      profiles: all\ngateway:\n  multiplex_profiles: true\n"
+    (home / "config.yaml").write_text(CONFIG.format(api=api_port, gadget=gadget_port, profiles=profiles),
+                                      encoding="utf-8")
     env = {**os.environ, "HERMES_HOME": str(home), "PYTHONUTF8": "1"}
     log = open(tmp_path / "gateway.out", "w", encoding="utf-8")
     proc = subprocess.Popen([str(VENV_PY), "-m", "hermes_cli.main", "gateway", "run"], cwd=AGENT_DIR, env=env,
@@ -166,3 +202,52 @@ def test_device_pairs_talks_and_is_driven_by_the_agent(gateway, make_sim):
     paths = [r["path"] for r in gateway["api"]]
     assert any(p.endswith("/audio/transcriptions") for p in paths)
     assert any(p.endswith("/audio/speech") for p in paths)
+
+
+@pytest.mark.parametrize("gateway", ["multiplexed"], indirect=True)
+def test_a_device_switches_to_a_second_profile_and_that_profile_answers(gateway, make_sim):
+    from hermes_gadget_plugin.face import ProfileFace
+
+    sim = make_sim(gateway["url"], name="E2E Gadget")
+    digest = {p: ProfileFace.of(_face(p)).hash for p in ("default", "ops")}
+    faces = lambda: [m for m in sim.received if m["type"] == "face"]  # noqa: E731
+    chats = lambda: [r for r in gateway["api"] if r["path"].endswith("/chat/completions")]  # noqa: E731
+
+    def says(text):
+        """Type text and return the reply's text."""
+        sim.received.clear()
+        sim.type_text(text)
+        assert sim.wait_for(lambda: sim.last_received("turn.end") is not None, timeout=90), sim.received
+        return (sim.last_received("reply") or {}).get("text", "")
+
+    assert sim.wait_for(lambda: sim.status().get("pairing_code"), timeout=60)
+    approved = _hermes(gateway["home"], "pairing", "approve", "gadget", sim.status()["pairing_code"])
+    assert approved.returncode == 0, approved.stdout + approved.stderr
+    assert sim.wait_screen("ready", timeout=30)
+    assert [p["id"] for p in sim.last_received("welcome")["profiles"]] == ["default", "ops"]
+    assert sim.wait_for(lambda: faces() and faces()[-1]["hash"] == digest["default"], timeout=30)
+    assert "You said: hello default" in says("hello default")
+    assert chats()[-1]["model"] == "fake-gadget-model"
+
+    # Switching from the device's settings brings the ops face before ops knows the device.
+    _select_next_profile(sim)
+    assert sim.wait_for(lambda: sim.last_received("profile") == {"type": "profile", "profile": "ops"}, timeout=30)
+    assert sim.wait_for(lambda: faces() and faces()[-1]["hash"] == digest["ops"], timeout=30)
+
+    # Ops pairs on its own: the device shows its approve command, then ops's model answers.
+    asked = len(chats())
+    offer = re.search(r"hermes -p ops pairing approve gadget (\w+)", says("hello ops"))
+    assert offer, sim.received
+    assert len(chats()) == asked  # an unknown device reaches no model
+    approved = _hermes(gateway["home"], "-p", "ops", "pairing", "approve", "gadget", offer.group(1))
+    assert approved.returncode == 0, approved.stdout + approved.stderr
+    assert "You said: hello ops" in says("hello ops")
+    assert chats()[-1]["model"] == "fake-ops-model"
+
+    # And back: the default face and the default profile's model again.
+    _select_next_profile(sim)
+    assert sim.wait_for(lambda: sim.last_received("profile") == {"type": "profile", "profile": "default"},
+                        timeout=30)
+    assert sim.wait_for(lambda: faces()[-1]["hash"] == digest["default"], timeout=30)
+    assert "You said: back again" in says("back again")
+    assert chats()[-1]["model"] == "fake-gadget-model"
