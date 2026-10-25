@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Hermes plugin
+
+- `hermes gadget update <device> --latest` no longer installs an older release over a device that runs newer firmware. It compares the leading `MAJOR.MINOR.PATCH` numbers, so 0.10.0 is newer than 0.9.0 and a source build such as `0.4.0-12-gabc1234` counts as at least 0.4.0. A device on the release's version or a newer one gets a one-line message and nothing installed; a device whose version is missing or unreadable is refused with a message. `--force` installs the release in every case. Reported by @mforce.
+
 ## 0.4.0
 
 Hermes Gadget 0.4.0 gives each Hermes profile its own face on the device, adds countdown timers that Hermes sets through device actions, face-down sleep on boards with a motion sensor, and a resting clock kept by network time and the board's RTC. It adds two experimental boards, the ESP32-2432S028 "Cheap Yellow Display" (the first classic ESP32 profile, drawn in bands without PSRAM) and the Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C. Profile switching no longer writes into other Hermes profiles and keeps the default profile's verdict even under a static route, and a switching device's dashboard lists the offered profiles' sessions, in order. Details by area follow.

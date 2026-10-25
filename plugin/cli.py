@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import re
 import socket
 import sys
 import time
@@ -99,8 +100,14 @@ def _cmd_forget(args) -> None:
     print(f"To also remove its chat approval: hermes pairing revoke gadget {device_id}")
 
 
+def _version_key(version: str | None) -> tuple[int, ...] | None:
+    """The leading MAJOR.MINOR.PATCH of a firmware version as numbers, or None when it has none."""
+    found = re.match(r"(\d+)\.(\d+)\.(\d+)", version or "")
+    return tuple(int(n) for n in found.groups()) if found else None
+
+
 def _latest_firmware(rec: dict, name: str, board: str | None, force: bool) -> tuple[bytes, str] | None:
-    """The newest release's app image for the device's board, or None when it already runs it."""
+    """The newest release's app image for the device's board, or None when it already runs it or a newer one."""
     from . import releases
 
     if not board:
@@ -109,9 +116,19 @@ def _latest_firmware(rec: dict, name: str, board: str | None, force: bool) -> tu
         manifest = releases.latest_manifest()
         build = releases.build_for(manifest, board)
         version = manifest["version"]
-        if rec.get("firmware") == version and not force:
-            print(f"{name} already runs {version}, the latest release. --force installs it again.")
-            return None
+        current = rec.get("firmware")
+        if not force:
+            key, release = _version_key(current), _version_key(version)
+            if key is None:
+                sys.exit(f"{name}'s firmware version is unknown ({current or 'not reported'}). --force installs {version} anyway.")
+            if release is None:
+                sys.exit(f"The latest release's version ({version}) can't be compared with {name}'s {current}. --force installs it anyway.")
+            if current == version:
+                print(f"{name} already runs {version}, the latest release. --force installs it again.")
+                return None
+            if key >= release:
+                print(f"{name} runs {current}, at least as new as the latest release ({version}). --force installs {version} anyway.")
+                return None
         print(f"Downloading firmware {version} for {build.get('title') or board}...")
         return releases.download_app(manifest, build), f"Release {version}"
     except releases.ReleaseError as exc:
@@ -305,7 +322,7 @@ def setup_argparse(parser) -> None:
     update.add_argument("--latest", action="store_true",
                         help="Download the newest release's firmware for the device's board instead")
     update.add_argument("--force", action="store_true",
-                        help="With --latest, install even if the device already runs that version")
+                        help="With --latest, install even if the device runs that version, a newer one, or an unknown one")
     update.add_argument("--no-wait", action="store_true", help="Stage it and return; the gateway installs it")
     update.add_argument("--timeout", type=float, default=600, help="Seconds to wait for the install (default 600)")
     tile = subs.add_parser("tile", help="Set the status tiles the gadget dashboard shows")

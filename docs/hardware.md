@@ -858,7 +858,7 @@ hermes gadget update "Kitchen" --latest     # the newest release's firmware for 
 hermes gadget update "Kitchen" firmware/esp32/.pio/build/esp32s3-touch-amoled-175/firmware.bin
 ```
 
-- `--latest` reads the newest [release](https://github.com/Adolanium/hermes-gadget-sdk/releases)'s manifest, picks the image for the device's board, and checks its size and SHA-256 against the manifest before using it. A device that already runs that version is left alone; `--force` installs it again. `hermes gadget devices` shows the version each device runs.
+- `--latest` reads the newest [release](https://github.com/Adolanium/hermes-gadget-sdk/releases)'s manifest, picks the image for the device's board, and checks its size and SHA-256 against the manifest before using it. A device that already runs that version or a newer one, including a source build such as `0.4.0-12-gabc1234`, is left alone, and a device whose version can't be read is refused; `--force` installs the release anyway. `hermes gadget devices` shows the version each device runs.
 - The gateway installs the image as soon as the device is online, and the command waits and reports progress (`--no-wait` returns at once).
 - The device shows the progress, restarts into the new firmware, and keeps it once it reaches Hermes again.
 - If the new firmware doesn't reach Hermes within 5 minutes, or crashes before then, the device goes back to the previous one by itself.
