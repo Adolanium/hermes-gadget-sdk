@@ -66,9 +66,10 @@ def _staged(store):
     return None if loaded is None else loaded[0]
 
 
-def test_latest_stages_the_release_image_for_the_device_board(github, store, capsys):
+@pytest.mark.parametrize("force", [False, True])
+def test_latest_stages_the_release_image_for_an_older_device(github, store, capsys, force):
     app = github("0.2.0")
-    _update()
+    _update(force=force)
     assert _staged(store) == app
     out = capsys.readouterr().out
     assert "Downloading firmware 0.2.0 for Waveshare ESP32-S3-Touch-AMOLED-1.75" in out
@@ -81,6 +82,30 @@ def test_a_device_on_the_latest_release_is_left_alone_unless_forced(github, stor
     _update()
     assert _staged(store) is None
     assert "Desk already runs 0.2.0, the latest release. --force installs it again." in capsys.readouterr().out
+    _update(force=True)
+    assert _staged(store) == app
+
+
+@pytest.mark.parametrize("firmware, release", [("0.4.0", "0.3.0"), ("0.10.0", "0.9.0"), ("0.3.0-12-gabc1234", "0.3.0")])
+def test_a_device_at_least_as_new_as_the_latest_release_is_left_alone_unless_forced(github, store, capsys, firmware, release):
+    app = github(release)
+    store.touch(DEVICE_ID, firmware=firmware)
+    _update()
+    assert _staged(store) is None
+    assert f"Desk runs {firmware}, at least as new as the latest release ({release}). --force installs {release} anyway." in capsys.readouterr().out
+    _update(force=True)
+    assert _staged(store) == app
+
+
+def test_a_device_with_an_unknown_version_is_refused_unless_forced(github, store):
+    app = github("0.2.0")
+    store.enroll("hg-0000000000000001", KEY, name="Lamp", board=BOARD)  # never reported a version
+    store.touch(DEVICE_ID, firmware="dev")
+    for device, shown in (("Desk", "dev"), ("Lamp", "not reported")):
+        with pytest.raises(SystemExit) as stop:
+            _update(device=device)
+        assert str(stop.value) == f"{device}'s firmware version is unknown ({shown}). --force installs 0.2.0 anyway."
+    assert _staged(store) is None
     _update(force=True)
     assert _staged(store) == app
 
