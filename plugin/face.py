@@ -269,24 +269,42 @@ def colour_from_picture(path: Path | io.BytesIO, px: int) -> ColourFace:
     return ColourFace(px, bytes(data), tuple(anchor_values(measure(shape, Options()))))
 
 
+def sources(home: Path, convert: bool = True) -> list[Path]:
+    """Where a profile's face may come from, in the order for_profile tries them: its face file,
+    then its avatar (`assets/avatar.*`, as Hermes keeps it) when `convert`."""
+    avatars = [home / "assets" / f"avatar.{ext}" for ext in ("png", "jpg", "webp")] if convert else []
+    return [home / FACE_FILE, *avatars]
+
+
+def stamp(home: Path, convert: bool = True) -> tuple:
+    """The path, size and modification time of each of a profile's face sources that exists: it
+    changes when the profile's face may have. This reads no file."""
+    found = []
+    for path in sources(home, convert):
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        found.append((path, st.st_size, st.st_mtime_ns))
+    return tuple(found)
+
+
 def for_profile(home: Path, convert: bool = True, colour_px: int = 0) -> ProfileFace | None:
-    """The face a Hermes profile shows: its face file, else its avatar (`assets/avatar.*`, as
-    Hermes keeps it) when `convert`, in colour at `colour_px` when that is set, else None for the
-    mascot. This reads one file; converting an avatar waits for `load()`."""
-    path = home / FACE_FILE
+    """The face a Hermes profile shows: its face file, else its avatar when `convert`, in colour at
+    `colour_px` when that is set, else None for the mascot. This reads one file; converting an avatar
+    waits for `load()`."""
+    path, *avatars = sources(home, convert)
     if path.is_file():
         data = path.read_bytes()
         if len(data) == FACE_BYTES:
             return ProfileFace.of(data)
         logger.warning("%s is not a face file (%d bytes, not %d); make it with hermes-gadget face --out",
                        path, len(data), FACE_BYTES)
-    if convert:
-        for ext in ("png", "jpg", "webp"):
-            avatar = home / "assets" / f"avatar.{ext}"
-            if avatar.is_file():
-                source = avatar.read_bytes()
-                if colour_px:
-                    return ProfileFace(digest(COLOUR_AVATAR + colour_px.to_bytes(2, "little") + source),
-                                       lambda: colour_from_picture(io.BytesIO(source), colour_px))
-                return ProfileFace(digest(AVATAR_DRAWING + source), lambda: from_picture(io.BytesIO(source)))
+    for avatar in avatars:
+        if avatar.is_file():
+            source = avatar.read_bytes()
+            if colour_px:
+                return ProfileFace(digest(COLOUR_AVATAR + colour_px.to_bytes(2, "little") + source),
+                                   lambda: colour_from_picture(io.BytesIO(source), colour_px))
+            return ProfileFace(digest(AVATAR_DRAWING + source), lambda: from_picture(io.BytesIO(source)))
     return None

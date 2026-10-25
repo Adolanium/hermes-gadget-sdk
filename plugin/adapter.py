@@ -40,7 +40,9 @@ import re
 import ssl
 import time
 import uuid
+import weakref
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from agent.i18n import get_language, t
@@ -122,6 +124,19 @@ class _Prompt:
 
     def expired(self) -> bool:
         return self.ttl_s is not None and time.monotonic() - self.created > self.ttl_s
+
+
+@dataclass
+class _FaceLook:
+    """A connection's last face lookup, and what the pairing check has seen of its files since (faces.stamp)."""
+    profile: Optional[str]  # the profile it could show; None for the mascot
+    seen: Optional[tuple] = None  # the files as the lookup read them; None until stat'ed
+    last: Optional[tuple] = None  # the files at the last pairing check
+    settled: Optional[tuple] = None  # files that held still for two checks, for the next lookup to read
+
+
+# A lookup that found the files changed after they settled: never sent, so the device keeps its face.
+_KEEP_FACE = faces.ProfileFace("", bytes, valid=lambda: False)
 
 
 def spoken_question(question: str, choices: Optional[list]) -> str:
@@ -210,7 +225,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._roster_lock = asyncio.Lock()  # one roster read at a time; never held across a send
         self._push_seq = 0
         self._pushed_seq: Dict[str, int] = {}  # device -> the newest push that read a roster for it
-        self._face_from: Dict[str, Optional[str]] = {}  # device -> the profile its last face lookup could show
+        # connection -> its last face lookup; it goes with the connection, and a replaced one keeps its own
+        self._face_from: "weakref.WeakKeyDictionary[DeviceSession, _FaceLook]" = weakref.WeakKeyDictionary()
         self._battery_log: Optional[BatteryLog] = None
         self._tls_cert = extra.get("tls_cert")
         self._tls_key = extra.get("tls_key")
@@ -456,17 +472,32 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             self._convert_avatars = imaging.pillow_available()
             if not self._convert_avatars:
                 logger.info("[%s] Pillow is not installed: devices show profile face files, not avatars", self.name)
-        profile = self._face_from[session.device_id] = self._face_profile(session)
+        profile = self._face_profile(session)
+        look = self._face_from.get(session)
+        settled = look.settled if look and look.profile == profile else None
+        if settled is None:
+            look = self._face_from[session] = _FaceLook(profile)
         if profile is None:
             return None
         try:
-            if profile == "default":  # this gateway's own home, for a standalone profile too
-                from hermes_constants import get_hermes_home
-                home = get_hermes_home()
-            else:
-                from hermes_cli.profiles import get_profile_dir
-                home = get_profile_dir(profile)
-            found = await asyncio.to_thread(faces.for_profile, home, self._convert_avatars, session.face_px)
+            home = self._profile_home(profile)
+            # Stat'ed before the read, so a change made while reading shows at the next pairing check.
+            now = await asyncio.to_thread(faces.stamp, home, self._convert_avatars)
+            if settled is None:
+                look.seen = now
+            elif now != settled:
+                return self._unsettled(look)
+            error = None
+            try:
+                found = await asyncio.to_thread(faces.for_profile, home, self._convert_avatars, session.face_px)
+            except Exception as exc:  # a file that went while it was read is a change, checked below
+                found, error = None, exc
+            if settled is not None:
+                if await asyncio.to_thread(faces.stamp, home, self._convert_avatars) != settled:
+                    return self._unsettled(look)
+                look.seen, look.settled = settled, None
+            if error:
+                raise error
             if found is None or profile == "default":  # the default profile's approval is session.paired
                 return found
             # Found while the profile approved the device: a revocation since then makes it stale.
@@ -474,6 +505,44 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         except Exception as exc:  # an unreadable picture shows the mascot; never block a connection on it
             logger.warning("[%s] no face for profile %s: %s", self.name, profile, exc)
             return None
+
+    @staticmethod
+    def _unsettled(look: _FaceLook) -> faces.ProfileFace:
+        """The files changed after they settled, before or while they were read: they settle again."""
+        look.settled = look.last = None
+        return _KEEP_FACE
+
+    @staticmethod
+    def _profile_home(profile: str) -> Path:
+        if profile == "default":  # this gateway's own home, for a standalone profile too
+            from hermes_constants import get_hermes_home
+            return get_hermes_home()
+        from hermes_cli.profiles import get_profile_dir
+        return get_profile_dir(profile)
+
+    async def _follow_face(self, session: DeviceSession) -> Optional[asyncio.Task]:
+        """Another profile approving or revoking the device, or its face file or avatar changing, only
+        shows at the pairing check: its face follows. Returns the face update it starts, if any."""
+        look = self._face_from.get(session)
+        if (session.paired and self._profile_faces and look
+                and (self._face_profile(session) != look.profile or await self._face_source_changed(session, look))):
+            return session.update_face()
+        return None
+
+    async def _face_source_changed(self, session: DeviceSession, look: _FaceLook) -> bool:
+        """Whether the files the device's last face lookup read from have changed since, and settled:
+        the same on two pairing checks in a row, a debounce for a file being written. Stat only; the
+        lookup it starts sends a face only if its hash differs from the one the device holds."""
+        if look.profile is None or look.seen is None or look.settled is not None:  # settled: not read yet
+            return False
+        now = await asyncio.to_thread(faces.stamp, self._profile_home(look.profile), self._convert_avatars)
+        if self._face_from.get(session) is not look:
+            return False  # looked up again meanwhile
+        before, look.last = look.last, now
+        if now == look.seen or now != before:
+            return False
+        look.settled = now
+        return True
 
     def _face_profile(self, session: DeviceSession) -> Optional[str]:
         """The profile whose face the device may show: the one answering it. None: the mascot.
@@ -568,10 +637,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                         self._prompts.pop(session.device_id, None)
                         await session.set_paired(False)
                         await self.on_ready(session)
-                    # Another profile approving or revoking the device only shows here: its face follows.
-                    if (session.paired and self._profile_faces and session.device_id in self._face_from
-                            and self._face_profile(session) != self._face_from[session.device_id]):
-                        session.update_face()
+                    await self._follow_face(session)
                 except Exception as exc:
                     logger.debug("[%s] pairing sync failed for %s: %s", self.name, session.device_id, exc)
 
@@ -805,7 +871,6 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if self._hub and session.device_id not in self._hub.sessions:
             self._turns.pop(session.device_id, None)
             self._pushed_seq.pop(session.device_id, None)
-            self._face_from.pop(session.device_id, None)
 
     # -- turn lifecycle -------------------------------------------------------------
 
