@@ -1078,3 +1078,96 @@ def test_a_switched_device_a_route_later_refuses_drops_its_face(live_rig, hermes
     assert sim.last_received("welcome")["paired"] is False
     sim.run_for(3)  # past the next pairing check
     assert not any("bits" in m for m in sim.received[sent:] if m["type"] == "face")
+
+
+def _face_watch(hermes_home, tmp_path):
+    """The adapter's face lookup and pairing-check face test on a paired device, run step by step: no
+    socket, no pairing loop, and the device shows the face of the profile it is on."""
+    from gateway.config import PlatformConfig
+    from test_plugin_units import _Wire
+
+    from hermes_gadget_plugin.adapter import GadgetAdapter
+    from hermes_gadget_plugin.hub import DeviceHub, DeviceSession
+    from hermes_gadget_plugin.store import DeviceStore
+
+    adapter = GadgetAdapter(PlatformConfig(enabled=True, extra={}))
+    adapter._face_profile = lambda session: session.profile
+    adapter._convert_avatars = False
+    adapter._hub = DeviceHub(DeviceStore(tmp_path / "plugin-data"), adapter)
+    wire = _Wire()
+    session = DeviceSession(adapter._hub, wire, {"device_id": DEVICE, "caps": {"faces": 1}})
+    session.paired = True
+    adapter._hub.sessions[DEVICE] = session
+    return adapter, session, lambda: [m.get("hash") for m in wire.sent if m["type"] == "face"]
+
+
+def _write_face(path, fill, mtime_s):
+    """A face file of `fill` bytes, with a set modification time so two writes never share one."""
+    import os
+    import struct
+
+    from hermes_gadget_plugin.face import FACE_BYTES, ProfileFace
+
+    data = bytes([fill]) * (FACE_BYTES - 20) + struct.pack("<10h", 607, 293, 262, 620, 801, 107, 396, 508, 586, 649)
+    path.write_bytes(data)
+    os.utime(path, ns=(mtime_s * 10**9, mtime_s * 10**9))
+    return ProfileFace.of(data).hash
+
+
+def test_a_profile_switch_starts_the_face_files_settling_afresh(hermes_home, tmp_path):
+    """A check on the old profile never counts towards the new one's two: a face file missing for a
+    moment on the new profile leaves the device its face."""
+    import asyncio
+
+    from hermes_gadget_plugin.face import FACE_FILE
+
+    adapter, session, faces_sent = _face_watch(hermes_home, tmp_path)
+    ops_face = hermes_home / "profiles" / "ops" / FACE_FILE
+    ops = _write_face(ops_face, 0x55, 1000)
+
+    async def main():
+        await session.update_face()  # default has no face: the mascot
+        assert await adapter._face_source_changed(DEVICE) is False  # default's files, as they were
+        session.profile = "ops"
+        await session.send_profile()
+        await session._face_task
+        assert faces_sent() == [ops]
+        ops_face.unlink()  # being replaced
+        return await adapter._face_source_changed(DEVICE)
+
+    assert asyncio.run(main()) is False
+    assert faces_sent() == [ops]
+
+
+def test_a_face_check_running_at_disconnect_leaves_nothing_behind(hermes_home, tmp_path, monkeypatch):
+    import asyncio
+    import threading
+
+    from hermes_gadget_plugin import face as faces
+    from hermes_gadget_plugin.face import FACE_FILE
+
+    adapter, session, faces_sent = _face_watch(hermes_home, tmp_path)
+    _write_face(hermes_home / FACE_FILE, 0xAA, 1000)
+    entered, release, stamp = threading.Event(), threading.Event(), faces.stamp
+
+    def held_stamp(*a):
+        if session.closed:
+            entered.set()
+            release.wait(10)
+        return stamp(*a)
+
+    async def main():
+        await session.update_face()
+        monkeypatch.setattr(faces, "stamp", held_stamp)
+        _write_face(hermes_home / FACE_FILE, 0x55, 1001)
+        assert await adapter._face_source_changed(DEVICE) is False  # the first check of the new file
+        session._shutdown()  # the connection ends, as the hub ends it
+        check = asyncio.create_task(adapter._face_source_changed(DEVICE))
+        await asyncio.to_thread(entered.wait, 10)
+        adapter._hub.sessions.pop(DEVICE)
+        await adapter.on_disconnect(session)
+        release.set()
+        return await check
+
+    assert asyncio.run(main()) is False  # the device left: no face for it
+    assert (adapter._face_from, getattr(adapter, "_face_stat", {})) == ({}, {})  # nothing kept for it
