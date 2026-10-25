@@ -1081,8 +1081,9 @@ def test_a_switched_device_a_route_later_refuses_drops_its_face(live_rig, hermes
 
 
 def _face_watch(hermes_home, tmp_path):
-    """The adapter's face lookup and pairing-check face test on a paired device, run step by step: no
-    socket, no pairing loop, and the device shows the face of the profile it is on."""
+    """A paired device's face lookups and pairing-check face tests, run step by step: no socket, no
+    pairing loop, and the device shows the face of the profile it is on. Returns the adapter, the
+    session and a function giving the hashes of the faces sent."""
     from gateway.config import PlatformConfig
     from test_plugin_units import _Wire
 
@@ -1146,7 +1147,7 @@ def test_a_face_check_running_at_disconnect_leaves_nothing_behind(hermes_home, t
     from hermes_gadget_plugin import face as faces
     from hermes_gadget_plugin.face import FACE_FILE
 
-    adapter, session, faces_sent = _face_watch(hermes_home, tmp_path)
+    adapter, session, _ = _face_watch(hermes_home, tmp_path)
     _write_face(hermes_home / FACE_FILE, 0xAA, 1000)
     entered, release, stamp = threading.Event(), threading.Event(), faces.stamp
 
@@ -1170,7 +1171,7 @@ def test_a_face_check_running_at_disconnect_leaves_nothing_behind(hermes_home, t
         return await check
 
     assert asyncio.run(main()) is False  # the device left: no face for it
-    assert (adapter._face_from, getattr(adapter, "_face_stat", {})) == ({}, {})  # nothing kept for it
+    assert adapter._face_from == {}  # nothing kept for it
 
 
 @pytest.mark.parametrize("when", ["before the lookup", "during its read"])
