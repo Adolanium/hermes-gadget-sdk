@@ -4,6 +4,7 @@
 
 ### Firmware
 
+- Spanish text fits the Knob-Touch-LCD-1.8, which draws at font scale 2: nine hints and the Prompt screen's No button were cut with ".." where the English fits. They are shorter now (for example "Desliza: cancelar", "Pregúntame algo", "Abajo: No"), and the fit test lays the Knob out at its real scale. Reported by @mforce.
 - Profile faces in colour: on boards with PSRAM, a profile's Hermes avatar shows as a still colour picture, at the largest size the Ready screen draws the face at, instead of the one-colour conversion. A picture with transparency keeps its shape on the screen's background; an opaque one is cropped to a square. The listening and thinking effects draw over it, and on the resting clock it shifts and dims like the mascot. A profile's `gadget-face.bin` still wins, in one colour. The protocol adds `caps.faces: {"v": 2, "px": N}`, the `face.start` and `face.end` messages and binary channel 4, and stays at version 1. Boards without PSRAM and older firmware keep one-colour faces. Update the plugin and the firmware together: a plugin from before this release compares `caps.faces` with 1, so it sends colour firmware no face and the device shows the mascot. [Faces](docs/faces.md#a-face-for-each-hermes-profile). Contributed by @mforce.
 
 ### Hermes plugin

@@ -404,7 +404,8 @@ def test_command_approvals_queue_on_the_device(gadget, make_sim, monkeypatch):
     gadget.run(gadget.adapter.edit_message(device_id, second.message_id, "Approval timed out."))
     assert sim.wait_for(lambda: sim.last_received("prompt.close") is not None, timeout=5)
     assert sim.wait_screen("ready", timeout=5)
-    assert sim.last_received("notice")["text"] == "Approval timed out."
+    # The notice follows prompt.close, so wait for it rather than read whatever notice came last.
+    assert sim.wait_for(lambda: (sim.last_received("notice") or {}).get("text") == "Approval timed out.", timeout=5)
     assert resolved == [("sk", "once")]
 
 
