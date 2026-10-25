@@ -525,7 +525,6 @@ BoardConfig make() {
   b.lcd.mirror_y = false;
   b.lcd.invert = true;
   // The ST7789's 240x320 RAM around the 135x240 glass, after the axis swap.
-  // Unverified on hardware: the vertical gap is 52 or 53 depending on mirroring.
   b.lcd.gap_x = 40;
   b.lcd.gap_y = 53;
   b.lcd.mosi = 39;

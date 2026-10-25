@@ -504,7 +504,7 @@ The pin map follows xiaozhi-esp32's `xorigin/aipi-lite` board at commit `0d576d3
 
 ## M5Stack StickS3
 
-Board option `m5stack-sticks3`, for M5Stack's StickS3: an ESP32-S3-PICO-1-N8R8 (8 MB flash, 8 MB octal PSRAM), a 1.14" 135×240 ST7789P3 panel used in landscape, one ES8311 codec for both the speaker and the microphone, an AW8737 amplifier, two keys, a BMI270 IMU and a 250 mAh battery behind an M5PM1 power manager. This port is experimental and has not been run on a board yet.
+Board option `m5stack-sticks3`, for M5Stack's StickS3: an ESP32-S3-PICO-1-N8R8 (8 MB flash, 8 MB octal PSRAM), a 1.14" 135×240 ST7789P3 panel used in landscape, one ES8311 codec for both the speaker and the microphone, an AW8737 amplifier, two keys, a BMI270 IMU and a 250 mAh battery behind an M5PM1 power manager. This port is experimental; see its [verification status](hardware-validation.md#current-hardware).
 
 | Part | Chip | Connection |
 |---|---|---|
