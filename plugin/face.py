@@ -157,7 +157,7 @@ FACE_FILE = "gadget-face.bin"
 FACE_FILE_KIND = b"hermes-gadget face file\n"
 AVATAR_DRAWING = b"hermes-gadget avatar 2\n"
 COLOUR_AVATAR = b"hermes-gadget colour avatar 1\n"  # followed by the size, as two little-endian bytes
-COLOUR_FRAMES = b"hermes-gadget colour avatar frames 1\n"  # then the size, and each picture's length and bytes
+COLOUR_FRAMES = b"hermes-gadget colour avatar frames 2\n"  # then the size and the pictures; change it when frames are drawn differently
 PICTURE_TYPES = ("png", "jpg", "webp")
 SAME = 16  # a frame's pixel within this many levels (of 255) of the avatar's is unchanged: lossy WebP's noise
 
