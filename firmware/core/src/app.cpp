@@ -723,7 +723,7 @@ bool App::open_profile_picker() {
 }
 
 bool App::show_reply_text() {
-  if (mode_ != Mode::Responding || !model_.hero || reply_.empty()) return false;
+  if (model_.screen != Screen::Responding || !model_.hero || reply_.empty()) return false;
   reply_shown_ = true;
   update_model();
   return true;

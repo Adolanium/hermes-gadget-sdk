@@ -1077,6 +1077,54 @@ TEST("app: a tap or a scroll during speech shows the whole text, and the speech 
   CHECK(b.fake.spk_open);
 }
 
+TEST("app: a question or a short card over a reply keeps its tap") {
+  auto tap = [](Rig& r, hg::TouchGestures& touch) {
+    touch.update(true, 160, 120, r.fake.clock);
+    r.advance(30);
+    touch.update(false, 0, 0, r.fake.clock);
+  };
+  // A question that arrives during the speech: the tap answers yes.
+  {
+    Rig r(Rig::touch_profile());
+    r.bring_online(true);
+    hg::TouchGestures touch(r.app);
+    r.server(R"({"type":"turn.start","turn":"t"})");
+    r.server(reply_msg("reply", "t", kLongReply));
+    r.server(R"({"type":"audio.start","stream":2,"rate":16000,"format":"pcm16"})");
+    r.server(R"({"type":"prompt","id":"q","title":"Allow?","text":"Continue?"})");
+    r.advance(700);
+    CHECK(r.app.screen() == hg::Screen::Prompt);
+    tap(r, touch);
+    CHECK(r.fake.last("prompt.reply") != nullptr);
+  }
+  // A short card during the speech: the tap closes it and stops the speech, as before.
+  {
+    Rig r(Rig::touch_profile());
+    r.bring_online(true);
+    hg::TouchGestures touch(r.app);
+    r.server(R"({"type":"turn.start","turn":"t"})");
+    r.server(reply_msg("reply", "t", kLongReply));
+    r.server(R"({"type":"audio.start","stream":2,"rate":16000,"format":"pcm16"})");
+    r.server(R"({"type":"display","title":"Card","body":"Remember milk.","ttl_s":0})");
+    CHECK(r.app.screen() == hg::Screen::Card && r.app.model().hero);
+    tap(r, touch);
+    CHECK(r.app.screen() != hg::Screen::Card);
+    CHECK(!r.fake.spk_open);
+  }
+  // A question over a silent reply on a panel with no caption: the tap answers it.
+  {
+    Rig r(Rig::touch_profile());
+    r.fake.make_panel(240, 135);
+    r.bring_online(true);
+    hg::TouchGestures touch(r.app);
+    r.server(reply_msg("reply.delta", "t", "Silent text."));
+    r.server(R"({"type":"prompt","id":"q","title":"Allow?","text":"Continue?"})");
+    r.advance(700);
+    tap(r, touch);
+    CHECK(r.fake.last("prompt.reply") != nullptr);
+  }
+}
+
 TEST("app: a long reply spoken under the caption gives its first page the whole reading time after the speech") {
   Rig r;
   r.bring_online(true);
