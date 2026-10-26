@@ -242,21 +242,33 @@ def from_picture(path: Path | io.BytesIO) -> bytes:
     return pack(dict.fromkeys(FRAMES, ink), measure(ink, Options()))
 
 
-def colour_from_picture(path: Path | io.BytesIO, px: int) -> ColourFace:
+def _rgba(path: Path | io.BytesIO):
+    from PIL import Image, ImageOps
+
+    with Image.open(path) as src:
+        return ImageOps.exif_transpose(src).convert("RGBA")
+
+
+def crops(path: Path | io.BytesIO) -> bool:
+    """Whether colour_from_picture crops the picture to the square: it has no transparency."""
+    return _rgba(path).getchannel("A").getextrema()[0] == 255
+
+
+def colour_from_picture(path: Path | io.BytesIO, px: int, crop: bool | None = None) -> ColourFace:
     """A still colour face, px wide, from a picture such as a Hermes avatar.
 
     An opaque picture is cropped to the square. One with transparency is fitted whole, so it keeps
     its shape: its pixels under half opaque are transparent, the rest are laid on black, and black
-    itself becomes the nearest colour that is not transparent. The waves and dots go where they would
-    on a one-colour face made from the same outline.
+    itself becomes the nearest colour that is not transparent. `crop` overrides that choice, so a
+    blink or talk picture is placed like its avatar. The waves and dots go where they would on a
+    one-colour face made from the same outline.
     """
     from PIL import Image, ImageOps
 
     from .imaging import rgb565_bytes
 
-    with Image.open(path) as src:
-        src = ImageOps.exif_transpose(src).convert("RGBA")
-    if src.getchannel("A").getextrema()[0] == 255:
+    src = _rgba(path)
+    if src.getchannel("A").getextrema()[0] == 255 if crop is None else crop:
         art = ImageOps.fit(src, (px, px), Image.Resampling.LANCZOS)
     else:
         whole = ImageOps.contain(src, (px, px), Image.Resampling.LANCZOS)
@@ -296,9 +308,9 @@ def _refuse(key: tuple, message: str, *args) -> None:
         logger.warning(message, *args)
 
 
-def moving(still: ColourFace, avatar: str, frames: dict[str, tuple[Path, bytes]]) -> ColourFace:
-    """`still` with the blink and talk frames of `frames` (frame: (path, picture)), each as only the
-    rows where it differs from the avatar. The bands share half the face's rows. A frame that is no
+def moving(still: ColourFace, avatar: str, frames: dict[str, tuple[Path, bytes]], crop: bool) -> ColourFace:
+    """`still` with the blink and talk frames of `frames` (frame: (path, picture)), each cropped or
+    fitted as the avatar was (`crop`) and kept as only the rows where it differs from the avatar. The bands share half the face's rows. A frame that is no
     picture, or needs more rows than that, leaves the whole face still, and the log says why, once for
     each file."""
     px, row = still.px, 2 * still.px
@@ -308,7 +320,7 @@ def moving(still: ColourFace, avatar: str, frames: dict[str, tuple[Path, bytes]]
             continue
         path, picture = frames[frame]
         try:
-            drawn = colour_from_picture(io.BytesIO(picture), px).rgb565
+            drawn = colour_from_picture(io.BytesIO(picture), px, crop).rgb565
         except Exception as exc:  # an optional file: the avatar still shows
             _refuse((path, digest(picture), px), "%s is not a picture the plugin can read (%s); the face stays still",
                     path, exc)
@@ -394,4 +406,5 @@ def for_profile(home: Path, convert: bool = True, colour_px: int = 0, frames: bo
     named = len(source).to_bytes(4, "little") + source + b"".join(
         b"\1" + len(found[frame][1]).to_bytes(4, "little") + found[frame][1] if frame in found else b"\0"
         for frame in ("blink", "talk"))
-    return ProfileFace(digest(COLOUR_FRAMES + size + named), lambda: moving(still(), avatar.name, found))
+    framed = lambda: moving(still(), avatar.name, found, crops(io.BytesIO(source)))  # noqa: E731
+    return ProfileFace(digest(COLOUR_FRAMES + size + named), framed)

@@ -883,3 +883,18 @@ def test_removing_an_empty_frame_file_lets_the_other_frame_move(tmp_path):
     starts = [m for m in _sent_faces(tmp_path, home, blink.unlink)
               if isinstance(m, dict) and m["type"] == "face.start"]
     assert len(starts) == 2 and "talk" not in starts[0] and "talk" in starts[1]
+
+
+def test_a_frame_with_transparent_eyes_is_cropped_like_its_opaque_avatar(tmp_path):
+    """A 400x300 opaque avatar is cropped to the square; a blink picture that cuts its eyes out to
+    transparency is not fitted whole for that, so only the eye rows change."""
+    from PIL import Image, ImageDraw
+
+    home = _frames_home(tmp_path)
+    blink = Image.open(home / "assets" / "avatar.png").convert("RGBA")
+    ImageDraw.Draw(blink).rectangle((150, 100, 250, 120), fill=(0, 0, 0, 0))
+    blink.save(home / "assets" / "avatar-blink.png")
+    face = profile_faces.for_profile(home, colour_px=144, frames=True).load()
+    assert face.blink is not None
+    y, rows, _ = face.blink
+    assert 40 <= y and y + rows <= 66  # the eyes, rows 100-120 of 300, are rows 48-58 of 144
