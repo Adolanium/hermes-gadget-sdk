@@ -1181,11 +1181,11 @@ def test_a_refusal_sent_before_a_welcome_is_sent_again_after_it(live_rig, hermes
     looking, release = threading.Event(), threading.Event()
     for_profile = face.for_profile
 
-    def held_lookup(home, convert=True, colour_px=0):
+    def held_lookup(home, convert=True, colour_px=0, frames=False):
         if home == hermes_home / "profiles" / "ops" and not looking.is_set():
             looking.set()
             release.wait(5)
-        return for_profile(home, convert, colour_px)
+        return for_profile(home, convert, colour_px, frames)
 
     monkeypatch.setattr(face, "for_profile", held_lookup)
     sent = len(sim.received)
