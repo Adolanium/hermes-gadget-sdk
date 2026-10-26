@@ -132,3 +132,64 @@ def test_time_to_first_audio_never_distorts_pacing(monkeypatch, ttfa_s):
     for i, (t, _) in enumerate(session.sent):
         due = t0 + i * hubmod.AUDIO_FRAME_MS / 1000
         assert t >= due - hubmod.PLAYBACK_LEAD_S - 1e-6, f"frame {i} sent {due - t:.3f}s early"
+
+
+def test_a_device_with_a_bigger_buffer_is_sent_further_ahead_but_never_past_its_lead(monkeypatch):
+    """#126: a device that announces caps.speaker.buffer_ms gets half of it as the lead."""
+    clock = VirtualClock()
+    real_sleep = asyncio.sleep
+
+    async def fake_sleep(seconds, *args):
+        if seconds <= 0:
+            await real_sleep(0)
+            return
+        clock.now += seconds
+        await real_sleep(0)
+
+    monkeypatch.setattr(hubmod.asyncio, "sleep", fake_sleep)
+    lead = 2.0  # a 4 s buffer, as the AMOLED-1.75C announces
+
+    async def run():
+        loop = asyncio.get_running_loop()
+        monkeypatch.setattr(loop, "time", lambda: clock.now)
+        session = RecordingSession(clock)
+        session.playback_lead_s = lead
+        out = hubmod.AudioOut(session, stream=7, src_rate=RATE)
+        await out.start()
+        out.write(b"\x00" * (FRAME_BYTES * 100))  # four seconds arrive at once
+        out.finish()
+        await asyncio.wait_for(out.done.wait(), 5)
+        return session
+
+    session = asyncio.run(run())
+    assert len(session.sent) == 100
+    t0 = session.sent[0][0]
+    lead_frames = int(lead * 1000 / hubmod.AUDIO_FRAME_MS)
+    burst = Counter(t for t, _ in session.sent)[t0]
+    assert lead_frames <= burst <= lead_frames + 1, f"{burst} frames at once; the lead allows {lead_frames}"
+    for i, (t, _) in enumerate(session.sent):
+        due = t0 + i * hubmod.AUDIO_FRAME_MS / 1000
+        assert t >= due - lead - 1e-6, f"frame {i} sent {due - t:.3f}s early"
+        # ...and once the lead is full, the device keeps all of it buffered: no frame goes out late.
+        if i >= lead_frames:
+            assert t <= due - lead + hubmod.AUDIO_FRAME_MS / 1000 + 1e-6, f"frame {i} sent {t - (due - lead):.3f}s late"
+
+
+@pytest.mark.parametrize(
+    "speaker, lead",
+    [
+        ({"rate": 24000}, hubmod.PLAYBACK_LEAD_S),                   # an older device: today's lead
+        ({"rate": 24000, "buffer_ms": 4000}, 2.0),                   # half the buffer
+        ({"rate": 16000, "buffer_ms": 600}, hubmod.PLAYBACK_LEAD_S),  # a small buffer keeps the floor
+        ({"rate": 24000, "buffer_ms": 600000}, hubmod.PLAYBACK_LEAD_MAX_S),  # a huge one is capped
+        ({"rate": 24000, "buffer_ms": "4000"}, hubmod.PLAYBACK_LEAD_S),
+        ({"rate": 24000, "buffer_ms": True}, hubmod.PLAYBACK_LEAD_S),
+        ({"rate": 24000, "buffer_ms": -1}, hubmod.PLAYBACK_LEAD_S),
+        ({"rate": 24000, "buffer_ms": 4000.5}, hubmod.PLAYBACK_LEAD_S),
+        (None, hubmod.PLAYBACK_LEAD_S),
+    ],
+)
+def test_the_lead_follows_the_buffer_the_device_announces(speaker, lead):
+    caps = {} if speaker is None else {"speaker": speaker}
+    session = hubmod.DeviceSession(None, SimpleNamespace(), {"device_id": "hg-1", "caps": caps})
+    assert session.playback_lead_s == pytest.approx(lead)
