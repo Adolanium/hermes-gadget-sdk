@@ -215,6 +215,17 @@ TEST("ws: finishing the item clears it, and each item gets its own limit") {
   CHECK(!w.stuck(1000 + 2 * hg::ws::kStuckMs + 5));
 }
 
+TEST("ws: an item that begins just after the caller read the clock is not stuck") {
+  // The main loop reads the clock, then asks stuck(); on the other core the send task may
+  // begin its next item in between, so since_ is a few milliseconds after now_ms. That must
+  // not count as an item busy for ~49 days (it restarted a board two seconds into a recording).
+  hg::ws::TxWatch w;
+  w.begin(1003);
+  CHECK(!w.stuck(1000));
+  CHECK(!w.stuck(1002));
+  CHECK(w.stuck(1004 + hg::ws::kStuckMs));
+}
+
 TEST("ws: the stuck limit holds across the millisecond clock wrapping") {
   hg::ws::TxWatch w;
   w.begin(0xFFFFFF00u);
