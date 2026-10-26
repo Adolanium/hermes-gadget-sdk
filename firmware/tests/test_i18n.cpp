@@ -334,6 +334,23 @@ TEST("i18n: the timer's one-line texts fit the 128x128 panel in every language")
   }
 }
 
+// A spoken reply's caption under the talking face: only where the face stays above its smallest size
+// with two caption lines under it, and there its "Speaking" headline fits one caption line.
+TEST("i18n: the talking face's two-line caption is on only where it fits, and its headline fits there") {
+  for (const Panel& p : kPanels) {
+    BlankDisplay display(p.w, p.h, p.round, p.font_scale);
+    const bool fits = hg::Ui(display).talk_caption_fits();
+    // The 240x135 and the 240x240 round (the Spotpear 1.28-BOX) show the face at its smallest size.
+    const bool small = p.h == 135 || (p.w == 240 && p.round);
+    CHECK_EQ(fits, !small);
+    if (!fits) continue;
+    const Columns c = columns(p.w, p.h, p.round, p.font_scale);
+    for (Lang lang : translations()) check_fits(lang, Msg::Speaking, c.line, p);
+  }
+  BlankDisplay aipi(128, 128, false);
+  CHECK(!hg::Ui(aipi).talk_caption_fits());
+}
+
 // ---------------------------------------------------------------------------
 // The font's Latin-1 half and UTF-8 text (hg/font.hpp)
 

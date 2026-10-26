@@ -973,10 +973,12 @@ Ui::HeroGeom Ui::hero_geom(const UiModel& m) const {
       last.resize(font::prefix(last, static_cast<size_t>(std::max(0, cols - 2))));
     last += "..";
   }
-  // Reserve one detail line even when there is none, so the mascot keeps its size. A name
+  // Reserve one detail line even when there is none, so the mascot keeps its size; a spoken reply's
+  // caption reserves all its lines, so the face keeps its size as the text arrives. A name
   // panel (headline and first detail line) grows to a finger's height.
   g.name_h = m.name_target ? std::max(2 * lh + s, touch_px_) : 0;
-  const int ch = caption_h(std::max<int>(1, static_cast<int>(g.detail.size()))) + std::max(0, g.name_h - (2 * lh + s));
+  const int reserved = m.screen == Screen::Responding ? max_lines : 1;
+  const int ch = caption_h(std::max<int>(reserved, static_cast<int>(g.detail.size()))) + std::max(0, g.name_h - (2 * lh + s));
   const int avail = std::min(w - 8 * s, layout_.main_h - ch - buttons_h - 4 * s);
   g.size = mascot::pick(avail, mascot::Frame::Idle)->size;
   const int block = g.size + 2 * s + ch + buttons_h;
@@ -985,6 +987,13 @@ Ui::HeroGeom Ui::hero_geom(const UiModel& m) const {
   g.caption_y = g.y + g.size + 2 * s;
   g.buttons_y = g.caption_y + ch + 2 * s;
   return g;
+}
+
+bool Ui::talk_caption_fits() const {
+  UiModel m;
+  m.screen = Screen::Responding;
+  m.caption_lines = 2;
+  return hero_geom(m).size > mascot::pick(0, mascot::Frame::Idle)->size;
 }
 
 void Ui::hero_anim_rows(const UiModel& m, int& y0, int& y1) const {

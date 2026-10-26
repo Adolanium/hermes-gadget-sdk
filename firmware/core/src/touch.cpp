@@ -23,6 +23,7 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
     switch (state_) {
       case State::Pending:  // a quick tap
         if (from_clock_) break;  // Ready came back at touch-down; a tap does nothing else
+        if (app_.show_reply_text()) break;  // the caption under the talking face gives way to the text
         if (on_name_) {  // a quick tap on the name opens the list, or does nothing while it can't
           app_.open_profile_picker();
           break;

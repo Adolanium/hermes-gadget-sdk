@@ -6,12 +6,15 @@ Wait for the device to show Ready. On the LCD board, BOOT is TALK and PLUS is CA
 |---|---|
 | Ask a question | Hold TALK, speak, and release to send |
 | Interrupt a spoken reply | Hold TALK to start speaking |
+| Read a spoken reply in full before it ends | Tap the screen, or press Up or Down |
 | Discard a recording, close a card, or stop a turn | Tap CANCEL |
 | Start a fresh conversation | Hold CANCEL for two seconds |
 | Open or close the [dashboard](#watch-hermes-sessions-on-the-dashboard) | Tap CANCEL on the idle screen |
 | Answer a confirmation question | TALK means yes; CANCEL means no |
 | Type in the simulator | Enter a message in the text box and press Enter |
 | Save the simulator's device screen | Press Ctrl+S |
+
+While Hermes speaks a reply, the face talks with the reply's latest two lines under it, and the whole text follows when the speech ends. Screens too small for the face and two lines, such as 240x135 and 128x128, show the text from the start.
 
 Long replies turn their own pages. Simulated boards with scroll buttons also accept Up and Down.
 
