@@ -67,6 +67,7 @@ bool P4I2sSpeaker::begin(const I2sSpeakerConfig& pins, const P4SpeakerConfig& cf
   if (storage) buffer_ = xStreamBufferCreateStatic(kSpeakerBuffer, 1, storage, &control);
   else buffer_ = xStreamBufferCreate(16 * 1024, 1);
   if (!buffer_) return false;
+  capacity_ = storage ? kSpeakerBuffer : 16 * 1024;
   if (xTaskCreate(&P4I2sSpeaker::task, "hg-p4spk", 4096, this, 7, nullptr) != pdPASS) return false;
   ESP_LOGI(TAG, "P4 speaker ready on I2S%d", cfg.i2s_port);
   return true;

@@ -318,11 +318,13 @@ class I2sSpeaker final : public hg::AudioOut {
   void abort() override;
   bool busy() const override;
   void set_volume(uint8_t percent) override { volume_ = percent; }
+  size_t buffer_bytes() const override { return capacity_; }
 
  private:
   static void task(void* arg);
   i2s_chan_handle_t tx_ = nullptr;
   StreamBufferHandle_t buffer_ = nullptr;
+  size_t capacity_ = 0;
   std::atomic<uint32_t> rate_{16000};
   std::atomic<bool> open_{false};
   std::atomic<bool> draining_{false};
@@ -341,12 +343,14 @@ class P4I2sSpeaker final : public hg::AudioOut {
   void abort() override;
   bool busy() const override;
   void set_volume(uint8_t percent) override { volume_ = percent; }
+  size_t buffer_bytes() const override { return capacity_; }
 
  private:
   static void task(void* arg);
   void set_pa(bool on);
   i2s_chan_handle_t tx_ = nullptr;
   StreamBufferHandle_t buffer_ = nullptr;
+  size_t capacity_ = 0;
   std::atomic<uint32_t> rate_{16000};
   std::atomic<bool> open_{false};
   std::atomic<bool> draining_{false};
@@ -503,6 +507,7 @@ class CodecSpeaker final : public hg::AudioOut {
   void abort() override;
   bool busy() const override;
   void set_volume(uint8_t percent) override;
+  size_t buffer_bytes() const override { return capacity_; }
   // While dozing: close the DAC and its I2S channel (an enabled channel holds a
   // power lock that keeps the chip out of light sleep). Only for a speaker codec
   // the microphones don't share. begin() powers it back up before playing.
@@ -527,6 +532,7 @@ class CodecSpeaker final : public hg::AudioOut {
   int32_t* stereo_ = nullptr;
   std::optional<hg::SpeakerPa> pa_;  // set when this speaker, not esp_codec_dev, drives the PA pin
   StreamBufferHandle_t buffer_ = nullptr;
+  size_t capacity_ = 0;
   std::atomic<bool> open_{false};
   std::atomic<bool> draining_{false};
   std::atomic<bool> flush_{false};

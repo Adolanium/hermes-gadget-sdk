@@ -465,6 +465,8 @@ void App::send_hello() {
       formats.push(hal_.speaker_decoder->format());
       s.set("formats", formats);
     }
+    if (const size_t bytes = hal_.speaker->buffer_bytes(); bytes && profile_.speaker_rate)
+      s.set("buffer_ms", static_cast<int>(bytes * 1000 / (profile_.speaker_rate * 2ull)));
     caps.set("speaker", s);
   }
   json::Value inputs = json::Value::array();

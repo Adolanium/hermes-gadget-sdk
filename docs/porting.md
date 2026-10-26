@@ -115,6 +115,7 @@ Boards like the ESP32-S3-BOX family and the ESP32-S3-Touch-AMOLED-1.75 route aud
 - **`AudioOut`:**
   - `begin(rate)` opens a stream.
   - `write()` must not block: buffer about 1.5 s; the server keeps 0.5 s of lead.
+  - `buffer_bytes()` returns how many bytes of mono PCM16 that buffer holds (0, the default, for unknown). The hello announces it as `caps.speaker.buffer_ms`, and the server then sends up to half of it ahead (at most 3 s), so a bigger buffer rides out a jittery link. Report what was actually allocated, not the size asked for.
   - `end()` drains the buffer.
   - `abort()` drops it immediately.
   - `busy()` stays true until the buffered audio has played out, and no longer once a closed stream has nothing left to play.

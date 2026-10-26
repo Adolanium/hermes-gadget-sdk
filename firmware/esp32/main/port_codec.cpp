@@ -242,6 +242,7 @@ bool CodecSpeaker::begin(esp_codec_dev_handle_t dev, bool stereo32, int pa) {
   if (storage) buffer_ = xStreamBufferCreateStatic(kSpeakerBuffer, 1, storage, &control);
   else buffer_ = xStreamBufferCreate(16 * 1024, 1);
   if (!buffer_) return false;
+  capacity_ = storage ? kSpeakerBuffer : 16 * 1024;
   stereo32_ = stereo32;
   if (pa >= 0) {
     const auto pin = static_cast<gpio_num_t>(pa);

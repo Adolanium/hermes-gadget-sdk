@@ -160,6 +160,8 @@ struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Stor
   void abort() override { spk_open = false; }
   bool busy() const override { return spk_open || spk_draining; }
   void set_volume(uint8_t percent) override { volume = percent; }
+  size_t speaker_buffer = 0;  // what buffer_bytes() reports; 0: unknown, as a port without one says
+  size_t buffer_bytes() const override { return speaker_buffer; }
 
   hg::Hal hal() {
     hg::Hal h;
@@ -303,6 +305,29 @@ TEST("app: connects after boot and sends a hello describing the device") {
   bool has_volume = false;
   for (const auto& a : (*hello)["actions"].elements()) has_volume |= a["name"].as_string() == "speaker.volume";
   CHECK(has_volume);
+}
+
+TEST("app: hello announces the speaker's playback buffer when the port knows it") {
+  hg::DeviceProfile p = Rig::profile("ws://hermes.local:8765/gadget");
+  p.speaker_rate = 24000;
+  Rig r(p);
+  r.fake.speaker_buffer = 192 * 1024;  // the AMOLED-1.75C's buffer: 4 s at 24 kHz
+  r.app.begin();
+  r.app.on_network(true);
+  r.advance(1000);
+  r.app.on_transport_open();
+  const Value* hello = r.fake.last("hello");
+  CHECK(hello != nullptr);
+  if (!hello) return;
+  CHECK_EQ((*hello)["caps"]["speaker"]["buffer_ms"].as_int(), int64_t(4096));
+
+  Rig unknown;  // a port that doesn't report its buffer announces none
+  unknown.app.begin();
+  unknown.app.on_network(true);
+  unknown.advance(1000);
+  unknown.app.on_transport_open();
+  const Value* plain = unknown.fake.last("hello");
+  CHECK(plain && (*plain)["caps"]["speaker"].is_object() && (*plain)["caps"]["speaker"]["buffer_ms"].is_null());
 }
 
 TEST("app: first contact enrolls the key, later contact proves it with an HMAC") {
