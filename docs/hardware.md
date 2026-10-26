@@ -883,7 +883,7 @@ gadget> set server ws://192.168.1.20:8765/gadget
 gadget> status
 @status {"device_id":"hg-...","phase":"online","screen":"pairing","pairing_code":"ABCD2345",...}
 ```
-When the board has a power adapter, `status` includes a `power` object; the state sensor message mirrors its battery fields. On the CrowPanel P4, the STC8 adapter samples its 12-byte record every 5 seconds through the app power poller and maps it to the existing Gadget fields `battery_mv`, `battery_percent`, and `charging`. The adapter does not expose raw registers, battery-state enums, `battery_present`, or `external_power`.
+A device refused for a gateway route has `"unpaired_reason": "routed"` in `status` (see [Hermes integration](hermes-integration.md#profile-switching-and-profile-routes)). When the board has a power adapter, `status` includes a `power` object; the state sensor message mirrors its battery fields. On the CrowPanel P4, the STC8 adapter samples its 12-byte record every 5 seconds through the app power poller and maps it to the existing Gadget fields `battery_mv`, `battery_percent`, and `charging`. The adapter does not expose raw registers, battery-state enums, `battery_present`, or `external_power`.
 
 | Command | Meaning |
 |---|---|

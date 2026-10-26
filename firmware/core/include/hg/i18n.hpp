@@ -148,6 +148,8 @@ namespace hg::i18n {
   X(PairThisDevice,         "Pair this device") \
   X(AskingForCode,          "Asking Hermes for a pairing code...") \
   X(WaitingForApproval,     "waiting for approval") \
+  X(RefusedByRoute,         "Refused by a route") \
+  X(RemoveRouteOnHost,      "Remove its route on the Hermes host.") \
   X(PairedWithHermes,       "Paired with Hermes") \
   X(ApprovePairingFirst,    "Approve pairing first") \
   /* Talking */ \

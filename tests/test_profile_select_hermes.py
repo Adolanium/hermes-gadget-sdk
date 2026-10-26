@@ -3,18 +3,9 @@ from __future__ import annotations
 
 import pytest
 from conftest import requires_hermes, requires_sim
-from hermes_fixtures import _paired_sim
+from hermes_fixtures import _paired_sim, _select_next_profile
 
 pytestmark = [requires_hermes, requires_sim, pytest.mark.usefixtures("registered_platform")]
-
-
-def _select_next_profile(sim):
-    sim.console("settings")
-    for _ in range(3):
-        sim.console("cancel")
-    sim.console("talk")
-    sim.console("release")
-    sim.console("settings close")
 
 
 def _profile_msgs(sim):

@@ -550,6 +550,7 @@ void App::h_welcome(const json::Value& m) {
   online_since_ = now();
   attempts_ = 0;
   paired_ = m["paired"].as_bool();
+  unpaired_reason_.clear();  // the server says it again on this connection if it still holds
   // Hermes's language, for a device whose `language` is auto (docs/protocol.md#welcome-server--device).
   hermes_lang_ = hermes_language(m["language"].str_or(""));
   if (lang_auto_) lang_ = hermes_lang_.value_or(i18n::Lang::En);
@@ -758,17 +759,24 @@ void App::h_pairing(const json::Value& m) {
   paired_ = false;
   pairing_code_ = m["code"].as_string();
   pairing_command_ = m["command"].as_string();
+  unpaired_reason_.clear();
 }
 
 void App::h_paired(const json::Value&) {
   paired_ = true;
   pairing_code_.clear();
   pairing_command_.clear();
+  unpaired_reason_.clear();
   set_hint_flash(tr(i18n::Msg::PairedWithHermes));
 }
 
-void App::h_unpaired(const json::Value&) {
+void App::h_unpaired(const json::Value& m) {
   paired_ = false;
+  unpaired_reason_ = m["reason"].as_string();
+  if (unpaired_reason_ == "routed") {  // no code can let it in: drop one shown before
+    pairing_code_.clear();
+    pairing_command_.clear();
+  }
   drop_face();
   mode_ = Mode::Idle;
   stop_playback();
@@ -1981,15 +1989,19 @@ void App::update_model() {
     m.screen = Screen::Pairing;
     m.hero = true;
     m.caption_lines = kCaptionLines;
+    m.hint = tr(Msg::WaitingForApproval);
     if (!pairing_code_.empty()) {
       m.code = pairing_code_;
       m.headline = tr(Msg::PairingCode, {pairing_code_});
       m.detail = tr(Msg::RunOnHost, {pairing_command_});
+    } else if (unpaired_reason_ == "routed") {  // no code can let it in; removing the route can
+      m.headline = tr(Msg::RefusedByRoute);
+      m.detail = tr(Msg::RemoveRouteOnHost);
+      m.hint = device_id_;  // what the route's user_id matches
     } else {
       m.headline = tr(Msg::PairThisDevice);
       m.detail = tr(Msg::AskingForCode);
     }
-    m.hint = tr(Msg::WaitingForApproval);
   } else if (mode_ == Mode::Listening) {
     m.screen = Screen::Listening;
     m.hero = true;
@@ -2144,6 +2156,7 @@ json::Value App::status_value() const {
   s.set("language", i18n::info(lang_).code).set("language_auto", lang_auto_);
   if (hal_.power) s.set("power", power_value());
   if (!pairing_code_.empty()) s.set("pairing_code", pairing_code_);
+  if (!unpaired_reason_.empty()) s.set("unpaired_reason", unpaired_reason_);
   if (!prompt_id_.empty()) s.set("prompt", prompt_id_);
   if (timer_active()) s.set("timer", timer_value());
   if (on_phone_pair) s.set("phone", phone_value());

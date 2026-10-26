@@ -266,6 +266,7 @@ class DeviceSession:
         # doesn't counts as always lit, so nothing is held back for it.
         self.display_sleeping: bool = hello.get("display_sleeping") is True
         self.paired = False
+        self.unpaired_reason: str | None = None  # why no pairing code can let it in, as last sent
         self.profile = "default"  # the Hermes profile that answers this device
         self.face_hash: str | None | object = None  # the face the device holds; None is the mascot
         # The profile the device takes as its own, which a face must name: the last `profile` or
@@ -396,13 +397,16 @@ class DeviceSession:
     async def send_pairing(self, code: str, command: str) -> None:
         await self.send_json(protocol.message("pairing", code=code, command=command))
 
-    async def set_paired(self, paired: bool) -> None:
-        if paired == self.paired:
+    async def set_paired(self, paired: bool, reason: str | None = None) -> None:
+        """``reason`` tells an unpaired device why no pairing code can let it in. A change of reason alone
+        is sent too; a bare ``unpaired`` clears the one the device shows."""
+        if paired == self.paired and reason == self.unpaired_reason:
             return
-        self.paired = paired
+        self.paired, self.unpaired_reason = paired, reason
         if paired:
             self.hub.store.confirm(self.device_id)
-        await self.send_json(protocol.message("paired" if paired else "unpaired"))
+        extra = {"reason": reason} if reason else {}
+        await self.send_json(protocol.message("paired" if paired else "unpaired", **extra))
         if not paired:
             self.face_hash = None  # unpaired drops the device's face
         self.update_face()
@@ -901,6 +905,7 @@ class DeviceHub:
                     and session.device_profile == named and face.valid()):
                 welcome["face"] = face.hash
             await session.send_json(protocol.message("welcome", **welcome))
+            session.unpaired_reason = None  # the welcome clears it on the device; on_ready sends it again
             session.face_hash = welcome.get("face")  # the welcome keeps that face, or drops the device's
             session.update_face(face, looked_up)  # after the welcome's send, which may let the state change
             face = None  # the task has it; an avatar's picture goes with the task
