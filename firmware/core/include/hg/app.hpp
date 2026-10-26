@@ -252,6 +252,7 @@ class App {
   void h_face_end(const json::Value& m);
   void face_chunk(uint8_t stream, uint16_t seq, const uint8_t* data, size_t len);
   void drop_face();
+  size_t face_bytes() const;
   bool can_switch_profile() const;
   void set_agent_profile(const std::string& id);
   void profile_notice(std::string text);
@@ -375,12 +376,14 @@ class App {
   std::optional<mascot::Face> face_;  // agent_profile_'s, from Hermes; kept through reconnects
   // Where a colour face's pixels live (colour_face_alloc): set aside once, so a face never allocates.
   std::unique_ptr<uint16_t, mascot::Face::Free> colour_;
-  int colour_px_ = 0;  // 0: no colour faces
+  int colour_px_ = 0;    // 0: no colour faces
+  int colour_bands_ = 0;  // rows past the picture for its blink and talk bands together; 0: still faces only
   // A colour face on its way into colour_; face_ holds none of it until all of it arrived.
   struct FaceTransfer {
     int stream;
     std::string hash;
     mascot::Anchors anchors;
+    mascot::Band blink, talk;  // their pixels follow the picture's, blink first
     size_t got = 0;
     uint16_t seq = 0;
   };

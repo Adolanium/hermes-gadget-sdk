@@ -41,9 +41,16 @@ struct Anchors {
 };
 const Anchors& anchors();
 
+// The rows of a colour face that its blink or talk frame changes: `rows` rows of px pixels from row `y`,
+// drawn over the idle picture's. rows 0: the face has no such frame and stays still.
+struct Band {
+  const uint16_t* rgb565 = nullptr;
+  uint16_t y = 0, rows = 0;
+};
+
 // A face Hermes sent for the profile that answers (docs/protocol.md#faces). A one-colour face has the
-// mascot's sizes and frames; a colour face is one still px*px picture. It replaces the mascot while
-// the app holds one.
+// mascot's sizes and frames; a colour face is a px*px picture, with the bands its blink and talk change.
+// It replaces the mascot while the app holds one.
 struct Face {
   struct Free {
     void operator()(void* p) const { std::free(p); }
@@ -52,7 +59,14 @@ struct Face {
   std::unique_ptr<uint8_t, Free> bits;  // one colour: every size, smallest first, each as idle, blink, talk
   const uint16_t* rgb565 = nullptr;     // colour: px*px, row-major, 0x0000 transparent; the app owns it
   uint16_t px = 0;
+  Band blink, talk;  // colour only
   Anchors anchors;
+
+  // The band `frame` lays over a colour face's picture; no rows for the idle frame.
+  const Band& band(Frame frame) const {
+    static const Band none;
+    return frame == Frame::Blink ? blink : frame == Frame::Talk ? talk : none;
+  }
 };
 // The face message's `bits`: base64 of the bitmaps, then of the anchors as ten little-endian int16
 // in Anchors' field order. False, before allocating anything, when the length is not exactly that;

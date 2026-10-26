@@ -157,6 +157,9 @@ FACE_FILE = "gadget-face.bin"
 FACE_FILE_KIND = b"hermes-gadget face file\n"
 AVATAR_DRAWING = b"hermes-gadget avatar 2\n"
 COLOUR_AVATAR = b"hermes-gadget colour avatar 1\n"  # followed by the size, as two little-endian bytes
+COLOUR_FRAMES = b"hermes-gadget colour avatar frames 2\n"  # then the size and the pictures; change it when frames are drawn differently
+PICTURE_TYPES = ("png", "jpg", "webp")
+SAME = 16  # a frame's pixel within this many levels (of 255) of the avatar's is unchanged: lossy WebP's noise
 
 
 def digest(data: bytes) -> str:
@@ -182,12 +185,15 @@ class ProfileFace:
 
 @dataclass(frozen=True)
 class ColourFace:
-    """A still colour face (docs/protocol.md#faces): px*px little-endian RGB565, row-major, where
-    0x0000 is transparent; and the effect anchors in thousandths, in the firmware's order."""
+    """A colour face (docs/protocol.md#faces): px*px little-endian RGB565, row-major, where 0x0000 is
+    transparent; the effect anchors in thousandths, in the firmware's order; and the rows its blink and
+    talk frames change, as (first row, rows, their pixels), or None where the face has no such frame."""
 
     px: int
     rgb565: bytes
     anchors: tuple[int, ...]
+    blink: tuple[int, int, bytes] | None = None
+    talk: tuple[int, int, bytes] | None = None
 
 
 def anchor_values(anchors: dict) -> list[int]:
@@ -236,21 +242,33 @@ def from_picture(path: Path | io.BytesIO) -> bytes:
     return pack(dict.fromkeys(FRAMES, ink), measure(ink, Options()))
 
 
-def colour_from_picture(path: Path | io.BytesIO, px: int) -> ColourFace:
+def _rgba(path: Path | io.BytesIO):
+    from PIL import Image, ImageOps
+
+    with Image.open(path) as src:
+        return ImageOps.exif_transpose(src).convert("RGBA")
+
+
+def crops(path: Path | io.BytesIO) -> bool:
+    """Whether colour_from_picture crops the picture to the square: it has no transparency."""
+    return _rgba(path).getchannel("A").getextrema()[0] == 255
+
+
+def colour_from_picture(path: Path | io.BytesIO, px: int, crop: bool | None = None) -> ColourFace:
     """A still colour face, px wide, from a picture such as a Hermes avatar.
 
     An opaque picture is cropped to the square. One with transparency is fitted whole, so it keeps
     its shape: its pixels under half opaque are transparent, the rest are laid on black, and black
-    itself becomes the nearest colour that is not transparent. The waves and dots go where they would
-    on a one-colour face made from the same outline.
+    itself becomes the nearest colour that is not transparent. `crop` overrides that choice, so a
+    blink or talk picture is placed like its avatar. The waves and dots go where they would on a
+    one-colour face made from the same outline.
     """
     from PIL import Image, ImageOps
 
     from .imaging import rgb565_bytes
 
-    with Image.open(path) as src:
-        src = ImageOps.exif_transpose(src).convert("RGBA")
-    if src.getchannel("A").getextrema()[0] == 255:
+    src = _rgba(path)
+    if src.getchannel("A").getextrema()[0] == 255 if crop is None else crop:
         art = ImageOps.fit(src, (px, px), Image.Resampling.LANCZOS)
     else:
         whole = ImageOps.contain(src, (px, px), Image.Resampling.LANCZOS)
@@ -269,11 +287,74 @@ def colour_from_picture(path: Path | io.BytesIO, px: int) -> ColourFace:
     return ColourFace(px, bytes(data), tuple(anchor_values(measure(shape, Options()))))
 
 
+def _differs(a: bytes, b: bytes) -> bool:
+    """Whether two rows of RGB565 differ in transparency, or by more than SAME in a colour."""
+    if a == b:
+        return False
+    for (p,), (q,) in zip(struct.iter_unpack("<H", a), struct.iter_unpack("<H", b)):
+        if (not p) != (not q) or max(abs((p >> 11) - (q >> 11)) * 8, abs((p >> 5 & 63) - (q >> 5 & 63)) * 4,
+                                     abs((p & 31) - (q & 31)) * 8) > SAME:
+            return True
+    return False
+
+
+_refused: set[tuple] = set()  # what the log already said: a frame's path, picture hash and px
+
+
+def _refuse(key: tuple, message: str, *args) -> None:
+    """Log `message` once for `key`."""
+    if key not in _refused:
+        _refused.add(key)
+        logger.warning(message, *args)
+
+
+def moving(still: ColourFace, avatar: str, frames: dict[str, tuple[Path, bytes]], crop: bool) -> ColourFace:
+    """`still` with the blink and talk frames of `frames` (frame: (path, picture)), each cropped or
+    fitted as the avatar was (`crop`) and kept as only the rows where it differs from the avatar. The bands share half the face's rows. A frame that is no
+    picture, or needs more rows than that, leaves the whole face still, and the log says why, once for
+    each file."""
+    px, row = still.px, 2 * still.px
+    room, bands = px // 2, {}
+    for frame, feature in (("blink", "eyes"), ("talk", "mouth")):
+        if frame not in frames:
+            continue
+        path, picture = frames[frame]
+        try:
+            drawn = colour_from_picture(io.BytesIO(picture), px, crop).rgb565
+        except Exception as exc:  # an optional file: the avatar still shows
+            _refuse((path, digest(picture), px), "%s is not a picture the plugin can read (%s); the face stays still",
+                    path, exc)
+            return still
+        changed = [y for y in range(px) if _differs(drawn[y * row:(y + 1) * row], still.rgb565[y * row:(y + 1) * row])]
+        if not changed:
+            continue
+        y0, y1 = changed[0], changed[-1] + 1
+        if y1 - y0 > room:
+            _refuse((path, digest(picture), px), "%s differs from %s in %d of %d rows, more than the %d the device has "
+                    "room for; draw it from the same picture with only the %s changed", path, avatar, y1 - y0, px,
+                    room, feature)
+            return still
+        bands[frame] = (y0, y1 - y0, drawn[y0 * row:y1 * row])
+    rows = sum(n for _, n, _ in bands.values())
+    if rows > room:
+        paths = [frames[frame][0] for frame in bands]
+        _refuse((*paths, *(digest(frames[frame][1]) for frame in bands), px),
+                "%s and %s differ from %s in %d rows together, more than the %d the device has room for; the face "
+                "stays still", *paths, avatar, rows, room)
+        return still
+    return ColourFace(px, still.rgb565, still.anchors, **bands)
+
+
+def _pictures(home: Path, name: str) -> list[Path]:
+    return [home / "assets" / f"{name}.{ext}" for ext in PICTURE_TYPES]
+
+
 def sources(home: Path, convert: bool = True) -> list[Path]:
-    """Where a profile's face may come from, in the order for_profile tries them: its face file,
-    then its avatar (`assets/avatar.*`, as Hermes keeps it) when `convert`."""
-    avatars = [home / "assets" / f"avatar.{ext}" for ext in ("png", "jpg", "webp")] if convert else []
-    return [home / FACE_FILE, *avatars]
+    """Where a profile's face may come from, in the order for_profile tries them: its face file, then,
+    when `convert`, its avatar (`assets/avatar.*`, as Hermes keeps it) and the avatar's blink and talk
+    pictures (`assets/avatar-blink.*`, `assets/avatar-talk.*`)."""
+    names = ("avatar", "avatar-blink", "avatar-talk") if convert else ()
+    return [home / FACE_FILE, *(path for name in names for path in _pictures(home, name))]
 
 
 def stamp(home: Path, convert: bool = True) -> tuple:
@@ -289,22 +370,41 @@ def stamp(home: Path, convert: bool = True) -> tuple:
     return tuple(found)
 
 
-def for_profile(home: Path, convert: bool = True, colour_px: int = 0) -> ProfileFace | None:
+def for_profile(home: Path, convert: bool = True, colour_px: int = 0, frames: bool = False) -> ProfileFace | None:
     """The face a Hermes profile shows: its face file, else its avatar when `convert`, in colour at
-    `colour_px` when that is set, else None for the mascot. This reads one file; converting an avatar
-    waits for `load()`."""
-    path, *avatars = sources(home, convert)
+    `colour_px` when that is set, with its blink and talk pictures when `frames`, else None for the
+    mascot. This reads the files the face is made from; converting an avatar waits for `load()`."""
+    path = home / FACE_FILE
     if path.is_file():
         data = path.read_bytes()
         if len(data) == FACE_BYTES:
             return ProfileFace.of(data)
         logger.warning("%s is not a face file (%d bytes, not %d); make it with hermes-gadget face --out",
                        path, len(data), FACE_BYTES)
-    for avatar in avatars:
-        if avatar.is_file():
-            source = avatar.read_bytes()
-            if colour_px:
-                return ProfileFace(digest(COLOUR_AVATAR + colour_px.to_bytes(2, "little") + source),
-                                   lambda: colour_from_picture(io.BytesIO(source), colour_px))
-            return ProfileFace(digest(AVATAR_DRAWING + source), lambda: from_picture(io.BytesIO(source)))
-    return None
+    avatar = next((p for p in _pictures(home, "avatar") if p.is_file()), None) if convert else None
+    if avatar is None:
+        return None
+    source = avatar.read_bytes()
+    if not colour_px:
+        return ProfileFace(digest(AVATAR_DRAWING + source), lambda: from_picture(io.BytesIO(source)))
+    still = lambda: colour_from_picture(io.BytesIO(source), colour_px)  # noqa: E731
+    size = colour_px.to_bytes(2, "little")
+    plain = ProfileFace(digest(COLOUR_AVATAR + size + source), still)
+    found = {}
+    for frame in ("blink", "talk") if frames else ():
+        picture = next((p for p in _pictures(home, f"avatar-{frame}") if p.is_file()), None)
+        if not picture:
+            continue
+        try:
+            found[frame] = (picture, picture.read_bytes())
+        except OSError as exc:  # an optional file: the avatar still shows
+            _refuse((picture, str(exc)), "%s cannot be read (%s); the face stays still", picture, exc)
+            return plain
+    if not found:
+        return plain
+    # Each frame is there (1, then its length and bytes) or not (0), so an empty file is not a missing one.
+    named = len(source).to_bytes(4, "little") + source + b"".join(
+        b"\1" + len(found[frame][1]).to_bytes(4, "little") + found[frame][1] if frame in found else b"\0"
+        for frame in ("blink", "talk"))
+    framed = lambda: moving(still(), avatar.name, found, crops(io.BytesIO(source)))  # noqa: E731
+    return ProfileFace(digest(COLOUR_FRAMES + size + named), framed)
