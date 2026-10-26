@@ -12,6 +12,7 @@
 #include "esp_timer.h"
 #include "freertos/task.h"
 #include "mic_power.hpp"
+#include "speaker_prebuffer.hpp"
 #include "speaker_queue.hpp"
 #include "ws185.hpp"
 
@@ -22,6 +23,11 @@ const char* TAG = "hg.codec";
 constexpr size_t kMicChunk = 320;             // about 13 ms at 24 kHz
 constexpr size_t kSpeakerBuffer = 192 * 1024;  // absorbs WiFi-burst backlog without dropping; PSRAM, 8 MB free
 constexpr size_t kSpeakerChunk = 512;         // samples per codec write
+// A reply starts once this much is queued (speaker_prebuffer.hpp): 1 s, or 1.5 s after its
+// first audio at the latest. It starts up to a second later, and plays its first seconds
+// without gaps. 500 ms still left one gap of about 300 ms near the start on a home link.
+constexpr size_t kPrebufferBytes = CodecAudio::kRate * sizeof(int16_t);
+constexpr uint32_t kPrebufferMaxWaitMs = 1500;
 
 }  // namespace
 
@@ -349,12 +355,14 @@ void CodecSpeaker::task(void* arg) {
   int64_t stream_t0 = 0;
   uint64_t stream_bytes = 0;
   hg::SpeakerUnderruns gaps;
+  hg::SpeakerPrebuffer prebuffer(kPrebufferBytes, kPrebufferMaxWaitMs);
   for (;;) {
     if (self->flush_) {
       stream_t0 = 0;
       stream_bytes = 0;
       self->drop_bytes_ = 0;
       gaps.finish();  // an aborted stream isn't reported
+      prebuffer.reset();
       if (pa) {
         // abort() already emptied the queue and turned the amplifier off.
         esp_codec_dev_set_out_mute(self->dev_, true);
@@ -363,6 +371,15 @@ void CodecSpeaker::task(void* arg) {
         xStreamBufferReset(self->buffer_);
       }
       self->flush_ = false;  // only after the reset: a write() waiting for it is not wiped
+    }
+    // A stream that hasn't started waits for its prebuffer; an empty queue takes the
+    // usual idle path below.
+    if (!playing && !self->flush_) {
+      const size_t buffered = xStreamBufferBytesAvailable(self->buffer_);
+      if (buffered && !prebuffer.ready(buffered, self->open_, speaker_now_ms())) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        continue;
+      }
     }
     uint32_t generation = 0;
     size_t got = pa ? pa->receive(chunk, sizeof(chunk), generation)
@@ -415,10 +432,12 @@ void CodecSpeaker::task(void* arg) {
         stream_t0 = 0;
         stream_bytes = 0;
         playing = false;
+        prebuffer.reset();
       } else if (!self->open_ && self->draining_) {
         // Closed with nothing played (its audio was dropped, or none came): nothing
         // is left to drain, so busy() must not stay true until the next stream.
         self->draining_ = false;
+        prebuffer.reset();
       }
       // Idle on a light-sleep board: wait for write()/abort() instead of waking
       // every 20 ms, so a doze can light-sleep. Draining, and other boards, keep
