@@ -112,7 +112,7 @@ class Handler(BaseHTTPRequestHandler):
         summary: dict = {"path": path}
         if path.endswith("/chat/completions"):
             body = json.loads(raw or b"{}")
-            summary.update(tools=sorted(t.get("function", {}).get("name", "") for t in body.get("tools") or []),
+            summary.update(model=body.get("model"), tools=sorted(t.get("function", {}).get("name", "") for t in body.get("tools") or []),
                            user=_last_user_text(body.get("messages") or [])[-200:])
         self._record(summary)
         if path.endswith("/chat/completions"):
