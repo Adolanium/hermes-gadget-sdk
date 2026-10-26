@@ -2094,7 +2094,14 @@ void App::update_model() {
     if (m.speaking && !reply_shown_ && ui_ && ui_->talk_caption_fits()) {
       m.hero = true;
       m.caption_lines = 2;
-      m.detail = latest_lines(reply_.empty() ? status_ : reply_, ui_->layout().hero_cols);
+      const std::string& text = reply_.empty() ? status_ : reply_;
+      const int cols = ui_->layout().hero_cols;
+      if (text != caption_text_ || cols != caption_cols_) {
+        caption_text_ = text;
+        caption_cols_ = cols;
+        caption_ = latest_lines(text, cols);
+      }
+      m.detail = caption_;
     }
   } else {
     m.screen = Screen::Ready;

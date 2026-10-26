@@ -482,6 +482,9 @@ class App {
   uint32_t last_turn_rx_ = 0;
   std::string reply_;
   bool reply_shown_ = false;  // the whole text, not the caption, until the Responding screen ends
+  // The talking face's caption, and the text and width it was wrapped from: rewrapped only when they change.
+  std::string caption_, caption_text_;
+  int caption_cols_ = 0;
   static constexpr uint32_t kReplyLingerMs = 20000;  // reply text stays up this long before the mascot returns
   uint32_t reply_until_ = 0;  // reply text shown on the Ready screen until then
   bool cancel_held_ = false;
