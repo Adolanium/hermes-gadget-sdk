@@ -107,6 +107,14 @@ std::string lower(std::string s) {
   return s;
 }
 
+// The last two lines of `text` wrapped to `cols`, blank lines skipped.
+std::string latest_lines(const std::string& text, int cols) {
+  std::vector<std::string> lines = wrap_text(text, cols);
+  lines.erase(std::remove(lines.begin(), lines.end(), std::string()), lines.end());
+  if (lines.size() > 2) lines.erase(lines.begin(), lines.end() - 2);
+  return lines.empty() ? std::string() : lines.size() == 1 ? lines[0] : lines[0] + "\n" + lines[1];
+}
+
 }  // namespace
 
 const App::Route App::kRoutes[] = {
@@ -714,6 +722,13 @@ bool App::open_profile_picker() {
   return true;
 }
 
+bool App::show_reply_text() {
+  if (mode_ != Mode::Responding || !model_.hero || reply_.empty()) return false;
+  reply_shown_ = true;
+  update_model();
+  return true;
+}
+
 int App::profile_row_hit(int x, int y) const { return ui_ ? ui_->profile_row_hit(model_, x, y) : -1; }
 
 void App::profile_tap(int x, int y) {
@@ -1231,6 +1246,7 @@ void App::on_button(Button button, bool pressed) {
     case Button::Down:
       if (!pressed) break;
       if (prompt_showing()) break;
+      if (show_reply_text()) return;
       page_at_ = now() + kManualScrollPauseMs;
       if (mode_ == Mode::Idle && overlay_ == Overlay::None && !reply_.empty() &&
           static_cast<int32_t>(reply_until_ - now()) <= 0) {
@@ -1790,6 +1806,8 @@ void App::tick() {
     update_model();
   }
 
+  // Text that follows a hero screen, such as a reply after its speech, gets its first page's reading time.
+  if (model_.hero) page_at_ = t + page_dwell_ms();
   if (static_cast<int32_t>(t - page_at_) >= 0) {
     page_at_ = t + page_dwell_ms();
     if (turn_page()) update_model();
@@ -1811,6 +1829,7 @@ void App::tick() {
 
 void App::update_model() {
   UiModel& m = model_;
+  if (mode_ != Mode::Responding) reply_shown_ = false;
   m.title = name_;
   m.lang = lang_;
   m.code.clear();
@@ -2042,6 +2061,12 @@ void App::update_model() {
     m.hint = profile_.touch_screen ? std::string(tr(Msg::HoldToReply)) : tr(Msg::ButtonToReply, {talk});
     // Spoken audio can start before the text arrives: let the mascot talk meanwhile.
     m.hero = reply_.empty();
+    // While it is spoken, the face talks over the reply's latest two lines, where they fit.
+    if (m.speaking && !reply_shown_ && ui_ && ui_->talk_caption_fits()) {
+      m.hero = true;
+      m.caption_lines = 2;
+      m.detail = latest_lines(reply_.empty() ? status_ : reply_, ui_->layout().hero_cols);
+    }
   } else {
     m.screen = Screen::Ready;
     m.headline = tr(Msg::Ready);

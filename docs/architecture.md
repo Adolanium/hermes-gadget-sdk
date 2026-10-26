@@ -57,7 +57,7 @@ As a result the core has no locks and every test is deterministic.
 
 ### The mascot
 
-Every screen that isn't showing reply text uses a **hero layout**: the Hermes Agent mascot, as large as the screen allows, with a short caption. That covers idle, listening, thinking, speaking before the text arrives, boot, connecting, offline, setup errors, pairing, short cards and questions.
+Every screen that isn't showing reply text uses a **hero layout**: the Hermes Agent mascot, as large as the screen allows, with a short caption. That covers idle, listening, thinking, speaking, boot, connecting, offline, setup errors, pairing, short cards and questions.
 
 - **Captions:** a headline and one detail line. Pairing, setup, cards and questions may wrap to three or four lines; the renderer picks the largest mascot that still fits, and drops caption lines rather than shrink her below the smallest bitmap. A question adds its two answer buttons under the caption.
 - **No scrolling needed:** a card too long for a caption gets the text layout. Long replies and long cards page by themselves (about a second per line), so a board with no scroll buttons can still read everything. UP/DOWN scrolls by hand and pauses the paging for 15 s.
@@ -69,6 +69,7 @@ Every screen that isn't showing reply text uses a **hero layout**: the Hermes Ag
   - blue thought dots while thinking;
   - a moving mouth and amber waves while speaking.
 - **Partial redraws:** the hero band tracks static content (screen, caption) separately from animation state. When only the animation changes, it redraws and flushes just the rows that animation can touch: the eye rows for a blink, the wave rows while listening. A blink therefore costs about 25 rows of SPI traffic, not a full screen.
+- **Speaking:** while a reply is spoken, the face talks over the reply's latest two lines, then the text layout shows the whole reply when the speech ends. A tap, UP or DOWN shows the whole text at once. On panels where two caption lines would push the face down to its smallest bitmap (240x135, 128x128 and the 240x240 round), the reply's text takes the screen as soon as it arrives, and the face talks only while no text has arrived yet.
 - **Reply text:** a finished reply stays on screen for 20 s before the mascot returns. On boards with scroll buttons, UP brings it back.
 - **Timer:** the alarm is a full-panel screen with its own layout, not a hero. While a timer runs, the Ready caption shows the time left.
 

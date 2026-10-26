@@ -960,11 +960,154 @@ TEST("app: the mascot fills idle, listening and thinking screens") {
   r.advance(500);
   r.app.on_button(hg::Button::Talk, false);
   CHECK(r.app.screen() == hg::Screen::Thinking && r.app.model().hero);
-  // Audio before text: the mascot speaks; text arrives: the reply takes the screen.
   r.server(R"({"type":"audio.start","stream":2,"rate":16000,"format":"pcm16"})");
   CHECK(r.app.screen() == hg::Screen::Responding && r.app.model().hero);
-  r.server(R"({"type":"reply","text":"Done."})");
+}
+
+namespace {
+
+constexpr const char* kLongReply =
+    "The forecast for today is sunny with a light breeze, and tomorrow brings rain in the afternoon.";
+
+// The caption under the talking face: two lines, the reply's latest, in order.
+void check_latest_lines(const hg::UiModel& m, const std::string& reply) {
+  CHECK(m.hero);
+  CHECK_EQ(int(m.caption_lines), 2);
+  const size_t nl = m.detail.find('\n');
+  CHECK(nl != std::string::npos);
+  if (nl == std::string::npos) return;
+  const std::string first = m.detail.substr(0, nl), second = m.detail.substr(nl + 1);
+  CHECK(!first.empty() && !second.empty());
+  const std::string tail = first + " " + second;
+  CHECK(reply.size() > tail.size());  // not the whole reply
+  if (reply.size() > tail.size()) CHECK_EQ(reply.substr(reply.size() - tail.size()), tail);
+}
+
+std::string reply_msg(const char* type, const char* turn, const char* text) {
+  return std::string(R"({"type":")") + type + R"(","turn":")" + turn + R"(","text":")" + text + "\"}";
+}
+
+}  // namespace
+
+TEST("app: text, then speech: the face talks over the reply's latest lines, and the text shows when it ends") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(reply_msg("reply.delta", "t", "It is"));
+  CHECK(r.app.screen() == hg::Screen::Responding && !r.app.model().hero);  // no speech yet: the text
+  r.server(R"({"type":"audio.start","stream":2,"rate":16000,"format":"pcm16"})");
+  CHECK(r.app.screen() == hg::Screen::Responding && r.app.model().hero && r.app.model().speaking);
+  CHECK_EQ(r.app.model().detail, std::string("It is"));
+  CHECK_EQ(int(r.app.model().caption_lines), 2);
+  r.server(reply_msg("reply", "t", kLongReply));
+  check_latest_lines(r.app.model(), kLongReply);
+  r.server(R"({"type":"audio.end","stream":2})");
+  r.advance(100);
+  CHECK(r.app.screen() == hg::Screen::Responding && !r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string(kLongReply));
+  r.server(R"({"type":"turn.end","turn":"t","outcome":"success"})");
+  r.advance(200);
+  CHECK(r.app.screen() == hg::Screen::Ready && !r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string(kLongReply));
+}
+
+TEST("app: speech, then text: the face talks from the start, and the text shows when the speech ends") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(R"({"type":"audio.start","stream":2,"rate":16000,"format":"pcm16"})");
+  CHECK(r.app.screen() == hg::Screen::Responding && r.app.model().hero);
+  r.server(reply_msg("reply.delta", "t", kLongReply));
+  check_latest_lines(r.app.model(), kLongReply);
+  r.server(reply_msg("reply", "t", kLongReply));
+  r.server(R"({"type":"turn.end","turn":"t","outcome":"success"})");
+  r.advance(200);
+  check_latest_lines(r.app.model(), kLongReply);  // the turn is over, the speech is not
+  r.server(R"({"type":"audio.end","stream":2})");
+  r.advance(200);
+  CHECK(r.app.screen() == hg::Screen::Ready && !r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string(kLongReply));
+}
+
+TEST("app: a reply with no speech is text from its first words") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(reply_msg("reply.delta", "t", "It is"));
+  CHECK(r.app.screen() == hg::Screen::Responding && !r.app.model().hero);
+  r.server(reply_msg("reply", "t", kLongReply));
   CHECK(!r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string(kLongReply));
+}
+
+TEST("app: a tap or a scroll during speech shows the whole text, and the speech goes on") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  hg::TouchGestures touch(r.app);
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(reply_msg("reply", "t", kLongReply));
+  r.server(R"({"type":"audio.start","stream":2,"rate":16000,"format":"pcm16"})");
+  check_latest_lines(r.app.model(), kLongReply);
+  touch.update(true, 160, 120, r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock + 30);
+  CHECK(r.app.screen() == hg::Screen::Responding && !r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string(kLongReply));
+  CHECK(r.fake.spk_open && !r.fake.mic_on);
+  CHECK(r.fake.last("audio.start") == nullptr);  // the tap recorded nothing
+  // The next spoken reply has its caption again.
+  r.server(R"({"type":"audio.end","stream":2})");
+  r.server(R"({"type":"turn.end","turn":"t","outcome":"success"})");
+  r.advance(200);
+  r.server(R"({"type":"turn.start","turn":"t2"})");
+  r.server(reply_msg("reply", "t2", kLongReply));
+  r.server(R"({"type":"audio.start","stream":3,"rate":16000,"format":"pcm16"})");
+  check_latest_lines(r.app.model(), kLongReply);
+
+  // On a board with buttons, UP or DOWN shows the text from where it is, without scrolling it yet.
+  Rig b;
+  b.bring_online(true);
+  b.server(reply_msg("reply", "", kLongReply));
+  b.server(R"({"type":"audio.start","stream":2,"rate":16000,"format":"pcm16"})");
+  check_latest_lines(b.app.model(), kLongReply);
+  const int scroll = b.app.model().scroll;
+  b.app.on_button(hg::Button::Down, true);
+  b.app.on_button(hg::Button::Down, false);
+  CHECK(!b.app.model().hero);
+  CHECK_EQ(b.app.model().scroll, scroll);
+  CHECK(b.fake.spk_open);
+}
+
+TEST("app: a long reply spoken under the caption gives its first page the whole reading time after the speech") {
+  Rig r;
+  r.bring_online(true);
+  std::string text;
+  for (int i = 0; i < 40; ++i) text += "sentence " + std::to_string(i) + " of a long answer. ";
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(R"({"type":"audio.start","stream":2,"rate":16000,"format":"pcm16"})");
+  r.server(reply_msg("reply", "t", text.c_str()));
+  r.server(R"({"type":"turn.end","turn":"t","outcome":"success"})");
+  r.advance(7000);  // past the first page's reading time, partway into a second one
+  CHECK(r.app.model().hero);
+  r.server(R"({"type":"audio.end","stream":2})");
+  r.advance(100);
+  CHECK(!r.app.model().hero);
+  CHECK_EQ(r.app.model().scroll, 0);
+  r.advance(7000);
+  CHECK_EQ(r.app.model().scroll, 0);  // the first page gets its reading time
+  r.advance(1500);
+  CHECK(r.app.model().scroll > 0);
+}
+
+TEST("app: where the face and two caption lines don't fit, a spoken reply shows its text as before") {
+  Rig r;
+  r.fake.make_panel(240, 135);
+  r.bring_online(true);
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(R"({"type":"audio.start","stream":2,"rate":16000,"format":"pcm16"})");
+  CHECK(r.app.screen() == hg::Screen::Responding && r.app.model().hero);  // no text yet: the face
+  r.server(reply_msg("reply", "t", kLongReply));
+  CHECK(r.app.model().speaking && !r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string(kLongReply));
 }
 
 TEST("app: a finished reply stays readable, then the mascot returns; UP brings it back") {

@@ -145,6 +145,9 @@ class Ui {
   // The largest size the Ready screen draws the face at (one caption line, no name panel): a colour face
   // is sent at this size and scaled down where there is less room.
   int face_px() const { return hero_geom(UiModel{}).size; }
+  // Whether the face stays above its smallest size with two caption lines under it: where a spoken
+  // reply's latest lines caption the talking face.
+  bool talk_caption_fits() const;
   // Touch targets (the name panel, list rows) are at least this many pixels tall.
   void set_touch_px(int px) { touch_px_ = px; }
   // Panel coordinates: the hero caption's panel (name_target), and the item of the Profiles row
