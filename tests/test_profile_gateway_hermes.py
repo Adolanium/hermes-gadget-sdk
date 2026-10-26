@@ -1108,6 +1108,26 @@ def test_a_device_a_route_refuses_is_told_why_and_asked_for_no_code(live_rig, he
     assert sim.wait_screen("ready", timeout=8)
 
 
+def test_a_late_pairing_reply_does_not_hide_a_refusal(live_rig, hermes_home, make_sim):
+    """A pairing request still waiting when the route is added answers late: its code cannot let the
+    device in, so it must not replace the refusal on the device's screen."""
+    sim, _held, digest = _faces_on_ops(live_rig, hermes_home, make_sim)
+    device = sim.status()["device_id"]
+    live_rig.approve("ops", device)
+    assert sim.wait_for(lambda: (sim.last_received("face") or {}).get("hash") == digest["ops"], timeout=8)
+    live_rig.runner.config.profile_routes = _ops_route(device)
+    assert sim.wait_for(lambda: sim.status().get("unpaired_reason") == "routed", timeout=8)
+
+    sent = len(sim.received)
+    session = live_rig.adapter.hub.get(device)
+    late = "Your pairing code: ABCD2345. Run: hermes pairing approve gadget ABCD2345"
+    live_rig.run(live_rig.adapter._forward_unpaired(session, late))
+    sim.run_for(2)
+    assert [m for m in sim.received[sent:] if m["type"] in ("pairing", "notice")] == []
+    assert sim.status().get("unpaired_reason") == "routed"
+    assert "pairing_code" not in sim.status()
+
+
 def test_a_route_added_or_removed_while_a_device_is_unpaired_reaches_it(live_rig, hermes_home, make_sim):
     """With the default profile's approval revoked too, the refusal still follows the route: added, the
     device is told once and gets no notice; removed, it drops the reason and pairing starts again."""

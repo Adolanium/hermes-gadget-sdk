@@ -797,6 +797,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         logger.info("[%s] %s (%s) is now the gadget home channel", self.name, session.name, session.device_id)
 
     async def _forward_unpaired(self, session: DeviceSession, content: str) -> None:
+        if session.unpaired_reason:  # a late reply to a request from before the refusal: no code can let it in
+            return
         match = _PAIRING_CMD.search(content or "")
         if match:
             command, code = match.group(1), match.group(2)
