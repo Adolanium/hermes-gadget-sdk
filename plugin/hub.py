@@ -320,6 +320,11 @@ class DeviceSession:
                 return px
         return 0
 
+    @property
+    def face_frames(self) -> bool:
+        """Whether the device's colour faces blink and talk (docs/protocol.md#faces)."""
+        return self.face_px > 0 and self.caps["faces"].get("frames") is True
+
     def shows_faces(self) -> bool:
         """Whether the device draws the faces the server sends: one-colour ones, or colour ones too."""
         return self.caps.get("faces") == 1 or self.face_px > 0
@@ -473,10 +478,13 @@ class DeviceSession:
         self.face_hash = _UNSURE  # until the last message is out: a cancelled send leaves it unknown
         if isinstance(data, ColourFace):
             stream = self._next_stream()
+            bands = {frame: band for frame, band in (("blink", data.blink), ("talk", data.talk)) if band}
             await self.send_json(protocol.message(
                 "face.start", stream=stream, profile=state[0], hash=digest, width=data.px, height=data.px,
-                format="rgb565", anchors=list(data.anchors)))
-            await self._send_chunks(protocol.CHANNEL_FACE, stream, data.rgb565)
+                format="rgb565", anchors=list(data.anchors),
+                **{frame: [y, rows] for frame, (y, rows, _) in bands.items()}))
+            await self._send_chunks(protocol.CHANNEL_FACE, stream,
+                                    data.rgb565 + b"".join(pixels for *_, pixels in bands.values()))
             await self.send_json(protocol.message("face.end", stream=stream))
         else:
             await self.send_json(protocol.message(

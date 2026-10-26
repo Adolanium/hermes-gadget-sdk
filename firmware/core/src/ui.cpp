@@ -137,17 +137,20 @@ int tri(uint32_t frame, int period) {
 }
 
 mascot::Frame mascot_frame(const UiModel& m) {
-  if (m.face && m.face->rgb565) return mascot::Frame::Idle;  // a colour face is a still picture
-  if (m.screen == Screen::Responding && m.speaking) {
-    return (m.frame / 2) % 2 ? mascot::Frame::Talk : mascot::Frame::Idle;
-  }
-  return m.frame % 45 < 2 ? mascot::Frame::Blink : mascot::Frame::Idle;  // blink every ~4.5 s
+  mascot::Frame f = m.frame % 45 < 2 ? mascot::Frame::Blink : mascot::Frame::Idle;  // blink every ~4.5 s
+  if (m.screen == Screen::Responding && m.speaking) f = (m.frame / 2) % 2 ? mascot::Frame::Talk : mascot::Frame::Idle;
+  const bool still = m.face && m.face->rgb565 && !m.face->band(f).rows;  // a colour face without that frame
+  return still ? mascot::Frame::Idle : f;
 }
 
-// `b` (from mascot::pick) in `ink`, or the colour face at b's size.
+// `b` (from mascot::pick) in `ink`, or the colour face at b's size, in b's frame.
 void draw_face(Canvas& c, int x, int y, const mascot::Bitmap& b, const mascot::Face* face, uint16_t ink) {
-  if (face && face->rgb565) c.picture(x, y, b.size, face->rgb565, face->px);
-  else c.bitmap1(x, y, b.size, b.size, b.bits, ink);
+  if (face && face->rgb565) {
+    const mascot::Band& band = face->band(b.frame);
+    c.picture(x, y, b.size, face->rgb565, face->px, band.rgb565, band.y, band.rows);
+  } else {
+    c.bitmap1(x, y, b.size, b.size, b.bits, ink);
+  }
 }
 
 // Everything that changes hero pixels between frames, and nothing else, so
@@ -988,7 +991,16 @@ void Ui::hero_anim_rows(const UiModel& m, int& y0, int& y1) const {
   const HeroGeom g = hero_geom(m);
   const int size = g.size, my = g.y;
   const mascot::Anchors& a = mascot::anchors(m.face);
+  // A colour face's band, as the rows Canvas::picture draws it on at `size`.
+  auto band_rows = [&](mascot::Frame frame, int& lo, int& hi) {
+    if (!m.face || !m.face->rgb565 || !m.face->band(frame).rows) return;
+    const mascot::Band& b = m.face->band(frame);
+    const int px = m.face->px;
+    lo = my + b.y * size / px;
+    hi = my + ((b.y + b.rows) * size + px - 1) / px;
+  };
   int top = my + size * a.eyes_y0 / 1000, bottom = my + size * a.eyes_y1 / 1000;
+  band_rows(mascot::Frame::Blink, top, bottom);
   auto add = [&](int lo, int hi) {
     top = std::min(top, lo);
     bottom = std::max(bottom, hi);
@@ -1002,7 +1014,9 @@ void Ui::hero_anim_rows(const UiModel& m, int& y0, int& y1) const {
     }
     case Screen::Responding: {
       int mouth = my + size * a.mouth.y / 1000;
-      add(my + size * a.mouth_y0 / 1000, my + size * a.mouth_y1 / 1000);
+      int lo = my + size * a.mouth_y0 / 1000, hi = my + size * a.mouth_y1 / 1000;
+      band_rows(mascot::Frame::Talk, lo, hi);
+      add(lo, hi);
       add(mouth - reach, mouth + reach);
       break;
     }

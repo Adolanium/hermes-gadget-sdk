@@ -494,7 +494,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 return self._unsettled(look)
             error = None
             try:
-                found = await asyncio.to_thread(faces.for_profile, home, self._convert_avatars, session.face_px)
+                found = await asyncio.to_thread(faces.for_profile, home, self._convert_avatars, session.face_px,
+                                                session.face_frames)
             except Exception as exc:  # a file that went while it was read is a change, checked below
                 found, error = None, exc
             if settled is not None:

@@ -20,6 +20,20 @@ int64_t whole_in(const json::Value& v, int64_t lo, int64_t hi) {
   return static_cast<double>(n) == d ? n : -1;
 }
 
+// A face.start band, [first row, rows], into `out`; absent leaves it with no rows. False when it is not
+// two whole numbers inside a px-row face.
+bool band_in(const json::Value& v, int px, mascot::Band& out) {
+  if (v.is_null()) return true;
+  const auto& e = v.elements();
+  if (e.size() != 2) return false;
+  const int64_t y = whole_in(e[0], 0, px - 1);
+  const int64_t rows = y < 0 ? -1 : whole_in(e[1], 1, px - y);
+  if (rows < 0) return false;
+  out.y = static_cast<uint16_t>(y);
+  out.rows = static_cast<uint16_t>(rows);
+  return true;
+}
+
 constexpr uint32_t kBootScreenMs = 800;
 constexpr uint32_t kConnectTimeoutMs = 10000;
 constexpr uint32_t kHandshakeTimeoutMs = 10000;
@@ -283,8 +297,11 @@ void App::begin() {
   if (hal_.display) ui_ = std::make_unique<Ui>(*hal_.display);
   if (ui_ && profile_.faces && profile_.colour_face_alloc && !colour_) {
     const int px = std::min(256, ui_->face_px());
-    const size_t bytes = static_cast<size_t>(px) * static_cast<size_t>(px) * 2;
-    colour_.reset(static_cast<uint16_t*>(profile_.colour_face_alloc(bytes)));
+    const size_t row = static_cast<size_t>(px) * 2;
+    // The picture and half as many rows again for its bands; else the picture alone, which stays still.
+    colour_.reset(static_cast<uint16_t*>(profile_.colour_face_alloc(row * static_cast<size_t>(px + px / 2))));
+    colour_bands_ = colour_ ? px / 2 : 0;
+    if (!colour_) colour_.reset(static_cast<uint16_t*>(profile_.colour_face_alloc(row * static_cast<size_t>(px))));
     colour_px_ = colour_ ? px : 0;
     if (!colour_) log(LogLevel::Warn, "no room for a colour face: one-colour faces only");
   }
@@ -456,8 +473,9 @@ void App::send_hello() {
   }
   caps.set("profiles", true);
   if (ui_ && profile_.faces) {
-    if (colour_px_) caps.set("faces", json::Value::object().set("v", 2).set("px", colour_px_));
-    else caps.set("faces", 1);
+    json::Value colour = json::Value::object().set("v", 2).set("px", colour_px_);
+    if (colour_bands_) colour.set("frames", true);
+    caps.set("faces", colour_px_ ? std::move(colour) : json::Value(1));
   }
   if (hal_.updater) {
     json::Value ota = json::Value::object();
@@ -609,18 +627,26 @@ void App::h_face_start(const json::Value& m) {
   for (size_t i = 0; ok && i < 10; ++i) ok = (v[i] = whole_in(a[i], 0, 1000)) >= 0;
   mascot::Anchors anchors;
   const int64_t stream = whole_in(m["stream"], 0, 255);
+  mascot::Band blink, talk;
+  ok = ok && band_in(m["blink"], colour_px_, blink) && band_in(m["talk"], colour_px_, talk) &&
+       blink.rows + talk.rows <= colour_bands_;
   if (!ok || !mascot::make_anchors(v, anchors) || hash.empty() || hash.size() > 64 || stream < 0 ||
       whole_in(m["width"], colour_px_, colour_px_) < 0 || whole_in(m["height"], colour_px_, colour_px_) < 0 ||
       m["format"].as_string() != "rgb565") {
     log(LogLevel::Warn, "ignored a malformed colour face");
     return;
   }
-  face_in_ = FaceTransfer{static_cast<int>(stream), hash, anchors};
+  face_in_ = FaceTransfer{static_cast<int>(stream), hash, anchors, blink, talk};
+}
+
+// The bytes of the colour face face_in_ brings: the picture, then its bands.
+size_t App::face_bytes() const {
+  return static_cast<size_t>(colour_px_) * (colour_px_ + face_in_->blink.rows + face_in_->talk.rows) * 2;
 }
 
 void App::face_chunk(uint8_t stream, uint16_t seq, const uint8_t* data, size_t len) {
   if (!face_in_ || stream != face_in_->stream) return;
-  const size_t total = static_cast<size_t>(colour_px_) * static_cast<size_t>(colour_px_) * 2;
+  const size_t total = face_bytes();
   if (seq != face_in_->seq || len > total - face_in_->got) {
     log(LogLevel::Warn, "dropped a colour face: a chunk out of place");
     face_in_.reset();
@@ -634,12 +660,15 @@ void App::face_chunk(uint8_t stream, uint16_t seq, const uint8_t* data, size_t l
 
 void App::h_face_end(const json::Value& m) {
   if (!face_in_ || whole_in(m["stream"], 0, 255) != face_in_->stream) return;
-  const bool whole = face_in_->got == static_cast<size_t>(colour_px_) * static_cast<size_t>(colour_px_) * 2;
-  if (whole) {
+  if (face_in_->got == face_bytes()) {
     mascot::Face face;
     face.hash = face_in_->hash;
     face.rgb565 = colour_.get();
     face.px = static_cast<uint16_t>(colour_px_);
+    face.blink = face_in_->blink;
+    face.blink.rgb565 = face.rgb565 + colour_px_ * colour_px_;
+    face.talk = face_in_->talk;
+    face.talk.rgb565 = face.blink.rgb565 + colour_px_ * face.blink.rows;
     face.anchors = face_in_->anchors;
     face_ = std::move(face);
   } else {

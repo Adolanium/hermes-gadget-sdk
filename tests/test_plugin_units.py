@@ -417,6 +417,43 @@ def test_a_colour_face_goes_as_face_start_chunks_and_face_end(tmp_path):
     assert session.face_hash == "c0ffee"
 
 
+@pytest.mark.parametrize("faces, frames", [({"v": 2, "px": 144, "frames": True}, True), ({"v": 2, "px": 144}, False),
+                                           ({"v": 2, "px": 144, "frames": 1}, False),
+                                           ({"v": 2, "frames": True}, False), (1, False)])
+def test_a_device_says_whether_it_draws_blink_and_talk_frames(faces, frames):
+    from hermes_gadget_plugin.hub import DeviceSession
+
+    assert DeviceSession(None, _Wire(), {"device_id": "hg-1", "caps": {"faces": faces}}).face_frames is frames
+
+
+def test_a_moving_colour_face_names_its_bands_and_sends_them_after_the_idle_picture(tmp_path):
+    from hermes_gadget_plugin.face import ColourFace, ProfileFace
+    from hermes_gadget_plugin.hub import DeviceHub, DeviceSession, HubDelegate
+    from hermes_gadget_plugin.protocol import parse_binary
+
+    idle, blink, talk = bytes([1]) * 64 * 64 * 2, bytes([2]) * 64 * 2 * 5, bytes([3]) * 64 * 2 * 3
+    colour = ColourFace(px=64, rgb565=idle, anchors=(607, 293, 262, 620, 801, 107, 396, 508, 586, 649),
+                        blink=(20, 5, blink), talk=(40, 3, talk))
+
+    class Colour(HubDelegate):
+        async def face(self, session):
+            return ProfileFace("moving", lambda: colour)
+
+    async def main():
+        wire = _MediaWire()
+        hub = DeviceHub(DeviceStore(tmp_path), Colour())
+        session = DeviceSession(hub, wire, {"device_id": "hg-1",
+                                            "caps": {"faces": {"v": 2, "px": 64, "frames": True}}})
+        session.paired = True
+        hub.sessions[session.device_id] = session
+        await session.update_face()
+        return wire.sent
+
+    start, *chunks, end = asyncio.run(main())
+    assert (start["type"], start["blink"], start["talk"], end["type"]) == ("face.start", [20, 5], [40, 3], "face.end")
+    assert b"".join(parse_binary(c).payload for c in chunks) == idle + blink + talk
+
+
 @pytest.mark.parametrize("held_at", ["face.start", "face.end"])
 def test_a_colour_face_cut_off_mid_send_is_cleared_when_the_profile_has_none(tmp_path, held_at):
     """The device may hold the old face, the new one, or nothing: a later "no face" must clear it."""
