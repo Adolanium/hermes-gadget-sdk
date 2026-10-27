@@ -68,6 +68,7 @@ Because the id is derived from the key, nobody can claim another device's id wit
 
 - Every `caps` member is optional. A device without a speaker omits `speaker`, and the server then never sends it audio.
 - `caps.speaker.formats` (`["pcm16", "opus"]`) lists the speaker audio formats the device decodes. `format` stays `"pcm16"` for servers that predate the list, and PCM16 is always accepted. See [Audio to the device](#audio-to-the-device).
+- `caps.speaker.buffer_ms` (`4096`) is how much reply audio, in milliseconds, the device can hold before it plays it. The server then sends audio further ahead of real time, which keeps playback smooth on a link whose delay varies, such as a phone hotspot. It is optional: without it the server keeps its default lead. See [Audio to the device](#audio-to-the-device).
 - `caps.ota` (`{"max_size": 2031616}`) means the device installs firmware updates over this connection, up to `max_size` bytes.
 - `caps.dashboard` (`{"v": 1, "rows": 6}`) means the device draws the [dashboard](#dashboard). `v` is the newest layout it draws, and `rows` is how many lines fit on its screen at once.
 - `actions` is the device's tool manifest. Each action has a JSON-Schema `params` object and a `description` written for the model.
@@ -220,7 +221,7 @@ Reply text is already shaped for the device: Markdown is stripped and the text i
 
 `format` is `"pcm16"` (little-endian mono samples) unless the device lists `"opus"` in `caps.speaker.formats`: then the server may send `"opus"`, and each binary frame carries one Opus packet (mono, at `rate`, one 40 ms frame; the last frame of a reply is padded with silence). The plugin sends Opus at 24 kbps when the host has libopus, about a tenth of PCM16 at 16 kHz, and falls back to PCM16 without it.
 
-The server resamples to the device's declared speaker rate. It also paces frames to real time, at most 0.5 s ahead, so a jitter buffer of about 1 s is enough. A new `audio.start` replaces the stream that is playing.
+The server resamples to the device's declared speaker rate. It also paces frames to real time, at most half of `caps.speaker.buffer_ms` ahead, and never less than 0.5 s or more than 3 s. A device that doesn't announce its buffer gets the 0.5 s lead, so a jitter buffer of about 1 s is enough for it. A new `audio.start` replaces the stream that is playing.
 
 ### Display
 

@@ -29,7 +29,8 @@ log = logging.getLogger("hermes_gadget.hub")
 HANDSHAKE_TIMEOUT_S = 10.0
 FACE_LOOKUP_S = 1.5          # how long a welcome waits to learn the face's hash (devices give up after 10 s)
 AUDIO_FRAME_MS = 40          # outbound audio frame duration
-PLAYBACK_LEAD_S = 0.5        # how far ahead of real time playback audio is sent
+PLAYBACK_LEAD_S = 0.5        # how far ahead of real time playback audio is sent, at least
+PLAYBACK_LEAD_MAX_S = 3.0    # the most a device's announced buffer can raise the lead to
 IMAGE_CHUNK_BYTES = 4096
 MIN_UTTERANCE_S = 0.25
 MAX_FRAME_BYTES = 1 << 20
@@ -140,15 +141,18 @@ class _Held:
 class AudioOut:
     """One outbound audio stream, resampled to the device rate and paced.
 
-    Frames are sent at most ``PLAYBACK_LEAD_S`` ahead of real time so a device
-    needs only a small jitter buffer. ``finish()`` returns immediately; the
-    pump sends the tail and ``audio.end`` in the background.
+    Frames are sent at most the session's ``playback_lead_s`` ahead of real time:
+    half the buffer the device announces (``caps.speaker.buffer_ms``), between
+    ``PLAYBACK_LEAD_S`` and ``PLAYBACK_LEAD_MAX_S``, so a burst never overflows it.
+    ``finish()`` returns immediately; the pump sends the tail and ``audio.end`` in
+    the background.
     """
 
     def __init__(self, session: "DeviceSession", stream: int, src_rate: int, channels: int = 1):
         self._session = session
         self.stream = stream
         self.rate = session.speaker_rate
+        self._lead = getattr(session, "playback_lead_s", PLAYBACK_LEAD_S)
         self._resampler = audio.Resampler(src_rate, self.rate, channels)
         self._frame_bytes = max(2, self.rate * 2 * AUDIO_FRAME_MS // 1000)
         # Opus when the device decodes it and the host has libopus: one packet per frame.
@@ -222,8 +226,8 @@ class AudioOut:
                     # (Moving `base` by `ahead` went the wrong way and let the rest of the
                     # reply out in one burst after the first stall.)
                     base = loop.time() - self.sent_seconds
-                elif ahead > PLAYBACK_LEAD_S:
-                    await asyncio.sleep(ahead - PLAYBACK_LEAD_S)
+                elif ahead > self._lead:
+                    await asyncio.sleep(ahead - self._lead)
                 payload = frame
                 if self._encoder:
                     # Opus takes whole frames: pad the last one with silence.
@@ -309,6 +313,17 @@ class DeviceSession:
     def speaker_rate(self) -> int:
         spk = self.caps.get("speaker") or {}
         return int(spk.get("rate") or 16000) if isinstance(spk, dict) else 16000
+
+    @property
+    def playback_lead_s(self) -> float:
+        """How far ahead of real time reply audio may go: half the playback buffer the device
+        announces (``caps.speaker.buffer_ms``), within PLAYBACK_LEAD_S..PLAYBACK_LEAD_MAX_S.
+        A device that doesn't announce one, or announces nonsense, gets PLAYBACK_LEAD_S."""
+        spk = self.caps.get("speaker")
+        buffer_ms = spk.get("buffer_ms") if isinstance(spk, dict) else None
+        if type(buffer_ms) is not int or buffer_ms <= 0:
+            return PLAYBACK_LEAD_S
+        return min(max(buffer_ms / 2000, PLAYBACK_LEAD_S), PLAYBACK_LEAD_MAX_S)
 
     @property
     def face_px(self) -> int:

@@ -141,6 +141,7 @@ bool I2sSpeaker::begin(const I2sSpeakerConfig& cfg) {
   if (storage) buffer_ = xStreamBufferCreateStatic(kSpeakerBuffer, 1, storage, &control);
   else buffer_ = xStreamBufferCreate(16 * 1024, 1);
   if (!buffer_) return false;
+  capacity_ = storage ? kSpeakerBuffer : 16 * 1024;
   xTaskCreate(&I2sSpeaker::task, "hg-spk", 4096, this, 7, nullptr);
   ESP_LOGI(TAG, "speaker ready");
   return true;
