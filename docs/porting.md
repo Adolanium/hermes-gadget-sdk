@@ -29,7 +29,7 @@ The common case is an SPI ST7789 panel, an I2S microphone, an I2S amplifier and 
    }
    ```
 
-3. Add `firmware/esp32/boards/my-board/sdkconfig.defaults` with the target, flash size, PSRAM mode, and `CONFIG_HG_BOARD_MY_BOARD=y`. Where it picks another option of a choice the base file sets, such as the flash size, also turn the base option off (`# CONFIG_ESPTOOLPY_FLASHSIZE_4MB is not set`); the build checks that every line took effect ([build checks](development.md#build-checks)). Add a PlatformIO env if you use it; every env is part of the next release.
+3. Add `firmware/esp32/boards/my-board/sdkconfig.defaults` with the target, flash size, PSRAM mode, and `CONFIG_HG_BOARD_MY_BOARD=y`. Where it picks another option of a choice the base file sets, such as the flash size, also turn the base option off (`# CONFIG_ESPTOOLPY_FLASHSIZE_4MB is not set`); the build checks that every line took effect ([build checks](development.md#build-checks)). Add a PlatformIO env if you use it; every env is part of the next release. A board with PSRAM also copies the network-buffer lines from another PSRAM board's file ([network buffers](#network-buffers)).
 4. Add `firmware/esp32/boards/my-board/board.json` with the name and one-line description the browser installer shows: `{"title": "...", "summary": "...", "docs": "docs/hardware.md#my-board"}`. Add `"ready_made": true` for an all-in-one board with nothing to wire; the installer then shows a "Nothing to wire" badge, so the summary needn't say it.
 
 5. Add a simulator profile with the same screen size and peripherals to `BOARDS` in `python/hermes_gadget/sim/runner.py`, so UI work happens on the desktop.
@@ -77,6 +77,21 @@ For an active-low GPIO backlight driven by `SpiDisplay`, set `b.lcd.backlight_in
 
 - **Monochrome or e-paper:** convert RGB565 to your format in `flush()`. The UI uses dark backgrounds with light text and accents, so thresholding the luminance works.
 - **Very small screens** (128×64): the layout scales text to 1×. You may want a slimmer layout; `Ui` reads only `DisplayInfo`.
+
+## Network buffers
+
+lwIP's default TCP window and send buffer are 5,760 bytes. One connection can't move more than that per round trip, so on a link with a long round trip, such as a phone hotspot (120 to 175 ms), the gadget's WebSocket tops out between about 33 and 48 KB/s. Microphone audio at 24 kHz needs 48 KB/s, so the device drops recording frames (`hg: recording: N of M audio frames not sent`). Replies sent as Opus need only about 3 KB/s and aren't affected.
+
+Every board with PSRAM therefore sets, in its `sdkconfig.defaults`:
+
+```text
+CONFIG_LWIP_TCP_WND_DEFAULT=32768
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+```
+
+The last line puts the Wi-Fi and lwIP buffers in PSRAM, so the larger windows don't take internal RAM, which the audio path and the radio need. When a module turns out to have no PSRAM (most profiles set `CONFIG_SPIRAM_IGNORE_NOTFOUND`), they fall back to internal RAM. A board without PSRAM keeps the defaults.
 
 ## Battery and power
 
