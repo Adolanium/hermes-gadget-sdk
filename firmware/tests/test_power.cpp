@@ -1,9 +1,11 @@
+#include <algorithm>
 #include <array>
 #include <vector>
 
 #include "axp2101.hpp"
 #include "stc8_battery.hpp"
 #include "cores3.hpp"
+#include "sticks3.hpp"
 #include "check.hpp"
 #include "hg/battery.hpp"
 
@@ -237,6 +239,114 @@ TEST("CoreS3: failed power access stops initialization without releasing reset")
   CHECK_EQ(delays, 0);
   CHECK(!control.set_brightness(100));
   CHECK_EQ(writes, 2);
+}
+
+namespace {
+// The StickS3's M5PM1 as a register file.
+struct FakePm1 {
+  std::array<uint8_t, 256> regs{};
+  bool fail = false;
+  std::vector<uint8_t> written;
+  hg::StickS3Control::Read read = [this](uint8_t reg, uint8_t* out, size_t n) {
+    if (fail) return false;
+    for (size_t i = 0; i < n; ++i) out[i] = regs[reg + i];
+    return true;
+  };
+  hg::StickS3Control::Write write = [this](uint8_t reg, uint8_t value) {
+    if (fail) return false;
+    written.push_back(reg);
+    regs[reg] = value;
+    return true;
+  };
+};
+}  // namespace
+
+TEST("StickS3: the LCD rail comes on and the amplifier stays off; other PM1 pins are preserved") {
+  FakePm1 fake;
+  auto& pm1 = fake.regs;
+  auto& written = fake.written;
+  pm1.fill(0xff);
+  pm1[0x09] = 0x01;  // I2C idle sleep left on by earlier firmware
+  pm1[0x10] = 0x00;
+  std::vector<uint32_t> delays;
+  hg::StickS3Control control(fake.read, fake.write, [&](uint32_t ms) {
+    delays.push_back(ms);
+    CHECK_EQ(pm1[0x10], 0x0c);  // both outputs set before the wait, GPIO0 an input
+  });
+  CHECK(control.begin());
+  CHECK_EQ(pm1[0x09], 0x00);
+  CHECK_EQ(pm1[0x0a], 0x00);  // watchdog off
+  CHECK_EQ(pm1[0x16], 0x0c);  // GPIO0/2/3 fields plain GPIO; GPIO1's field untouched
+  CHECK_EQ(pm1[0x13], 0xf3);  // push-pull
+  CHECK_EQ(pm1[0x11], 0xf7);  // LCD rail high, amplifier low
+  CHECK(delays == std::vector<uint32_t>({100}));
+  // Levels are set before the pins become outputs.
+  const auto out = std::find(written.begin(), written.end(), uint8_t(0x11));
+  const auto mode = std::find(written.begin(), written.end(), uint8_t(0x10));
+  CHECK(out < mode);
+
+  written.clear();
+  CHECK(control.set_amplifier(true));
+  CHECK_EQ(pm1[0x11], 0xff);
+  CHECK(control.set_amplifier(true));  // no change, no write
+  CHECK_EQ(written.size(), size_t(1));
+  CHECK(control.set_amplifier(false));
+  CHECK_EQ(pm1[0x11], 0xf7);
+}
+
+TEST("StickS3: a PM1 that does not answer stops initialization") {
+  FakePm1 fake;
+  fake.fail = true;
+  int delays = 0;
+  hg::StickS3Control control(fake.read, fake.write, [&](uint32_t) { ++delays; });
+  CHECK(!control.begin());
+  CHECK(fake.written.empty());
+  CHECK_EQ(delays, 0);
+  CHECK(!control.read());
+  CHECK(!control.external_power());
+}
+
+TEST("StickS3: battery millivolts, USB and the active-low charge status are reported") {
+  FakePm1 fake;
+  hg::StickS3Control control(fake.read, fake.write, [](uint32_t) {});
+  fake.regs[0x22] = 0x9c;  // 3996 mV, little-endian
+  fake.regs[0x23] = 0x0f;
+  fake.regs[0x04] = 0x05;  // USB and battery
+  fake.regs[0x12] = 0x00;  // charge status low: charging
+  auto s = control.read();
+  CHECK(s.has_value());
+  CHECK(s->battery_present == std::optional<bool>(true));
+  CHECK(s->battery_mv == std::optional<uint16_t>(3996));
+  CHECK(s->battery_percent == std::optional<uint8_t>(hg::estimate_liion_curve_percent(3996)));
+  CHECK(s->external_power == std::optional<bool>(true));
+  CHECK(s->charging == std::optional<bool>(true));
+  CHECK(control.external_power() == std::optional<bool>(true));
+
+  fake.regs[0x12] = 0x01;  // high: charged, or not charging
+  CHECK(control.read()->charging == std::optional<bool>(false));
+
+  fake.regs[0x04] = 0x04;  // battery only: never charging, whatever the pin reads
+  fake.regs[0x12] = 0x00;
+  s = control.read();
+  CHECK(s->external_power == std::optional<bool>(false));
+  CHECK(s->charging == std::optional<bool>(false));
+
+  fake.regs[0x22] = 0x00;  // nothing on the battery node
+  fake.regs[0x23] = 0x00;
+  s = control.read();
+  CHECK(s->battery_present == std::optional<bool>(false));
+  CHECK(!s->battery_mv && !s->battery_percent && !s->charging);
+}
+
+TEST("StickS3: power off turns the amplifier off, then sends the PM1 shutdown command") {
+  FakePm1 fake;
+  hg::StickS3Control control(fake.read, fake.write, [](uint32_t) {});
+  CHECK(control.set_amplifier(true));
+  fake.written.clear();
+  CHECK(control.power_off());
+  CHECK_EQ(fake.regs[0x11] & 0x08, 0);
+  CHECK(fake.written.back() == 0x0c);
+  CHECK_EQ(fake.regs[0x0c], 0xa1);
 }
 
 TEST("AXP2101: the power key's short press is read once and cleared; enabling touches only interrupts") {

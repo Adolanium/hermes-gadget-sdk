@@ -248,6 +248,9 @@ bool CodecSpeaker::begin(esp_codec_dev_handle_t dev, bool stereo32, int pa) {
     pa_.emplace([this](void* chunk, size_t bytes) { return xStreamBufferReceive(buffer_, chunk, bytes, 0); },
                 [this] { xStreamBufferReset(buffer_); },
                 [pin](bool on) { gpio_set_level(pin, on); });
+  } else if (board_pa) {
+    pa_.emplace([this](void* chunk, size_t bytes) { return xStreamBufferReceive(buffer_, chunk, bytes, 0); },
+                [this] { xStreamBufferReset(buffer_); }, board_pa);
   }
   if (stereo32) {
     stereo_ = static_cast<int32_t*>(heap_caps_malloc(kSpeakerChunk * 2 * sizeof(int32_t), MALLOC_CAP_8BIT));

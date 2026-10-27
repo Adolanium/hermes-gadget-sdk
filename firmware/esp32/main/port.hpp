@@ -21,10 +21,12 @@
 #include "board.hpp"
 #include "axp2101.hpp"
 #include "band_flush.hpp"
+#include "bmi270.hpp"
 #include "cores3.hpp"
 #include "pcf85063.hpp"
 #include "qmi8658.hpp"
 #include "shared_reply.hpp"
+#include "sticks3.hpp"
 #include "speaker_pa.hpp"
 #include "speaker_underruns.hpp"
 #include "tag_scanner.hpp"
@@ -510,6 +512,9 @@ class CodecSpeaker final : public hg::AudioOut {
   }
   void power_down();
   void power_up();
+  // An amplifier enable that isn't an ESP32 pin (StickS3: behind the M5PM1).
+  // Used when begin() gets no PA pin; set it before begin().
+  std::function<void(bool)> board_pa;
 
  private:
   static void task(void* arg);
@@ -584,12 +589,16 @@ class MotionInput {
   // Counts good reads: the app task forwards a sample only when this moved, so a
   // sensor that stops answering goes stale in App::motion_tick instead of repeating.
   uint32_t samples() const { return samples_.load(std::memory_order_acquire); }
+  const char* chip_name() const { return cfg_.chip == ImuChip::Bmi270 ? "bmi270" : "qmi8658"; }
 
  private:
   static void task(void* arg);
+  bool start_chip();
+  bool read_chip(int16_t mg[3]);
   ImuConfig cfg_{};
   i2c_master_dev_handle_t dev_ = nullptr;
   std::unique_ptr<hg::Qmi8658> chip_;
+  std::unique_ptr<hg::Bmi270> bmi270_;
   std::atomic<int16_t> x_{0}, y_{0}, z_{0};
   std::atomic<uint32_t> samples_{0};
 };
@@ -671,6 +680,20 @@ class CoreS3Board {
  private:
   i2c_master_dev_handle_t pmic_ = nullptr, expander_ = nullptr;
   std::unique_ptr<hg::CoreS3Control> control_;
+};
+
+// The M5PM1's rails, amplifier and battery. Hal::power once begin() succeeded.
+class StickS3Board final : public hg::Power {
+ public:
+  bool begin(i2c_master_bus_handle_t bus);
+  void set_amplifier(bool on);
+  std::optional<hg::PowerStatus> read() override { return control_->read(); }
+  bool power_off() override { return control_->power_off(); }
+  std::optional<bool> external_power() override { return control_->external_power(); }
+
+ private:
+  i2c_master_dev_handle_t pm1_ = nullptr;
+  std::unique_ptr<hg::StickS3Control> control_;
 };
 
 // Opus reply audio (port_opus.cpp). It decodes on the app task, whose stack

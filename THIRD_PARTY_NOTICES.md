@@ -38,6 +38,8 @@ The mascot artwork, and the logo and device bitmaps drawn from it, come from [He
 
 The QR code encoder in `firmware/core/third_party/qrcode/` is vendored from [ricmoo/QRCode](https://github.com/ricmoo/QRCode) (MIT, © 2017 Richard Moore and © 2017 Project Nayuki), which in turn derives from [Project Nayuki's QR Code generator](https://www.nayuki.io/page/qr-code-generator-library). It is adapted for this project: the C99 variable-length arrays become fixed, bounded buffers so MSVC accepts the file, and two bounds checks are added so an oversized payload cannot corrupt memory or produce an unscannable code. The modification notice is in [NOTICE](NOTICE) and the upstream license in [LICENSES/QRCode-MIT.txt](LICENSES/QRCode-MIT.txt).
 
+The BMI270 configuration image in `firmware/drivers/third_party/bmi270/bmi270_config.hpp` is `bmi270_config_file[]` from Bosch Sensortec's [BMI270_SensorAPI](https://github.com/boschsensortec/BMI270_SensorAPI/tree/41129fcfe39c583ee5462d79195741945d51c1fe) v2.86.1 (BSD-3-Clause, © 2023 Bosch Sensortec GmbH), unmodified and re-wrapped as a C++ array. The chip runs it after each reset; the StickS3 profile loads it for face-down sleep. The upstream license is in [LICENSES/BMI270_SensorAPI-BSD-3-Clause.txt](LICENSES/BMI270_SensorAPI-BSD-3-Clause.txt).
+
 ## Adapted display initialization tables
 
 The BOX-3 panel register values follow [Espressif's BSP](https://github.com/espressif/esp-bsp/tree/master/bsp/esp-box-3), Apache 2.0. The adapter uses zero-length sleep/display commands with explicit delays.

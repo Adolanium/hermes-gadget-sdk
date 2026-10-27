@@ -1,0 +1,6 @@
+{
+  "title": "M5Stack StickS3",
+  "summary": "1.14\" 240×135 screen, onboard microphone, speaker and battery, two keys. Experimental.",
+  "docs": "docs/hardware.md#m5stack-sticks3",
+  "ready_made": true
+}

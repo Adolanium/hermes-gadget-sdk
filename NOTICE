@@ -199,6 +199,25 @@ https://qstcorp.com/upload/pdf/202301/13-52-25%20QMI8658A%20Datasheet%20Rev%20A.
 Copyright (c) 2022 QST Corporation. Hardware facts only; no QST code is
 included.
 
+The BMI270 register facts in firmware/drivers/bmi270.cpp (the chip id, the
+soft-reset command, the configuration-load sequence and the accelerometer
+settings and data layout) come from Bosch Sensortec's BMI270 datasheet
+BST-BMI270-DS000. The configuration image in
+firmware/drivers/third_party/bmi270/bmi270_config.hpp is bmi270_config_file[]
+from Bosch Sensortec's BMI270_SensorAPI v2.86.1,
+https://github.com/boschsensortec/BMI270_SensorAPI/blob/41129fcfe39c583ee5462d79195741945d51c1fe/bmi270.c,
+Copyright (c) 2023 Bosch Sensortec GmbH, BSD-3-Clause, unmodified; it is
+re-wrapped as a C++ array. The full upstream license is in
+LICENSES/BMI270_SensorAPI-BSD-3-Clause.txt.
+
+The StickS3 M5PM1 register facts in firmware/drivers/sticks3.cpp (the GPIO
+mode, output, input, drive and function registers, the LCD rail on GPIO2, the
+amplifier on GPIO3, the active-low charge status on GPIO0, the power source,
+battery voltage, I2C idle-sleep, watchdog and shutdown registers) come from
+M5Stack's M5Unified at commit 368ad60807161625aa65baad37a4a3af2a7eccea and
+M5GFX at commit 65c816a38386062d2c3dc47d41237a9083acbc75 (both MIT,
+Copyright (c) M5Stack). Hardware facts only; no M5Stack code is included.
+
 The PCF85063 register facts in firmware/drivers/pcf85063.cpp (the BCD time
 registers 0x04-0x0A, the oscillator-stop flag on the seconds register and the
 burst-write behavior that restarts the clock) come from NXP's PCF85063A
