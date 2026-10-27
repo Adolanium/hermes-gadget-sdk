@@ -512,7 +512,7 @@ Board option `m5stack-sticks3`, for M5Stack's StickS3: an ESP32-S3-PICO-1-N8R8 (
 | Speaker DAC + microphone ADC | ES8311 | I2C 0x18 on SDA 47, SCL 48; I2S MCLK 18, BCLK 17, WS 15, DOUT 14, DIN 16; clocked from BCLK |
 | Power manager | M5PM1 | I2C 0x6E; its GPIO2 switches the LCD rail, its GPIO3 enables the AW8737 amplifier, its GPIO0 reads the charge status (low while charging); battery voltage, USB presence and shutdown |
 | Motion | BMI270 | I2C 0x68; its axes match the device frame, so no remapping |
-| Keys | | KEY1 GPIO 11 (TALK), KEY2 GPIO 12 (CANCEL) |
+| Keys | | KEY1 GPIO 11 (TALK, the front key), KEY2 GPIO 12 (CANCEL, a side key); the other side key is the M5PM1's power button (single click powers on or resets, double click powers off, long press enters download mode) and is not read by the firmware |
 
 The LCD rail and the amplifier are switched over I2C, not from ESP32 pins: `StickS3Board` (`port_sticks3.cpp`, `drivers/sticks3.cpp`) turns the rail on before the panel starts and the amplifier on only while audio plays. It is also the board's `Power`: battery millivolts, a percent estimated from the voltage curve (it reads high while charging), USB presence, charging, and **Power off** in settings through the PM1's shutdown command. The BMI270 (`drivers/bmi270.cpp`) needs Bosch's configuration image loaded after every reset, which takes about 8 KB of I2C writes at boot; it then gives face-down sleep (`set face_down_sleep on`). The IR transceiver isn't used yet.
 
@@ -523,7 +523,9 @@ cd firmware/esp32
 pio run -e m5stack-sticks3 -t upload -t monitor
 ```
 
-If the board doesn't enter download mode, hold the side button until the screen goes dark and then plug in USB.
+If the board doesn't enter download mode, connect USB and hold the power button (the side key that isn't KEY2) until the internal green LED flashes.
+
+The StickS3 has two side keys. KEY2 is an ESP32 input and does nothing while the device is off; only the power button turns it back on after **Power off**.
 
 ### First flash: what to check
 
