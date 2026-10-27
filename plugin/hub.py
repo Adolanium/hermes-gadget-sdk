@@ -323,7 +323,9 @@ class DeviceSession:
         buffer_ms = spk.get("buffer_ms") if isinstance(spk, dict) else None
         if type(buffer_ms) is not int or buffer_ms <= 0:
             return PLAYBACK_LEAD_S
-        return min(max(buffer_ms / 2000, PLAYBACK_LEAD_S), PLAYBACK_LEAD_MAX_S)
+        # Clamp the integer before dividing: a value past float range would raise OverflowError.
+        buffer_ms = min(max(buffer_ms, int(PLAYBACK_LEAD_S * 2000)), int(PLAYBACK_LEAD_MAX_S * 2000))
+        return buffer_ms / 2000
 
     @property
     def face_px(self) -> int:

@@ -182,6 +182,7 @@ def test_a_device_with_a_bigger_buffer_is_sent_further_ahead_but_never_past_its_
         ({"rate": 24000, "buffer_ms": 4000}, 2.0),                   # half the buffer
         ({"rate": 16000, "buffer_ms": 600}, hubmod.PLAYBACK_LEAD_S),  # a small buffer keeps the floor
         ({"rate": 24000, "buffer_ms": 600000}, hubmod.PLAYBACK_LEAD_MAX_S),  # a huge one is capped
+        ({"rate": 24000, "buffer_ms": 10**400}, hubmod.PLAYBACK_LEAD_MAX_S),  # past float range: capped, no OverflowError
         ({"rate": 24000, "buffer_ms": "4000"}, hubmod.PLAYBACK_LEAD_S),
         ({"rate": 24000, "buffer_ms": True}, hubmod.PLAYBACK_LEAD_S),
         ({"rate": 24000, "buffer_ms": -1}, hubmod.PLAYBACK_LEAD_S),
