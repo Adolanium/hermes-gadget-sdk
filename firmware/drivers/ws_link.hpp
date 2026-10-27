@@ -73,7 +73,11 @@ class TxWatch {
     busy_.store(true);
   }
   void end() { busy_.store(false); }
-  bool stuck(uint32_t now_ms) const { return busy_.load() && now_ms - since_.load() > kStuckMs; }
+  // Signed: `now_ms` is read before since_, so an item the send task began in between on the
+  // other core is a few milliseconds in the future, not ~49 days old. Holds across the wrap.
+  bool stuck(uint32_t now_ms) const {
+    return busy_.load() && static_cast<int32_t>(now_ms - since_.load()) > static_cast<int32_t>(kStuckMs);
+  }
 
  private:
   std::atomic<bool> busy_{false};
