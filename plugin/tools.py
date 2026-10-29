@@ -53,7 +53,7 @@ DISPLAY_SCHEMA = {
 
 ACTION_SCHEMA = {
     "name": "gadget_action",
-    "description": "Invoke an action a gadget exposes (for example an LED, relay, buzzer or volume control). "
+    "description": "Invoke an action a gadget exposes (for example an LED, relay, buzzer, volume control or camera capture). "
                    "Use gadget_devices first if you do not know the action names and parameters.",
     "parameters": {
         "type": "object",
@@ -165,6 +165,8 @@ def gadget_action(args: dict, **_kw) -> str:
     session, err = _resolve(adapter, args.get("device"))
     if err:
         return _error(err)
+    if session is None:
+        return _error("no connected gadget is available")
     if (err := _usable(session)):
         return _error(err)
     action = str(args.get("action") or "").strip()
@@ -177,6 +179,14 @@ def gadget_action(args: dict, **_kw) -> str:
         result = _run(adapter, session.invoke_action(action, call_args, timeout=CALL_TIMEOUT_S - 2))
     except Exception as exc:
         return _error(str(exc))
+    if action == "camera.capture":
+        try:
+            from .camera_capture import save_camera_capture
+
+            capture = save_camera_capture(result, session.device_id)
+        except Exception as exc:
+            return _error(f"could not save the camera capture: {exc}")
+        return json.dumps({"success": True, "device": session.name, "action": action, **capture})
     return json.dumps({"success": True, "device": session.name, "action": action, "result": result})
 
 

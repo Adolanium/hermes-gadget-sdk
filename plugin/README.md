@@ -42,7 +42,7 @@ Choose **Hermes Gadget** in setup and restart the gateway when it asks. Then set
 
 | | |
 | --- | --- |
-| **A gateway platform**<br />`gadget`, a WebSocket endpoint devices connect to. Each device is a direct-message chat, so sessions, `/stop`, `/new` and pairing work as on any platform. | **Three agent tools**<br />`gadget_devices` lists connected gadgets, `gadget_display` shows a short card on a screen, and `gadget_action` runs an action a device declares, such as an LED or a relay. |
+| **A gateway platform**<br />`gadget`, a WebSocket endpoint devices connect to. Each device is a direct-message chat, so sessions, `/stop`, `/new` and pairing work as on any platform. | **Three agent tools**<br />`gadget_devices` lists connected gadgets, `gadget_display` shows a short card on a screen, and `gadget_action` runs a device-declared action, such as an LED, relay or camera capture saved as PNG on the gateway. |
 | **A CLI**<br />`hermes gadget info`, `devices`, `pair`, `forget`, `update` and `tile`. | **Over-the-air updates**<br />`hermes gadget update` sends new firmware to a connected gadget. |
 | **A dashboard**<br />Gadgets list the agent's sessions (idle, busy or waiting for approval) and status tiles set with `hermes gadget tile`. Session state comes from Hermes's plugin hooks. | |
 
