@@ -3,6 +3,8 @@
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h
 
 #include <cstring>
+#include <utility>
+#include <vector>
 
 #include "driver/gpio.h"
 #include "esp_app_desc.h"
@@ -15,6 +17,10 @@
 #include "hg/touch.hpp"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
+#if CONFIG_HG_BOARD_WS_P4_TOUCH_LCD_7B
+#include "hg/crypto.hpp"
+#include "port_camera.hpp"
+#endif
 #if SOC_MIPI_DSI_SUPPORTED
 #include "esp_ldo_regulator.h"
 #endif
@@ -75,6 +81,9 @@ hgp::TailnetLink g_tailnet;
 #endif
 hgp::Buttons g_buttons;
 hgp::Wifi g_wifi;
+#if CONFIG_HG_BOARD_WS_P4_TOUCH_LCD_7B
+hgp::CameraCapture g_camera;
+#endif
 hgp::TimePort g_time;
 hgp::EspUpdater g_updater;
 hg::TouchGestures* g_gestures = nullptr;
@@ -138,6 +147,30 @@ void add_status_led(hg::App& app, int gpio) {
   };
   app.add_action(std::move(led));
 }
+
+#if CONFIG_HG_BOARD_WS_P4_TOUCH_LCD_7B
+void add_camera_action(hg::App& app, i2c_master_bus_handle_t sccb_bus) {
+  hg::Action camera;
+  camera.name = "camera.capture";
+  camera.description = "Take a still photo with the attached OV5647 camera. The gateway saves it as a PNG and returns its path.";
+  camera.params.set("type", "object").set("properties", hg::json::Value::object());
+  camera.handler = [sccb_bus](const hg::json::Value&, hg::json::Value& result, std::string& error) {
+    std::vector<uint8_t> pixels;
+    uint16_t width = 0, height = 0;
+    if (!g_camera.capture_rgb565(sccb_bus, pixels, width, height, error)) return false;
+    if (pixels.size() > 640u * 512u * 2u) {
+      error = "captured image exceeds the action-result limit";
+      return false;
+    }
+    result.set("format", "rgb565le")
+        .set("width", static_cast<unsigned>(width))
+        .set("height", static_cast<unsigned>(height))
+        .set("image_b64", hg::crypto::base64_encode(pixels.data(), pixels.size()));
+    return true;
+  };
+  app.add_action(std::move(camera));
+}
+#endif
 
 // Supplies switched straight from a GPIO go on before anything talks to the
 // parts behind them.
@@ -481,6 +514,9 @@ extern "C" void app_main(void) {
   if (profile.touch_screen) g_gestures = &gestures;
   apply_touch_cancel();
   add_status_led(app, board.status_led);
+#if CONFIG_HG_BOARD_WS_P4_TOUCH_LCD_7B
+  add_camera_action(app, i2c_bus);
+#endif
   app.on_setting_changed = [](std::string_view key) {
     if (key == "wifi_ssid" || key == "wifi_pass") app.close_wifi_setup();
     if (key == "wifi_ssid" || key == "wifi_pass" || key == "wifi_nets") g_wifi.networks_changed();

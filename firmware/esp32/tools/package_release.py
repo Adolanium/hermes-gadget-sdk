@@ -51,7 +51,10 @@ CHIP_NAMES = {"esp32": "ESP32", "esp32s2": "ESP32-S2", "esp32s3": "ESP32-S3", "e
               "esp32c6": "ESP32-C6", "esp32h2": "ESP32-H2", "esp32p4": "ESP32-P4"}
 # Boards built with idf.py, not PlatformIO, mapped to where their build command lives. Each one's
 # directory under boards/ has the board's name.
-IDF_BOARDS = {"crowpanel-p4-101": "the esp32p4 job in .github/workflows/ci.yml"}
+IDF_BOARDS = {
+    "crowpanel-p4-101": "the esp32p4 job in .github/workflows/ci.yml",
+    "ws-p4-touch-lcd-7b": "the esp32p4 job in .github/workflows/ci.yml",
+}
 BUILD_FILES = ("bootloader.bin", "partitions.bin", "ota_data_initial.bin", "firmware.bin")
 
 

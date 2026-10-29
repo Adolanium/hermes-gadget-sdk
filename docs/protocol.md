@@ -288,6 +288,16 @@ Hermes asks before some actions: destructive commands such as `/new`, a costly m
 
 Devices must answer every `action` exactly once. The server times out after about 18 s.
 
+#### Optional `camera.capture` action
+
+A device with a camera may advertise `camera.capture` in `hello.actions`; it takes an empty parameter object. A successful `action.result` carries:
+
+```json
+{"format":"rgb565le","width":640,"height":512,"image_b64":"<base64>"}
+```
+
+`image_b64` is Base64-encoded, tightly packed, row-major RGB565 pixels in little-endian byte order, with no row padding. For the 7B port, the maximum dimensions are 640×512 (655,360 decoded bytes; 873,816 Base64 characters). The full result stays below the gateway's current 1 MiB action-frame limit. Other camera ports must keep the serialized result within their transport's frame limit. On capture failure, the device uses the existing `action.result` error form; no new message type is introduced. The plugin saves a successful result as a PNG under `~/.hermes/gadgetpix/` and gives the agent the file's path, width, height and size, never `image_b64`.
+
 ### Telemetry and events (device → server)
 
 | Message | Meaning |

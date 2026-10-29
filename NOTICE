@@ -270,3 +270,7 @@ register layout are hardware facts referenced from Elecrow V1.1 commit
 6c7c851f3105349dc24b12ad058655ba6afa98ee. See the pinned URLs in
 THIRD_PARTY_NOTICES.md. The Elecrow repository has no license file; only those
 hardware facts are used and no Elecrow source code is copied.
+
+The optional OV5647 camera build fetches Espressif's `esp_video` 2.5.0 and `esp_ipa` 2.4.0 (Espressif MIT), plus `esp_cam_sensor` 2.6.0 (Apache License 2.0). The Espressif MIT license text is included in `LICENSES/Espressif-MIT.txt`.
+
+The Waveshare ESP32-P4-WIFI6-Touch-LCD-7B camera connector and SCCB wiring facts follow the vendor's Arduino camera preview example at commit `9fcd49a8c927a00f5583c22d568b3448addbe51c`: https://github.com/waveshareteam/ESP32-P4-WIFI6-Touch-LCD-7B/tree/9fcd49a8c927a00f5583c22d568b3448addbe51c/examples/arduino/examples/06_Camera_Preview. The vendor repository is Apache License 2.0. Only hardware facts are used; no vendor source code is copied.

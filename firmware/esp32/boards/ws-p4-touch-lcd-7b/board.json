@@ -1,0 +1,6 @@
+{
+  "title": "Waveshare ESP32-P4-WIFI6-Touch-LCD-7B",
+  "summary": "1024x600 MIPI-DSI panel, GT911 touch, ES8311+ES7210 audio, Wi-Fi 6 via C6. Experimental.",
+  "docs": "docs/hardware.md#waveshare-esp32-p4-wifi6-touch-lcd-7b",
+  "ready_made": true
+}
