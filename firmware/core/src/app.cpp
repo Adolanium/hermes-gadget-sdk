@@ -6,6 +6,7 @@
 
 #include "hg/crypto.hpp"
 #include "hg/protocol.hpp"
+#include "hg/setup.hpp"
 #include "hg/wifi_networks.hpp"
 
 namespace hg {
@@ -69,7 +70,10 @@ std::string_view setting_storage_key(std::string_view key) {
   return key == "battery_estimate" ? std::string_view("batt_estimate") : key;
 }
 
-bool is_secret(std::string_view key) { return key == "token" || key == "wifi_pass"; }
+bool is_secret(std::string_view key) { return key == "token" || key == "wifi_pass" || key == "ts_key"; }
+
+// Settings a board with DeviceProfile::tailnet adds (docs/tailnet.md).
+const char* const kTailnetKeys[] = {"tailnet", "ts_key"};
 
 // " en es ... auto": the `language` setting's values.
 std::string language_codes() {
@@ -185,6 +189,8 @@ void App::load_settings() {
   face_down_sleep_ = setting("face_down_sleep", "off") == "on";
   clock_after_ms_ = static_cast<uint32_t>(std::max(0, std::min(3600, std::atoi(setting("clock", "0").c_str())))) * 1000;
   clock_24h_ = setting("time_format", "24h") != "12h";
+  tailnet_on_ = profile_.tailnet && setting("tailnet", "off") == "on";
+  tailnet_key_ = profile_.tailnet ? setting("ts_key") : std::string();
   if (face_down_) return;  // a face-down screen stays dark until the gadget is turned over
   activity_at_ = now();
   display_dimmed_ = display_sleeping_ = false;
@@ -353,6 +359,35 @@ void App::on_network(bool up, std::string_view detail) {
     reconnect_at_ = now();
   }
   update_model();
+}
+
+void App::on_tunnel(bool up, std::string_view detail) {
+  const bool was_up = tunnel_up_;
+  tunnel_up_ = up;
+  tunnel_detail_ = std::string(detail);
+  if (!tailnet_wanted()) return;
+  if (up && !was_up) {
+    log(LogLevel::Info, "tailnet up");
+    if (reconnect_pending_) reconnect_at_ = now();  // the wait was for the tunnel, not the backoff
+  } else if (!up && was_up) {
+    log(LogLevel::Warn, std::string("tailnet down: ") + tunnel_detail_);
+    if (transport_active_) {
+      hal_.transport->close();
+      drop_session("tailnet lost");
+    }
+  }
+  update_model();
+}
+
+// `tailnet` or `ts_key` changed: a session that went the wrong way starts again.
+void App::tailnet_reconfigured() {
+  if (transport_active_) {
+    hal_.transport->close();
+    drop_session("reconfigured");
+  }
+  backoff_ = 0;
+  reconnect_pending_ = network_up_;
+  reconnect_at_ = now();
 }
 
 void App::connect_now() {
@@ -1751,7 +1786,16 @@ void App::tick() {
     update_model();
   }
 
-  if (reconnect_pending_ && network_up_ && static_cast<int32_t>(t - reconnect_at_) >= 0) connect_now();
+  if (reconnect_pending_ && network_up_ && static_cast<int32_t>(t - reconnect_at_) >= 0) {
+    if (!waiting_for_tunnel()) {
+      connect_now();
+    } else if (phase_ == Phase::NoNetwork) {
+      // On Wi-Fi, waiting for the tailnet: the connecting screen says so (update_model).
+      phase_ = Phase::Connecting;
+      phase_since_ = t;
+      update_model();
+    }
+  }
 
   if (phase_ == Phase::Connecting && !reconnect_pending_ && t - phase_since_ > kConnectTimeoutMs) {
     hal_.transport->close();
@@ -2000,7 +2044,10 @@ void App::update_model() {
     m.headline = tr(phase_ == Phase::Handshake ? Msg::Authenticating : Msg::ConnectingToHermes);
     m.detail = server_url_;
     if (!last_close_.empty() && attempts_ > 1) m.detail += "\n" + tr(Msg::ConnectError, {last_close_});
-    if (reconnect_pending_) {
+    if (reconnect_pending_ && waiting_for_tunnel()) {
+      // The port's words, like the Wi-Fi detail: "Joining tailnet", or why it failed.
+      m.detail = server_url_ + "\n" + (tunnel_detail_.empty() ? std::string("Joining tailnet") : tunnel_detail_);
+    } else if (reconnect_pending_) {
       uint32_t wait = static_cast<int32_t>(reconnect_at_ - now()) > 0 ? (reconnect_at_ - now() + 999) / 1000 : 0;
       m.hint = tr(Msg::RetryIn, {std::to_string(wait)});
     } else {
@@ -2184,6 +2231,12 @@ json::Value App::status_value() const {
       .set("profile", agent_profile_)
       .set("server", server_url_)
       .set("network", network_up_);
+  if (profile_.tailnet) {
+    json::Value tn = json::Value::object();
+    tn.set("on", tailnet_on_).set("key", !tailnet_key_.empty()).set("up", tunnel_up_);
+    if (!tunnel_detail_.empty()) tn.set("detail", tunnel_detail_);
+    s.set("tailnet", tn);
+  }
   s.set("display_sleeping", display_sleeping_);
   if (can_sleep_face_down()) s.set("face_down", face_down_);
   // The language the screen is in, and whether it follows Hermes's (`language` auto).
@@ -2211,6 +2264,7 @@ std::string App::diag_report() {
   r.set("device_id", device_id_).set("board", profile_.board).set("firmware", profile_.firmware);
   json::Value conn = json::Value::object();
   conn.set("attempts", attempts_).set("network", network_detail_);
+  if (tailnet_wanted()) conn.set("tailnet", tunnel_up_ ? std::string("up") : tunnel_detail_.empty() ? std::string("joining") : tunnel_detail_);
   if (!last_close_.empty()) conn.set("last_close", last_close_);
   if (online_since_) conn.set("online_s", (now() - online_since_) / 1000);
   r.set("connection", conn);
@@ -2227,6 +2281,11 @@ bool App::known_setting(std::string_view key) const {
   for (const auto& k : profile_.extra_settings) {
     if (key == k) return true;
   }
+  if (profile_.tailnet) {
+    for (const char* k : kTailnetKeys) {
+      if (key == k) return true;
+    }
+  }
   return false;
 }
 
@@ -2241,6 +2300,8 @@ std::string App::console(std::string_view raw) {
     std::string keys;
     for (const char* k : kSettingKeys) keys += std::string(" ") + k;
     for (const auto& k : profile_.extra_settings) keys += " " + k;
+    if (profile_.tailnet)
+      for (const char* k : kTailnetKeys) keys += std::string(" ") + k;
     return "@help commands: status | diag [log] | get <key> | set <key> <value> | say <text> | talk | release | "
            "cancel | new-session | settings [close] | wifi-setup [close] | wifi [list | add <ssid> [password] | join <ssid> | "
            "forget <ssid>] | phone [pair [close] | forget] | perf [on | off | reset | budget <us> | bench [scroll | mascot | redraw | all]] | yes | no | reconnect | forget-key | factory-reset   keys:" + keys;
@@ -2303,6 +2364,10 @@ std::string App::console(std::string_view raw) {
       return "@error clock must be 0 (off) or 5..3600 seconds";
     if (key == "time_format" && !value.empty() && value != "12h" && value != "24h")
       return "@error time_format must be 12h or 24h";
+    if (key == "tailnet" && !value.empty() && value != "on" && value != "off")
+      return "@error tailnet must be on or off";
+    if (key == "ts_key" && !value.empty() && !valid_tailnet_key(value))
+      return "@error ts_key must be a Tailscale auth key (tskey-...)";
     if (key == "language" && !value.empty() && value != "auto" && !i18n::parse(value))
       return "@error language must be one of:" + language_codes();
     if (!hal_.storage) return "@error no storage";
@@ -2325,6 +2390,7 @@ std::string App::console(std::string_view raw) {
       reconnect_pending_ = network_up_;
       reconnect_at_ = now();
     }
+    if (key == "tailnet" || key == "ts_key") tailnet_reconfigured();
     if (on_setting_changed) on_setting_changed(key);
     update_model();
     return "@ok " + key;
@@ -2378,6 +2444,8 @@ std::string App::console(std::string_view raw) {
       hal_.storage->erase("wifi_nets");
       hal_.storage->erase("wifi_fast");  // where the last access point was (drivers/wifi_fast.hpp)
       if (on_phone_forget) on_phone_forget();
+      for (const char* k : kTailnetKeys) hal_.storage->erase(k);
+      if (on_tailnet_forget) on_tailnet_forget();
     }
     return "@ok " + cmd + " (restart the device to apply)";
   }

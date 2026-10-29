@@ -9,6 +9,7 @@ body{max-width:30rem;margin:3rem auto;padding:0 1.25rem}h1{font-size:2rem;line-h
 p{color:#bac3cc}label{display:block;margin-top:1.2rem;font-weight:600}
 input,button{box-sizing:border-box;width:100%;padding:.8rem;border-radius:.6rem;font:inherit}
 input{background:#1b222b;color:inherit;border:1px solid #596574;margin:.35rem 0}
+input[type=checkbox]{width:auto;margin:0 .5rem 0 0;accent-color:#aadcc5}label.check{display:flex;align-items:center}
 button{margin-top:1.4rem;background:#aadcc5;color:#10291d;border:0;font-weight:700;cursor:pointer}
 button:disabled{opacity:.55;cursor:wait}small{display:block;color:#bac3cc}
 :focus-visible{outline:3px solid #aadcc5;outline-offset:3px}#status{min-height:3rem}
@@ -23,6 +24,12 @@ button:disabled{opacity:.55;cursor:wait}small{display:block;color:#bac3cc}
 <small>Leave empty for an open network. Saved passwords are never shown here.</small>
 <label for="server">Hermes gateway address</label><input id="server" required maxlength="200" placeholder="ws://192.168.1.20:8765/gadget" inputmode="url" autocomplete="off">
 <small>Use the address shown by the Hermes gadget setup command.</small>
+<fieldset id="tailnet" hidden style="border:0;padding:0;margin:0">
+<label class="check" for="tn_on"><input id="tn_on" type="checkbox">Reach Hermes over my Tailscale tailnet</label>
+<small>For a Hermes computer that only listens on its tailnet address, such as ws://100.x.y.z:8765/gadget.</small>
+<label for="ts_key">Tailscale auth key</label><input id="ts_key" type="password" maxlength="120" autocomplete="off" placeholder="tskey-auth-...">
+<small id="ts_hint">Create a one-off, pre-approved key in the Tailscale admin console. The key is secret: the gadget stores it and never shows it again.</small>
+</fieldset>
 <button id="connect" disabled>Check connection and save</button>
 </form>
 <p id="status" role="status" aria-live="polite">Loading device settings...</p>
@@ -35,14 +42,23 @@ const button = document.querySelector('#connect');
 const ssid = document.querySelector('#ssid');
 const password = document.querySelector('#password');
 const server = document.querySelector('#server');
-let nonce = '', waiting = false;
+const tailnet = document.querySelector('#tailnet');
+const tnOn = document.querySelector('#tn_on');
+const tsKey = document.querySelector('#ts_key');
+let nonce = '', waiting = false, hasTailnet = false;
 async function readState(initial = false) {
   try {
     const response = await fetch('/api/setup', {cache:'no-store'});
     if (!response.ok) throw new Error();
     const data = await response.json();
     nonce = data.nonce;
-    if (initial) { ssid.value = data.ssid; server.value = data.server; }
+    if (initial) {
+      ssid.value = data.ssid; server.value = data.server;
+      if (data.tailnet) {
+        hasTailnet = true; tailnet.hidden = false; tnOn.checked = data.tailnet.on;
+        if (data.tailnet.key) document.querySelector('#ts_hint').textContent = 'A key is saved. Leave this empty to keep it.';
+      }
+    }
     if (data.state === 'connected') {
       waiting = false; button.disabled = true;
       status.textContent = 'Wi-Fi connected and settings saved. Reconnect your phone to your usual network. The gadget will now contact Hermes.';
@@ -64,10 +80,11 @@ form.addEventListener('submit', async event => {
   event.preventDefault(); button.disabled = true;
   try {
     const response = await fetch('/api/setup', {method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ssid:ssid.value,password:password.value,server:server.value,nonce})});
+      body:JSON.stringify(Object.assign({ssid:ssid.value,password:password.value,server:server.value,nonce},
+        hasTailnet ? {tailnet:tnOn.checked,ts_key:tsKey.value} : {}))});
     const data = await response.json();
     if (!response.ok) { status.textContent = data.error; button.disabled = false; return; }
-    password.value = ''; waiting = true; await readState();
+    password.value = ''; tsKey.value = ''; waiting = true; await readState();
   } catch { status.textContent = 'Connection interrupted. Rejoin the gadget network and reload this page.'; button.disabled = false; }
 });
 readState(true);

@@ -267,6 +267,57 @@ Failed or untested steps:
 
 Attach the report to a pull request that makes the two changes for that board and adds Bluetooth to its row in the table above. The board's next release then ships with the link. A report for one board doesn't turn it on for another.
 
+## Tailnet
+
+Reaching Hermes over a [Tailscale tailnet](tailnet.md) is off on every board. Turning it on adds TailTiny, a Tailscale client, to the image: about 108 KB of flash on the AMOLED-1.75C (measured: 1,566,640 → 1,677,248 bytes; without the feature's code the image is 1,561,984), four more tasks with 27 KB of internal-RAM stacks, and PSRAM while it syncs the tailnet's map. It needs a board with PSRAM. On the AMOLED-1.75C it doesn't fit beside [Bluetooth](#bluetooth): the two together leave 7% of the app slot free, under the 10% the build requires. So each board turns it on only after someone has checked it on that board.
+
+To try it on a board, build it yourself with two changes, then flash over USB:
+
+1. In `firmware/esp32/main/board.cpp`, set `b.tailnet = true;` in the board's section.
+2. Append these lines to `firmware/esp32/boards/<board>/sdkconfig.defaults`:
+
+   ```text
+   # Tailnet (docs/hardware-validation.md#tailnet).
+   CONFIG_HG_TAILNET=y
+   CONFIG_LWIP_MAX_SOCKETS=16
+   CONFIG_LWIP_SO_RCVBUF=y
+   # Internal RAM: the relay's always-open TLS buffers in PSRAM.
+   CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+   ```
+
+Delete the generated `firmware/esp32/sdkconfig.<board>` before building, or the configuration check stops the build. A board with the flag but without these lines logs `this board enables the tailnet, but the build has no CONFIG_HG_TAILNET` and runs without it.
+
+Check, with the Hermes host on the tailnet and its gadget plugin listening on its tailnet address:
+
+1. **Join:** `set ts_key <key>`, `set server ws://<host tailnet IP>:8765/<path>` and `set tailnet on`. The screen shows *Joining tailnet*, then *Reaching Hermes over the tailnet*, then the device connects. The log shows `hg.tailnet: up: 100.x.y.z as <name>`, and the device is listed in the Tailscale admin console.
+2. **Refusal:** with a used or revoked one-off key on a fresh device (after `factory-reset`), the screen shows *Tailnet: auth key rejected* and the device never connects.
+3. **Away from home:** on a phone hotspot, the device reaches Ready, a voice turn gets a spoken reply, and `diag` shows `tailnet.hermes.path` (`direct` or `relay`).
+4. **Wi-Fi changes:** moving between home Wi-Fi and the hotspot, the device reconnects through the tailnet without a restart.
+5. **Restart:** after a restart, the device rejoins without a new key.
+6. **OTA:** a `hermes gadget update` over the tailnet is kept (`hg.ota: kept the new firmware`).
+7. **Off:** `set tailnet off` restarts the device, which then connects directly as before.
+8. **Power:** on battery, idle for two hours each, with the tailnet on and off: compare the battery log. Record whether the screen-off doze still happens (`hg.power: awake after N s dozing`).
+9. **Long run:** an hour of normal use, with no resets and stable free memory (`diag`).
+
+Use this report format:
+
+```text
+Model / PCB revision:
+Firmware commit (with the two changes above):
+Tailnet (Tailscale or Headscale), key type and ACL:
+Image size and free memory, tailnet on and off:
+Join, refusal, restart:
+Hotspot: Ready, voice, path (direct / relay):
+Wi-Fi changes:
+OTA over the tailnet:
+Off:
+Battery, tailnet on and off (idle hours, doze):
+One-hour run:
+Failed or untested steps:
+```
+
+Attach the report to a pull request that makes the two changes for that board and adds the tailnet to its row in the table above. Release images include it only once a board has such a report and someone other than their author has reviewed the changes to TailTiny's encryption and TLS code (`firmware/esp32/components/TAILTINY.md`, changes 2 to 4).
+
 ## Support labels
 
 - **Experimental:** the port builds and passes automated checks, but no complete physical report is linked for that configuration.

@@ -21,6 +21,7 @@ assets/mascot/          The mascot master image and its attribution
 | Suite | Command | Needs |
 |---|---|---|
 | Core (C++) | `hermes-gadget build-sim --test`, or `ctest --test-dir build/host -C Release` | CMake + compiler |
+| TailTiny's relay TLS check | `cmake -S firmware -B build/host -DHG_TLS_TESTS=ON`, then build and `ctest` as above | Network access on the first build, which downloads and builds Mbed TLS 4.1.0 (the version ESP-IDF 6.1 ships); not on Windows |
 | Plugin units, simulator ↔ hub, desktop controls | `pytest` | Built simulator library; a desktop or Xvfb for window tests |
 | Adapter on real Hermes classes | `HERMES_AGENT_DIR=../hermes-agent ../hermes-agent/.venv/bin/python -m pytest tests/test_adapter_hermes.py tests/test_profile_select_hermes.py tests/test_profile_gateway_hermes.py` | A Hermes checkout and its virtualenv |
 | Full gateway end to end | `HERMES_GADGET_E2E=1 pytest tests/test_gateway_e2e.py` | The above; spawns `hermes gateway run` with a temporary `HERMES_HOME` |

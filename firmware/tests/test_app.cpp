@@ -2899,6 +2899,38 @@ TEST("Wi-Fi setup: bounded credentials require the current session and never rep
   CHECK(!hg::parse_wifi_setup(std::string(1025, ' '), "current", out, error));
 }
 
+TEST("Wi-Fi setup: the tailnet fields are optional and the auth key is checked") {
+  hg::WifiCredentials out;
+  std::string error;
+  const std::string body = R"({"nonce":"n","ssid":"Phone","password":"example pass","server":"ws://100.71.189.23:8765/gadget"})";
+  CHECK(hg::parse_wifi_setup(body, "n", out, error));
+  CHECK(!out.tailnet_given);  // a page without the tailnet section changes nothing
+  CHECK_EQ(std::string(out.ts_key), std::string());
+
+  Value form;
+  CHECK(hg::json::parse(body, form));
+  form.set("tailnet", true).set("ts_key", "tskey-auth-kTEST123-abcdefghijklmnop");
+  CHECK(hg::parse_wifi_setup(form.dump(), "n", out, error));
+  CHECK(out.tailnet_given && out.tailnet_on);
+  CHECK_EQ(std::string(out.ts_key), std::string("tskey-auth-kTEST123-abcdefghijklmnop"));
+
+  form.set("tailnet", false).set("ts_key", "");  // off, keeping whatever key is saved
+  CHECK(hg::parse_wifi_setup(form.dump(), "n", out, error));
+  CHECK(out.tailnet_given && !out.tailnet_on);
+  CHECK_EQ(std::string(out.ts_key), std::string());
+
+  hg::WifiCredentials kept;
+  CHECK(hg::parse_wifi_setup(body, "n", kept, error));
+  for (const std::string& bad : {std::string("hunter2"), std::string("tskey-auth-x y"), std::string("tskey-") + std::string(120, 'a')}) {
+    form.set("ts_key", bad);
+    CHECK(!hg::parse_wifi_setup(form.dump(), "n", kept, error));
+    CHECK_EQ(error, std::string("Enter a Tailscale auth key (tskey-...), or leave it empty"));
+  }
+  form.set("ts_key", "").set("tailnet", "yes");
+  CHECK(!hg::parse_wifi_setup(form.dump(), "n", kept, error));
+  CHECK_EQ(std::string(kept.server), std::string("ws://100.71.189.23:8765/gadget"));  // untouched on failure
+}
+
 TEST("Wi-Fi setup: private instructions stay out of diagnostics and prompts close the temporary network") {
   Rig r(Rig::touch_profile());
   r.bring_online(true);
@@ -5265,4 +5297,146 @@ TEST("clock: the face's strings in 12- and 24-hour time and in Spanish") {
   r.advance(200);
   CHECK_EQ(r.app.model().clock_date, std::string("SÁB 24 OCT"));
   CHECK_EQ(r.app.model().clock_time, std::string("09:41"));
+}
+
+namespace {
+
+const char* const kTsKey = "tskey-auth-kTEST123-abcdefghijklmnopqrstuvwxyz";
+
+// A board that can join a tailnet (DeviceProfile::tailnet), aimed at a tailnet address.
+hg::DeviceProfile tailnet_profile() {
+  hg::DeviceProfile p = Rig::profile("ws://100.71.189.23:8765/gadget");
+  p.tailnet = true;
+  return p;
+}
+
+}  // namespace
+
+TEST("tailnet: a board without it has no tailnet settings") {
+  Rig r;
+  r.app.begin();
+  CHECK_EQ(r.app.console("set tailnet on"), std::string("@error unknown key"));
+  CHECK_EQ(r.app.console("set ts_key tskey-auth-x-y"), std::string("@error unknown key"));
+  CHECK(r.app.console("help").find("ts_key") == std::string::npos);
+  CHECK(r.app.console("status").find("tailnet") == std::string::npos);
+  CHECK(!r.app.tailnet_wanted());
+}
+
+TEST("tailnet: off, a tailnet board connects as soon as the network is up") {
+  Rig r(tailnet_profile());
+  r.app.begin();
+  r.app.on_network(true, "wifi");
+  r.advance(1000);
+  CHECK(!r.app.tailnet_wanted());
+  CHECK_EQ(r.fake.connects, 1);
+}
+
+TEST("tailnet: on, the device waits for the tunnel and says why") {
+  Rig r(tailnet_profile());
+  r.fake.kv["tailnet"] = "on";
+  r.fake.kv["ts_key"] = kTsKey;
+  r.app.begin();
+  CHECK(r.app.tailnet_wanted());
+  CHECK_EQ(r.app.tailnet_key(), std::string(kTsKey));
+  r.app.on_network(true, "wifi");
+  r.advance(5000);
+  CHECK_EQ(r.fake.connects, 0);
+  CHECK(r.app.screen() == hg::Screen::Connecting);
+  CHECK(r.app.model().detail.find("Joining tailnet") != std::string::npos);
+
+  r.app.on_tunnel(false, "Tailnet: auth key rejected");
+  r.advance(100);
+  CHECK(r.app.model().detail.find("Tailnet: auth key rejected") != std::string::npos);
+  CHECK_EQ(r.fake.connects, 0);
+
+  r.app.on_tunnel(true);
+  r.advance(20);  // no backoff left to wait out: the wait was for the tunnel
+  CHECK_EQ(r.fake.connects, 1);
+  CHECK_EQ(r.fake.url, std::string("ws://100.71.189.23:8765/gadget"));
+  Value st;
+  CHECK(hg::json::parse(r.app.console("status").substr(8), st));
+  CHECK(st["tailnet"]["on"].as_bool() && st["tailnet"]["key"].as_bool() && st["tailnet"]["up"].as_bool());
+}
+
+TEST("tailnet: losing the tunnel ends the session until it is back") {
+  Rig r(tailnet_profile());
+  r.fake.kv["tailnet"] = "on";
+  r.fake.kv["ts_key"] = kTsKey;
+  r.app.begin();
+  r.app.on_network(true, "wifi");
+  r.app.on_tunnel(true);
+  r.advance(1000);
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":false})");
+  r.server(R"({"type":"welcome","session":"s1","heartbeat_s":20,"paired":true})");
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  const int closes = r.fake.closes, connects = r.fake.connects;
+
+  r.app.on_tunnel(false, "Joining tailnet");
+  CHECK_EQ(r.fake.closes, closes + 1);
+  CHECK(r.app.screen() == hg::Screen::Connecting);
+  r.advance(40000);  // past every backoff step and the connect timeout
+  CHECK_EQ(r.fake.connects, connects);
+  Value d;
+  CHECK(hg::json::parse(r.app.console("diag").substr(6), d));
+  CHECK_EQ(d["connection"]["tailnet"].as_string(), std::string("Joining tailnet"));
+
+  r.app.on_tunnel(true);
+  r.advance(20);
+  CHECK_EQ(r.fake.connects, connects + 1);
+
+  // Back before the reconnect backoff is over: connect at once instead of waiting it out.
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":true})");
+  r.app.on_tunnel(false, "Joining tailnet");
+  r.app.on_tunnel(true);
+  r.advance(20);
+  CHECK_EQ(r.fake.connects, connects + 2);
+}
+
+TEST("tailnet: turning it on reconnects through the tunnel; off connects directly") {
+  Rig r(tailnet_profile());
+  r.bring_online(true);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  const int closes = r.fake.closes, connects = r.fake.connects;
+  CHECK_EQ(r.app.console("set ts_key " + std::string(kTsKey)), std::string("@ok ts_key"));
+  CHECK_EQ(r.app.console("set tailnet on"), std::string("@ok tailnet"));
+  CHECK(r.fake.closes > closes);
+  r.advance(5000);
+  CHECK_EQ(r.fake.connects, connects);  // no tunnel yet
+  CHECK_EQ(r.app.console("set tailnet off"), std::string("@ok tailnet"));
+  r.advance(20);
+  CHECK_EQ(r.fake.connects, connects + 1);
+}
+
+TEST("tailnet: the auth key is checked, kept secret and never logged") {
+  Rig r(tailnet_profile());
+  r.app.begin();
+  CHECK_EQ(r.app.console("set tailnet maybe"), std::string("@error tailnet must be on or off"));
+  CHECK_EQ(r.app.console("set ts_key hunter2"), std::string("@error ts_key must be a Tailscale auth key (tskey-...)"));
+  CHECK_EQ(r.app.console("set ts_key tskey-auth-has space"), std::string("@error ts_key must be a Tailscale auth key (tskey-...)"));
+  CHECK_EQ(r.app.console("set ts_key " + std::string(kTsKey)), std::string("@ok ts_key"));
+  CHECK(r.app.console("get ts_key").find("<set>") != std::string::npos);
+  CHECK(r.app.console("get ts_key").find("abcdefghij") == std::string::npos);
+  CHECK(r.app.console("status").find("abcdefghij") == std::string::npos);
+  CHECK(r.app.console("diag").find("abcdefghij") == std::string::npos);
+  for (const auto& line : r.fake.logs) CHECK(line.find("abcdefghij") == std::string::npos);
+  CHECK(r.app.console("help").find("tailnet ts_key") != std::string::npos);
+  CHECK_EQ(r.app.console("set ts_key"), std::string("@ok ts_key"));  // empty clears it
+  CHECK(r.app.tailnet_key().empty());
+}
+
+TEST("tailnet: factory reset forgets the settings and the tailnet identity") {
+  Rig r(tailnet_profile());
+  r.fake.kv["tailnet"] = "on";
+  r.fake.kv["ts_key"] = kTsKey;
+  int forgot = 0;
+  r.app.on_tailnet_forget = [&] { ++forgot; };
+  r.app.begin();
+  r.app.console("factory-reset");
+  CHECK(r.fake.kv.find("tailnet") == r.fake.kv.end());
+  CHECK(r.fake.kv.find("ts_key") == r.fake.kv.end());
+  CHECK_EQ(forgot, 1);
+  r.app.console("forget-key");
+  CHECK_EQ(forgot, 1);  // forgetting the device key keeps the tailnet
 }

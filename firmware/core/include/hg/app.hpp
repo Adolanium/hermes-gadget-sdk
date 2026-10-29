@@ -66,6 +66,10 @@ struct DeviceProfile {
   // Room for a face from Hermes (docs/protocol.md#faces): about 27 KB, and its message at once.
   // Boards without PSRAM don't offer faces.
   bool faces = true;
+  // The port can join a Tailscale tailnet (docs/tailnet.md). Adds the `tailnet` (on/off) and
+  // `ts_key` (the auth key, a secret) settings. With `tailnet on` the device waits for the port's
+  // on_tunnel(true) before it connects to Hermes.
+  bool tailnet = false;
   // Faces in colour too: begin() takes px*px*2 bytes for one (72 KB at 192 px) from this, and free()
   // releases them. Without it, or when it returns null, the board offers one-colour faces.
   void* (*colour_face_alloc)(size_t) = nullptr;
@@ -97,6 +101,15 @@ class App {
 
   // --- events from the port -------------------------------------------------
   void on_network(bool up, std::string_view detail = {});
+  // The port's tailnet connection to the Hermes host: up once traffic to it can flow,
+  // down otherwise. `detail` says what it is doing or why it failed ("Joining tailnet",
+  // "Tailnet: auth key rejected"); the connecting screen shows it while the device waits.
+  void on_tunnel(bool up, std::string_view detail = {});
+  // Whether the device should reach Hermes over the tailnet: the board supports it and the
+  // `tailnet` setting is on. The port reads the auth key from tailnet_key().
+  bool tailnet_wanted() const { return profile_.tailnet && tailnet_on_; }
+  const std::string& tailnet_key() const { return tailnet_key_; }
+  const std::string& server_url() const { return server_url_; }
   void on_transport_open();
   void on_transport_text(std::string_view text);
   void on_transport_binary(const uint8_t* data, size_t len);
@@ -180,6 +193,7 @@ class App {
   std::function<bool()> on_phone_pair;
   std::function<void()> on_phone_pair_close;
   std::function<void()> on_phone_forget;  // removes every paired phone
+  std::function<void()> on_tailnet_forget;  // factory reset: drops the device's tailnet identity
 
   // Serial-console command (provisioning, bench automation). Returns the
   // response; machine-readable lines start with '@'.
@@ -461,6 +475,14 @@ class App {
   int attempts_ = 0;
   std::string fatal_;   // unrecoverable until reconfigured
   std::string last_close_;
+  // tailnet (DeviceProfile::tailnet): the settings, and the port's tunnel as last reported
+  bool tailnet_on_ = false;
+  std::string tailnet_key_;
+  bool tunnel_up_ = false;
+  std::string tunnel_detail_;
+  // The device is on the network but must wait for the tunnel before connecting.
+  bool waiting_for_tunnel() const { return tailnet_wanted() && !tunnel_up_; }
+  void tailnet_reconfigured();
 
   // pairing
   bool paired_ = false;

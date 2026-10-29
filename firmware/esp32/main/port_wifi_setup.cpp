@@ -184,6 +184,13 @@ esp_err_t Wifi::setup_http(httpd_req_t* req) {
     }
     result.set("ssid", self->storage_->get("wifi_ssid").value_or(CONFIG_HG_DEFAULT_WIFI_SSID));
     result.set("server", self->storage_->get("server").value_or(CONFIG_HG_DEFAULT_SERVER_URL));
+    if (TailnetLink::supported()) {
+      // Whether the board can reach Hermes over a tailnet, as the settings stand; never the key.
+      auto tailnet = hg::json::Value::object();
+      tailnet.set("on", self->storage_->get("tailnet").value_or("off") == "on")
+          .set("key", !self->storage_->get("ts_key").value_or("").empty());
+      result.set("tailnet", tailnet);
+    }
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, result.dump().c_str());
   }
