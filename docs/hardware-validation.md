@@ -53,7 +53,7 @@ The `ws-p4-touch-lcd-7b` profile is built and release-packaged by the dedicated 
 
 - **Hardware:** Waveshare ESP32-P4-WIFI6-Touch-LCD-7B, SKU 32510, with an OV5647 module attached (owner-confirmed).
 - **Firmware candidate:** `91a9cec-ws7bcam2`, built with ESP-IDF 6.1.0; app image SHA-256 `864b369b7b03b25cd423e444c7bf83a9d1f64b9b1f696aa67698b31c7f949862`, 1,819,600 bytes. This was a development candidate, not a published release.
-- **Clean PR source build:** the upstream-based board branch built successfully with ESP-IDF 6.1.0. `hermes_gadget.bin` is 1,885,424 bytes (SHA-256 `2b892616836b0dba7d0b6045bac540a7894f86e3bbffdbd2aa8c2a7865eb2aea`); the smallest OTA app partition is 1,984 KiB with 7% free. This clean build was not reflashed; the live hardware results below refer to the candidate above.
+- **Clean PR source build:** the upstream-based board branch built successfully with ESP-IDF 6.1.0. `hermes_gadget.bin` is 1,885,424 bytes (SHA-256 `46d19d29650319cb398daf0bee3a3cb705da32519e703dbabb13f37da7e39fd4`); the smallest OTA app partition is 1,984 KiB with 7% free. This clean build was not reflashed; the live hardware results below refer to the candidate above.
 - **Flash scope:** app partition only at `0x20000`; bootloader, partition table and NVS were not written.
 - **Online state:** settled device status reported `phase=online`, `screen=ready`, and `network=True`; the gateway listed the device online.
 - **Camera:** two device `camera.capture` calls returned bounded RGB565 results. In the integrated development test, the plugin's saver saved the latest result as a valid 640×512 PNG, 238,434 bytes, under lowercase `~/.hermes/gadgetpix/`. File mode was `0600` and PNG chunk CRCs passed. Image content and quality were not visually reviewed.
