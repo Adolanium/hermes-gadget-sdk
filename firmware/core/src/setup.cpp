@@ -47,6 +47,13 @@ bool server_url(std::string_view url) {
 
 }  // namespace
 
+bool valid_tailnet_key(std::string_view key) {
+  if (key.size() < 12 || key.size() > 120 || key.substr(0, 6) != "tskey-") return false;
+  for (unsigned char c : key)
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_')) return false;
+  return true;
+}
+
 bool parse_wifi_setup(std::string_view body, std::string_view nonce, WifiCredentials& out, std::string& error) {
   json::Value form;
   if (body.size() > 1024 || !json::parse(body, form, nullptr, 2) || !form.is_object()) {
@@ -64,10 +71,23 @@ bool parse_wifi_setup(std::string_view body, std::string_view nonce, WifiCredent
   error = wifi_network_error(ssid, password);
   if (!error.empty()) return false;
   if (!server_url(server)) { error = "Enter a ws:// or wss:// gateway address with a host"; return false; }
+  // Optional: the page sends these only on a board that can join a tailnet.
+  const json::Value& tailnet = form["tailnet"];
+  const json::Value& ts_key = form["ts_key"];
+  if ((!tailnet.is_null() && !tailnet.is_bool()) || (!ts_key.is_null() && !ts_key.is_string())) {
+    error = "Invalid setup request"; return false;
+  }
+  const std::string key = ts_key.is_string() ? ts_key.as_string() : std::string();
+  if (!key.empty() && !valid_tailnet_key(key)) {
+    error = "Enter a Tailscale auth key (tskey-...), or leave it empty"; return false;
+  }
   WifiCredentials valid;
   std::memcpy(valid.ssid, ssid.data(), ssid.size());
   std::memcpy(valid.password, password.data(), password.size());
   std::memcpy(valid.server, server.data(), server.size());
+  valid.tailnet_given = tailnet.is_bool();
+  valid.tailnet_on = tailnet.is_bool() && tailnet.as_bool();
+  std::memcpy(valid.ts_key, key.data(), key.size());
   out = valid;
   error.clear();
   return true;

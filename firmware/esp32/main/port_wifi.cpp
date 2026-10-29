@@ -205,6 +205,11 @@ void Wifi::connected(hg::App& app) {
   networks_.save(*storage_);
   pick_.reset(networks_.size());
   app.console(std::string("set server ") + candidate_.server);
+  if (candidate_.tailnet_given) {
+    // The key first: `tailnet on` starts the node with whatever key is saved.
+    if (candidate_.ts_key[0]) app.console(std::string("set ts_key ") + candidate_.ts_key);
+    app.console(std::string("set tailnet ") + (candidate_.tailnet_on ? "on" : "off"));
+  }
   candidate_ = {};
   joining_ = false;
   setup_status("connected");

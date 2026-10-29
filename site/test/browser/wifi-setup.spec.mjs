@@ -35,3 +35,36 @@ test("phone setup leaves the form available after a failed connection", async ({
   await expect(page.getByRole("status")).toContainText("Previous settings were kept");
   await expect(page.getByRole("button", {name:"Check connection and save"})).toBeEnabled();
 });
+
+test("phone setup hides the tailnet section on boards without it", async ({page}) => {
+  await page.route("http://192.168.4.1/**", async route => {
+    if (route.request().url().endsWith("/api/setup")) await route.fulfill({json:{nonce:"n",ssid:"",server:"",state:"ready"}});
+    else await route.fulfill({contentType:"text/html",body:html});
+  });
+  await page.goto("http://192.168.4.1/");
+  await expect(page.getByRole("status")).toContainText("Ready to connect");
+  await expect(page.getByLabel("Tailscale auth key")).toBeHidden();
+});
+
+test("phone setup sends the tailnet choice and key on a board that can join a tailnet", async ({page}) => {
+  let posted;
+  await page.route("http://192.168.4.1/**", async route => {
+    if (route.request().url().endsWith("/api/setup")) {
+      if (route.request().method() === "POST") posted = route.request().postDataJSON();
+      await route.fulfill({json:{nonce:"n",ssid:"Phone",server:"ws://100.71.189.23:8765/gadget",state:posted ? "connected" : "ready",
+                                 tailnet:{on:false,key:true}}});
+    } else await route.fulfill({contentType:"text/html",body:html});
+  });
+  await page.setViewportSize({width:390,height:844});
+  await page.goto("http://192.168.4.1/");
+  await expect(page.getByText("A key is saved. Leave this empty to keep it.")).toBeVisible();
+  await page.getByLabel("Wi-Fi password", {exact:true}).fill("hotspot password");
+  await page.getByLabel("Reach Hermes over my Tailscale tailnet").check();
+  await page.getByLabel("Tailscale auth key").fill("tskey-auth-kTEST-abcdefghijklmnop");
+  await page.getByRole("button", {name:"Check connection and save"}).click();
+  await expect(page.getByRole("status")).toContainText("Wi-Fi connected and settings saved");
+  expect(posted).toEqual({nonce:"n",ssid:"Phone",password:"hotspot password",server:"ws://100.71.189.23:8765/gadget",
+                          tailnet:true,ts_key:"tskey-auth-kTEST-abcdefghijklmnop"});
+  await expect(page.getByLabel("Tailscale auth key")).toHaveValue("");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+});

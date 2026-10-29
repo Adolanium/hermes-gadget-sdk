@@ -35,12 +35,17 @@ menu "Hermes Gadget"
             discovery round. docs/hardware.md#wi-fi-reconnect
 
     config HG_TAILNET
-        bool "Build in TailTiny, a Tailscale client (experimental)"
+        bool "Join a Tailscale tailnet (experimental)"
         default n
         depends on SPIRAM
         help
-            Compiles the vendored TailTiny and wireguard-lwip components
-            (components/TAILTINY.md). Off on every board.
+            Builds in TailTiny, a third-party Tailscale client
+            (components/TAILTINY.md), so the device can reach a Hermes
+            gateway that only listens on its tailnet address, from any
+            network. The board also needs BoardConfig::tailnet, and the user
+            turns it on with `set tailnet on` and an auth key (`set ts_key`).
+            Adds about 108 KB of flash on the AMOLED-1.75C. Off on every
+            board and in release images. docs/tailnet.md
 
     config HG_FRAME_STATS
         bool "Time every frame from boot"

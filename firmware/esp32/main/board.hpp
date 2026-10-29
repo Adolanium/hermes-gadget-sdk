@@ -311,6 +311,11 @@ struct BoardConfig {
   // the Bluetooth lines in the board's sdkconfig.defaults and stays off until the
   // board passes the checks in docs/hardware-validation.md#bluetooth.
   bool bluetooth = false;
+  // Reaching Hermes over a Tailscale tailnet (port_tailnet.cpp, docs/tailnet.md).
+  // Experimental: needs the tailnet lines in the board's sdkconfig.defaults (PSRAM
+  // boards only) and stays off until the board passes the checks in
+  // docs/hardware-validation.md#tailnet.
+  bool tailnet = false;
   LatchPowerConfig latch_power;
   int status_led = -1;
   // A speaker driven by the chip's own DAC, with no I2S and no codec: the pin the

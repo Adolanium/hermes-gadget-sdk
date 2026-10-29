@@ -71,6 +71,7 @@ hgp::LatchPower g_latch_power;
 hgp::CoreS3Board g_cores3;
 hgp::StickS3Board g_sticks3;
 hgp::PhoneLink g_phone;
+hgp::TailnetLink g_tailnet;
 #endif
 hgp::Buttons g_buttons;
 hgp::Wifi g_wifi;
@@ -181,15 +182,24 @@ void dispatch(hg::App& app, hgp::Event& ev) {
       g_wifi.connected(app);
       app.on_network(true, text ? text : "");
       g_time.set_network(true);
+#if !CONFIG_HG_BOARD_ESP32_CYD
+      g_tailnet.network_up();
+#endif
       break;
     case EventType::NetDown:
       app.on_network(false, text ? text : "");
       g_time.set_network(false);
+#if !CONFIG_HG_BOARD_ESP32_CYD
+      g_tailnet.network_down();
+#endif
       break;
     case EventType::WifiDisconnected:
       g_wifi.disconnected();
       app.on_network(false, text ? text : "");
       g_time.set_network(false);
+#if !CONFIG_HG_BOARD_ESP32_CYD
+      g_tailnet.network_down();
+#endif
       break;
     case EventType::WifiStarted: g_wifi.reconfigure(); break;
     case EventType::WifiScanDone: g_wifi.scan_done(); break;
@@ -457,6 +467,7 @@ extern "C" void app_main(void) {
     profile.vad_min_rms = board.codec.vad_min_rms;
   }
   if (hal.speaker == &g_codec_speaker) profile.speaker_rate = hgp::CodecAudio::kRate;
+  profile.tailnet = hgp::TailnetLink::supported();
 #endif
 
 #if CONFIG_HG_BOARD_ESP32_CYD
@@ -478,6 +489,7 @@ extern "C" void app_main(void) {
     if (key == "timezone") g_time.apply_timezone(g_storage);
 #if !CONFIG_HG_BOARD_ESP32_CYD
     if (key == "name" && hgp::board_config().bluetooth) g_phone.set_name(device_name());
+    if (key == "tailnet" || key == "ts_key") g_tailnet.settings_changed();
 #endif
   };
 #if !CONFIG_HG_BOARD_ESP32_CYD
@@ -485,6 +497,10 @@ extern "C" void app_main(void) {
     app.on_phone_pair = [] { return g_phone.open_pairing(); };
     app.on_phone_pair_close = [] { g_phone.close_pairing(); };
     app.on_phone_forget = [] { g_phone.forget(); };
+  }
+  if (profile.tailnet) {
+    g_tailnet.begin(app, device_name());
+    app.on_tailnet_forget = [] { g_tailnet.forget(); };
   }
 #endif
   app.on_wifi_setup = [] { return g_wifi.start_setup(); };
@@ -496,6 +512,7 @@ extern "C" void app_main(void) {
     report.set("ota", g_updater.describe());
 #if !CONFIG_HG_BOARD_ESP32_CYD
     if (const auto ma = g_power.charge_current_ma()) report.set("charge_current_ma", static_cast<unsigned>(*ma));
+    if (hgp::board_config().tailnet) g_tailnet.report(report);
 #endif
   };
   app.recent_log = &hgp::diag::recent_log;
@@ -537,6 +554,9 @@ extern "C" void app_main(void) {
     }
     g_buttons.poll(app);
     g_wifi.tick(app, g_system.now_ms());
+#if !CONFIG_HG_BOARD_ESP32_CYD
+    g_tailnet.tick(g_system.now_ms());
+#endif
     if (g_gestures) g_gestures->tick(g_system.now_ms());
     app.tick();
 #if !CONFIG_HG_BOARD_ESP32_CYD

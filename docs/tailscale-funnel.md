@@ -54,6 +54,8 @@ To use a phone hotspot:
 
 If your phone cannot keep its hotspot active while joined to the setup network, use a second phone or computer for setup, or configure the gadget through USB.
 
+To keep Hermes off the internet entirely, the gadget can instead join your tailnet itself; see [Reach Hermes over your tailnet](tailnet.md). That needs firmware you build with the feature turned on.
+
 The board stores one Wi-Fi network. A successful setup replaces its Wi-Fi credentials; a failed connection check restores the previous settings. Re-enter your home Wi-Fi credentials when you return. The same Funnel address works on both networks, and changing Wi-Fi preserves the gadget's identity and pairing with the same Hermes host.
 
 ## Verify the connection
