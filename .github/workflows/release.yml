@@ -95,12 +95,22 @@ jobs:
           idf.py -B build/crowpanel-p4-101 -D SDKCONFIG=build/crowpanel-p4-101/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/crowpanel-p4-101/sdkconfig.defaults" set-target esp32p4
           idf.py -B build/crowpanel-p4-101 -D SDKCONFIG=build/crowpanel-p4-101/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/crowpanel-p4-101/sdkconfig.defaults" build
           python tools/stage_idf_build.py crowpanel-p4-101 build/crowpanel-p4-101 --notices notices
+      - name: Build Waveshare P4 7B
+        shell: bash
+        working-directory: firmware/esp32
+        run: |
+          source /opt/esp/idf/export.sh
+          idf.py -B build/ws-p4-touch-lcd-7b -D SDKCONFIG=build/ws-p4-touch-lcd-7b/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/ws-p4-touch-lcd-7b/sdkconfig.defaults" set-target esp32p4
+          idf.py -B build/ws-p4-touch-lcd-7b -D SDKCONFIG=build/ws-p4-touch-lcd-7b/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/ws-p4-touch-lcd-7b/sdkconfig.defaults" build
+          python tools/stage_idf_build.py ws-p4-touch-lcd-7b build/ws-p4-touch-lcd-7b --notices notices
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: esp32p4-builds
           path: |
             firmware/esp32/.pio/build/crowpanel-p4-101/
+            firmware/esp32/.pio/build/ws-p4-touch-lcd-7b/
             firmware/esp32/sdkconfig.crowpanel-p4-101
+            firmware/esp32/sdkconfig.ws-p4-touch-lcd-7b
             firmware/esp32/notices/
           include-hidden-files: true  # .pio
           if-no-files-found: error
@@ -144,7 +154,7 @@ jobs:
       - name: Package
         working-directory: firmware/esp32
         run: >-
-          python tools/package_release.py --all --board crowpanel-p4-101 --notices notices
+          python tools/package_release.py --all --board crowpanel-p4-101 --board ws-p4-touch-lcd-7b --notices notices
           --out dist --expect-version "${TAG#v}"
           --notes "$RUNNER_TEMP/notes.md" --commit "$(git rev-parse HEAD)" --changelog ../../CHANGELOG.md
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8

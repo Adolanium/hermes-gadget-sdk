@@ -14,6 +14,10 @@ if(IDF_TARGET STREQUAL "esp32p4")
         "port_power_p4.cpp"
         "../../drivers/stc8_battery.cpp")
     list(APPEND HG_P4_REQUIRES esp_lcd_ek79007)
+    if(CONFIG_HG_BOARD_WS_P4_TOUCH_LCD_7B)
+        list(APPEND HG_P4_SOURCES "port_camera.cpp")
+        list(APPEND HG_P4_REQUIRES esp_video)
+    endif()
 endif()
 # The RGB panel driver (ST7701 over an I/O expander) only builds for the chips
 # with an LCD_CAM RGB scanout: port_rgb.cpp is compiled out on every other

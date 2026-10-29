@@ -249,6 +249,7 @@ class DsiDisplay final : public hg::Display {
   esp_lcd_panel_io_handle_t io_ = nullptr;
   esp_lcd_panel_handle_t panel_ = nullptr;
   uint16_t* fb_ = nullptr;
+  uint16_t* transform_fb_ = nullptr;  // optional mirrored DSI scanout source
   bool use_dma2d_ = true;
   std::atomic<uint32_t> flushes_{0};
 };
