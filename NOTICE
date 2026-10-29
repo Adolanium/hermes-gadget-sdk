@@ -241,17 +241,19 @@ checks are added (the bit writer no longer writes past its buffer, and a payload
 that overflows the chosen version is rejected instead of encoded incorrectly).
 The full upstream license is in LICENSES/QRCode-MIT.txt.
 
-The Tailscale client in firmware/esp32/third_party/tailtiny/ is vendored from
+The Tailscale client in firmware/esp32/components/tailtiny/ is vendored from
 TailTiny, https://github.com/Asimmimx/tailtiny, version 3.0.2, revision
 450ad519810f0a7560306e1389c65acf2c48828c, Copyright (c) 2025-2026 Cameron
 Malone, MIT License; it derives from MicroLink by the same author. It bundles
-wireguard-lwip, https://github.com/smartalock/wireguard-lwip, in its
-components/wireguard_lwip/, Copyright (c) 2021 Daniel Hope
+wireguard-lwip, https://github.com/smartalock/wireguard-lwip, vendored in
+firmware/esp32/components/wireguard_lwip/, Copyright (c) 2021 Daniel Hope
 (www.floorsense.nz), BSD 3-Clause License, which includes X25519 code from the
 STROBE project, Copyright (c) 2015-2016 Cryptography Research, Inc., MIT
 License, BLAKE2s from RFC 7693 and Poly1305 from poly1305-donna (public domain
-or MIT). The copy is unmodified apart from line endings (LF). The licenses are
-in LICENSES/TailTiny-MIT.txt, LICENSES/wireguard-lwip-BSD-3-Clause.txt and
+or MIT). Both are modified for this project and compiled only with
+CONFIG_HG_TAILNET; firmware/esp32/components/TAILTINY.md lists every change,
+with one patch file per change in firmware/esp32/components/tailtiny-patches/.
+The licenses are in LICENSES/TailTiny-MIT.txt, LICENSES/wireguard-lwip-BSD-3-Clause.txt and
 LICENSES/STROBE-x25519-MIT.txt.
 
 

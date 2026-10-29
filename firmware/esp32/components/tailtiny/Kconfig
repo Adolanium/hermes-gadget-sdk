@@ -1,4 +1,5 @@
 menu "TailTiny Configuration"
+    depends on HG_TAILNET
 
     config ML_ZERO_COPY_WG
         bool "Enable zero-copy WireGuard receive (high-throughput mode)"

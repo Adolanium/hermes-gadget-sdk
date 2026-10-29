@@ -3,5 +3,5 @@ description: "Tailscale client for ESP32: WireGuard, DERP relay, DISCO, MagicDNS
 url: "https://github.com/Asimmimx/tailtiny"
 dependencies:
   idf: ">=5.0"
-  wireguard_lwip:
-    path: "components/wireguard_lwip"
+  # ESP-IDF 6 no longer ships cJSON as the `json` component.
+  espressif/cjson: "^1.7.19"

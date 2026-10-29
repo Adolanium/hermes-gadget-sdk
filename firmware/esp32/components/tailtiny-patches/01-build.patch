@@ -1,0 +1,125 @@
+diff -ruN a/tailtiny/CMakeLists.txt b/tailtiny/CMakeLists.txt
+--- a/tailtiny/CMakeLists.txt	2026-10-29 15:01:09.000000000 +0000
++++ b/tailtiny/CMakeLists.txt	2026-10-29 15:02:55.046472095 +0000
+@@ -1,4 +1,9 @@
+-set(SRCS
++# TailTiny, vendored: ../TAILTINY.md has the pinned commit and our patches.
++# Compiled only when CONFIG_HG_TAILNET is on. The requirements stay unconditional:
++# ESP-IDF resolves them before the sdkconfig exists.
++set(SRCS)
++if(CONFIG_HG_TAILNET)
++list(APPEND SRCS
+     "src/tailtiny.c"
+     "src/ml_coord.c"
+     "src/ml_derp.c"
+@@ -13,12 +18,14 @@
+     "src/nacl_box.c"
+     "src/x25519.c"
+     "src/ml_zerocopy.c"
+-    "src/ml_cellular.c"
++    # src/ml_cellular.c: the 4G modem driver, left out (CONFIG_ML_ENABLE_CELLULAR stays off,
++    # and the file includes driver/uart.h outside its #ifdef).
+     "src/ml_at_socket.c"
+     "src/ml_net_switch.c"
+     "src/ml_config_httpd.c"
+     "src/ml_json_strip.c"
+ )
++endif()
+ 
+ set(REQUIRES
+     nvs_flash
+@@ -28,8 +35,10 @@
+     esp_timer
+     lwip
+     mbedtls
+-    json
++    espressif__cjson
+     driver
++    # ESP-IDF 6 dropped UART from `driver`; ml_at_socket.c includes driver/uart.h.
++    esp_driver_uart
+     esp_driver_tsens
+     esp_http_server
+ )
+@@ -43,3 +52,9 @@
+     PRIV_REQUIRES
+         wireguard_lwip
+ )
++
++if(CONFIG_HG_TAILNET)
++    # GCC 15: protocol constants (HSalsa20's sigma) are byte arrays initialised from
++    # strings of exactly their length, deliberately without the NUL.
++    target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-unterminated-string-initialization)
++endif()
+diff -ruN a/tailtiny/idf_component.yml b/tailtiny/idf_component.yml
+--- a/tailtiny/idf_component.yml	2026-10-29 15:01:09.000000000 +0000
++++ b/tailtiny/idf_component.yml	2026-10-29 15:02:55.046472095 +0000
+@@ -3,5 +3,5 @@
+ url: "https://github.com/Asimmimx/tailtiny"
+ dependencies:
+   idf: ">=5.0"
+-  wireguard_lwip:
+-    path: "components/wireguard_lwip"
++  # ESP-IDF 6 no longer ships cJSON as the `json` component.
++  espressif/cjson: "^1.7.19"
+diff -ruN a/tailtiny/Kconfig b/tailtiny/Kconfig
+--- a/tailtiny/Kconfig	2026-10-29 15:01:09.000000000 +0000
++++ b/tailtiny/Kconfig	2026-10-29 15:02:55.046472095 +0000
+@@ -1,4 +1,5 @@
+ menu "TailTiny Configuration"
++    depends on HG_TAILNET
+ 
+     config ML_ZERO_COPY_WG
+         bool "Enable zero-copy WireGuard receive (high-throughput mode)"
+diff -ruN a/wireguard_lwip/CMakeLists.txt b/wireguard_lwip/CMakeLists.txt
+--- a/wireguard_lwip/CMakeLists.txt	2026-10-29 15:01:09.000000000 +0000
++++ b/wireguard_lwip/CMakeLists.txt	2026-10-29 15:02:55.047737517 +0000
+@@ -1,5 +1,8 @@
+-idf_component_register(
+-    SRCS
++# Vendored with TailTiny (../TAILTINY.md). Compiled only when CONFIG_HG_TAILNET
++# is on; the requirements stay unconditional (resolved before the sdkconfig exists).
++set(WG_SRCS)
++if(CONFIG_HG_TAILNET)
++    list(APPEND WG_SRCS
+         "src/wireguard.c"
+         "src/wireguardif.c"
+         "src/crypto.c"
+@@ -8,7 +11,11 @@
+         "src/crypto/refc/chacha20.c"
+         "src/crypto/refc/chacha20poly1305.c"
+         "src/crypto/refc/poly1305-donna.c"
+-        "src/crypto/refc/x25519.c"
++        "src/crypto/refc/x25519.c")
++endif()
++
++idf_component_register(
++    SRCS ${WG_SRCS}
+     INCLUDE_DIRS
+         "src"
+         "src/crypto/refc"
+@@ -17,12 +24,17 @@
+         esp_timer
+ )
+ 
+-target_compile_definitions(${COMPONENT_LIB} PRIVATE
+-    WIREGUARD_CRYPTO_REFC=1
+-)
++if(CONFIG_HG_TAILNET)
++    target_compile_definitions(${COMPONENT_LIB} PRIVATE
++        WIREGUARD_CRYPTO_REFC=1
++    )
++    # GCC 15: the protocol names (CONSTRUCTION, IDENTIFIER, LABEL_*) are byte arrays
++    # initialised from strings of exactly their length, deliberately without the NUL.
++    target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-unterminated-string-initialization)
+ 
+-# Disable stringop-overread warning for x25519.c (false positive in GCC array bounds check)
+-set_source_files_properties(
+-    src/crypto/refc/x25519.c
+-    PROPERTIES COMPILE_FLAGS "-Wno-stringop-overread"
+-)
++    # Disable stringop-overread warning for x25519.c (false positive in GCC array bounds check)
++    set_source_files_properties(
++        src/crypto/refc/x25519.c
++        PROPERTIES COMPILE_FLAGS "-Wno-stringop-overread"
++    )
++endif()
