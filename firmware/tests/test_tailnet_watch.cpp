@@ -52,7 +52,7 @@ TEST("tailnet watch: a failed registration is shown with TailTiny's reason") {
   CHECK_EQ(s.detail, std::string("Tailnet: auth key rejected"));
 }
 
-TEST("tailnet watch: a short gap keeps the session, a long one or a lost node ends it") {
+TEST("tailnet watch: a short gap keeps the session, a long one ends it") {
   TailnetWatch w;
   w.update(0, true, {Node::Connected, true, ""});
   CHECK(w.told_up());
@@ -69,10 +69,47 @@ TEST("tailnet watch: a short gap keeps the session, a long one or a lost node en
   v.update(1000, true, {Node::Connected, false, ""});
   CHECK(v.update(2000, true, {Node::Connected, true, ""}).up);  // back: the grace starts over
   CHECK(v.update(2000 + TailnetWatch::kDownGraceMs, true, {Node::Connected, false, ""}).up);
+}
 
-  s = v.update(30000, true, {Node::Reconnecting, false, ""});
+TEST("tailnet watch: replacing the control server's connection keeps the session while WireGuard is up") {
+  // Tailscale ends the control long-poll from time to time; TailTiny reconnects while the
+  // WireGuard session with the Hermes host carries on.
+  TailnetWatch w;
+  w.update(0, true, {Node::Connected, true, ""});
+  for (Node n : {Node::Reconnecting, Node::Starting}) {  // RECONNECTING, then CONNECTING/REGISTERING
+    auto s = w.update(1000, true, {n, true, ""});
+    CHECK(!s.tell && s.up && !s.poke);
+  }
+  auto s = w.update(60000, true, {Node::Reconnecting, true, ""});  // however long it takes
+  CHECK(!s.tell && s.up);
+  CHECK(!w.update(61000, true, {Node::Connected, true, ""}).tell);
+  CHECK(w.told_up());
+}
+
+TEST("tailnet watch: a control reconnect with WireGuard down too gets the grace, then ends it") {
+  TailnetWatch w;
+  w.update(0, true, {Node::Connected, true, ""});
+  auto s = w.update(1000, true, {Node::Reconnecting, false, ""});
+  CHECK(!s.tell && s.up && !s.poke);  // no handshake asked for while the control server is away
+  s = w.update(1000 + TailnetWatch::kDownGraceMs - 10, true, {Node::Starting, false, ""});
+  CHECK(!s.tell && s.up);
+  s = w.update(1000 + TailnetWatch::kDownGraceMs, true, {Node::Reconnecting, false, ""});
   CHECK(s.tell && !s.up);
   CHECK_EQ(s.detail, std::string("Tailnet reconnecting"));
+  CHECK(!w.update(20000, true, {Node::Reconnecting, false, ""}).tell);  // still saying the same
+
+  TailnetWatch never;  // never up: a reconnect is shown at once, as before
+  s = never.update(0, true, {Node::Reconnecting, true, ""});
+  CHECK(s.tell && !s.up);
+  CHECK_EQ(s.detail, std::string("Tailnet reconnecting"));
+}
+
+TEST("tailnet watch: a registration refused during a reconnect ends the session at once") {
+  TailnetWatch w;
+  w.update(0, true, {Node::Connected, true, ""});
+  auto s = w.update(1000, true, {Node::Reconnecting, true, "auth key rejected"});
+  CHECK(s.tell && !s.up);
+  CHECK_EQ(s.detail, std::string("Tailnet: auth key rejected"));
 }
 
 TEST("tailnet watch: no Wi-Fi means no tunnel, at once") {
