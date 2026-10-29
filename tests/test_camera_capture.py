@@ -46,7 +46,7 @@ def test_rgb565_png_encodes_little_endian_pixels_as_png_rgb():
 
 
 def test_camera_capture_saves_timestamped_png_under_gateway_home(monkeypatch, tmp_path):
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))  # HOME alone misses Windows
     pixels = bytes.fromhex("00f8 e007 1f00 ffff")
     result = {
         "format": "rgb565le",
@@ -126,3 +126,16 @@ def test_camera_action_result_fits_the_existing_websocket_frame_limit():
                        separators=(",", ":")).encode("utf-8")
 
     assert len(frame) < MAX_FRAME_BYTES
+
+
+def test_camera_capture_keeps_only_the_newest_captures(monkeypatch, tmp_path):
+    from hermes_gadget_plugin import camera_capture
+
+    monkeypatch.setattr(camera_capture, "KEEP_CAPTURES", 3)
+    unrelated = tmp_path / "holiday.png"
+    unrelated.write_bytes(b"not ours")
+    result = {"format": "rgb565le", "width": 1, "height": 1, "image_b64": "AAA="}
+    saved = [Path(camera_capture.save_camera_capture(result, "hg-test", tmp_path)["path"]) for _ in range(5)]
+
+    assert sorted(p for p in tmp_path.glob("*.png") if p != unrelated) == saved[-3:]
+    assert unrelated.is_file()

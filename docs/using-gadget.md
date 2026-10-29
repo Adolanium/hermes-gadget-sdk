@@ -20,7 +20,7 @@ Long replies turn their own pages. Simulated boards with scroll buttons also acc
 
 Try asking Hermes to show a reminder on the screen. The agent can use `gadget_display` to display a card. While the screen is dark, the card waits and appears when the screen lights up ([screen sleep](protocol.md#screen-sleep)). Devices with actions can also respond to requests such as "Turn the LED purple."
 
-On a Waveshare P4 7B with an OV5647 module attached, ask Hermes to take a picture. The device returns a bounded RGB565 result through the existing action/result messages. With the separate camera-saver plugin update installed, the gateway converts that result to a timestamped PNG under `~/.hermes/gadgetpix/`.
+On a Waveshare P4 7B with an OV5647 module attached, ask Hermes to take a picture. The plugin saves the photo as a timestamped PNG in `~/.hermes/gadgetpix/` on the Hermes computer and tells Hermes its path. It keeps the newest 100 photos and removes older ones.
 
 If speech is missing, check [audio setup](connect-hermes.md#4-enable-speech). For connection problems, use [troubleshooting](troubleshooting.md). To change Wi-Fi or install firmware updates, see [Manage an existing gadget](setup-board.md#manage-an-existing-gadget).
 

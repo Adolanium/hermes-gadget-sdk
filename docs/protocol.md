@@ -296,7 +296,7 @@ A device with a camera may advertise `camera.capture` in `hello.actions`; it tak
 {"format":"rgb565le","width":640,"height":512,"image_b64":"<base64>"}
 ```
 
-`image_b64` is Base64-encoded, tightly packed, row-major RGB565 pixels in little-endian byte order, with no row padding. For the 7B port, the maximum dimensions are 640×512 (655,360 decoded bytes; 873,816 Base64 characters). The full result stays below the gateway's current 1 MiB action-frame limit. Other camera ports must keep the serialized result within their transport's frame limit. On capture failure, the device uses the existing `action.result` error form; no new message type is introduced.
+`image_b64` is Base64-encoded, tightly packed, row-major RGB565 pixels in little-endian byte order, with no row padding. For the 7B port, the maximum dimensions are 640×512 (655,360 decoded bytes; 873,816 Base64 characters). The full result stays below the gateway's current 1 MiB action-frame limit. Other camera ports must keep the serialized result within their transport's frame limit. On capture failure, the device uses the existing `action.result` error form; no new message type is introduced. The plugin saves a successful result as a PNG under `~/.hermes/gadgetpix/` (the newest 100 are kept) and gives the agent the file's path, width, height and size, never `image_b64`.
 
 ### Telemetry and events (device → server)
 

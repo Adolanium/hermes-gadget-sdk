@@ -15,6 +15,7 @@ from typing import Any
 MAX_WIDTH = 640
 MAX_HEIGHT = 512
 MAX_RAW_BYTES = MAX_WIDTH * MAX_HEIGHT * 2
+KEEP_CAPTURES = 100  # the newest PNGs kept in the capture folder; older ones are removed
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
@@ -88,4 +89,12 @@ def save_camera_capture(result: dict[str, Any], device_id: str, root: str | Path
     finally:
         temp_path.unlink(missing_ok=True)
 
+    _prune(directory, KEEP_CAPTURES)
     return {"path": str(target), "format": "png", "width": width, "height": height, "size_bytes": len(png)}
+
+
+def _prune(directory: Path, keep: int) -> None:
+    """Remove all but the newest `keep` captures. Names start with a UTC timestamp, so they sort by age."""
+    captures = sorted(p for p in directory.glob("*.png") if re.match(r"\d{8}T\d{6}\.\d{6}Z_", p.name))
+    for old in captures[:-keep]:
+        old.unlink(missing_ok=True)

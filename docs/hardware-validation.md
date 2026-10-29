@@ -56,7 +56,7 @@ The `ws-p4-touch-lcd-7b` profile is built and release-packaged by the dedicated 
 - **Clean PR source build:** the upstream-based board branch built successfully with ESP-IDF 6.1.0. `hermes_gadget.bin` is 1,885,424 bytes (SHA-256 `2b892616836b0dba7d0b6045bac540a7894f86e3bbffdbd2aa8c2a7865eb2aea`); the smallest OTA app partition is 1,984 KiB with 7% free. This clean build was not reflashed; the live hardware results below refer to the candidate above.
 - **Flash scope:** app partition only at `0x20000`; bootloader, partition table and NVS were not written.
 - **Online state:** settled device status reported `phase=online`, `screen=ready`, and `network=True`; the gateway listed the device online.
-- **Camera:** two device `camera.capture` calls returned bounded RGB565 results. In the integrated development test, the separate gateway handler saved the latest result as a valid 640×512 PNG, 238,434 bytes, under lowercase `~/.hermes/gadgetpix/`. File mode was `0600` and PNG chunk CRCs passed. Image content and quality were not visually reviewed.
+- **Camera:** two device `camera.capture` calls returned bounded RGB565 results. In the integrated development test, the plugin's saver saved the latest result as a valid 640×512 PNG, 238,434 bytes, under lowercase `~/.hermes/gadgetpix/`. File mode was `0600` and PNG chunk CRCs passed. Image content and quality were not visually reviewed.
 - **Still unverified:** touch input/coordinates, actual microphone capture, audible speaker output, OTA, Wi-Fi loss/recovery and the full physical checklist.
 
 ## Waveshare LCD-1.54 partial physical report
