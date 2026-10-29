@@ -44,4 +44,23 @@ if(HG_BUILD_TESTS)
     target_include_directories(hg_tailtiny_tests PRIVATE ${HG_WG_REFC} esp32/components/tailtiny/src)
     add_test(NAME hg_tailtiny_tests COMMAND hg_tailtiny_tests)
   endif()
+
+  # TailTiny's relay TLS check against a local TLS server, on the Mbed TLS ESP-IDF 6.1 ships. Off by
+  # default because it downloads and builds Mbed TLS; CI turns it on.
+  option(HG_TLS_TESTS "Build the TLS test (downloads Mbed TLS 4.1.0)" OFF)
+  if(HG_TLS_TESTS AND NOT WIN32)
+    include(FetchContent)
+    set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+    set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+    set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+    set(TF_PSA_CRYPTO_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(mbedtls
+      URL https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-4.1.0/mbedtls-4.1.0.tar.bz2
+      URL_HASH SHA256=377a09cf8eb81b5fb2707045e5522d5489d3309fed5006c9874e60558fc81d10)
+    FetchContent_MakeAvailable(mbedtls)
+    add_executable(hg_tailtiny_tls_tests tests/main.cpp tests/test_tailtiny_tls.cpp)
+    target_include_directories(hg_tailtiny_tls_tests PRIVATE esp32/components/tailtiny/src)
+    target_link_libraries(hg_tailtiny_tls_tests PRIVATE mbedtls mbedx509 tfpsacrypto)
+    add_test(NAME hg_tailtiny_tls_tests COMMAND hg_tailtiny_tls_tests)
+  endif()
 endif()

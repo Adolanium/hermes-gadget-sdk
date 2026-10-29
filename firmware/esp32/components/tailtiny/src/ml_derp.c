@@ -27,6 +27,8 @@
 #include "lwip/netdb.h"
 #include "mbedtls/net_sockets.h"
 #include "mbedtls/error.h"
+#include "esp_crt_bundle.h"
+#include "ml_derp_tls.h"  /* Hermes gadget patch */
 #include "nacl_box.h"
 #include <string.h>
 #include <errno.h>
@@ -886,7 +888,14 @@ esp_err_t ml_derp_connect(tailtiny_t *ml) {
         derp_connect_abort(ml, sock);
         return ESP_FAIL;
     }
-    mbedtls_ssl_conf_authmode(&ml->derp.ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
+    /* Hermes gadget patch: check the relay's certificate against the
+     * firmware's CA bundle (upstream skipped verification); ml_derp_tls.h. */
+    setup_ret = ml_derp_tls_verify(&ml->derp.ssl_conf, esp_crt_bundle_attach);
+    if (setup_ret != 0) {
+        ESP_LOGE(TAG, "TLS setup failed: no CA bundle");
+        derp_connect_abort(ml, sock);
+        return ESP_FAIL;
+    }
 #if MBEDTLS_VERSION_MAJOR < 4
     mbedtls_ssl_conf_rng(&ml->derp.ssl_conf, mbedtls_ctr_drbg_random, &ml->derp.ctr_drbg);
 #endif

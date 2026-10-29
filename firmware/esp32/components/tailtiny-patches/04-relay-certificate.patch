@@ -1,0 +1,51 @@
+diff -ruN a/tailtiny/src/ml_derp.c b/tailtiny/src/ml_derp.c
+--- a/tailtiny/src/ml_derp.c	2026-10-29 15:08:49.000000000 +0000
++++ b/tailtiny/src/ml_derp.c	2026-10-29 15:11:54.155895580 +0000
+@@ -27,6 +27,8 @@
+ #include "lwip/netdb.h"
+ #include "mbedtls/net_sockets.h"
+ #include "mbedtls/error.h"
++#include "esp_crt_bundle.h"
++#include "ml_derp_tls.h"  /* Hermes gadget patch */
+ #include "nacl_box.h"
+ #include <string.h>
+ #include <errno.h>
+@@ -886,7 +888,14 @@
+         derp_connect_abort(ml, sock);
+         return ESP_FAIL;
+     }
+-    mbedtls_ssl_conf_authmode(&ml->derp.ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
++    /* Hermes gadget patch: check the relay's certificate against the
++     * firmware's CA bundle (upstream skipped verification); ml_derp_tls.h. */
++    setup_ret = ml_derp_tls_verify(&ml->derp.ssl_conf, esp_crt_bundle_attach);
++    if (setup_ret != 0) {
++        ESP_LOGE(TAG, "TLS setup failed: no CA bundle");
++        derp_connect_abort(ml, sock);
++        return ESP_FAIL;
++    }
+ #if MBEDTLS_VERSION_MAJOR < 4
+     mbedtls_ssl_conf_rng(&ml->derp.ssl_conf, mbedtls_ctr_drbg_random, &ml->derp.ctr_drbg);
+ #endif
+diff -ruN a/tailtiny/src/ml_derp_tls.h b/tailtiny/src/ml_derp_tls.h
+--- a/tailtiny/src/ml_derp_tls.h	1970-01-01 01:00:00.000000000 +0100
++++ b/tailtiny/src/ml_derp_tls.h	2026-10-29 15:11:54.155922539 +0000
+@@ -0,0 +1,19 @@
++/*
++ * Hermes gadget patch: how the relay (DERP) TLS connection checks the server,
++ * split out of ml_derp.c so the host tests (firmware/tests/test_tailtiny_tls.cpp)
++ * can run it against a local TLS server.
++ */
++#pragma once
++
++#include "mbedtls/ssl.h"
++
++/* Require the relay's certificate to chain to the CA certificates attach_ca()
++ * adds (the firmware passes esp_crt_bundle_attach) and to match the host name
++ * the caller sets with mbedtls_ssl_set_hostname(). Upstream skipped
++ * verification. WireGuard already encrypts what the relay carries; this stops
++ * a network in the middle from impersonating the relay and dropping or
++ * delaying it unnoticed. Returns 0, or -1 when attach_ca() fails. */
++static inline int ml_derp_tls_verify(mbedtls_ssl_config *conf, int (*attach_ca)(void *conf)) {
++    mbedtls_ssl_conf_authmode(conf, MBEDTLS_SSL_VERIFY_REQUIRED);
++    return attach_ca(conf) == 0 ? 0 : -1;
++}
