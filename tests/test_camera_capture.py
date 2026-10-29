@@ -46,7 +46,7 @@ def test_rgb565_png_encodes_little_endian_pixels_as_png_rgb():
 
 
 def test_camera_capture_saves_timestamped_png_under_gateway_home(monkeypatch, tmp_path):
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))  # HOME alone misses Windows
     pixels = bytes.fromhex("00f8 e007 1f00 ffff")
     result = {
         "format": "rgb565le",
