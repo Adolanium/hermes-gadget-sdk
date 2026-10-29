@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Hardware and setup
+
+- Adds the experimental `ws-p4-touch-lcd-7b` profile for Waveshare's ESP32-P4-WIFI6-Touch-LCD-7B (SKU 32510), including the display, touch, audio, ESP32-C6 Wi-Fi, CI/release packaging and optional OV5647 capture. The camera advertises `camera.capture` over the existing action/result protocol; no wire message types or schema are added. One live capture and gateway PNG-save smoke test passed; touch/audio I/O and the full physical checklist remain incomplete.
+
 ### Firmware
 
 - Experimental, and not in release images: a gadget can reach a Hermes computer that only listens on its Tailscale tailnet, from any network such as a phone hotspot, by joining the tailnet itself. It uses TailTiny 3.0.2, a third-party Tailscale client for ESP32, vendored with one patch per change (`firmware/esp32/components/TAILTINY.md`): ESP-IDF 6 and Mbed TLS 4 support, the relay's TLS certificate now verified, registration errors kept for the screen, and smaller task stacks. `set ts_key <auth key>`, `set server ws://100.x.y.z:8765/<path>` and `set tailnet on` turn it on, or the new tailnet fields on the phone setup page. The device then waits for the tunnel before it connects, and the connecting screen says what it is waiting for or why the tailnet refused it. No board has it on: it needs `BoardConfig::tailnet` and the sdkconfig lines in [hardware verification](docs/hardware-validation.md#tailnet), about 108 KB of flash on the AMOLED-1.75C, and PSRAM. Host tests check the control channel's ChaCha20-Poly1305 against RFC 8439 and, with `-DHG_TLS_TESTS=ON`, that the relay connection refuses a bad certificate. [Reach Hermes over your tailnet](docs/tailnet.md). Contributed by Antonio Lourenco (@tozes).

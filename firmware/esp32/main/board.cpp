@@ -48,6 +48,8 @@ namespace {
 #define HG_BOARD_NAME "crowpanel-advance-p4-10.1"
 #elif CONFIG_HG_BOARD_WS_P4_TOUCH_LCD_3_4C
 #define HG_BOARD_NAME "waveshare-esp32-p4-touch-lcd-3.4c"
+#elif CONFIG_HG_BOARD_WS_P4_TOUCH_LCD_7B
+#define HG_BOARD_NAME "waveshare-esp32-p4-wifi6-touch-lcd-7b"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154
 #define HG_BOARD_NAME "waveshare-esp32s3-lcd-154"
 #elif CONFIG_HG_BOARD_ESP32_CYD
@@ -1037,6 +1039,65 @@ BoardConfig make() {
   b.codec.rmnm_mics = false;
   b.codec.es7210_mics = 0x03;
   // Wi-Fi via C6 over SDIO (standard P4 function board pins).
+  b.buttons = {0, -1, -1, -1};
+  b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
+  return b;
+}
+#elif CONFIG_HG_BOARD_WS_P4_TOUCH_LCD_7B
+// Waveshare ESP32-P4-WIFI6-Touch-LCD-7B (SKU 32510): 1024x600 EK79007
+// MIPI-DSI panel, GT911 touch, ES8311 speaker + ES7210 microphone, C6 Wi-Fi.
+// Pin/timing data follows Waveshare's ESP-IDF BSP component 3.0.1.
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.lcd.enabled = true;
+  b.lcd.width = 1024;
+  b.lcd.height = 600;
+  b.lcd.mirror_x = true;
+  b.lcd.mirror_y = true;
+  b.lcd.backlight = 32;
+  b.lcd.backlight_invert = true;
+  b.lcd.rst = 33;
+  b.lcd.bus.type = LcdBus::Type::Dsi;
+  b.lcd.dsi.controller = DsiController::Ek79007;
+  b.lcd.dsi.lanes = 2;
+  b.lcd.dsi.lane_bit_rate_mbps = 1000;
+  b.lcd.dsi.dpi_clock_mhz = 52;
+  b.lcd.dsi.ldo_channel = 3;
+  b.lcd.dsi.ldo_voltage_mv = 2500;
+  b.lcd.dsi.use_dma2d = true;
+  b.lcd.dsi.hsync_pulse_width = 10;
+  b.lcd.dsi.hsync_back_porch = 160;
+  b.lcd.dsi.hsync_front_porch = 160;
+  b.lcd.dsi.vsync_pulse_width = 1;
+  b.lcd.dsi.vsync_back_porch = 23;
+  b.lcd.dsi.vsync_front_porch = 12;
+  // Waveshare BSP I2C bus: SDA GPIO7, SCL GPIO8.
+  b.i2c = {7, 8, 400000};
+  b.touch.enabled = true;
+  b.touch.controller = TouchController::Gt911;
+  b.touch.width = 1024;
+  b.touch.height = 600;
+  // The DSI framebuffer is rotated 180° in software for this panel mounting;
+  // leave the GT911 axes unmirrored so touch coordinates stay aligned to pixels.
+  b.touch.mirror_x = false;
+  b.touch.mirror_y = false;
+  b.touch.ppi = 171;
+  // Waveshare BSP leaves GT911 reset and interrupt unconnected; poll the I2C bus.
+  b.codec.enabled = true;
+  b.codec.mclk = 13;
+  b.codec.bclk = 12;
+  b.codec.ws = 10;
+  b.codec.dout = 9;
+  b.codec.din = 11;
+  b.codec.pa = 53;
+  b.codec.speaker_pa = true;
+  b.codec.mic = MicCodec::Es7210;
+  b.codec.speaker = SpeakerCodec::Es8311;
+  b.codec.dac_mclk = true;
+  b.codec.rmnm_mics = false;
+  b.codec.es7210_mics = 0x03;
   b.buttons = {0, -1, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";

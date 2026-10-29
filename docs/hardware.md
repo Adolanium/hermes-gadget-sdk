@@ -857,6 +857,42 @@ Experimental. The owner confirmed the display, C6-hosted Wi-Fi, pairing, reconne
 
 Wi-Fi caveat: the ESP32-C6 companion on this board does not ship with an esp_hosted slave image that this host (esp_hosted 2.12.6) can talk to. `g_wifi.begin()` times out after about 10 s and the gadget runs offline until the C6 is flashed. Flash `network_adapter.bin` (CrowPanel C6 firmware, V2.12.3, in `CrowPanel_Advance_ESP32-P4 Display_Firmware_Upgrade_Guide/.../`) to the C6 through its SH1.0 UART header with esptool before expecting Wi-Fi. The [report](hardware-validation.md#getting-the-c6-working-on-this-board) lists every step that was needed.
 
+## Waveshare ESP32-P4-WIFI6-Touch-LCD-7B
+
+Board option `ws-p4-touch-lcd-7b`, for Waveshare's ESP32-P4-WIFI6-Touch-LCD-7B (SKU 32510): a 1024x600 MIPI-DSI panel using EK79007, GT911 capacitive touch, ES8311 speaker codec plus ES7210 microphone ADC, and ESP32-C6 Wi-Fi over 4-bit SDIO. Hardware pins and display timings follow Waveshare's BSP component 3.0.1; the board configuration targets the ESP32-P4 rev 3 silicon family and 32 MiB flash observed on the connected device.
+
+| Part | Chip | Connection |
+|---|---|---|
+| Display | EK79007, 1024x600 MIPI-DSI | 2 data lanes @ 1000 Mbps; DPI 52 MHz; H: 10/160/160, V: 1/23/12; DSI PHY internal LDO channel 3 @ 2500 mV; software 180° X/Y framebuffer transform |
+| Backlight | PWM | GPIO 32, inverted output |
+| Touch | GT911 | I2C SDA 7, SCL 8; reset and interrupt not connected; polling; axes unmirrored to match the software-rotated display |
+| Microphone | ES7210 ADC (dual mic) | I2S MCLK 13, BCLK 12, WS 10, DIN 11 |
+| Speaker | ES8311 codec + amp | I2S DOUT 9; amplifier enable GPIO 53 (active high) |
+| Wi-Fi / BLE | ESP32-C6 companion | SDIO CMD 19, CLK 18, D0-D3 14-17; reset GPIO 54 (active high) |
+| Camera | Optional OV5647 | Two-lane MIPI-CSI; SCCB shares I2C SDA 7/SCL 8; vendor preview example assigns no separate reset/PWDN GPIO |
+| LCD reset | | GPIO 33 |
+| Console | USB-to-UART bridge | UART0, 115200 baud; USB Serial/JTAG remains secondary |
+
+On camera-equipped 7B units, the firmware exposes `camera.capture`. It captures an OV5647 still, reduces it to 640×512 RGB565 for the existing generic action result, and the gateway converts it to PNG under `~/.hermes/gadgetpix/`, named with a UTC timestamp and device ID. This reuses the current action/result message types; no new protocol messages are added. SKU 32510 is the standard version without the bundled camera; an OV5647 module is required. The camera connector and SCCB wiring follow Waveshare's [camera preview example](https://github.com/waveshareteam/ESP32-P4-WIFI6-Touch-LCD-7B/tree/9fcd49a8c927a00f5583c22d568b3448addbe51c/examples/arduino/examples/06_Camera_Preview) at commit `9fcd49a8c927a00f5583c22d568b3448addbe51c`; no vendor source code is copied. One live capture and gateway PNG save have been verified on the attached camera module; the image content and quality were not visually reviewed, and broader physical validation remains incomplete. See [hardware validation](hardware-validation.md#waveshare-p4-7b-camera-and-online-smoke-test).
+
+When a phone requests `http://192.168.4.1/`, the 7B replaces the Wi-Fi QR/join instructions with the configured WebSocket URL (or the `ws://<host>:8765/gadget` template) to copy into the form's gateway field. The URL remains on screen until the user exits Wi-Fi setup, after which the regular gadget screen returns.
+
+Build with ESP-IDF 6.1.0 (the project's P4 CI toolchain) and the board defaults:
+
+```bash
+cd firmware/esp32
+idf.py -B build/ws-p4-touch-lcd-7b \
+    -D SDKCONFIG=build/ws-p4-touch-lcd-7b/sdkconfig \
+    -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/ws-p4-touch-lcd-7b/sdkconfig.defaults" \
+    set-target esp32p4 build
+idf.py -B build/ws-p4-touch-lcd-7b \
+    -D SDKCONFIG=build/ws-p4-touch-lcd-7b/sdkconfig \
+    -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/ws-p4-touch-lcd-7b/sdkconfig.defaults" \
+    -p <PORT> flash monitor
+```
+
+This is an experimental profile. Connecting and error screens reserve up to eight caption lines for long WebSocket URLs, shrinking the mascot when needed. The URL-only Wi-Fi setup screen transition is implemented but not visually verified on hardware. Touch input/coordinates, actual microphone capture, audible speaker output, Wi-Fi loss/recovery, OTA and the full physical checklist remain unverified.
+
 ## Build and flash
 
 **No toolchain needed:** the [browser installer](https://adolanium.github.io/hermes-gadget-sdk/) flashes each release's prebuilt firmware from Chrome or Edge, then sets up Wi-Fi and pairing. The release files are also on the [releases page](https://github.com/Adolanium/hermes-gadget-sdk/releases), for `esptool.py write_flash 0x0 hermes-gadget-<board>-<version>.bin`, which also erases the board's settings.
