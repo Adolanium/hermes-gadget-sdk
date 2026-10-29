@@ -24,8 +24,12 @@
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "mbedtls/ssl.h"
+/* Hermes gadget patch: Mbed TLS 4 (ESP-IDF 6) draws TLS randomness from PSA
+ * and made the entropy/CTR-DRBG modules private. */
+#if MBEDTLS_VERSION_MAJOR < 4
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
+#endif
 #include "esp_heap_caps.h"
 #include "lwip/tcpip.h"
 #include "lwip/priv/tcpip_priv.h"   /* tcpip_api_call() */
@@ -355,8 +359,10 @@ typedef struct {
     int sockfd;                     /* Raw TCP socket */
     mbedtls_ssl_context ssl;        /* TLS context (owned exclusively by DERP I/O task) */
     mbedtls_ssl_config ssl_conf;
+#if MBEDTLS_VERSION_MAJOR < 4
     mbedtls_entropy_context entropy;
     mbedtls_ctr_drbg_context ctr_drbg;
+#endif
     bool connected;
     uint64_t last_recv_ms;          /* For keepalive watchdog */
 } ml_derp_conn_t;

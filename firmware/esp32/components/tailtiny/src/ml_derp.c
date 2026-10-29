@@ -785,8 +785,10 @@ static uint16_t derp_measure_regions(tailtiny_t *ml, uint16_t current,
 static void derp_connect_abort(tailtiny_t *ml, int sock) {
     mbedtls_ssl_free(&ml->derp.ssl);
     mbedtls_ssl_config_free(&ml->derp.ssl_conf);
+#if MBEDTLS_VERSION_MAJOR < 4
     mbedtls_ctr_drbg_free(&ml->derp.ctr_drbg);
     mbedtls_entropy_free(&ml->derp.entropy);
+#endif
     ml_close_sock(sock);
     ml->derp.sockfd = -1;
 }
@@ -864,11 +866,15 @@ esp_err_t ml_derp_connect(tailtiny_t *ml) {
     /* TLS setup */
     mbedtls_ssl_init(&ml->derp.ssl);
     mbedtls_ssl_config_init(&ml->derp.ssl_conf);
+#if MBEDTLS_VERSION_MAJOR < 4
     mbedtls_entropy_init(&ml->derp.entropy);
     mbedtls_ctr_drbg_init(&ml->derp.ctr_drbg);
 
     int setup_ret = mbedtls_ctr_drbg_seed(&ml->derp.ctr_drbg, mbedtls_entropy_func,
                                           &ml->derp.entropy, NULL, 0);
+#else
+    int setup_ret = 0;
+#endif
     if (setup_ret == 0) {
         setup_ret = mbedtls_ssl_config_defaults(&ml->derp.ssl_conf,
                                                 MBEDTLS_SSL_IS_CLIENT,
@@ -881,7 +887,9 @@ esp_err_t ml_derp_connect(tailtiny_t *ml) {
         return ESP_FAIL;
     }
     mbedtls_ssl_conf_authmode(&ml->derp.ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
+#if MBEDTLS_VERSION_MAJOR < 4
     mbedtls_ssl_conf_rng(&ml->derp.ssl_conf, mbedtls_ctr_drbg_random, &ml->derp.ctr_drbg);
+#endif
     mbedtls_ssl_conf_read_timeout(&ml->derp.ssl_conf, DERP_CONNECT_TIMEOUT_MS);
 
     setup_ret = mbedtls_ssl_setup(&ml->derp.ssl, &ml->derp.ssl_conf);
@@ -1185,8 +1193,10 @@ void ml_derp_disconnect(tailtiny_t *ml) {
         mbedtls_ssl_close_notify(&ml->derp.ssl);
         mbedtls_ssl_free(&ml->derp.ssl);
         mbedtls_ssl_config_free(&ml->derp.ssl_conf);
+#if MBEDTLS_VERSION_MAJOR < 4
         mbedtls_ctr_drbg_free(&ml->derp.ctr_drbg);
         mbedtls_entropy_free(&ml->derp.entropy);
+#endif
         ml_close_sock(ml->derp.sockfd);
         ml->derp.sockfd = -1;
     }
