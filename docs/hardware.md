@@ -873,9 +873,7 @@ Board option `ws-p4-touch-lcd-7b`, for Waveshare's ESP32-P4-WIFI6-Touch-LCD-7B (
 | LCD reset | | GPIO 33 |
 | Console | USB-to-UART bridge | UART0, 115200 baud; USB Serial/JTAG remains secondary |
 
-On camera-equipped 7B units, the firmware exposes `camera.capture`. It captures an OV5647 still, reduces it to 640×512 RGB565 for the existing generic action result, and the gateway converts it to PNG under `~/.hermes/gadgetpix/`, named with a UTC timestamp and device ID. This reuses the current action/result message types; no new protocol messages are added. SKU 32510 is the standard version without the bundled camera; an OV5647 module is required. The camera connector and SCCB wiring follow Waveshare's [camera preview example](https://github.com/waveshareteam/ESP32-P4-WIFI6-Touch-LCD-7B/tree/9fcd49a8c927a00f5583c22d568b3448addbe51c/examples/arduino/examples/06_Camera_Preview) at commit `9fcd49a8c927a00f5583c22d568b3448addbe51c`; no vendor source code is copied. One live capture and gateway PNG save have been verified on the attached camera module; the image content and quality were not visually reviewed, and broader physical validation remains incomplete. See [hardware validation](hardware-validation.md#waveshare-p4-7b-camera-and-online-smoke-test).
-
-When a phone requests `http://192.168.4.1/`, the 7B replaces the Wi-Fi QR/join instructions with the configured WebSocket URL (or the `ws://<host>:8765/gadget` template) to copy into the form's gateway field. The URL remains on screen until the user exits Wi-Fi setup, after which the regular gadget screen returns.
+On camera-equipped 7B units, the firmware exposes `camera.capture`. It captures an OV5647 still, reduces it to 640×512 RGB565 for the existing generic action result, and returns `format`, `width`, `height`, and `image_b64` in the existing action result; see [Device actions](protocol.md#device-actions). A separate generic gateway plugin change converts this result to a timestamped PNG under `~/.hermes/gadgetpix/` when installed. This reuses the current action/result message types; no new protocol messages are added. SKU 32510 is the standard version without the bundled camera; an OV5647 module is required. The camera connector and SCCB wiring follow Waveshare's [camera preview example](https://github.com/waveshareteam/ESP32-P4-WIFI6-Touch-LCD-7B/tree/9fcd49a8c927a00f5583c22d568b3448addbe51c/examples/arduino/examples/06_Camera_Preview) at commit `9fcd49a8c927a00f5583c22d568b3448addbe51c`; no vendor source code is copied. Two device captures were completed on the attached camera module. In the integrated development test, the separate gateway handler saved the latest result as a valid 640×512 PNG; its image content and quality were not visually reviewed, and broader physical validation remains incomplete. See [hardware validation](hardware-validation.md#waveshare-p4-7b-camera-and-online-smoke-test).
 
 Build with ESP-IDF 6.1.0 (the project's P4 CI toolchain) and the board defaults:
 
@@ -891,7 +889,7 @@ idf.py -B build/ws-p4-touch-lcd-7b \
     -p <PORT> flash monitor
 ```
 
-This is an experimental profile. Connecting and error screens reserve up to eight caption lines for long WebSocket URLs, shrinking the mascot when needed. The URL-only Wi-Fi setup screen transition is implemented but not visually verified on hardware. Touch input/coordinates, actual microphone capture, audible speaker output, Wi-Fi loss/recovery, OTA and the full physical checklist remain unverified.
+This is an experimental profile. Touch input/coordinates, actual microphone capture, audible speaker output, Wi-Fi loss/recovery, OTA and the full physical checklist remain unverified.
 
 ## Build and flash
 

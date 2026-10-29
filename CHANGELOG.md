@@ -4,7 +4,7 @@
 
 ### Hardware and setup
 
-- Adds the experimental `ws-p4-touch-lcd-7b` profile for Waveshare's ESP32-P4-WIFI6-Touch-LCD-7B (SKU 32510), including the display, touch, audio, ESP32-C6 Wi-Fi, CI/release packaging and optional OV5647 capture. The camera advertises `camera.capture` over the existing action/result protocol; no wire message types or schema are added. One live capture and gateway PNG-save smoke test passed; touch/audio I/O and the full physical checklist remain incomplete.
+- Adds the experimental `ws-p4-touch-lcd-7b` profile for Waveshare's ESP32-P4-WIFI6-Touch-LCD-7B (SKU 32510), including the display, touch, audio, ESP32-C6 Wi-Fi, CI/release packaging and optional OV5647 capture. The `camera.capture` RGB565 result format and bounds are documented in `docs/protocol.md`; it uses the existing action/result protocol with no new wire messages or schema. One physical OV5647 capture smoke test passed; touch/audio I/O and the full physical checklist remain incomplete.
 
 ### Firmware
 
