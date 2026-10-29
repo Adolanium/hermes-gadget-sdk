@@ -1455,7 +1455,8 @@ bool ml_wg_mgr_peer_is_up(tailtiny_t *ml, uint32_t vpn_ip) {
         if (dev && p->wg_peer_index < WIREGUARD_MAX_PEERS) {
             struct wireguard_peer *wp = &dev->peers[p->wg_peer_index];
             bool key_match = (memcmp(wp->public_key, p->public_key, 32) == 0);
-            ESP_LOGI(TAG, "WG peer UP: %s wg_idx=%d ep=%s:%u key=%02x%02x%02x%02x %s",
+            /* Hermes gadget patch: debug, not info; the port polls this. */
+            ESP_LOGD(TAG, "WG peer UP: %s wg_idx=%d ep=%s:%u key=%02x%02x%02x%02x %s",
                      p->hostname, p->wg_peer_index,
                      ip_addr_isany(&cur_ip) ? "DERP" : ipaddr_ntoa(&cur_ip),
                      cur_port,
