@@ -1067,6 +1067,7 @@ BoardConfig make() {
   b.lcd.dsi.ldo_channel = 3;
   b.lcd.dsi.ldo_voltage_mv = 2500;
   b.lcd.dsi.use_dma2d = true;
+  b.lcd.dsi.phy_clk_auto = true;
   b.lcd.dsi.hsync_pulse_width = 10;
   b.lcd.dsi.hsync_back_porch = 160;
   b.lcd.dsi.hsync_front_porch = 160;

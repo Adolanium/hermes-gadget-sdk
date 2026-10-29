@@ -152,7 +152,7 @@ void add_status_led(hg::App& app, int gpio) {
 void add_camera_action(hg::App& app, i2c_master_bus_handle_t sccb_bus) {
   hg::Action camera;
   camera.name = "camera.capture";
-  camera.description = "Capture a still photo from the attached OV5647 camera; the gateway saves a timestamped PNG.";
+  camera.description = "Take a still photo with the attached OV5647 camera. The gateway saves it as a PNG and returns its path.";
   camera.params.set("type", "object").set("properties", hg::json::Value::object());
   camera.handler = [sccb_bus](const hg::json::Value&, hg::json::Value& result, std::string& error) {
     std::vector<uint8_t> pixels;

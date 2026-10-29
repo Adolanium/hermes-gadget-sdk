@@ -122,6 +122,7 @@ menu "Hermes Gadget"
             depends on IDF_TARGET_ESP32
         config HG_BOARD_WS_P4_TOUCH_LCD_3_4C
             bool "Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C (800x800 round DSI, ES8311+ES7210 audio, C6 Wi-Fi)"
+            depends on IDF_TARGET_ESP32P4
         config HG_BOARD_WS_P4_TOUCH_LCD_7B
             bool "Waveshare ESP32-P4-WIFI6-Touch-LCD-7B (1024x600 DSI, GT911 touch, ES8311+ES7210 audio, C6 Wi-Fi)"
             depends on IDF_TARGET_ESP32P4

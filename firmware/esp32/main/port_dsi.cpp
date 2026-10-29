@@ -315,9 +315,10 @@ bool DsiDisplay::begin(const LcdConfig& cfg, const DsiPanelConfig& dsi) {
   esp_lcd_dsi_bus_config_t bus_cfg = {};
   bus_cfg.bus_id = 0;
   bus_cfg.num_data_lanes = dsi_.lanes;
-  // Keep phy_clk_src at its zero/default sentinel: ESP-IDF chooses XTAL on
-  // P4 rev 3.x and the legacy PLL_F20M source on older P4 revisions. The
-  // backwards-compatibility MIPI_DSI_PHY_CLK_SRC_DEFAULT macro is wrong for rev 3.x.
+  // DsiPanelConfig::phy_clk_auto leaves phy_clk_src at zero so ESP-IDF picks the source
+  // for the chip revision (XTAL on P4 rev 3.x, PLL_F20M before). The boards validated
+  // before it keep MIPI_DSI_PHY_CLK_SRC_DEFAULT.
+  if (!dsi_.phy_clk_auto) bus_cfg.phy_clk_src = MIPI_DSI_PHY_CLK_SRC_DEFAULT;
   bus_cfg.lane_bit_rate_mbps = static_cast<float>(dsi_.lane_bit_rate_mbps);
   esp_err_t err = esp_lcd_new_dsi_bus(&bus_cfg, &bus_);
   if (err != ESP_OK) {
@@ -504,6 +505,12 @@ void DsiDisplay::flush(uint16_t y0, uint16_t y1) {
   // the pixels arrive at the DPI scanout buffer in the intended orientation.
   const uint16_t* source = &fb_[static_cast<size_t>(y0) * cfg_.width];
   if (transform_fb_) {
+    // Mirrored vertically, the changed rows [y0, y1) land at [height - y1, height - y0).
+    if (cfg_.mirror_y) {
+      const uint16_t top = cfg_.height - y1;
+      y1 = cfg_.height - y0;
+      y0 = top;
+    }
     for (uint16_t out_y = y0; out_y < y1; ++out_y) {
       const uint16_t in_y = cfg_.mirror_y ? cfg_.height - 1 - out_y : out_y;
       const uint16_t* src_row = &fb_[static_cast<size_t>(in_y) * cfg_.width];

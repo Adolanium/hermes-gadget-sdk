@@ -67,6 +67,9 @@ struct DsiPanelConfig {
   int ldo_channel = 3;            // internal LDO channel powering the DSI PHY
   int ldo_voltage_mv = 2500;      // that channel's voltage
   bool use_dma2d = true;          // DMA2D-assisted flush, falling back to a CPU copy
+  // Let ESP-IDF choose the DSI PHY clock source for the chip revision instead of
+  // MIPI_DSI_PHY_CLK_SRC_DEFAULT (needed on the 7B's P4 rev 3.x).
+  bool phy_clk_auto = false;
   // Video timing; the P4's EK79007 panel's porches are wide.
   int hsync_pulse_width = 70, hsync_back_porch = 160, hsync_front_porch = 160;
   int vsync_pulse_width = 10, vsync_back_porch = 23, vsync_front_porch = 12;
