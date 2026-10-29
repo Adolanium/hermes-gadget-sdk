@@ -59,7 +59,7 @@ Phone setup configures a board that already runs the firmware. A board without a
 
 1. Join the `Hermes-XXXX` network shown on the gadget. Enter its temporary password, also shown on the screen. Each setup session gets a new password. Where the screen has room, it also shows a QR code: point your phone's camera at it to join the network without typing, then continue with the next step.
 2. Keep this network selected if your phone warns that it has no internet. Open `http://192.168.4.1` in the phone's browser.
-3. Enter your 2.4 GHz network name, its password, and the device URL from `hermes gadget info`. Leave the password empty only for an open network.
+3. Enter your 2.4 GHz network name and password. After the page loads, copy the WebSocket address shown on the gadget screen into the gateway-address field; if the screen shows the `<host>` template, run `hermes gadget info` on the Hermes host to get the actual URL. The screen switches from the QR/join instructions only after the page opens because the form needs that gateway URL; it stays visible until you exit Wi-Fi setup. Leave the password empty only for an open network.
 4. Choose **Check connection and save**. The board allows up to 30 seconds to connect. If your phone disconnects during the check, rejoin the gadget's network and reload the page.
 5. After the page reports success, reconnect your phone to its usual network. The gadget connects to Hermes; approve its pairing code if this is its first setup.
 

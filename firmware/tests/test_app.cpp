@@ -1351,6 +1351,25 @@ TEST("app: connection, pairing and setup screens show the mascot") {
   CHECK(unset.app.screen() == hg::Screen::Error && unset.app.model().hero);
 }
 
+TEST("app: connection and server-error screens reserve room for full gateway URLs") {
+  const std::string server = "ws://gateway.example:8765/" + std::string(120, 'a');
+  Rig connecting(server);
+  connecting.app.begin();
+  connecting.app.on_network(true, "wifi");
+  connecting.advance(1000);
+  CHECK(connecting.app.screen() == hg::Screen::Connecting);
+  CHECK_EQ(connecting.app.model().detail, server);
+  CHECK(connecting.app.model().caption_lines >= 8);
+
+  Rig unset("");
+  unset.app.begin();
+  unset.app.on_network(true);
+  unset.advance(1000);
+  CHECK(unset.app.screen() == hg::Screen::Error);
+  CHECK(unset.app.model().detail.find("ws://") != std::string::npos);
+  CHECK(unset.app.model().caption_lines >= 8);
+}
+
 TEST("app: short cards sit under the mascot, long ones use the text layout") {
   Rig r;
   r.bring_online(true);
@@ -2957,6 +2976,40 @@ TEST("Wi-Fi setup: private instructions stay out of diagnostics and prompts clos
   CHECK(!r.app.wifi_setup_open());
   CHECK(r.app.screen() == hg::Screen::Prompt);
   CHECK(!r.app.start_wifi_setup());
+}
+
+TEST("Wi-Fi setup: loading the phone page replaces instructions and QR with the server URL") {
+  const std::string server = "ws://gateway.example:8765/gadget";
+  Rig r(server);
+  r.bring_online(true);
+  r.app.on_wifi_setup = [] { return "Network: Hermes-test\nPassword: temporary-key\nOpen http://192.168.4.1"; };
+  r.app.on_wifi_setup_ap = [] {
+    hg::WifiSetupAp ap;
+    ap.ssid = "Hermes-test";
+    ap.password = "temporary-key";
+    return ap;
+  };
+  CHECK(r.app.start_wifi_setup());
+  CHECK(r.app.model().qr != nullptr);
+  r.app.on_wifi_setup_page_open();
+  CHECK(r.app.wifi_setup_open());
+  CHECK(r.app.model().qr == nullptr);
+  CHECK(r.app.model().detail.empty());
+  CHECK_EQ(r.app.model().body, server);
+
+  r.app.close_wifi_setup();
+  CHECK(!r.app.wifi_setup_open());
+  CHECK(r.app.start_wifi_setup());
+  CHECK(r.app.model().qr != nullptr);
+}
+
+TEST("Wi-Fi setup: page-open screen falls back to the documented gateway URL template") {
+  Rig r("");
+  r.app.on_wifi_setup = [] { return "Network: Hermes-test\nPassword: temporary-key"; };
+  CHECK(r.app.start_wifi_setup());
+  r.app.on_wifi_setup_page_open();
+  CHECK_EQ(r.app.model().body, std::string("ws://<host>:8765/gadget"));
+  CHECK(r.app.model().qr == nullptr);
 }
 
 TEST("Wi-Fi setup: the screen carries a scannable code for the temporary network") {

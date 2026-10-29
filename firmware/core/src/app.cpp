@@ -50,6 +50,7 @@ constexpr uint32_t kPageLineMs = 1000;        // long text: reading time per lin
 constexpr uint32_t kManualScrollPauseMs = 15000;  // UP/DOWN pauses automatic paging this long
 constexpr uint8_t kCaptionLines = 3;          // detail lines on pairing, setup and card screens
 constexpr uint8_t kPromptLines = 4;           // ...and on a question (the renderer drops lines on small screens)
+constexpr uint8_t kServerCaptionLines = 8;    // reserve room for long ws:// URLs; the mascot shrinks to fit
 constexpr uint32_t kFrameMs = 100;
 constexpr uint32_t kSensorIntervalMs = 2000;
 constexpr uint32_t kDefaultCardMs = 15000;
@@ -1961,9 +1962,17 @@ void App::update_model() {
   if (!wifi_setup_text_.empty()) {
     m.screen = Screen::Setup;
     m.headline = tr(Msg::WifiSetup);
-    m.detail = tr(Msg::ConnectYourPhone);
-    m.body = wifi_setup_text_;
-    m.qr = wifi_setup_qr_.ok() ? &wifi_setup_qr_ : nullptr;
+    if (wifi_setup_page_open_) {
+      // Once the phone has the setup form, use the screen to show the gateway
+      // address the form needs. Keep the temporary-network QR/instructions on
+      // screen until the page is actually requested.
+      m.body = server_url_.empty() ? "ws://<host>:8765/gadget" : server_url_;
+      m.qr = nullptr;
+    } else {
+      m.detail = tr(Msg::ConnectYourPhone);
+      m.body = wifi_setup_text_;
+      m.qr = wifi_setup_qr_.ok() ? &wifi_setup_qr_ : nullptr;
+    }
     m.scroll = 0;
     m.hint = profile_.touch_screen ? std::string(tr(Msg::SwipeDownToClose)) : tr(Msg::ButtonToClose, {cancel});
     render(m);
@@ -2024,7 +2033,7 @@ void App::update_model() {
   } else if (!fatal_.empty()) {
     m.screen = Screen::Error;
     m.hero = true;
-    m.caption_lines = kCaptionLines;
+    m.caption_lines = kServerCaptionLines;
     m.headline = tr(Msg::SetupNeeded);
     // The status report keeps the English reason; the screen shows it translated.
     const std::string reason = fatal_ == i18n::english(Msg::NoServerConfigured) ? tr(Msg::NoServerConfigured) : fatal_;
@@ -2040,7 +2049,7 @@ void App::update_model() {
   } else if (phase_ == Phase::Connecting || phase_ == Phase::Handshake) {
     m.screen = Screen::Connecting;
     m.hero = true;
-    m.caption_lines = kCaptionLines;
+    m.caption_lines = kServerCaptionLines;
     m.headline = tr(phase_ == Phase::Handshake ? Msg::Authenticating : Msg::ConnectingToHermes);
     m.detail = server_url_;
     if (!last_close_.empty() && attempts_ > 1) m.detail += "\n" + tr(Msg::ConnectError, {last_close_});

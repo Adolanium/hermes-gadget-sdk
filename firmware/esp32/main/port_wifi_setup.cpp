@@ -174,7 +174,9 @@ esp_err_t Wifi::setup_http(httpd_req_t* req) {
   if (!local_request(req)) return error_response(req, "403 Forbidden", "Open setup from the device's temporary Wi-Fi network");
   if (req->method == HTTP_GET && std::strcmp(req->uri, "/") == 0) {
     httpd_resp_set_type(req, "text/html; charset=utf-8");
-    return httpd_resp_sendstr(req, setup_page);
+    const esp_err_t sent = httpd_resp_sendstr(req, setup_page);
+    if (sent == ESP_OK) events::post(EventType::WifiSetupPageOpened);
+    return sent;
   }
   if (req->method == HTTP_GET) {
     auto result = hg::json::Value::object();

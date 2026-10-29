@@ -339,6 +339,7 @@ bool App::start_wifi_setup() {
   cancel_held_ = false;
   settings_chord_fired_ = false;
   wake_buttons_ = 0;
+  wifi_setup_page_open_ = false;
   wifi_setup_text_ = on_wifi_setup();
   // Encode the code once here: the model is rebuilt on every frame.
   wifi_setup_qr_ = {};
@@ -351,9 +352,16 @@ bool App::start_wifi_setup() {
   return !wifi_setup_text_.empty();
 }
 
+void App::on_wifi_setup_page_open() {
+  if (wifi_setup_text_.empty() || wifi_setup_page_open_) return;
+  wifi_setup_page_open_ = true;
+  update_model();
+}
+
 void App::close_wifi_setup() {
   if (wifi_setup_text_.empty()) return;
   wifi_setup_text_.clear();
+  wifi_setup_page_open_ = false;
   wifi_setup_qr_ = {};
   if (on_wifi_setup_close) on_wifi_setup_close();
   update_model();

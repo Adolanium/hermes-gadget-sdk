@@ -165,6 +165,8 @@ class App {
   bool dozing() const { return dozing_; }
   bool start_wifi_setup();
   void close_wifi_setup();
+  // Called on the app task after the phone loads the temporary setup page.
+  void on_wifi_setup_page_open();
   bool wifi_setup_open() const { return !wifi_setup_text_.empty(); }
   // A turn is under way: listening, waiting for a reply, or responding, which lasts until the
   // reply has finished playing. The port keeps Wi-Fi at full power until it ends.
@@ -416,6 +418,7 @@ class App {
   HardwareCheck hardware_check_ = HardwareCheck::None;
   std::string check_result_;
   std::string wifi_setup_text_;
+  bool wifi_setup_page_open_ = false;
   // The setup network's scannable code, encoded once when the screen opens.
   qr::Code wifi_setup_qr_;
   // phone pairing (on_phone_pair)

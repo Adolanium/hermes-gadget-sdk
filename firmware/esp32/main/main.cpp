@@ -203,6 +203,7 @@ void dispatch(hg::App& app, hgp::Event& ev) {
       break;
     case EventType::WifiStarted: g_wifi.reconfigure(); break;
     case EventType::WifiScanDone: g_wifi.scan_done(); break;
+    case EventType::WifiSetupPageOpened: app.on_wifi_setup_page_open(); break;
     case EventType::WifiProvision:
       if (ev.len == sizeof(hg::WifiCredentials)) g_wifi.provision(*reinterpret_cast<const hg::WifiCredentials*>(ev.data));
       break;
