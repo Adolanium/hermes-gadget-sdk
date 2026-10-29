@@ -32,4 +32,16 @@ if(HG_BUILD_TESTS)
     target_compile_options(hg_core_tests PRIVATE /utf-8)
   endif()
   add_test(NAME hg_core_tests COMMAND hg_core_tests)
+
+  # TailTiny's Noise channel AEAD (esp32/components/TAILTINY.md) against RFC 8439. The vendored
+  # C uses GCC builtins, so not on MSVC.
+  if(NOT MSVC)
+    enable_language(C)
+    set(HG_WG_REFC esp32/components/wireguard_lwip/src/crypto/refc)
+    add_executable(hg_tailtiny_tests tests/main.cpp tests/test_tailtiny_aead.cpp
+      ${HG_WG_REFC}/chacha20poly1305.c ${HG_WG_REFC}/chacha20.c ${HG_WG_REFC}/poly1305-donna.c
+      esp32/components/wireguard_lwip/src/crypto.c)
+    target_include_directories(hg_tailtiny_tests PRIVATE ${HG_WG_REFC} esp32/components/tailtiny/src)
+    add_test(NAME hg_tailtiny_tests COMMAND hg_tailtiny_tests)
+  endif()
 endif()
