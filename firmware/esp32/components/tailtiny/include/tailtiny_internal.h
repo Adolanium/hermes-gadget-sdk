@@ -377,6 +377,9 @@ struct tailtiny_s {
 
     /* State (atomic reads from any task, writes only from coord) */
     volatile tailtiny_state_t state;
+    /* Hermes gadget patch: why registration last failed, for the device screen
+     * (written by the coord task, cleared on connect). */
+    char last_error[96];
     volatile uint32_t vpn_ip;
 
     /* Event group (cross-task synchronization) */

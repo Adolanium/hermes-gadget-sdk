@@ -1016,6 +1016,7 @@ static int do_register(tailtiny_t *ml, ml_noise_state_t *noise) {
     cJSON *reg_err = cJSON_GetObjectItem(resp_json, "Error");
     if (cJSON_IsString(reg_err) && reg_err->valuestring[0]) {
         ESP_LOGE(TAG, "Registration rejected by the control server: %s", reg_err->valuestring);
+        snprintf(ml->last_error, sizeof(ml->last_error), "%s", reg_err->valuestring);  /* Hermes gadget patch */
         cJSON_Delete(resp_json);
         return -1;
     }
@@ -1024,12 +1025,14 @@ static int do_register(tailtiny_t *ml, ml_noise_state_t *noise) {
         ESP_LOGE(TAG, "Registration needs a login: the auth key is invalid, expired, or "
                       "already used (non-reusable). Create a new key, or log in at %s",
                  auth_url->valuestring);
+        snprintf(ml->last_error, sizeof(ml->last_error), "auth key rejected");  /* Hermes gadget patch */
         cJSON_Delete(resp_json);
         return -1;
     }
     if (cJSON_IsFalse(cJSON_GetObjectItem(resp_json, "MachineAuthorized"))) {
         ESP_LOGW(TAG, "Device is waiting for approval: approve it at "
                       "https://login.tailscale.com/admin/machines");
+        snprintf(ml->last_error, sizeof(ml->last_error), "approve this device in the admin console");  /* Hermes gadget patch */
     }
 
     /* Extract our VPN IP from Node.Addresses */
@@ -2733,6 +2736,7 @@ void ml_coord_task(void *arg) {
 
             state = COORD_LONG_POLL;
             ml->state = ML_STATE_CONNECTED;
+            ml->last_error[0] = '\0';  /* Hermes gadget patch */
             reconnect_attempts = 0;
             last_map_rx_ms = ml_get_time_ms();
 
