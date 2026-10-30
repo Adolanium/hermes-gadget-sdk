@@ -94,6 +94,8 @@ menu "Hermes Gadget"
             bool "Waveshare ESP32-S3-Touch-AMOLED-2.16 (480x480 AMOLED, CST9220 touch, ES8311 + ES7210)"
         config HG_BOARD_BOX3
             bool "Espressif ESP32-S3-BOX-3 (LCD, touch, ES8311 + ES7210)"
+        config HG_BOARD_ESP32S3_BOX
+            bool "Espressif ESP32-S3-BOX (experimental, ST7789 320x240, TT21100, ES8311 + ES7210)"
         config HG_BOARD_CORES3
             bool "M5Stack CoreS3 (LCD, touch, AW88298 + ES7210)"
         config HG_BOARD_STICKS3

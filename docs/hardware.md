@@ -203,9 +203,42 @@ References: [Waveshare wiki](https://www.waveshare.com/wiki/ESP32-S3-Knob-Touch-
 - The encoder scrolls the reply list; each detent is one step.
 - The microphone captures on a hold: check the VU feedback on screen, and that released audio is recognized.
 
+## ESP32-S3-BOX
+
+Use `esp32-s3-box` for the original Espressif ESP32-S3-BOX: 16 MB flash and 8 MB octal PSRAM. BOX-3 and BOX-Lite use other profiles. This port is experimental, with no physical report recorded.
+
+| Part | Connection |
+|---|---|
+| ST7789 320×240 | SPI MOSI 6, clock 7, CS 5, DC 4, reset 48 (active low, shared with touch), backlight 45 |
+| TT21100 touch | I2C 0x24, interrupt 3. The touch driver mirrors X. |
+| I2C | SDA 8, SCL 18, 400 kHz |
+| ES8311 speaker / ES7210 microphones | MCLK 2, BCLK 17, WS 47, DOUT 15, DIN 16; amplifier enable 46 |
+| BOOT | GPIO 0, TALK |
+
+The glass is a 2.4 inch ST7789. Color order is BGR, both axes are mirrored, and color inversion stays off. Reset on GPIO 48 is active low. The display reset runs before touch starts, and touch does not pulse that line again. Backlight is GPIO 45. I2S word select is GPIO 47.
+
+Hold the screen or BOOT to talk, swipe down to cancel, and hold the title for one second to open settings. GPIO 1 is the hardware mute button and is left to that circuit. The touch controller's home button is unused. The ICM-42607-P, the PMOD headers and storage stay off.
+
+```bash
+cd firmware/esp32
+pio run -e esp32-s3-box -t upload -t monitor
+```
+
+The USB-C port handles flashing and the serial console. For ESP-IDF, use `SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp32-s3-box/sdkconfig.defaults"` with a separate build directory and sdkconfig. Phone setup, pairing and OTA use the same flows as the other ESP32 boards.
+
+Back up the factory image before the first flash:
+
+```bash
+esptool.py --chip esp32s3 read_flash 0 0x1000000 esp32-s3-box-factory.bin
+```
+
+On a good boot the panel logs `st7789 320x240 ready`. Run the [hardware checklist](hardware-validation.md) for touch alignment, colors, audio, the physical mute button, USB recovery and Wi-Fi setup. No battery readings are advertised.
+
+References: Espressif's [ESP-BOX BSP](https://github.com/espressif/esp-bsp/tree/67f41a169401d1f23e827188dd08fb351cb0febe/bsp/esp-box) at commit `67f41a169401d1f23e827188dd08fb351cb0febe` (Apache 2.0). Pin numbers, the ST7789 mirror, BGR color order and the TT21100 mirror come from that package. The source of those facts is listed in [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
+
 ## ESP32-S3-BOX-3
 
-Use `esp32-s3-box-3` for Espressif's BOX-3 with 16 MB flash and 16 MB octal PSRAM. The original BOX and BOX-Lite need different profiles. This port is experimental, with no physical report recorded.
+Use `esp32-s3-box-3` for Espressif's BOX-3 with 16 MB flash and 16 MB octal PSRAM. The [original BOX](#esp32-s3-box) has its own profile. BOX-Lite needs a different profile. This port is experimental, with no physical report recorded.
 
 | Part | Connection |
 |---|---|
