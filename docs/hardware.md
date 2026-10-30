@@ -236,6 +236,40 @@ On a good boot the panel logs `st7789 320x240 ready`. Run the [hardware checklis
 
 References: Espressif's [ESP-BOX BSP](https://github.com/espressif/esp-bsp/tree/67f41a169401d1f23e827188dd08fb351cb0febe/bsp/esp-box) at commit `67f41a169401d1f23e827188dd08fb351cb0febe` (Apache 2.0). Pin numbers, the ST7789 mirror, BGR color order and the TT21100 mirror come from that package. The source of those facts is listed in [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
 
+## ESP32-S3-Korvo-2
+
+Use `esp32-s3-korvo-2` for the Espressif ESP32-S3-Korvo-2 with the LCD sub-board (ESP32-S3-Korvo-2-LCD V1.0 on a V3.0 or V3.1 main board): 16 MB flash and 8 MB octal PSRAM. This port is experimental, with no physical report recorded. A main board without that LCD sub-board has no panel.
+
+| Part | Connection |
+|---|---|
+| ILI9341 320×240 | SPI MOSI 0, clock 1, DC 2. Chip select is not an ESP32 pin. Reset, backlight and the LCD/touch enable are on the TCA9554 |
+| TCA9554 | I2C 0x38 (TCA9554A) or 0x20. Pin 3 held low enables the LCD and touch. Pin 2 is reset, pulsed low then left high. Pin 1 is the backlight, on when brightness is above 0 |
+| GT911 or TT21100 touch | Probed at 0x5d, then 0x14, then 0x24. No interrupt pin. X is mirrored |
+| I2C | SDA 17, SCL 18, 400 kHz |
+| ES8311 speaker / ES7210 microphones | MCLK 16, BCLK 9, WS 45, DOUT 8, DIN 10; amplifier enable 48 |
+| Battery | GPIO 6, divider of four. No charge pin and no software power-off |
+
+The glass is a 2.4 inch ILI9341. Color order is BGR, both axes are mirrored, and color inversion stays off. The panel uses Espressif's stock ILI9341 initialization. SPI chip select stays disconnected. The expander enable is held before SPI and touch start.
+
+Hold the screen to talk, swipe down to cancel, and hold the title for one second to open settings. GPIO 0 is the panel data line, so BOOT is not a talk button. The six ADC buttons on GPIO 5, the camera, the microSD card and the red and blue LEDs stay off.
+
+```bash
+cd firmware/esp32
+pio run -e esp32-s3-korvo-2 -t upload -t monitor
+```
+
+The USB port handles flashing and the serial console. For ESP-IDF, use `SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp32-s3-korvo-2/sdkconfig.defaults"` with a separate build directory and sdkconfig. Phone setup, pairing and OTA use the same flows as the other ESP32 boards.
+
+Back up the factory image before the first flash:
+
+```bash
+esptool.py --chip esp32s3 read_flash 0 0x1000000 esp32-s3-korvo-2-factory.bin
+```
+
+On a good boot the panel logs `ili9341 320x240 ready` and the expander logs `expander 0x38 levels ready` or `expander 0x20 levels ready`. Run the [hardware checklist](hardware-validation.md) for touch alignment, colors, audio, the battery reading and Wi-Fi setup. The battery percentage uses the default Li-ion estimate. No measured curve is claimed.
+
+References: Espressif's [Korvo-2 BSP](https://github.com/espressif/esp-bsp/tree/67f41a169401d1f23e827188dd08fb351cb0febe/bsp/esp32_s3_korvo_2) at commit `67f41a169401d1f23e827188dd08fb351cb0febe` (Apache 2.0), the [Korvo-2 product page](https://www.espressif.com/en/dev-board/esp32-s3-korvo-2-en) (16 MB flash and 8 MB PSRAM), and the [Korvo-2-LCD user guide](https://docs.espressif.com/projects/esp-adf/en/latest/multimedia-boards/dev-boards/user-guide-esp32-s3-korvo-2-lcd.html). Pin numbers, the ILI9341 mirror, BGR color order, the touch X mirror and the expander levels come from that package. The source of those facts is listed in [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
+
 ## ESP32-S3-BOX-3
 
 Use `esp32-s3-box-3` for Espressif's BOX-3 with 16 MB flash and 16 MB octal PSRAM. The [original BOX](#esp32-s3-box) has its own profile. BOX-Lite needs a different profile. This port is experimental, with no physical report recorded.

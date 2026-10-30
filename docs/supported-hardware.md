@@ -24,6 +24,7 @@ Hardware ports remain experimental until the [verification table](hardware-valid
 | [Spotpear ESP32-S3-1.28-BOX](hardware.md#spotpear-esp32-s3-128-box) | Hold the screen or BOOT to talk; swipe down to cancel | Onboard microphone and speaker; battery |
 | [Spotpear ESP32-S3-1.54 muma](hardware.md#spotpear-esp32-s3-154-muma) | Hold the screen or BOOT to talk; swipe down to cancel | Onboard microphone and speaker |
 | [Espressif ESP32-S3-BOX](hardware.md#esp32-s3-box) | Hold the screen or BOOT to talk | Onboard microphones and speaker. Experimental |
+| [Espressif ESP32-S3-Korvo-2](hardware.md#esp32-s3-korvo-2) | Hold the screen to talk | Onboard microphones and speaker. Needs the LCD sub-board. Experimental |
 | [Espressif ESP32-S3-BOX-3](hardware.md#esp32-s3-box-3) | Hold the screen or BOOT to talk | Onboard microphones and speaker |
 | [M5Stack CoreS3](hardware.md#m5stack-cores3) | Hold the screen to talk | Onboard microphones and speaker; battery management |
 | [M5Stack StickS3](hardware.md#m5stack-sticks3) | Hold KEY1 to talk; KEY2 cancels; face-down sleep | Onboard microphone and speaker; battery. Experimental |

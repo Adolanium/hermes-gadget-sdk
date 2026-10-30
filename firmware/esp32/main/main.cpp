@@ -374,9 +374,12 @@ extern "C" void app_main(void) {
   i2c_master_bus_handle_t i2c_bus = io_rail_ready ? hgp::i2c::bus(board.i2c) : nullptr;
   const bool peripherals_ready = io_rail_ready && (!board.cores3 || g_cores3.begin(i2c_bus)) &&
       (!board.sticks3 || g_sticks3.begin(i2c_bus)) &&
-      (!board.expander_reset.mask || hgp::tca9554_reset(i2c_bus, board.expander_reset));
+      (!board.expander_reset.mask || hgp::tca9554_reset(i2c_bus, board.expander_reset)) &&
+      (!board.expander_levels.enabled || hgp::tca9554_levels_begin(i2c_bus, board.expander_levels));
   if (board.cores3 && peripherals_ready)
     g_display.board_backlight = [](uint8_t percent) { g_cores3.set_backlight(percent); };
+  if (board.expander_levels.backlight && peripherals_ready)
+    g_display.board_backlight = [](uint8_t percent) { hgp::tca9554_backlight(percent); };
   if (peripherals_ready && board.lcd.enabled) {
 #if SOC_MIPI_DSI_SUPPORTED
     if (board.lcd.bus.type == hgp::LcdBus::Type::Dsi) {
