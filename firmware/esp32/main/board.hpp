@@ -75,7 +75,7 @@ struct DsiPanelConfig {
   int vsync_pulse_width = 10, vsync_back_porch = 23, vsync_front_porch = 12;
 };
 
-enum class LcdController { St7789, Box3, CoreS3, St77916, Gc9a01, Sh8601, Ili9341 };
+enum class LcdController { St7789, Box3, CoreS3, St77916, Gc9a01, Sh8601, Ili9341, Spd2010 };
 
 // Which vendor initialization table an ST77916 panel gets. Waveshare's 1.85C
 // tables are chosen by the panel ID the driver reads; the ESP-VoCat's glass

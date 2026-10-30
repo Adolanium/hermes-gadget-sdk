@@ -12,6 +12,7 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_gc9a01.h"
 #include "esp_lcd_panel_st7789.h"
+#include "esp_lcd_spd2010.h"
 #include "esp_log.h"
 #include "panel_box3.hpp"
 #include "panel_sh8601.hpp"
@@ -63,9 +64,16 @@ bool SpiDisplay::on_trans_done(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event
 
 bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   cfg_ = cfg;
-  const bool qspi = cfg.controller == LcdController::St77916 || cfg.controller == LcdController::Sh8601;
+  const bool qspi = cfg.controller == LcdController::St77916 || cfg.controller == LcdController::Sh8601 ||
+                     cfg.controller == LcdController::Spd2010;
   const bool st77916 = cfg.controller == LcdController::St77916;
   const bool gc9a01 = cfg.controller == LcdController::Gc9a01;
+  // The SPD2010 accepts a window only when both x edges are multiples of 4.
+  // This port always draws from x = 0 across the full width, plus gap_x.
+  if (cfg.controller == LcdController::Spd2010 && (cfg.width % 4 != 0 || cfg.gap_x % 4 != 0)) {
+    ESP_LOGE(TAG, "SPD2010 x range must start and end on a multiple of 4");
+    return false;
+  }
   bool ili9341 = cfg.controller == LcdController::Ili9341;
   bool cores3_e = false;
   if (cfg.controller == LcdController::Box3) {
@@ -79,6 +87,7 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
     }
   }
   controller_name_ = cfg.controller == LcdController::Sh8601 ? "sh8601"
+                     : cfg.controller == LcdController::Spd2010 ? "spd2010"
                      : qspi ? "st77916" : gc9a01 ? "gc9a01"
                      : cfg.controller == LcdController::Ili9341 ? "ili9341"
                      : ili9341 ? "ili9342" : "st7789";
@@ -170,7 +179,9 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   io_cfg.lcd_cmd_bits = qspi ? 32 : 8;
   io_cfg.flags.quad_mode = qspi;
   io_cfg.lcd_param_bits = 8;
-  io_cfg.spi_mode = 0;
+  // Espressif's SPD2010_PANEL_IO_QSPI_CONFIG uses SPI mode 3. The other panels
+  // in this file use mode 0.
+  io_cfg.spi_mode = cfg.controller == LcdController::Spd2010 ? 3 : 0;
   io_cfg.trans_queue_depth = 4;
   io_cfg.on_color_trans_done = &SpiDisplay::on_trans_done;
   io_cfg.user_ctx = this;
@@ -224,6 +235,11 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
       sh_vendor.init_cmds_size = sizeof(kSh8601PanelInit) / sizeof(kSh8601PanelInit[0]);
       panel_cfg.vendor_config = &sh_vendor;
       if (!esp_ok(esp_lcd_new_panel_sh8601(io_, &panel_cfg, &panel_), TAG, "esp_lcd_new_panel_sh8601")) return false;
+    } else if (cfg.controller == LcdController::Spd2010) {
+      spd2010_vendor_config_t sp_vendor = {};
+      sp_vendor.flags.use_qspi_interface = 1;
+      panel_cfg.vendor_config = &sp_vendor;
+      if (!esp_ok(esp_lcd_new_panel_spd2010(io_, &panel_cfg, &panel_), TAG, "esp_lcd_new_panel_spd2010")) return false;
     } else {
       st_vendor.flags.use_qspi_interface = 1;
       if (cfg.st77916_panel == St77916Panel::Vocat) {
@@ -259,7 +275,16 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   if (cfg.controller != LcdController::Sh8601) {
     // The SH8601 component rejects even no-op swap_xy/mirror calls (it drives
     // orientation through its own init sequence), so skip them for that panel.
-    if (!esp_ok(esp_lcd_panel_swap_xy(panel_, cfg.swap_xy), TAG, "esp_lcd_panel_swap_xy")) return false;
+    // esp_lcd_spd2010 returns ESP_ERR_NOT_SUPPORTED for every swap_xy call,
+    // including a request to leave the axes alone. Mirror still works.
+    if (cfg.controller == LcdController::Spd2010) {
+      if (cfg.swap_xy) {
+        ESP_LOGE(TAG, "SPD2010 does not support swap_xy");
+        return false;
+      }
+    } else if (!esp_ok(esp_lcd_panel_swap_xy(panel_, cfg.swap_xy), TAG, "esp_lcd_panel_swap_xy")) {
+      return false;
+    }
     if (!esp_ok(esp_lcd_panel_mirror(panel_, cfg.mirror_x, cfg.mirror_y), TAG, "esp_lcd_panel_mirror")) return false;
   }
   if (!esp_ok(esp_lcd_panel_set_gap(panel_, cfg.gap_x, cfg.gap_y), TAG, "esp_lcd_panel_set_gap")) return false;
