@@ -151,16 +151,25 @@ esp_err_t tailtiny_factory_reset(void) {
     nvs_handle_t nvs;
     err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
     if (err == ESP_OK) {
-        nvs_erase_all(nvs);
-        nvs_commit(nvs);
+        /* Hermes gadget patch: report a failed erase or commit, so the caller can retry. */
+        err = nvs_erase_all(nvs);
+        if (err == ESP_OK) err = nvs_commit(nvs);
         nvs_close(nvs);
-        ESP_LOGI(TAG, "Factory reset: keys erased");
+        if (err == ESP_OK) ESP_LOGI(TAG, "Factory reset: keys erased");
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Factory reset: keys not erased: %s", esp_err_to_name(err));
+        return err;
     }
 
     /* Erase cached peers */
-    ml_peer_nvs_init();
-    ml_peer_nvs_clear();
+    err = ml_peer_nvs_init();
+    if (err == ESP_OK) err = ml_peer_nvs_clear();
     ml_peer_nvs_deinit();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Factory reset: cached peers not erased: %s", esp_err_to_name(err));
+        return err;
+    }
 
     ESP_LOGI(TAG, "Factory reset complete");
     return ESP_OK;

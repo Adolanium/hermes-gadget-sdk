@@ -51,7 +51,7 @@ void TailnetLink::network_up() {}
 void TailnetLink::network_down() {}
 void TailnetLink::settings_changed() {}
 void TailnetLink::tick(uint32_t) {}
-void TailnetLink::forget() {}
+bool TailnetLink::forget() { return true; }
 void TailnetLink::report(hg::json::Value&) {}
 void TailnetLink::start() {}
 
@@ -110,10 +110,14 @@ void TailnetLink::begin(hg::App& app, const std::string& name) {
   if (nvs_open(kForgetNamespace, NVS_READWRITE, &h) != ESP_OK) return;
   uint8_t pending = 0;
   if (nvs_get_u8(h, kForgetKey, &pending) == ESP_OK && pending) {
-    tailtiny_factory_reset();
-    nvs_erase_key(h, kForgetKey);
-    nvs_commit(h);
-    ESP_LOGI(TAG, "forgot the tailnet identity, as factory-reset asked");
+    // The request stays until the erase works, so a failed one is tried again next boot.
+    if (tailtiny_factory_reset() == ESP_OK) {
+      nvs_erase_key(h, kForgetKey);
+      nvs_commit(h);
+      ESP_LOGI(TAG, "forgot the tailnet identity, as factory-reset asked");
+    } else {
+      ESP_LOGE(TAG, "couldn't forget the tailnet identity; trying again at the next boot");
+    }
   }
   nvs_close(h);
 }
@@ -220,7 +224,7 @@ void TailnetLink::tick(uint32_t now) {
   }
 }
 
-void TailnetLink::forget() {
+bool TailnetLink::forget() {
   // Its node, WireGuard and DISCO keys and the cached peers go at the next boot, before
   // TailTiny starts (begin()); factory-reset asks for that restart. The next start
   // registers anew.
@@ -232,6 +236,7 @@ void TailnetLink::forget() {
     nvs_close(h);
   }
   if (err != ESP_OK) ESP_LOGE(TAG, "couldn't schedule forgetting the tailnet identity: %s", esp_err_to_name(err));
+  return err == ESP_OK;
 }
 
 void TailnetLink::report(hg::json::Value& r) {

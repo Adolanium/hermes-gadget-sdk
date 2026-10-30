@@ -193,7 +193,8 @@ class App {
   std::function<bool()> on_phone_pair;
   std::function<void()> on_phone_pair_close;
   std::function<void()> on_phone_forget;  // removes every paired phone
-  std::function<void()> on_tailnet_forget;  // factory reset: drops the device's tailnet identity
+  // Factory reset: drops the device's tailnet identity. False when the port couldn't do that.
+  std::function<bool()> on_tailnet_forget;
 
   // Serial-console command (provisioning, bench automation). Returns the
   // response; machine-readable lines start with '@'.

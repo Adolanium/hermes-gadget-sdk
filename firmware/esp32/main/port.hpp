@@ -890,7 +890,9 @@ class TailnetLink {
   // running node, restarts the device (TailTiny can't stop and start again cleanly).
   void settings_changed();
   void tick(uint32_t now);
-  void forget();  // factory reset: TailTiny's keys and cached peers, erased at the next boot
+  // Factory reset: TailTiny's keys and cached peers, erased at the next boot. False when
+  // that couldn't be scheduled.
+  bool forget();
   void report(hg::json::Value& r);  // the `diag` report's "tailnet" part
 
  private:
