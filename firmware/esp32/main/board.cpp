@@ -491,10 +491,10 @@ BoardConfig make() {
   b.i2c = {11, 10, 400000};
   b.expander_reset.addr = 0x20;
   b.expander_reset.mask = 0x03;  // EXIO1 touch reset is bit 0, EXIO2 LCD reset is bit 1
-  b.mic = {true, 15, 2, 39, false};  // SCK 15, WS 2, SD 39. Not PDM.
-  b.speaker = {true, 48, 38, 47};    // PCM5101 BCK 48, LRCK 38, DIN 47. No MCLK pin.
+  b.mic = {true, 15, 2, 39, false, true};  // SCK 15, WS 2, SD 39. Not PDM. L/R is tied to 3V3.
+  b.speaker = {true, 48, 38, 47};           // PCM5101 BCK 48, LRCK 38, DIN 47. No MCLK pin.
   b.touch.enabled = true;
-  b.touch.ppi = 399;  // estimate (see TouchConfig::ppi)
+  b.touch.ppi = 282;  // 412 px diameter / 1.46 in (see TouchConfig::ppi)
   b.touch.controller = TouchController::Spd2010;
   b.touch.addr = 0x53;
   b.touch.int_gpio = 4;

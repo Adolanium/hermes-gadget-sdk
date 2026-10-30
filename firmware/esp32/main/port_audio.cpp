@@ -62,9 +62,10 @@ bool I2sMic::begin(const I2sMicConfig& cfg) {
     if (i2s_channel_init_pdm_rx_mode(rx_, &pdm_cfg) != ESP_OK) return false;
     pdm_ = true;
   } else {
-    // INMP441 outputs 24-bit samples in a 32-bit left slot.
+    // 24-bit samples in a 32-bit slot. INMP441 uses the left slot.
+    // right selects the other slot (MSM261 with L/R tied high).
     i2s_std_config_t std_cfg = std_config(rate_, I2S_DATA_BIT_WIDTH_32BIT, cfg.sck, cfg.ws, -1, cfg.sd);
-    std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_LEFT;
+    std_cfg.slot_cfg.slot_mask = cfg.right ? I2S_STD_SLOT_RIGHT : I2S_STD_SLOT_LEFT;
     if (i2s_channel_init_std_mode(rx_, &std_cfg) != ESP_OK) return false;
   }
   xTaskCreate(&I2sMic::task, "hg-mic", 4096, this, 6, nullptr);

@@ -240,7 +240,9 @@ the EXIO bit map (EXIO N is bit N-1) and backlight on-level 1 follow the
 factory demo at commit fda89ff2ff32eb1bce561901225c6a36fa684237,
 https://github.com/waveshareteam/ESP32-S3-Touch-LCD-1.46.
 That repository publishes no license. Only these hardware facts are used.
-No vendor source is copied.
+No vendor source is copied. The microphone part MSM261S4030H0R and the L/R
+tie to 3V3 follow the schematic
+https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-1.46/ESP32-S3-Touch-LCD-1.46.pdf.
 
 The managed esp_lcd_ili9341, esp_lcd_gc9a01, esp_lcd_touch, esp_lcd_touch_gt911,
 esp_lcd_touch_tt21100, esp_lcd_touch_ft5x06, esp_lcd_touch_spd2010 2.1.0,

@@ -115,6 +115,10 @@ struct I2sMicConfig {
   bool enabled = false;
   int sck = -1, ws = -1, sd = -1;
   bool pdm = false;  // PDM mic: sck carries the PDM clock, sd the data; ws unused
+  // Last, so positional initializers written before it existed keep their meaning.
+  // MEMS mics (INMP441, MSM261) put a 24-bit sample in one 32-bit slot.
+  // L/R tied high selects the right slot. Left stays the default.
+  bool right = false;
 };
 
 struct I2sSpeakerConfig {

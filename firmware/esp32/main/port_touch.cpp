@@ -365,6 +365,11 @@ void TouchInput::gate_on_int() {
   }
   int_gated_ = true;
   ESP_LOGI(TAG, "touch read on INT (GPIO %d)", touch_.int_gpio);
+  // SPD2010 holds INT low from reset until the first read sends the CPU-start
+  // command. A falling-edge handler installed after that misses the level, the
+  // task never reads, and the controller stays in BIOS. Sample once. The task
+  // does not exist yet, so the flag is enough. An idle FT3168 sits high.
+  if (gpio_get_level(static_cast<gpio_num_t>(touch_.int_gpio)) == 0) int_pending_ = true;
 }
 
 void IRAM_ATTR TouchInput::on_int(void* arg) {
