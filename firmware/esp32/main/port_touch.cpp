@@ -13,6 +13,7 @@
 #include "esp_lcd_touch_gt911.h"
 #include "esp_lcd_touch_tt21100.h"
 #include "esp_lcd_touch_ft5x06.h"
+#include "esp_lcd_touch_spd2010.h"
 #include "freertos/task.h"
 
 namespace hgp {
@@ -52,6 +53,26 @@ bool TouchInput::begin(const TouchConfig& touch, const ExpanderKeyConfig& key, c
     begin_gt911(bus);
   } else if (touch.enabled && touch.controller == TouchController::Box3) {
     begin_box_touch(bus);
+  } else if (touch.enabled && touch.controller == TouchController::Spd2010) {
+    esp_lcd_panel_io_i2c_config_t io_cfg = {};
+    io_cfg.dev_addr = touch.addr;
+    io_cfg.scl_speed_hz = 100000;
+    io_cfg.control_phase_bytes = 1;
+    io_cfg.lcd_cmd_bits = 0;
+    io_cfg.flags.disable_control_phase = 1;
+    esp_lcd_panel_io_handle_t io = nullptr;
+    esp_lcd_touch_config_t cfg = {};
+    cfg.x_max = touch.width;
+    cfg.y_max = touch.height;
+    // The expander pulse already released reset. INT is gated below.
+    cfg.rst_gpio_num = GPIO_NUM_NC;
+    cfg.int_gpio_num = GPIO_NUM_NC;
+    cfg.flags.swap_xy = touch.swap_xy;
+    cfg.flags.mirror_x = touch.mirror_x;
+    cfg.flags.mirror_y = touch.mirror_y;
+    if (esp_lcd_new_panel_io_i2c(bus, &io_cfg, &io) == ESP_OK &&
+        esp_lcd_touch_new_i2c_spd2010(io, &cfg, &managed_touch_) != ESP_OK) esp_lcd_panel_io_del(io);
+    if (managed_touch_ && touch.int_gpio >= 0) gate_on_int();
   } else if (touch.enabled) {
     if (touch.rst >= 0) {
       gpio_config_t rst = {};
@@ -344,6 +365,11 @@ void TouchInput::gate_on_int() {
   }
   int_gated_ = true;
   ESP_LOGI(TAG, "touch read on INT (GPIO %d)", touch_.int_gpio);
+  // SPD2010 holds INT low from reset until the first read sends the CPU-start
+  // command. A falling-edge handler installed after that misses the level, the
+  // task never reads, and the controller stays in BIOS. Sample once. The task
+  // does not exist yet, so the flag is enough. An idle FT3168 sits high.
+  if (gpio_get_level(static_cast<gpio_num_t>(touch_.int_gpio)) == 0) int_pending_ = true;
 }
 
 void IRAM_ATTR TouchInput::on_int(void* arg) {
@@ -354,9 +380,15 @@ void IRAM_ATTR TouchInput::on_int(void* arg) {
   if (woken) portYIELD_FROM_ISR();
 }
 
-// Without INT every poll reads; with it, only a pending report or a finger still down does.
+// Without INT every poll reads; with it, only a pending report, a finger still
+// down, or a line that is still low. SPD2010 leaves INT low until a read
+// clears it. may_read consumes the pending flag before that read, so a failed
+// status read would otherwise never be retried: the line never rises, and no
+// second falling edge arrives. An idle FT3168 sits high and is not polled.
 bool TouchInput::may_read(bool was_touching) {
-  return !int_gated_ || int_pending_.exchange(false) || was_touching;
+  if (!int_gated_) return true;
+  if (int_pending_.exchange(false) || was_touching) return true;
+  return gpio_get_level(static_cast<gpio_num_t>(touch_.int_gpio)) == 0;
 }
 
 // Waits out the poll period, or less: an INT edge or an encoder detent ends

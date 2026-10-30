@@ -1,0 +1,6 @@
+{
+  "title": "Waveshare ESP32-S3-Touch-LCD-1.46",
+  "summary": "412×412 round touchscreen, onboard microphone and speaker. Experimental.",
+  "docs": "docs/hardware.md#waveshare-esp32-s3-touch-lcd-146",
+  "ready_made": true
+}
