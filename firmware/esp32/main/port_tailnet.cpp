@@ -176,7 +176,8 @@ void TailnetLink::tick(uint32_t now) {
   std::memcpy(error, ml->last_error, sizeof(error));
   error[sizeof(error) - 1] = '\0';
   s.error = error;
-  s.peer_up = s.node == hg::TailnetWatch::Node::Connected && (!server_ip_ || ml_wg_mgr_peer_is_up(ml, server_ip_));
+  // Asked in every state: the WireGuard session outlives a reconnect to the control server.
+  s.peer_up = !server_ip_ || ml_wg_mgr_peer_is_up(ml, server_ip_);
 
   const hg::TailnetWatch::Step step = watch_.update(now, wifi_up_, s);
   if (step.poke && server_ip_) {

@@ -46,8 +46,8 @@ class TailnetWatch {
   enum class Node : uint8_t { Starting, Connected, Reconnecting };
 
   // What TailTiny says now: its state, whether the WireGuard session with the Hermes
-  // host is up (true when Hermes isn't at a tailnet address), and why registration
-  // last failed ("" when it didn't).
+  // host is up in any state (true when Hermes isn't at a tailnet address), and why
+  // registration last failed ("" when it didn't).
   struct Sample {
     Node node = Node::Starting;
     bool peer_up = false;
@@ -68,15 +68,17 @@ class TailnetWatch {
     if (!wifi_up) {
       detail = "Joining tailnet";
       gap_ = false;
-    } else if (s.node != Node::Connected) {
+    } else if (s.node != Node::Connected && (!told_up_ || !s.error.empty())) {
       detail = !s.error.empty() ? "Tailnet: " + std::string(s.error)
                : s.node == Node::Reconnecting ? "Tailnet reconnecting" : "Joining tailnet";
       gap_ = false;
     } else if (s.peer_up) {
+      // Connected, or the control server's connection being replaced (Tailscale ends it
+      // from time to time): WireGuard to the Hermes host doesn't depend on it.
       up = true;
       gap_ = false;
     } else {
-      if (!poked_ || static_cast<int32_t>(now - next_poke_) >= 0) {
+      if (s.node == Node::Connected && (!poked_ || static_cast<int32_t>(now - next_poke_) >= 0)) {
         out.poke = true;
         poked_ = true;
         next_poke_ = now + kPokeMs;
@@ -88,12 +90,12 @@ class TailnetWatch {
           gap_since_ = now;
         }
         up = now - gap_since_ < kDownGraceMs;
-        if (!up) detail = "Tailnet: Hermes host unreachable";
+        if (!up) detail = s.node == Node::Connected ? "Tailnet: Hermes host unreachable" : "Tailnet reconnecting";
       } else {
         detail = "Reaching Hermes over the tailnet";
       }
     }
-    if (up) poked_ = false;
+    if (s.peer_up) poked_ = false;  // not while a grace keeps `up`: handshakes stay kPokeMs apart
     if (!told_ || up != told_up_ || (!up && detail != told_detail_)) {
       out.tell = true;
       told_ = true;
