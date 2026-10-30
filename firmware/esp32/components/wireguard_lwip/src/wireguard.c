@@ -988,6 +988,11 @@ bool wireguard_device_init(struct wireguard_device *device, const uint8_t *priva
 	// Ensure private key is correctly "clamped"
 	wireguard_clamp_private_key(device->private_key);
 	device->valid = wireguard_generate_public_key(device->public_key, private_key);
+	if (device->valid && !device->lock) {
+		// Hermes gadget patch: the state lock (wireguard-platform.h)
+		device->lock = wireguard_platform_lock_create();
+		device->valid = device->lock != NULL;
+	}
 	if (device->valid) {
 		generate_cookie_secret(device);
 		// 5.4.4 Cookie MACs - The value Hash(Label-Mac1 || Spubm' ) above can be pre-computed.
