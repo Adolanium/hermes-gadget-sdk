@@ -32,6 +32,8 @@ namespace {
 #define HG_BOARD_NAME "spotpear-esp32-s3-1.28-box"
 #elif CONFIG_HG_BOARD_BOX3
 #define HG_BOARD_NAME "esp32-s3-box-3"
+#elif CONFIG_HG_BOARD_ESP32S3_BOX
+#define HG_BOARD_NAME "esp32-s3-box"
 #elif CONFIG_HG_BOARD_CORES3
 #define HG_BOARD_NAME "m5stack-cores3"
 #elif CONFIG_HG_BOARD_STICKS3
@@ -631,6 +633,44 @@ BoardConfig make() {
   b.touch.width = 320;
   b.touch.height = 240;
   b.buttons = {0, -1, -1, -1};
+  b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
+  return b;
+}
+#elif CONFIG_HG_BOARD_ESP32S3_BOX
+// Original ESP32-S3-BOX: 2.4" ST7789, TT21100, ES8311 + ES7210. 16 MB flash,
+// 8 MB octal PSRAM. Reset is active low and shared with touch. Backlight is
+// GPIO 45; I2S word select is GPIO 47. Mute (GPIO 1), the touch home button
+// and the ICM-42607-P stay unused.
+// Pins: docs/hardware.md#esp32-s3-box
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.lcd.enabled = true;
+  b.lcd.controller = LcdController::St7789;
+  b.lcd.width = 320;
+  b.lcd.height = 240;
+  b.lcd.swap_xy = false;
+  b.lcd.mirror_x = true;
+  b.lcd.mirror_y = true;
+  b.lcd.invert = false;
+  b.lcd.bgr = true;
+  b.lcd.mosi = 6;
+  b.lcd.sclk = 7;
+  b.lcd.cs = 5;
+  b.lcd.dc = 4;
+  b.lcd.rst = 48;
+  b.lcd.backlight = 45;
+  b.lcd.spi_mhz = 40;
+  b.i2c = {8, 18, 400000};
+  b.codec = {true, 2, 17, 47, 15, 16, 46};
+  b.touch.enabled = true;
+  b.touch.ppi = 167;  // 320x240 across a 2.4 inch diagonal
+  b.touch.controller = TouchController::Box3;  // probe takes TT21100 at 0x24 and mirrors X
+  b.touch.int_gpio = 3;
+  b.touch.width = 320;
+  b.touch.height = 240;
+  b.buttons = {0, -1, -1, -1};  // BOOT is TALK. GPIO 1 is the hardware mute.
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";
   return b;

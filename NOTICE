@@ -160,6 +160,13 @@ reference, https://github.com/witnessmenow/ESP32-Cheap-Yellow-Display/tree/0564a
 files PINS.md and DisplayConfig/CYD2USB/User_Setup.h, Copyright (c) 2023 Brian
 Lough, MIT License. Only these hardware facts are used.
 
+The original ESP32-S3-BOX pin numbers in firmware/esp32/main/board.cpp follow
+Espressif's ESP-BOX BSP,
+https://github.com/espressif/esp-bsp/tree/67f41a169401d1f23e827188dd08fb351cb0febe/bsp/esp-box,
+commit 67f41a169401d1f23e827188dd08fb351cb0febe,
+Copyright 2022-2026 Espressif Systems (Shanghai) CO LTD, Apache License 2.0.
+Only hardware facts are used; no vendor source is copied.
+
 The BOX-3 panel initialization register values in
 firmware/esp32/main/panel_box3.hpp follow Espressif's ESP32-S3-BOX-3 BSP,
 https://github.com/espressif/esp-bsp/tree/master/bsp/esp-box-3,

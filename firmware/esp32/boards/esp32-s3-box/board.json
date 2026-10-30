@@ -1,0 +1,6 @@
+{
+  "title": "Espressif ESP32-S3-BOX",
+  "summary": "320×240 touchscreen, onboard microphones and speaker. Experimental.",
+  "docs": "docs/hardware.md#esp32-s3-box",
+  "ready_made": true
+}
