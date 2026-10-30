@@ -5433,7 +5433,7 @@ TEST("tailnet: factory reset forgets the settings and the tailnet identity") {
   r.fake.kv["tailnet"] = "on";
   r.fake.kv["ts_key"] = kTsKey;
   int forgot = 0;
-  r.app.on_tailnet_forget = [&] { ++forgot; };
+  r.app.on_tailnet_forget = [&] { ++forgot; return true; };
   r.app.begin();
   r.app.console("factory-reset");
   CHECK(r.fake.kv.find("tailnet") == r.fake.kv.end());
@@ -5441,4 +5441,15 @@ TEST("tailnet: factory reset forgets the settings and the tailnet identity") {
   CHECK_EQ(forgot, 1);
   r.app.console("forget-key");
   CHECK_EQ(forgot, 1);  // forgetting the device key keeps the tailnet
+}
+
+TEST("tailnet: factory reset says so when the tailnet identity can't be scheduled for erasing") {
+  Rig r(tailnet_profile());
+  r.fake.kv["ts_key"] = kTsKey;
+  r.app.on_tailnet_forget = [] { return false; };
+  r.app.begin();
+  const std::string reply = r.app.console("factory-reset");
+  CHECK(reply.rfind("@error factory-reset", 0) == 0);
+  CHECK(reply.find("tailnet identity") != std::string::npos);
+  CHECK(r.fake.kv.find("ts_key") == r.fake.kv.end());  // the settings are erased either way
 }

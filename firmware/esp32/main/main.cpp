@@ -539,7 +539,7 @@ extern "C" void app_main(void) {
   }
   if (profile.tailnet) {
     g_tailnet.begin(app, device_name());
-    app.on_tailnet_forget = [] { g_tailnet.forget(); };
+    app.on_tailnet_forget = [] { return g_tailnet.forget(); };
   }
 #endif
   app.on_wifi_setup = [] { return g_wifi.start_setup(); };

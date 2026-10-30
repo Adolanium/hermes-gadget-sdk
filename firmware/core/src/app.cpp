@@ -2446,7 +2446,8 @@ std::string App::console(std::string_view raw) {
       hal_.storage->erase("wifi_fast");  // where the last access point was (drivers/wifi_fast.hpp)
       if (on_phone_forget) on_phone_forget();
       for (const char* k : kTailnetKeys) hal_.storage->erase(k);
-      if (on_tailnet_forget) on_tailnet_forget();
+      if (on_tailnet_forget && !on_tailnet_forget())
+        return "@error " + cmd + ": the tailnet identity couldn't be scheduled for erasing; the rest is erased. Run it again";
     }
     return "@ok " + cmd + " (restart the device to apply)";
   }

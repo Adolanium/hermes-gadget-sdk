@@ -123,3 +123,23 @@ def test_wireguard_state_is_used_only_under_its_lock_and_never_sends_under_it():
     assert {"wireguardif_output", "wireguardif_network_rx", "wireguardif_run_timers",
             "wireguard_start_handshake", "wireguardif_connect_derp"} <= checked
     assert not problems, "\n".join(problems)
+
+
+def test_tailtiny_is_reset_only_at_boot_before_it_starts():
+    # tailtiny_factory_reset() must run before tailtiny_init() (tailtiny.h): on a running
+    # node it frees the peer cache TailTiny's tasks still use, and the node can write its
+    # keys back. factory-reset only leaves a flag (TailnetLink::forget()); TailnetLink::begin()
+    # erases at the next boot, before Wi-Fi starts the node.
+    call = re.compile(r"\btailtiny_factory_reset\s*\(")
+    found = []
+    for path in sorted((FIRMWARE / "esp32" / "main").glob("*.cpp")):
+        function = None
+        for number, code in _code_lines(path):
+            if code.startswith("}"):
+                function = None  # a definition at the top level ends here
+            definition = re.match(r"^(?![#/}])\S.*?\b(\w+(?:::\w+)?)\s*\(", code)
+            if definition and not code.rstrip().endswith(";"):
+                function = definition.group(1)
+            if call.search(code):
+                found.append((path.name, function))
+    assert found == [("port_tailnet.cpp", "TailnetLink::begin")], found

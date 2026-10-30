@@ -882,17 +882,17 @@ class TailnetLink {
   // The build has CONFIG_HG_TAILNET and the board BoardConfig::tailnet.
   static bool supported();
   // `name` becomes the device's tailnet hostname (lowercased, other characters as '-').
-  void begin(hg::App& app, const std::string& name) {
-    app_ = &app;
-    name_ = name;
-  }
+  // Runs before Wi-Fi, so before TailTiny starts: it carries out a pending forget().
+  void begin(hg::App& app, const std::string& name);
   void network_up();    // Wi-Fi has an address: start the node, or move it to the new network
   void network_down();  // Wi-Fi is gone: the tunnel is too, until network_up()
   // `tailnet` or `ts_key` changed. Starting is live; stopping, or a new key for a
   // running node, restarts the device (TailTiny can't stop and start again cleanly).
   void settings_changed();
   void tick(uint32_t now);
-  void forget();  // factory reset: TailTiny's keys and cached peers
+  // Factory reset: TailTiny's keys and cached peers, erased at the next boot. False when
+  // that couldn't be scheduled.
+  bool forget();
   void report(hg::json::Value& r);  // the `diag` report's "tailnet" part
 
  private:
@@ -903,6 +903,7 @@ class TailnetLink {
   std::string name_;       // its tailnet hostname, likewise
   uint32_t server_ip_ = 0; // Hermes's tailnet address in host order; 0 when it isn't one
   bool wifi_up_ = false;
+  bool reset_unresolved_ = false;  // a factory-reset request begin() couldn't read or carry out
   hg::TailnetWatch watch_;
   bool restart_ = false, restart_timed_ = false;
   uint32_t next_check_ = 0, restart_at_ = 0;
