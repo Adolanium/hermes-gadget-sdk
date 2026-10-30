@@ -42,6 +42,8 @@ namespace {
 #define HG_BOARD_NAME "m5stack-sticks3"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_185C_V2
 #define HG_BOARD_NAME "waveshare-esp32-s3-touch-lcd-1.85c-v2"
+#elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_146
+#define HG_BOARD_NAME "esp32-s3-touch-lcd-146"
 #elif CONFIG_HG_BOARD_WS_KNOB_LCD_18
 #define HG_BOARD_NAME "waveshare-esp32s3-knob-touch-lcd-1.8"
 #elif CONFIG_HG_BOARD_ESP_VOCAT
@@ -461,6 +463,43 @@ BoardConfig make() {
   b.touch.addr = 0x15;
   b.touch.width = b.touch.height = 360;
   b.buttons = {0, -1, -1, -1};
+  b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
+  return b;
+}
+#elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_146
+// Waveshare ESP32-S3-Touch-LCD-1.46. The 1.46B and 1.46C share this pin table.
+// Round 412x412 SPD2010 over QSPI, SPD2010 touch, I2S microphone, PCM5101.
+// Pins: docs/hardware.md#waveshare-esp32-s3-touch-lcd-146.
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.lcd.enabled = true;
+  b.lcd.controller = LcdController::Spd2010;
+  b.lcd.width = b.lcd.height = 412;
+  b.lcd.swap_xy = b.lcd.mirror_x = b.lcd.mirror_y = false;
+  b.lcd.invert = false;  // Espressif's QSPI example does not turn inversion on
+  b.lcd.round = true;
+  b.lcd.sclk = 40;
+  b.lcd.mosi = 46;
+  b.lcd.d1 = 45;
+  b.lcd.d2 = 42;
+  b.lcd.d3 = 41;
+  b.lcd.cs = 21;
+  b.lcd.backlight = 5;  // active high
+  b.lcd.spi_mhz = 20;   // Espressif's QSPI example. The factory header uses 80 MHz in mode 0.
+  b.i2c = {11, 10, 400000};
+  b.expander_reset.addr = 0x20;
+  b.expander_reset.mask = 0x03;  // EXIO1 touch reset is bit 0, EXIO2 LCD reset is bit 1
+  b.mic = {true, 15, 2, 39, false};  // SCK 15, WS 2, SD 39. Not PDM.
+  b.speaker = {true, 48, 38, 47};    // PCM5101 BCK 48, LRCK 38, DIN 47. No MCLK pin.
+  b.touch.enabled = true;
+  b.touch.ppi = 399;  // estimate (see TouchConfig::ppi)
+  b.touch.controller = TouchController::Spd2010;
+  b.touch.addr = 0x53;
+  b.touch.int_gpio = 4;
+  b.touch.width = b.touch.height = 412;
+  b.buttons = {0, -1, -1, -1};  // wiki lists BOOT and does not print the GPIO
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";
   return b;

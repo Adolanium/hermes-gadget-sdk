@@ -171,6 +171,47 @@ Record the results with the [hardware checklist](hardware-validation.md#record-a
 
 References: [Waveshare V2 documentation](https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.85C), [V2 schematic](https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-1.85C/ESP32-S3-Touch-LCD-1.85C_V2.pdf) and the [factory demo at 8ead4a96](https://github.com/waveshareteam/ESP32-S3-Touch-LCD-1.85C/tree/8ead4a96bf3a278fc4ebd8ef4768657e17fa2880). The demo numbers the expander pins from one (EXIO1 is P0). The LCD initialization tables and their licenses are listed in [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
 
+## Waveshare ESP32-S3-Touch-LCD-1.46
+
+Use `esp32-s3-touch-lcd-146` for the Waveshare ESP32-S3-Touch-LCD-1.46. The same pin table on the wiki covers the 1.46B and the 1.46C. The module is an ESP32-S3R8 with 16 MB flash and 8 MB stacked PSRAM, a round 412×412 SPD2010 LCD over QSPI, SPD2010 touch, an I2S microphone and a PCM5101 speaker. This port is experimental. It was built and not run on a board.
+
+Octal PSRAM at 80 MHz follows the S3R8 pairing used on the other S3R8 boards in this tree. The wiki does not print a flash part order code.
+
+| Part | Connection |
+|---|---|
+| SPD2010 LCD, QSPI | CS 21, clock 40, D0 to D3 46, 45, 42, 41, backlight 5, active high. Reset is TCA9554 EXIO2. TE on GPIO 18 is unused |
+| SPD2010 touch | I2C 0x53, INT GPIO 4, reset TCA9554 EXIO1 |
+| TCA9554 expander | I2C 0x20. The firmware pulses bits 0 and 1 and leaves the other bits alone |
+| I2C | SDA 11, SCL 10, 400 kHz. The touch device itself runs at 100 kHz |
+| Microphone | I2S SCK 15, WS 2, SD 39 |
+| PCM5101 speaker | BCLK 48, LRCK 38, DIN 47. No MCLK pin and no amplifier-enable pin |
+| BOOT | GPIO 0, TALK. The wiki names the button and does not print this GPIO |
+
+**Audio.** The speaker path is the existing I2S speaker, 16-bit Philips, on I2S0. The microphone path is the existing I2S microphone on I2S1. That reader expects a 24-bit sample in a 32-bit left slot. The wiki names the microphone only as MIC, so the packing was not confirmed against a part number.
+
+QSPI runs at 20 MHz in SPI mode 3. Espressif's QSPI example macro uses that clock. The factory ESP-IDF header sets mode 0 and 80 MHz, which this driver does not follow. Color order is RGB. Color inversion, axis swap and both mirrors stay off, matching that example. The width 412 is a multiple of 4, which the SPD2010 driver requires. About 399 pixels per inch, from the 1.46 inch diagonal.
+
+Hold the screen or BOOT to talk, tap to answer yes, and swipe down to cancel. The QMI8658, the PCF85063, the TF card, the battery header, the volume knob and the PWR button stay off. The wiki does not give GPIO numbers for the knob, the battery sense or PWR. TF card chip select is EXIO3. RTC interrupt is GPIO 9. IMU interrupts are EXIO4 and EXIO5.
+
+```bash
+cd firmware/esp32
+pio run -e esp32-s3-touch-lcd-146 -t upload -t monitor
+```
+
+For ESP-IDF, use `SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp32-s3-touch-lcd-146/sdkconfig.defaults"` with a separate build directory and sdkconfig. The USB-C port handles flashing and the serial console at 115200 baud. There is no simulator profile at 412×412.
+
+### First flash: what to check
+
+1. **Boot log:** `expander resets 0x03 ready`, `spd2010 412x412 ready`, `microphone ready (i2s)`, `speaker ready` and `touch ready`. In `hermes-gadget diag`, the `i2c` list includes `0x20` and `0x53`. Other chips on the bus may answer too.
+2. **Screen:** the mascot is centred and upright, the whole circle is visible, and the accents are amber, not blue. Brightness and screen timeout work.
+3. **Touch:** holding the centre and each edge starts a recording. A tap answers yes and a swipe down cancels.
+4. **Microphone:** the waves move with your voice and Hermes's transcript is right. If the waves stay flat, the microphone packing may not match this part.
+5. **Speaker:** replies are clear. Cancelling a reply stops it at once.
+
+Record the results with the [hardware checklist](hardware-validation.md#record-a-physical-test).
+
+References: [Waveshare documentation](https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.46) and the [factory demo at fda89ff](https://github.com/waveshareteam/ESP32-S3-Touch-LCD-1.46/tree/fda89ff2ff32eb1bce561901225c6a36fa684237). The demo repository has no license. Pin numbers come from the wiki. The expander address, the EXIO bit map and the backlight on-level come from the demo. Display and touch drivers are Espressif components. See [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
+
 ## Waveshare ESP32-S3-Knob-Touch-LCD-1.8
 
 Use `esp32s3-knob-touch-lcd-1.8` for the knob board: an ESP32-S3R8 with 16 MB flash and 8 MB octal PSRAM, a round 360×360 SH8601 LCD over QSPI (not the ST77916 of the 1.85C V2), CST816S touch, one PDM microphone, a rotary encoder around the screen, a DRV2605 haptic driver and a Li-ion battery with charging management.

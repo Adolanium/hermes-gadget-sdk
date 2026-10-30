@@ -24,6 +24,8 @@ dependencies:
   espressif/esp_lcd_touch_tt21100: "^1"
   espressif/esp_lcd_touch_gt911: "^1"
   espressif/esp_lcd_touch_ft5x06: "^1"
+  # SPD2010 touch. 2.1.0 keeps a no-command-phase I2C read working on ESP-IDF 6.
+  espressif/esp_lcd_touch_spd2010: "2.1.0"
   # 1.1.0 is what the CrowPanel 2.1 was tested with; its MIPI source only builds
   # for the P4 (which needs it as well) on ESP-IDF 6.1 from 2.x. The component
   # only publishes for esp32s3/esp32p4, so a classic-ESP32 build must not pull it

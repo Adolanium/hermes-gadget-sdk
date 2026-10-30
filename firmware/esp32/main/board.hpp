@@ -183,7 +183,7 @@ struct CodecAudioConfig {
 };
 
 // Capacitive touch on the I2C bus: hold to talk, tap, swipe down to cancel.
-enum class TouchController { Cst9217, Box3, Ft5x06, Cst816, Gt911 };
+enum class TouchController { Cst9217, Box3, Ft5x06, Cst816, Gt911, Spd2010 };
 
 struct TouchConfig {
   bool enabled = false;

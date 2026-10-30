@@ -234,8 +234,17 @@ https://github.com/Elecrow-RD/CrowPanel-2.1inch-HMI-ESP32-Rotary-Display-480-480
 That repository carries no license. Only these hardware facts are used,
 re-expressed for Espressif's esp_lcd_st7701 driver.
 
+The Waveshare ESP32-S3-Touch-LCD-1.46 pin numbers follow
+https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.46. The TCA9554 address 0x20,
+the EXIO bit map (EXIO N is bit N-1) and backlight on-level 1 follow the
+factory demo at commit fda89ff2ff32eb1bce561901225c6a36fa684237,
+https://github.com/waveshareteam/ESP32-S3-Touch-LCD-1.46.
+That repository publishes no license. Only these hardware facts are used.
+No vendor source is copied.
+
 The managed esp_lcd_ili9341, esp_lcd_gc9a01, esp_lcd_touch, esp_lcd_touch_gt911,
-esp_lcd_touch_tt21100, esp_lcd_touch_ft5x06, esp_lcd_st7701, esp_lcd_sh8601,
+esp_lcd_touch_tt21100, esp_lcd_touch_ft5x06, esp_lcd_touch_spd2010 2.1.0,
+esp_lcd_st7701, esp_lcd_sh8601,
 esp_lcd_spd2010 2.0.0~1, esp_lcd_ek79007, esp_lcd_jd9365
 and esp_lcd_panel_io_additions drivers are Espressif components under Apache
 License 2.0. CoreS3 audio uses esp_codec_dev's AW88298 driver.
