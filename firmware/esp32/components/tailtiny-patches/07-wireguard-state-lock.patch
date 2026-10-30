@@ -1,6 +1,6 @@
 diff -ruN a/wireguard_lwip/src/wireguard.c b/wireguard_lwip/src/wireguard.c
---- a/wireguard_lwip/src/wireguard.c	2026-10-30 12:49:21.000000000 +0000
-+++ b/wireguard_lwip/src/wireguard.c	2026-10-30 13:51:30.400330397 +0000
+--- a/wireguard_lwip/src/wireguard.c	2026-10-30 17:30:05.790740300 +0200
++++ b/wireguard_lwip/src/wireguard.c	2026-10-30 17:30:05.852943800 +0200
 @@ -988,6 +988,11 @@
  	// Ensure private key is correctly "clamped"
  	wireguard_clamp_private_key(device->private_key);
@@ -14,8 +14,8 @@ diff -ruN a/wireguard_lwip/src/wireguard.c b/wireguard_lwip/src/wireguard.c
  		generate_cookie_secret(device);
  		// 5.4.4 Cookie MACs - The value Hash(Label-Mac1 || Spubm' ) above can be pre-computed.
 diff -ruN a/wireguard_lwip/src/wireguard.h b/wireguard_lwip/src/wireguard.h
---- a/wireguard_lwip/src/wireguard.h	2026-10-30 12:49:21.000000000 +0000
-+++ b/wireguard_lwip/src/wireguard.h	2026-10-30 13:51:30.400330397 +0000
+--- a/wireguard_lwip/src/wireguard.h	2026-10-30 17:30:05.888419300 +0200
++++ b/wireguard_lwip/src/wireguard.h	2026-10-30 17:30:05.950807000 +0200
 @@ -211,6 +211,9 @@
  	// Force all peer output through DERP relay (cellular mode)
  	bool force_derp_output;
@@ -27,8 +27,8 @@ diff -ruN a/wireguard_lwip/src/wireguard.h b/wireguard_lwip/src/wireguard.h
  };
  
 diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
---- a/wireguard_lwip/src/wireguardif.c	2026-10-30 12:49:21.000000000 +0000
-+++ b/wireguard_lwip/src/wireguardif.c	2026-10-30 13:51:30.400330397 +0000
+--- a/wireguard_lwip/src/wireguardif.c	2026-10-30 17:30:05.989471000 +0200
++++ b/wireguard_lwip/src/wireguardif.c	2026-10-30 17:30:06.068524600 +0200
 @@ -160,8 +160,30 @@
  	return ((peer->last_initiation_tx == 0) || (wireguard_expired(peer->last_initiation_tx, REKEY_TIMEOUT)));
  }
@@ -167,13 +167,16 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  		return ERR_RTE;
  	}
  }
-@@ -404,11 +445,22 @@
+@@ -404,33 +445,46 @@
  	wireguardif_output_to_peer(device->netif, NULL, NULL, peer);
  }
  
 -static void wireguardif_process_response_message(struct wireguard_device *device, struct wireguard_peer *peer, struct message_handshake_response *response, const ip_addr_t *addr, u16_t port) {
 +static void wireguardif_process_response_message(struct wireguard_device *device, struct message_handshake_response *response, const ip_addr_t *addr, u16_t port) {
 +	struct wireguard_peer *peer;
++	// What the log lines need, copied under the lock: remove_peer() may zero the slot after it.
++	uint8_t wg_idx = 0;
++	struct wg_endpoint ep;
  	WG_DEBUG("[WG] Processing handshake response from %s:%u\n",
  		ip_addr_isany(addr) ? "DERP" : ipaddr_ntoa(addr), port);
  
@@ -186,24 +189,30 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
 +	if (ok) {
 +		update_peer_addr(peer, addr, port);
 +		wireguard_start_session(peer, true);
++		wg_idx = wireguard_peer_index(device, peer);
++		endpoint_of(peer, &ep);
 +	}
 +	WG_UNLOCK(device);
 +	if (ok) {
  		// Packet is good — identify the peer
- 		uint8_t wg_idx = wireguard_peer_index(device, peer);
+-		uint8_t wg_idx = wireguard_peer_index(device, peer);
  		printf("[WG] *** HANDSHAKE COMPLETE! wg_idx=%u key=%02x%02x%02x%02x "
-@@ -417,10 +469,6 @@
- 		       peer->public_key[0], peer->public_key[1],
- 		       peer->public_key[2], peer->public_key[3],
+ 		       "from=%s:%u ***\n",
+ 		       wg_idx,
+-		       peer->public_key[0], peer->public_key[1],
+-		       peer->public_key[2], peer->public_key[3],
++		       ep.public_key[0], ep.public_key[1],
++		       ep.public_key[2], ep.public_key[3],
  		       ip_addr_isany(addr) ? "DERP" : ipaddr_ntoa(addr), port);
 -		// Update the peer location
 -		update_peer_addr(peer, addr, port);
 -
 -		wireguard_start_session(peer, true);
  		printf("[WG] Session started, sending keepalive to %s:%u\n",
- 		       ip_addr_isany(&peer->ip) ? "DERP" : ipaddr_ntoa(&peer->ip), peer->port);
+-		       ip_addr_isany(&peer->ip) ? "DERP" : ipaddr_ntoa(&peer->ip), peer->port);
++		       ip_addr_isany(&ep.ip) ? "DERP" : ipaddr_ntoa(&ep.ip), ep.port);
  		wireguardif_send_keepalive(device, peer);
-@@ -428,9 +476,11 @@
+ 
  		// Set the IF-UP flag on netif
  		wg_netif_set_link(device->netif, true);
  		printf("[WG] *** WIREGUARD SESSION ESTABLISHED wg_idx=%u ***\n", wg_idx);
@@ -216,7 +225,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  	}
  }
  
-@@ -462,7 +512,9 @@
+@@ -462,7 +516,9 @@
  	return result;
  }
  
@@ -227,7 +236,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  	struct wireguard_keypair *keypair;
  	uint64_t nonce;
  	uint8_t *src;
-@@ -516,8 +568,8 @@
+@@ -516,8 +572,8 @@
  						peer->send_handshake = true;
  					}
  
@@ -238,7 +247,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  
  					if (pbuf->tot_len > 0) {
  						//4a. Once the packet payload is decrypted, the interface has a plaintext packet. If this is not an IP packet, it is dropped.
-@@ -578,10 +630,9 @@
+@@ -578,10 +634,9 @@
  									// this runs on the WireGuard task, and lwIP may only be entered from
  									// tcpip_thread. Calling ip_input() here raced with sockets being opened
  									// and crashed in udp_input().
@@ -252,7 +261,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  								} else {
  									WG_DEBUG("[WG_RX_IP] DROPPED: dest_ok=false\n");
  								}
-@@ -642,26 +693,23 @@
+@@ -642,26 +697,23 @@
  	return pbuf;
  }
  
@@ -285,7 +294,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  }
  
  static size_t get_source_addr_port(const ip_addr_t *addr, u16_t port, uint8_t *buf, size_t buflen) {
-@@ -810,36 +858,36 @@
+@@ -810,36 +862,36 @@
  				(unsigned long)msg_initiation->sender);
  
  			// Check mac1 (and optionally mac2) are correct - note it may internally generate a cookie reply packet
@@ -344,7 +353,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  					}
  				} else {
  					printf("[WG_RX] Initiation process FAILED (bad keys/timestamp?)\n");
-@@ -857,15 +905,8 @@
+@@ -857,15 +909,8 @@
  			// Check mac1 (and optionally mac2) are correct - note it may internally generate a cookie reply packet
  			if (wireguardif_check_response_message(device, msg_response, addr, port)) {
  				printf("[WG_RX] Response MAC check PASSED\n");
@@ -362,7 +371,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  			} else {
  				printf("[WG_RX] Response MAC check FAILED\n");
  			}
-@@ -873,6 +914,7 @@
+@@ -873,6 +918,7 @@
  
  		case MESSAGE_COOKIE_REPLY:
  			msg_cookie = (struct message_cookie_reply *)data;
@@ -370,7 +379,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  			peer = peer_lookup_by_handshake(device, msg_cookie->receiver);
  			if (peer) {
  				if (wireguard_process_cookie_message(device, peer, msg_cookie)) {
-@@ -882,16 +924,29 @@
+@@ -882,16 +928,29 @@
  					// Don't send anything out - we stay quiet until the next initiation message
  				}
  			}
@@ -402,7 +411,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  
  		default:
  			// Unknown or bad packet header
-@@ -901,6 +956,8 @@
+@@ -901,6 +960,8 @@
  	pbuf_free(p);
  }
  
@@ -411,7 +420,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  static err_t wireguard_start_handshake(struct netif *netif, struct wireguard_peer *peer) {
  	if (!netif || !netif->state) {
  		return ERR_ARG;
-@@ -909,23 +966,24 @@
+@@ -909,23 +970,29 @@
  	err_t result;
  	struct pbuf *pbuf;
  	struct message_handshake_initiation msg;
@@ -420,8 +429,14 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
 -	WG_DEBUG("[WG_TX] Starting handshake to %s:%u\n",
 -		ip_addr_isany(&peer->ip) ? "DERP" : ipaddr_ntoa(&peer->ip), peer->port);
 -
+-	pbuf = wireguardif_initiate_handshake(device, peer, &msg, &result);
 +	WG_LOCK(device);
- 	pbuf = wireguardif_initiate_handshake(device, peer, &msg, &result);
++	// The caller decided to handshake before this lock; remove_peer() may have freed the slot since.
++	pbuf = NULL;
++	result = ERR_CONN;
++	if (peer->valid) {
++		pbuf = wireguardif_initiate_handshake(device, peer, &msg, &result);
++	}
  	if (pbuf) {
 -		result = wireguardif_peer_output(netif, pbuf, peer);
 -		printf("[WG_TX] Handshake init sent, result=%d, sender_idx=%lu, to %s:%u\n",
@@ -446,7 +461,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  	}
  	return result;
  }
-@@ -953,43 +1011,51 @@
+@@ -953,43 +1020,51 @@
  
  err_t wireguardif_connect(struct netif *netif, u8_t peer_index) {
  	struct wireguard_peer *peer;
@@ -503,7 +518,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
  	if (result == ERR_OK) {
  		if ((peer->curr_keypair.valid) || (peer->prev_keypair.valid)) {
-@@ -1004,17 +1070,21 @@
+@@ -1004,17 +1079,21 @@
  			*current_port = peer->port;
  		}
  	}
@@ -525,7 +540,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  	return result;
  }
  
-@@ -1031,12 +1101,15 @@
+@@ -1031,12 +1110,15 @@
  
  err_t wireguardif_update_endpoint(struct netif *netif, u8_t peer_index, const ip_addr_t *ip, u16_t port) {
  	struct wireguard_peer *peer;
@@ -541,7 +556,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  	return result;
  }
  
-@@ -1057,6 +1130,7 @@
+@@ -1057,6 +1139,7 @@
  			&& (public_key_len == WIREGUARD_PUBLIC_KEY_LEN)) {
  
  		// See if the peer is already registered
@@ -549,7 +564,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  		peer = peer_lookup_by_pubkey(device, public_key);
  		if (!peer) {
  			// Not active - see if we have room to allocate a new one
-@@ -1087,6 +1161,7 @@
+@@ -1087,6 +1170,7 @@
  		} else {
  			result = ERR_OK;
  		}
@@ -557,7 +572,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  	} else {
  		result = ERR_ARG;
  	}
-@@ -1096,7 +1171,7 @@
+@@ -1096,7 +1180,7 @@
  
  	if (peer_index) {
  		if (peer) {
@@ -566,7 +581,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  		} else {
  			*peer_index = WIREGUARDIF_INVALID_INDEX;
  		}
-@@ -1149,21 +1224,14 @@
+@@ -1149,21 +1233,14 @@
  	return result;
  }
  
@@ -595,7 +610,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  		if (peer->valid) {
  			// Do we need to rekey / send a handshake?
  			if (should_reset_peer(peer)) {
-@@ -1181,53 +1249,9 @@
+@@ -1181,53 +1258,9 @@
  				// Destroy current keypair
  				keypair_destroy(&peer->curr_keypair);
  			}
@@ -652,7 +667,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  				printf("[WG_PERIODIC] Handshake retry wg_idx=%d key=%02x%02x%02x%02x "
  				       "ip=%s:%u connect_ip=%s:%u active=%d send_hs=%d\n",
  				       x,
-@@ -1238,18 +1262,50 @@
+@@ -1238,18 +1271,50 @@
  				       ip_addr_isany(&peer->connect_ip) ? "0.0.0.0" : ipaddr_ntoa(&peer->connect_ip),
  				       peer->connect_port,
  				       peer->active, peer->send_handshake);
@@ -707,7 +722,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  err_t wireguardif_init(struct netif *netif) {
  	err_t result;
  	struct wireguardif_init_data *init_data;
-@@ -1429,6 +1485,8 @@
+@@ -1429,6 +1494,8 @@
  
  err_t wireguardif_connect_derp(struct netif *netif, u8_t peer_index) {
  	struct wireguard_peer *peer;
@@ -716,7 +731,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
  	if (result == ERR_OK) {
  		// Mark peer as active so timer will initiate handshakes
-@@ -1436,15 +1494,18 @@
+@@ -1436,15 +1503,18 @@
  		// Force immediate handshake by setting send_handshake flag
  		peer->send_handshake = true;
  		// CRITICAL: Clear endpoint IP/port to force DERP relay output!
@@ -738,8 +753,8 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  	return result;
  }
 diff -ruN a/wireguard_lwip/src/wireguard-platform-esp32.c b/wireguard_lwip/src/wireguard-platform-esp32.c
---- a/wireguard_lwip/src/wireguard-platform-esp32.c	2026-10-30 12:49:21.000000000 +0000
-+++ b/wireguard_lwip/src/wireguard-platform-esp32.c	2026-10-30 13:51:30.400330397 +0000
+--- a/wireguard_lwip/src/wireguard-platform-esp32.c	2026-10-30 17:30:06.103791900 +0200
++++ b/wireguard_lwip/src/wireguard-platform-esp32.c	2026-10-30 17:30:06.211345800 +0200
 @@ -7,6 +7,8 @@
  #include "esp_random.h"
  #include "esp_timer.h"
@@ -767,8 +782,8 @@ diff -ruN a/wireguard_lwip/src/wireguard-platform-esp32.c b/wireguard_lwip/src/w
 +	xSemaphoreGive((SemaphoreHandle_t)lock);
 +}
 diff -ruN a/wireguard_lwip/src/wireguard-platform.h b/wireguard_lwip/src/wireguard-platform.h
---- a/wireguard_lwip/src/wireguard-platform.h	2026-10-30 12:49:21.000000000 +0000
-+++ b/wireguard_lwip/src/wireguard-platform.h	2026-10-30 13:51:30.400330397 +0000
+--- a/wireguard_lwip/src/wireguard-platform.h	2026-10-30 17:30:06.259082900 +0200
++++ b/wireguard_lwip/src/wireguard-platform.h	2026-10-30 17:30:06.330017800 +0200
 @@ -64,5 +64,13 @@
  // Is the system under load - i.e. should we generate cookie reply message in response to initiation messages
  bool wireguard_is_under_load();

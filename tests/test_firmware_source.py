@@ -68,21 +68,37 @@ WG_UNLOCKED_CALLS = (
 WG_LOCKED_HELPERS = ("wireguardif_initiate_handshake", "wireguardif_lookup_peer")
 
 
-def _wg_functions():
-    path = FIRMWARE / "esp32" / "components" / "wireguard_lwip" / "src" / "wireguardif.c"
-    name, depth, body = None, 0, []
+def _wg_functions(path=None):
+    """(name, lines) for each function in wireguardif.c. A function's brace may be on its
+    definition line or the next; any other top-level brace that opens neither a type nor an
+    initializer fails, so a layout change can't drop a function from the lock check."""
+    path = path or FIRMWARE / "esp32" / "components" / "wireguard_lwip" / "src" / "wireguardif.c"
+    name, pending, depth, body = None, None, 0, []
     for number, code in _code_lines(path):
         code = re.sub(r"/\*.*?\*/", "", code)
         if depth == 0:
             definition = re.match(r"^(?:static\s+)?[\w\s\*]+?\b(\w+)\s*\([^;]*$", code)
             if definition and "{" in code:
-                name, body = definition.group(1), []
+                name, body, pending = definition.group(1), [], None
+            elif definition:
+                pending = definition.group(1)
+            elif pending and "{" in code:  # the brace after a signature that spans lines
+                name, body, pending = pending, [], None
+            elif "{" in code and not re.match(r"\s*#|\s*(?:static\s+|const\s+)*(?:struct|union|enum)\b|.*=\s*\{", code):
+                raise AssertionError(f"{path.name}:{number}: a top-level brace the lock check can't place")
         if name:
             body.append((number, code))
         depth += code.count("{") - code.count("}")
         if name and depth == 0 and body:
             yield name, body
             name = None
+
+
+def test_the_lock_check_reads_a_function_whose_brace_is_on_its_own_line(tmp_path):
+    source = tmp_path / "wireguardif.c"
+    source.write_text("static void wireguardif_process_response_message(struct wireguard_device *device)\n"
+                      "{\n\twireguard_start_session(peer, true);\n}\n", encoding="utf-8")
+    assert [name for name, _ in _wg_functions(source)] == ["wireguardif_process_response_message"]
 
 
 def test_wireguard_state_is_used_only_under_its_lock_and_never_sends_under_it():

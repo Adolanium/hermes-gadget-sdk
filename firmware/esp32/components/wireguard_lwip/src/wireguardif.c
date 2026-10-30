@@ -447,6 +447,9 @@ static void wireguardif_send_keepalive(struct wireguard_device *device, struct w
 
 static void wireguardif_process_response_message(struct wireguard_device *device, struct message_handshake_response *response, const ip_addr_t *addr, u16_t port) {
 	struct wireguard_peer *peer;
+	// What the log lines need, copied under the lock: remove_peer() may zero the slot after it.
+	uint8_t wg_idx = 0;
+	struct wg_endpoint ep;
 	WG_DEBUG("[WG] Processing handshake response from %s:%u\n",
 		ip_addr_isany(addr) ? "DERP" : ipaddr_ntoa(addr), port);
 
@@ -458,19 +461,20 @@ static void wireguardif_process_response_message(struct wireguard_device *device
 	if (ok) {
 		update_peer_addr(peer, addr, port);
 		wireguard_start_session(peer, true);
+		wg_idx = wireguard_peer_index(device, peer);
+		endpoint_of(peer, &ep);
 	}
 	WG_UNLOCK(device);
 	if (ok) {
 		// Packet is good — identify the peer
-		uint8_t wg_idx = wireguard_peer_index(device, peer);
 		printf("[WG] *** HANDSHAKE COMPLETE! wg_idx=%u key=%02x%02x%02x%02x "
 		       "from=%s:%u ***\n",
 		       wg_idx,
-		       peer->public_key[0], peer->public_key[1],
-		       peer->public_key[2], peer->public_key[3],
+		       ep.public_key[0], ep.public_key[1],
+		       ep.public_key[2], ep.public_key[3],
 		       ip_addr_isany(addr) ? "DERP" : ipaddr_ntoa(addr), port);
 		printf("[WG] Session started, sending keepalive to %s:%u\n",
-		       ip_addr_isany(&peer->ip) ? "DERP" : ipaddr_ntoa(&peer->ip), peer->port);
+		       ip_addr_isany(&ep.ip) ? "DERP" : ipaddr_ntoa(&ep.ip), ep.port);
 		wireguardif_send_keepalive(device, peer);
 
 		// Set the IF-UP flag on netif
@@ -969,7 +973,12 @@ static err_t wireguard_start_handshake(struct netif *netif, struct wireguard_pee
 	struct wg_endpoint ep;
 
 	WG_LOCK(device);
-	pbuf = wireguardif_initiate_handshake(device, peer, &msg, &result);
+	// The caller decided to handshake before this lock; remove_peer() may have freed the slot since.
+	pbuf = NULL;
+	result = ERR_CONN;
+	if (peer->valid) {
+		pbuf = wireguardif_initiate_handshake(device, peer, &msg, &result);
+	}
 	if (pbuf) {
 		peer->send_handshake = false;
 		peer->last_initiation_tx = wireguard_sys_now();
