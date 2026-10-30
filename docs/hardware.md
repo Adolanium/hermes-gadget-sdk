@@ -259,6 +259,51 @@ Before relying on the port, run the [physical checklist](hardware-validation.md)
 
 References: [M5Stack hardware and recovery instructions](https://docs.m5stack.com/en/core/CoreS3), [Espressif board definitions](https://github.com/espressif/esp-bsp/tree/master/bsp/m5stack_core_s3), [AW9523 registers](https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/docs/products/core/CoreS3/AW9523B-EN.pdf), and [AXP2101 registers](https://files.waveshare.com/wiki/common/X-power-AXP2101_SWcharge_V1.0.pdf). See [README](../README.md#license) for driver licenses and the adapted ILI9342E table's notice.
 
+## Waveshare ESP32-S3-Touch-AMOLED-1.32
+
+Board option `waveshare-touch-amoled-132`, for the Waveshare ESP32-S3-Touch-AMOLED-1.32: an ESP32-S3-PICO-1-N8R8 with 8 MB flash and 8 MB octal PSRAM, a round 1.32" 466×466 CO5300 panel over QSPI, a CST820 touchscreen, and one ES8311 codec for the speaker and the microphone. This port is experimental. It has not been run on a board.
+
+**Back up the whole flash before the first flash.** The board has no other copy of its factory firmware:
+
+```bash
+esptool.py --chip esp32s3 read_flash 0 0x800000 touch-amoled-132-factory.bin
+```
+
+Writing that file back at `0x0` restores the original firmware.
+
+| Part | Connection |
+|---|---|
+| CO5300 466×466 AMOLED, QSPI | CS 10, clock 11, D0–D3 12/13/14/15, reset 8; 40 MHz; column offset 6 |
+| CST820 touch | I2C 0x15 on SDA 47, SCL 48; reset 7; interrupt 6 unused because input is polled |
+| ES8311 speaker and microphone | I2C 0x18 on the same bus; MCLK 38, BCLK 39, WS 41, DOUT 42, DIN 40; amplifier enable 46 |
+| Power latch | GPIO 18 held high. PWR is GPIO 17 |
+| BOOT | GPIO 0, TALK |
+
+Hold the screen or BOOT to talk, tap to answer yes, and swipe down to cancel. A short press on PWR turns the screen off and on. Holding PWR drops GPIO 18, which releases the battery latch. USB can still power the board after that. The round 466 layout is the existing `sim-466x466-round` simulator profile. That profile also has a motion sensor, and this board does not.
+
+The CO5300 bring-up is the short table from Waveshare's board support package, with a 100 ms wait after sleep-out. The 1.75" table writes extra registers and waits 600 ms, so this profile does not use it. xiaozhi-esp32 writes memory-access control `0xC0` after init, which rotates the picture 180 degrees. This profile does not. If a unit shows the picture upside down, that register is the first thing to check.
+
+The product has a lithium-battery header. Neither the board support package nor the pin list that names GPIO 17 and GPIO 18 names a battery-sense pin, so this profile does not report voltage or a percentage. Do not add a divider ratio without a schematic.
+
+**Build and flash it** with PlatformIO:
+
+```bash
+cd firmware/esp32
+pio run -e waveshare-touch-amoled-132 -t upload -t monitor
+```
+
+Or with `idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/waveshare-esp32-s3-touch-amoled-1.32/sdkconfig.defaults" build`. The USB-C port is the module's USB Serial/JTAG, so flashing and the serial console (115200 baud) both use it.
+
+### First flash: what to check
+
+1. **Boot log:** `CO5300 466x466 ready` and `codecs: speaker ready, microphones ready (es8311 analog)`. `hermes-gadget diag` should list the display and I2C devices `0x18` and `0x15`.
+2. **Screen:** the mascot is upright inside the round glass, and the colors are right. A picture that is upside down is a candidate for memory-access control `0xC0`. A shifted picture means the column offset of 6 is wrong.
+3. **Touch:** holding the screen records, a swipe down cancels, and taps land where you touch.
+4. **Microphone and speaker:** hold BOOT and speak; the waves move with your voice. Replies are clear (`set volume 80`).
+5. **Power:** on battery, a short PWR press turns the screen off and on, and holding PWR powers the board off. GPIO 18 must stay high while the board should remain on. `status` does not show a battery voltage.
+
+Pin numbers, the CO5300 command bytes and the column gap follow Waveshare's `esp32_s3_touch_amoled_1_32` board support package at commit `b9a73081`. GPIO 17 and GPIO 18 follow xiaozhi-esp32's `waveshare/esp32-s3-touch-amoled-1.32` board at commit `49b4380b` (tag v2.5.2). See [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
+
 ## ESP32-S3-Touch-AMOLED-1.75C
 
 Use `esp32s3-touch-amoled-175c` for SKUs 33691/33692, the enclosed model with 32 MB flash and 8 MB octal PSRAM. This is an experimental port. Use its exact image; the 1.75 model's image has different pins.
