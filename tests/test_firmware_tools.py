@@ -372,6 +372,23 @@ def test_every_board_trusts_a_chain_at_any_bundled_root():
         assert {k: settings.get(k) for k in want} == want, board
 
 
+def test_every_board_with_psram_has_the_network_buffers():
+    """lwIP's 5,760-byte TCP window holds a connection below 24 kHz microphone audio on a slow
+    link (a phone hotspot), and recordings lose frames; every PSRAM board sets 32 KB windows with
+    the buffers in PSRAM (docs/porting.md#network-buffers). A new board copies them (#227)."""
+    want = {"CONFIG_LWIP_TCP_WND_DEFAULT": "32768", "CONFIG_LWIP_TCP_SND_BUF_DEFAULT": "32768",
+            "CONFIG_LWIP_TCP_RECVMBOX_SIZE": "32", "CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP": "y"}
+    boards = sorted((package_release.PROJECT_DIR / "boards").glob("*/sdkconfig.defaults"))
+    checked = 0
+    for path in boards:
+        settings = {symbol: value for _, symbol, value in check_config.parse(path)}
+        if settings.get("CONFIG_SPIRAM") != "y":
+            continue
+        checked += 1
+        assert {k: settings.get(k) for k in want} == want, path.parent.name
+    assert checked > 20
+
+
 def test_release_notes_pin_the_plugin_to_the_release_commit(project, tmp_path):
     project("breadboard")
     notes = tmp_path / "notes.md"
