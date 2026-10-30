@@ -7,6 +7,8 @@
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "lwip/sys.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include <string.h>
 
 /* ============================================================================
@@ -72,4 +74,17 @@ bool wireguard_is_under_load() {
     // - CPU usage
     // - Number of active connections
     return false;
+}
+
+// Hermes gadget patch: see wireguard-platform.h.
+void *wireguard_platform_lock_create(void) {
+	return xSemaphoreCreateMutex();
+}
+
+void wireguard_platform_lock(void *lock) {
+	xSemaphoreTake((SemaphoreHandle_t)lock, portMAX_DELAY);
+}
+
+void wireguard_platform_unlock(void *lock) {
+	xSemaphoreGive((SemaphoreHandle_t)lock);
 }
