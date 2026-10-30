@@ -114,6 +114,16 @@ waveshare/esp32-s3-touch-lcd-1.83 board,
 https://github.com/78/xiaozhi-esp32/tree/49b4380b3faa0ceadd28a3e78aaf0f311c46c57e/main/boards/waveshare/esp32-s3-touch-lcd-1.83,
 MIT License. Only these hardware facts are used. No vendor source is copied.
 
+The Waveshare ESP32-S3-Touch-AMOLED-1.32 pin numbers, the CO5300 command
+bytes and the 6-pixel column gap in firmware/esp32/main/board.cpp and
+firmware/esp32/main/port_amoled.cpp follow Waveshare's
+esp32_s3_touch_amoled_1_32 board support package,
+https://github.com/waveshareteam/Waveshare-ESP32-components/tree/b9a7308173d196925d6853daaa754f414e21eab8/bsp/esp32_s3_touch_amoled_1_32,
+Apache License 2.0. The battery-latch pin (GPIO 18) and the PWR pin (GPIO 17)
+follow xiaozhi-esp32's waveshare/esp32-s3-touch-amoled-1.32 board,
+https://github.com/78/xiaozhi-esp32/tree/49b4380b3faa0ceadd28a3e78aaf0f311c46c57e/main/boards/waveshare/esp32-s3-touch-amoled-1.32,
+MIT License. Only these hardware facts are used. No vendor source is copied.
+
 The Spotpear ESP32-S3-1.28-BOX pin map, panel settings and power wiring in
 firmware/esp32/main/board.cpp, and the GC9A01 register changes in
 firmware/esp32/main/panel_spotpear128.hpp, follow xiaozhi-esp32's

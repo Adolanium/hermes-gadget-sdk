@@ -55,6 +55,25 @@ constexpr InitCommand kInit466[] = {
     {0x29, {}, 0, 0},    // display on
 };
 
+// Panel bring-up for the round 466x466 1.32" module, following Waveshare's
+// esp32_s3_touch_amoled_1_32 BSP (commit b9a73081): the short table, RGB565,
+// tearing, brightness, the 466 window (column offset 6) and a 100 ms sleep-out.
+// The 1.75" table writes page-2 registers and waits 600 ms, so this glass does
+// not use it. Every flush rewrites the window.
+constexpr InitCommand kInit132[] = {
+    {0xFE, {0x00}, 1, 0},
+    {0xC4, {0x80}, 1, 0},
+    {0x3A, {0x55}, 1, 0},  // 16 bits per pixel
+    {0x35, {0x00}, 1, 0},  // tearing effect line on
+    {0x53, {0x20}, 1, 0},  // brightness control on
+    {0x51, {0xFF}, 1, 0},  // brightness
+    {0x63, {0xFF}, 1, 0},
+    {0x2A, {0x00, 0x06, 0x01, 0xD7}, 4, 0},
+    {0x2B, {0x00, 0x00, 0x01, 0xD1}, 4, 0},
+    {0x11, {}, 0, 100},  // sleep out
+    {0x29, {}, 0, 0},    // display on
+};
+
 // Panel bring-up for the rectangular 368x448 1.8" module (V2: CO5300 + CST820),
 // following Waveshare's own board example: no MADCTL write and no page-2
 // registers, only the vendor page, RGB565, tearing, brightness and the window
@@ -179,7 +198,10 @@ bool AmoledDisplay::begin(const AmoledConfig& cfg) {
   }
   const InitCommand* init = kInit466;
   size_t init_len = sizeof(kInit466) / sizeof(kInit466[0]);
-  if (cfg.panel == AmoledPanel::Co5300_368) {
+  if (cfg.panel == AmoledPanel::Co5300_132) {
+    init = kInit132;
+    init_len = sizeof(kInit132) / sizeof(kInit132[0]);
+  } else if (cfg.panel == AmoledPanel::Co5300_368) {
     init = kInit368;
     init_len = sizeof(kInit368) / sizeof(kInit368[0]);
   } else if (cfg.panel == AmoledPanel::Co5300_410) {
