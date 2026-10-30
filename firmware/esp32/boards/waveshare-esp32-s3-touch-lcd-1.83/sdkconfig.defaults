@@ -1,0 +1,25 @@
+# Waveshare ESP32-S3-Touch-LCD-1.83: ESP32-S3R8 (8 MB octal PSRAM), 16 MB flash,
+# 1.83" 240x284 ST7789P SPI display, CST816D touch, ES8311 + ES7210, AXP2101.
+# Pins: docs/hardware.md#waveshare-esp32-s3-touch-lcd-183
+CONFIG_IDF_TARGET="esp32s3"
+# CONFIG_ESPTOOLPY_FLASHSIZE_4MB is not set
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+# The USB-C port is the S3's own USB Serial/JTAG; the console must live on USB.
+# CONFIG_ESP_CONSOLE_UART_DEFAULT is not set
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_183=y
+
+# TCP windows for links with a long round trip (a phone hotspot): 5,760 B capped
+# a connection near 33 KB/s at 175 ms, below 24 kHz audio's 48 KB/s.
+# Wi-Fi and lwIP buffers in PSRAM first, internal RAM when the module has none.
+# docs/porting.md#network-buffers
+CONFIG_LWIP_TCP_WND_DEFAULT=32768
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y

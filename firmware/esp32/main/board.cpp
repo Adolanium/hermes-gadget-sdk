@@ -52,6 +52,8 @@ namespace {
 #define HG_BOARD_NAME "waveshare-esp32-p4-wifi6-touch-lcd-7b"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154
 #define HG_BOARD_NAME "waveshare-esp32s3-lcd-154"
+#elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_183
+#define HG_BOARD_NAME "waveshare-esp32-s3-touch-lcd-1.83"
 #elif CONFIG_HG_BOARD_ESP32_CYD
 #define HG_BOARD_NAME "esp32-2432s028-cyd"
 #else
@@ -443,6 +445,55 @@ BoardConfig make() {
   b.talk_label = "BOOT";
   b.cancel_label = "PLUS";
   b.light_sleep = true;  // dozing on battery; keep_pins_through_sleep holds the latch and panel
+  return b;
+}
+#elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_183
+// Waveshare ESP32-S3-Touch-LCD-1.83 (SKUs 32790/32791): ESP32-S3R8, 16 MB flash,
+// 1.83" 240x284 ST7789P over SPI, CST816D touch on the codec I2C bus, ES8311
+// speaker and ES7210 microphones, AXP2101. The IMU, RTC and TF card stay off.
+// Pins: docs/hardware.md#waveshare-esp32-s3-touch-lcd-183
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.lcd.enabled = true;
+  b.lcd.width = 240;
+  b.lcd.height = 284;
+  b.lcd.swap_xy = false;
+  b.lcd.mirror_x = false;
+  b.lcd.mirror_y = false;
+  b.lcd.invert = true;
+  b.lcd.gap_x = 0;
+  b.lcd.gap_y = 0;
+  b.lcd.mosi = 7;
+  b.lcd.sclk = 6;
+  b.lcd.cs = 5;
+  b.lcd.dc = 4;
+  b.lcd.rst = 38;
+  b.lcd.backlight = 40;
+  b.lcd.backlight_invert = false;
+  b.lcd.spi_mhz = 24;
+  b.i2c = {15, 14, 400000};
+  b.codec.enabled = true;
+  b.codec.mclk = 16;
+  b.codec.bclk = 9;
+  b.codec.ws = 45;
+  b.codec.dout = 8;
+  b.codec.din = 10;
+  b.codec.pa = 46;
+  b.touch.enabled = true;
+  b.touch.ppi = 203;  // estimate (see TouchConfig::ppi)
+  b.touch.controller = TouchController::Cst816;
+  b.touch.addr = 0x15;
+  b.touch.rst = 39;  // INT on GPIO 13; the CST816 driver polls
+  b.touch.width = 240;
+  b.touch.height = 284;
+  b.axp2101 = true;
+  b.axp_audio_supply = true;  // ALDO1 at 3.3 V supplies the microphone
+  // PWR reaches the AXP2101. A short press turns the screen off and on.
+  b.axp_power_key = true;
+  b.buttons = {0, -1, -1, -1};  // BOOT is TALK
+  b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
   return b;
 }
 #elif CONFIG_HG_BOARD_BOX3

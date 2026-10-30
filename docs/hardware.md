@@ -87,6 +87,54 @@ The USB-C port is the S3's own USB Serial/JTAG, so flashing and the serial conso
 4. **Speaker:** replies are clear and loud enough (`set volume 80`); no hiss between replies.
 5. **Buttons:** BOOT holds to talk, PLUS cancels, and holding PLUS for 2 s starts a new conversation.
 
+## Waveshare ESP32-S3-Touch-LCD-1.83
+
+Board option `waveshare-touch-lcd-183`, for the Waveshare ESP32-S3-Touch-LCD-1.83 (SKUs 32790 and 32791; the `-EN` SKU is the same hardware): an ESP32-S3R8 with 16 MB flash and 8 MB octal PSRAM, a 1.83" 240×284 ST7789P panel over SPI, a CST816D touchscreen, an ES8311 speaker codec, an ES7210 microphone ADC, an AXP2101 power manager, a QMI8658 IMU, a PCF85063 RTC and a TF card slot. This port is experimental. It has not been run on a board.
+
+**Back up the whole flash before the first flash.** The board has no other copy of its factory firmware:
+
+```bash
+esptool.py --chip esp32s3 read_flash 0 0x1000000 touch-lcd-183-factory.bin
+```
+
+Writing that file back at `0x0` restores the original firmware.
+
+| Part | Chip | Connection |
+|---|---|---|
+| Display | ST7789P, SPI | MOSI 7, SCLK 6, CS 5, DC 4, RST 38; 24 MHz, SPI mode 0; colors inverted; offsets 0; backlight GPIO 40, active high |
+| Speaker DAC | ES8311 | I2C 0x18 on SDA 15, SCL 14; I2S MCLK 16, BCLK 9, WS 45, DOUT 8, DIN 10; amplifier enable 46 |
+| Microphone ADC | ES7210 | I2C 0x40 on the same bus; MIC1 and MIC2, standard I2S. The echo-reference channel is not used |
+| Touch | CST816D | I2C 0x15 on the same bus; RST 39, INT 13 (the driver polls) |
+| Power | AXP2101 | I2C 0x34. ALDO1 at 3.3 V supplies the microphone. PWR is the PMIC power key |
+| Keys | | BOOT GPIO 0 (TALK) |
+
+Hold the screen or BOOT to talk, tap to answer yes, and swipe down to cancel. A short press on PWR turns the screen off and on. The profile reads that press from the AXP2101, the same way the 2.06 watch does. One published pin list names GPIO 41 as a power button and never uses it; this profile does not read GPIO 41. If PWR does nothing on a unit, that pin is the first thing to check.
+
+The AXP2101 reports battery voltage, charging and external power. There is no measured discharge curve for this cell, so a percentage is the chip's own gauge or the uncalibrated linear fallback, not a fitted curve. Do not treat it as a state of charge. The QMI8658, the PCF85063 and the TF card are present and unused. Light sleep is off.
+
+The glass is 240×284. To preview that layout, run `hermes-gadget sim --board sim-240x284`. A stripe along an edge means `lcd.gap_x` or `lcd.gap_y` is wrong; both are 0 until a unit says otherwise.
+
+**Build and flash it** with PlatformIO:
+
+```bash
+cd firmware/esp32
+pio run -e waveshare-touch-lcd-183 -t upload -t monitor
+```
+
+Or with `idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/waveshare-esp32-s3-touch-lcd-1.83/sdkconfig.defaults" build`. The USB-C port is the S3's own USB Serial/JTAG, so flashing and the serial console (115200 baud) both use it.
+
+### First flash: what to check
+
+1. **Boot log:** `ST7789 240x284 ready` and `codecs: speaker ready, microphones ready`. `hermes-gadget diag` should list `display st7789`, `microphone es7210`, `speaker es8311`, and I2C devices `0x18`, `0x40`, `0x15` and `0x34`.
+2. **Screen:** the mascot is upright and not mirrored, and the colors are right (amber accents, not blue). A negative image means `lcd.invert` is wrong. A blank panel is a candidate for SPI mode 3. One pin list names mode 3, and the board file that starts this panel sets mode 0, which is what the firmware uses.
+3. **Brightness:** the settings menu's brightness steps dim the screen, and 100 percent is the brightest. Reversed steps mean `lcd.backlight_invert` is wrong.
+4. **Touch:** holding the screen records, a swipe down cancels, and taps land where you touch.
+5. **Microphone:** hold BOOT and speak; the waves move with your voice. Silence with the ES8311 present points at ALDO1, which this profile turns on for the microphone.
+6. **Speaker:** replies are clear and loud enough (`set volume 80`).
+7. **Power:** `status` shows `battery_mv`, charging and external power on USB. A percentage, if one appears, is not calibrated. A short PWR press turns the screen off and on.
+
+Pin numbers follow Waveshare's `esp32_s3_touch_lcd_1_83` board support package at commit `7945883d`. Panel size, color inversion, the 24 MHz clock, touch reset and the AXP2101 microphone rail follow xiaozhi-esp32's `waveshare/esp32-s3-touch-lcd-1.83` board at commit `49b4380b` (tag v2.5.2). See [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
+
 ## Waveshare ESP32-S3-Touch-LCD-1.85C V2
 
 Use `esp32s3-touch-lcd-185c-v2` for the V2 board, PCB Rev2.0: an ESP32-S3R8 with 16 MB flash and 8 MB octal PSRAM, a round 360×360 ST77916 LCD over QSPI, CST816 touch, an ES8311 DAC, an ES7210 microphone ADC with two microphones and an NS4150B amplifier. A V2 board says Rev2.0 on the PCB or has a V2 sticker on the case. V1 has different audio hardware and must not use this image. The standard SKU needs a speaker on the SPK connector; the speaker-box version includes one. This port is experimental; see the [partial physical report](hardware-validation.md#waveshare-185c-v2-partial-physical-report).
