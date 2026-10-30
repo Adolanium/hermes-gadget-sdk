@@ -10,6 +10,7 @@
 
 #include "esp_log.h"
 #include "esp_system.h"
+#include "nvs.h"
 #include "sdkconfig.h"
 
 #if CONFIG_HG_TAILNET
@@ -42,6 +43,10 @@ bool TailnetLink::supported() {
 
 #if !CONFIG_HG_TAILNET
 
+void TailnetLink::begin(hg::App& app, const std::string& name) {
+  app_ = &app;
+  name_ = name;
+}
 void TailnetLink::network_up() {}
 void TailnetLink::network_down() {}
 void TailnetLink::settings_changed() {}
@@ -53,6 +58,11 @@ void TailnetLink::start() {}
 #else
 
 namespace {
+
+// forget() leaves this flag; begin() erases TailTiny's keys at the next boot. Its own
+// namespace, so the app's factory-reset, which asked for it, doesn't clear it.
+constexpr char kForgetNamespace[] = "hg_tailnet";
+constexpr char kForgetKey[] = "forget";
 
 tailtiny_t* node(void* p) { return static_cast<tailtiny_t*>(p); }
 
@@ -90,6 +100,23 @@ const char* state_name(tailtiny_state_t s) {
 }
 
 }  // namespace
+
+void TailnetLink::begin(hg::App& app, const std::string& name) {
+  app_ = &app;
+  name_ = name;
+  // tailtiny_factory_reset() must run before tailtiny_init() (tailtiny.h): a running
+  // node's tasks use the peer cache it frees, and could write their keys back.
+  nvs_handle_t h;
+  if (nvs_open(kForgetNamespace, NVS_READWRITE, &h) != ESP_OK) return;
+  uint8_t pending = 0;
+  if (nvs_get_u8(h, kForgetKey, &pending) == ESP_OK && pending) {
+    tailtiny_factory_reset();
+    nvs_erase_key(h, kForgetKey);
+    nvs_commit(h);
+    ESP_LOGI(TAG, "forgot the tailnet identity, as factory-reset asked");
+  }
+  nvs_close(h);
+}
 
 void TailnetLink::start() {
   key_ = app_->tailnet_key();
@@ -193,8 +220,17 @@ void TailnetLink::tick(uint32_t now) {
 }
 
 void TailnetLink::forget() {
-  // Its node, WireGuard and DISCO keys and the cached peers: the next start registers anew.
-  tailtiny_factory_reset();
+  // Its node, WireGuard and DISCO keys and the cached peers go at the next boot, before
+  // TailTiny starts (begin()); factory-reset asks for that restart. The next start
+  // registers anew.
+  nvs_handle_t h;
+  esp_err_t err = nvs_open(kForgetNamespace, NVS_READWRITE, &h);
+  if (err == ESP_OK) {
+    err = nvs_set_u8(h, kForgetKey, 1);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+  }
+  if (err != ESP_OK) ESP_LOGE(TAG, "couldn't schedule forgetting the tailnet identity: %s", esp_err_to_name(err));
 }
 
 void TailnetLink::report(hg::json::Value& r) {

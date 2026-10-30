@@ -107,7 +107,7 @@ Once it is up, the gadget connects as usual: pairing, Ready and replies don't ch
 
 - `set tailnet off` restarts the gadget, which then connects to the `server` address directly.
 - Setting a different key while the tailnet is running also restarts the gadget.
-- `factory-reset` removes the key and the gadget's tailnet identity. Remove the device from the admin console too ([revoke the key](#revoke-the-key)).
+- `factory-reset` removes the key at once and the gadget's tailnet identity when it next starts; restart it, as the console says. Remove the device from the admin console too ([revoke the key](#revoke-the-key)).
 
 ## Limits
 

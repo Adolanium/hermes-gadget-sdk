@@ -882,17 +882,15 @@ class TailnetLink {
   // The build has CONFIG_HG_TAILNET and the board BoardConfig::tailnet.
   static bool supported();
   // `name` becomes the device's tailnet hostname (lowercased, other characters as '-').
-  void begin(hg::App& app, const std::string& name) {
-    app_ = &app;
-    name_ = name;
-  }
+  // Runs before Wi-Fi, so before TailTiny starts: it carries out a pending forget().
+  void begin(hg::App& app, const std::string& name);
   void network_up();    // Wi-Fi has an address: start the node, or move it to the new network
   void network_down();  // Wi-Fi is gone: the tunnel is too, until network_up()
   // `tailnet` or `ts_key` changed. Starting is live; stopping, or a new key for a
   // running node, restarts the device (TailTiny can't stop and start again cleanly).
   void settings_changed();
   void tick(uint32_t now);
-  void forget();  // factory reset: TailTiny's keys and cached peers
+  void forget();  // factory reset: TailTiny's keys and cached peers, erased at the next boot
   void report(hg::json::Value& r);  // the `diag` report's "tailnet" part
 
  private:

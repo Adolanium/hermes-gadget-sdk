@@ -42,3 +42,21 @@ def test_the_websocket_transport_never_waits_without_a_limit_on_the_app_task():
         if re.search(r"\bxQueueSend\w*\s*\(", code) and "portMAX_DELAY" in code:
             found.append(f"{path.relative_to(REPO)}:{number}: {code.strip()}")
     assert not found, "\n".join(found)
+
+
+def test_tailtiny_is_reset_only_at_boot_before_it_starts():
+    # tailtiny_factory_reset() must run before tailtiny_init() (tailtiny.h): on a running
+    # node it frees the peer cache TailTiny's tasks still use, and the node can write its
+    # keys back. factory-reset only leaves a flag (TailnetLink::forget()); TailnetLink::begin()
+    # erases at the next boot, before Wi-Fi starts the node.
+    call = re.compile(r"\btailtiny_factory_reset\s*\(")
+    found = []
+    for path in sorted((FIRMWARE / "esp32" / "main").glob("*.cpp")):
+        function = None
+        for number, code in _code_lines(path):
+            definition = re.match(r"^\S.*?\b(\w+::\w+)\s*\(", code)
+            if definition:
+                function = definition.group(1)
+            if call.search(code):
+                found.append((path.name, function))
+    assert found == [("port_tailnet.cpp", "TailnetLink::begin")], found
