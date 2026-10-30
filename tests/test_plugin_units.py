@@ -33,6 +33,13 @@ def test_a_latin1_device_keeps_its_accents_and_folds_the_rest():
     assert out == "¿Café \"quoted\" - it's 20°C, Ñandú? Lódz"
 
 
+def test_a_cjk_device_keeps_chinese_and_folds_the_rest():
+    out = textfmt.for_device("今天台中天氣晴朗，氣溫 28 度！“好”\U0001F600 café", "cjk")
+    assert out == '今天台中天氣晴朗，氣溫 28 度！"好" café'
+    # The other charsets still drop CJK.
+    assert textfmt.for_device("日本 ok", "latin1") == "ok"
+
+
 def test_a_latin1_device_gets_plain_spaces_and_no_soft_hyphens():
     assert textfmt.for_device("a\xa0b co\xadop\tx", "latin1") == "a b coop x"
 
