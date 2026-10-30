@@ -150,6 +150,8 @@ def cmd_build_sim(args) -> int:
         configure += ["-G", args.generator]
     if sys.platform != "win32":
         configure += [f"-DCMAKE_BUILD_TYPE={args.config}"]
+    if args.cjk:
+        configure += ["-DHG_CJK_FONT=ON"]
     for step in (configure, [cmake, "--build", str(build), "--config", args.config]):
         print("+", " ".join(step))
         if subprocess.run(step).returncode != 0:
@@ -442,6 +444,7 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--config", default="Release")
     b.add_argument("--generator", help="CMake generator override")
     b.add_argument("--test", action="store_true", help="Also run the core unit tests")
+    b.add_argument("--cjk", action="store_true", help="Taller text lines that fit the 12x12 CJK font (docs/cjk.md)")
     b.set_defaults(func=cmd_build_sim)
 
     pl = sub.add_parser("plugin", help="Manage the Hermes plugin")

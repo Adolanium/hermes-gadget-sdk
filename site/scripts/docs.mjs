@@ -6,7 +6,7 @@ const REPO = "https://github.com/Adolanium/hermes-gadget-sdk";
 export const groups = [
   ["Get started", [["getting-started", "Choose your path"], ["supported-hardware", "Supported hardware"], ["desktop", "Try the simulator"], ["setup-board", "Set up a board"], ["linux", "Run a Linux gadget"], ["connect-hermes", "Connect Hermes"]]],
   ["Use your gadget", [["using-gadget", "Talk, type, and interrupt"], ["tailscale-funnel", "Connect from another network"], ["tailnet", "Reach Hermes over your tailnet"], ["troubleshooting", "Fix a problem"], ["simulator", "Simulator controls"]]],
-  ["Build with the SDK", [["development", "Development and tests"], ["porting", "Add a board or action"], ["home-automation", "Home Assistant and MQTT"], ["faces", "Customize the face"], ["hardware", "Hardware and wiring"]]],
+  ["Build with the SDK", [["development", "Development and tests"], ["porting", "Add a board or action"], ["cjk", "Chinese text"], ["home-automation", "Home Assistant and MQTT"], ["faces", "Customize the face"], ["hardware", "Hardware and wiring"]]],
   ["Reference", [["hardware-validation", "Hardware verification"], ["protocol", "Protocol"], ["architecture", "Architecture"], ["hermes-integration", "Hermes integration"]]],
 ];
 const pages = new Set(groups.flatMap(([, entries]) => entries.map(([id]) => id)));

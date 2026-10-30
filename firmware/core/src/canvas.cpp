@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "hg/font.hpp"
+#include "hg/font_cjk.hpp"
 
 namespace hg {
 
@@ -104,11 +105,27 @@ void Canvas::bitmap1(int x, int y, int w, int h, const uint8_t* bits, uint16_t c
 int Canvas::text(int x, int y, std::string_view s, int scale, uint16_t color) {
   if (scale < 1) scale = 1;
   for (size_t i = 0; i < s.size();) {
-    const char* g = font::glyph(font::next(s, i));
+    const char32_t cp = font::next(s, i);
+    if (font::columns(cp) == 2) {
+      // Wide characters are 12x12, filling the whole line pitch.
+      if (const uint8_t* g = font::cjk_glyph(cp)) {
+        for (int bit = 0; bit < font::kCjkSize * font::kCjkSize; ++bit) {
+          if ((g[bit >> 3] >> (7 - (bit & 7))) & 1) {
+            fill_rect(x + (bit % font::kCjkSize) * scale, y + (bit / font::kCjkSize) * scale, scale, scale, color);
+          }
+        }
+      } else {
+        text(x + 3 * scale, y, "?", scale, color);  // no glyph: a '?' centred in the two columns
+      }
+      x += 2 * font::kCellWidth * scale;
+      continue;
+    }
+    const char* g = font::glyph(cp);
+    const int y0 = y + font::kAsciiYOffset * scale;
     for (int row = 0; row < font::kGlyphHeight; ++row) {
       for (int col = 0; col < font::kGlyphWidth; ++col) {
         if (g[row * font::kGlyphWidth + col] == '#') {
-          fill_rect(x + col * scale, y + row * scale, scale, scale, color);
+          fill_rect(x + col * scale, y0 + row * scale, scale, scale, color);
         }
       }
     }
@@ -155,42 +172,85 @@ void Canvas::picture(int x, int y, int size, const uint16_t* src, int src_px, co
 }
 
 // Widths are in code points (font::length): a UTF-8 letter is one column.
+namespace {
+
+// A wrap unit: a run of narrow characters, or one wide character, which may break anywhere.
+struct Unit {
+  std::string_view text;
+  size_t cols;
+  bool space_before;  // separated from the previous unit by a space
+};
+
+std::vector<Unit> split_units(std::string_view para) {
+  std::vector<Unit> units;
+  bool space = false;
+  size_t i = 0;
+  while (i < para.size()) {
+    if (para[i] == ' ') {
+      space = true;
+      ++i;
+      continue;
+    }
+    const size_t start = i;
+    size_t j = i;
+    if (font::columns(font::next(para, j)) == 2) {
+      units.push_back({para.substr(start, j - start), 2, space});
+      i = j;
+    } else {
+      size_t cols = 0;
+      while (i < para.size() && para[i] != ' ') {
+        size_t k = i;
+        if (font::columns(font::next(para, k)) == 2) break;
+        ++cols;
+        i = k;
+      }
+      units.push_back({para.substr(start, i - start), cols, space});
+    }
+    space = false;
+  }
+  return units;
+}
+
+}  // namespace
+
+// Widths are in display columns (font::length): narrow letters take one, wide characters two.
 std::vector<std::string> wrap_text(std::string_view text, int max_chars) {
   std::vector<std::string> lines;
   const size_t max = static_cast<size_t>(max_chars < 1 ? 1 : max_chars);
-  if (max_chars < 1) max_chars = 1;
   size_t i = 0;
   while (i <= text.size()) {
     size_t nl = text.find('\n', i);
     std::string_view para = text.substr(i, nl == std::string_view::npos ? std::string_view::npos : nl - i);
     std::string line;
-    size_t p = 0;
-    while (p < para.size()) {
-      while (p < para.size() && para[p] == ' ') ++p;
-      size_t end = para.find(' ', p);
-      if (end == std::string_view::npos) end = para.size();
-      std::string_view word = para.substr(p, end - p);
-      p = end;
-      if (word.empty()) continue;
-      while (font::length(word) > max) {
+    size_t line_cols = 0;
+    for (const Unit& u : split_units(para)) {
+      std::string_view word = u.text;
+      size_t cols = u.cols;
+      // A narrow word longer than a line is cut at the line width.
+      while (cols > max) {
         if (!line.empty()) {
           lines.push_back(line);
           line.clear();
+          line_cols = 0;
         }
         const size_t cut = font::prefix(word, max);
         lines.emplace_back(word.substr(0, cut));
         word.remove_prefix(cut);
+        cols = font::length(word);
       }
       if (word.empty()) continue;
-      const size_t words = font::length(word);
-      size_t needed = line.empty() ? words : font::length(line) + 1 + words;
-      if (needed > max) {
+      // CJK text has no spaces: only narrow words are joined with one.
+      const size_t gap = (!line.empty() && u.space_before) ? 1 : 0;
+      if (line_cols + gap + cols > max && !line.empty()) {
         lines.push_back(line);
-        line.assign(word);
-      } else {
-        if (!line.empty()) line.push_back(' ');
-        line.append(word);
+        line.clear();
+        line_cols = 0;
+      } else if (gap) {
+        line.push_back(' ');
+        ++line_cols;
       }
+      line.append(word);
+      line_cols += cols;
     }
     lines.push_back(line);
     if (nl == std::string_view::npos) break;
