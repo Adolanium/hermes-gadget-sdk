@@ -141,7 +141,14 @@ bool TouchInput::read_touch(TouchSample& out) {
     const uint8_t reg = 0x02;
     uint8_t data[5] = {};
     if (i2c_master_transmit_receive(touch_dev_, &reg, 1, data, sizeof(data), 20) != ESP_OK) return false;
-    return hg::cst816_touch(data, touch_.width, touch_.height, out.touching, out.x, out.y);
+    if (!hg::cst816_touch(data, touch_.width, touch_.height, out.touching, out.x, out.y)) return false;
+    // Native panel coordinates. A board that rotates the glass sets these so
+    // the touch lands on the pixel that was drawn there.
+    if (out.touching) {
+      if (touch_.mirror_x && touch_.width) out.x = static_cast<int16_t>(touch_.width - 1 - out.x);
+      if (touch_.mirror_y && touch_.height) out.y = static_cast<int16_t>(touch_.height - 1 - out.y);
+    }
+    return true;
   }
   const uint8_t reg[2] = {0xD0, 0x00};
   if (i2c_master_transmit(touch_dev_, reg, sizeof(reg), 20) != ESP_OK) return false;

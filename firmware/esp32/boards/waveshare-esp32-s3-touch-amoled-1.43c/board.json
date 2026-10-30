@@ -1,0 +1,6 @@
+{
+  "title": "Waveshare ESP32-S3-Touch-AMOLED-1.43C",
+  "summary": "Experimental. 1.43\" round 466x466 screen, touch, microphones and an onboard speaker.",
+  "docs": "docs/hardware.md#waveshare-esp32-s3-touch-amoled-143c",
+  "ready_made": true
+}

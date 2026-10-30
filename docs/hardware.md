@@ -304,6 +304,56 @@ Or with `idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/waveshare-esp32
 
 Pin numbers, the CO5300 command bytes and the column gap follow Waveshare's `esp32_s3_touch_amoled_1_32` board support package at commit `b9a73081`. GPIO 17 and GPIO 18 follow xiaozhi-esp32's `waveshare/esp32-s3-touch-amoled-1.32` board at commit `49b4380b` (tag v2.5.2). See [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
 
+## Waveshare ESP32-S3-Touch-AMOLED-1.43C
+
+Board option `waveshare-touch-amoled-143c`, for the Waveshare ESP32-S3-Touch-AMOLED-1.43C: an ESP32-S3-PICO-1-N8R8 with 8 MB flash and 8 MB octal PSRAM, a round 1.43" 466×466 CO5300 panel over QSPI, a CST820 touchscreen, an ES8311 speaker and ES7210 microphones. This port is experimental. It has not been run on a board.
+
+This is not the older ESP32-S3-Touch-AMOLED-1.43. That board has 16 MB flash, a different pin map, an IMU and an RTC. Do not flash this image onto it.
+
+**Back up the whole flash before the first flash.** The board has no other copy of its factory firmware:
+
+```bash
+esptool.py --chip esp32s3 read_flash 0 0x800000 touch-amoled-143c-factory.bin
+```
+
+Writing that file back at `0x0` restores the original firmware.
+
+| Part | Connection |
+|---|---|
+| CO5300 466×466 AMOLED, QSPI | CS 15, clock 14, D0–D3 9/10/11/12, reset 13; 40 MHz; column offset 8; memory-access control `0xC0` |
+| CST820 touch | I2C 0x15 on SDA 47, SCL 48; reset 16; interrupt 17 unused because input is polled; both axes mirrored to match the panel |
+| ES8311 speaker | I2C 0x18 on the same bus; MCLK 38, BCLK 39, WS 40, DOUT 41, DIN 42; amplifier enable 46 |
+| ES7210 microphones | I2C 0x40 on the same bus; MIC1 and MIC2. MIC3 is the playback reference and stays off |
+| Codec supply | GPIO 18 held high. This is the audio LDO, not a battery latch |
+| Battery | GPIO 4, ADC1 channel 3, calibrated millivolts times 2. GPIO 7 is low while charging. GPIO 5 is the charge LED and is unused |
+| BOOT | GPIO 0, TALK |
+| Tearing | GPIO 8, unused |
+
+Hold the screen or BOOT to talk, tap to answer yes, and swipe down to cancel. There is no power key and no software power-off. The round 466 layout is the existing `sim-466x466-round` simulator profile. That profile also has a motion sensor, and this board does not.
+
+The CO5300 bring-up follows the factory component: the short table, a 120 ms wait after sleep-out, a column offset of 8, and a 180 degree rotation. The 1.32" table uses a column offset of 6 and does not rotate, so this profile does not use it. The factory table itself leaves the pixel format and the window to the CO5300 driver, writes brightness `0x00`, then mirrors both axes. This driver sends those steps in the same table and writes brightness `0xFF`, which is the factory default of 100%. A shifted picture means the column offset of 8 is wrong.
+
+GPIO 4 reports a voltage. It does not report a percentage until `set battery_estimate liion`. The divider ratio comes from the vendor example (`calibrated millivolts * 2`). It is not a measured curve. `status` shows `battery_mv` and `charging`.
+
+**Build and flash it** with PlatformIO:
+
+```bash
+cd firmware/esp32
+pio run -e waveshare-touch-amoled-143c -t upload -t monitor
+```
+
+Or with `idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/waveshare-esp32-s3-touch-amoled-1.43c/sdkconfig.defaults" build`. The USB-C port is the module's USB Serial/JTAG, so flashing and the serial console (115200 baud) both use it.
+
+### First flash: what to check
+
+1. **Boot log:** `CO5300 466x466 ready` and `codecs: speaker ready, microphones ready (es7210)`. `hermes-gadget diag` should list the display and I2C devices `0x18`, `0x40` and `0x15`.
+2. **Screen:** the mascot is upright inside the round glass, and the colors are right. A shifted picture means the column offset of 8 is wrong.
+3. **Touch:** holding the screen records, a swipe down cancels, and taps land where you touch. A touch that lands opposite the picture means the 180 degree mirror is wrong.
+4. **Microphone and speaker:** hold BOOT and speak; the waves move with your voice. Replies are clear (`set volume 80`).
+5. **Power:** `status` shows `battery_mv` with a cell fitted, and `charging` while the charger is active. GPIO 18 must stay high or the codecs have no supply. There is no power-off command.
+
+Pin numbers, the CO5300 command bytes, the column gap, the codec supply and the battery divider follow Waveshare's ESP32-S3-Touch-AMOLED-1.43C repository at commit `8cea11dd`. See [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
+
 ## ESP32-S3-Touch-AMOLED-1.75C
 
 Use `esp32s3-touch-amoled-175c` for SKUs 33691/33692, the enclosed model with 32 MB flash and 8 MB octal PSRAM. This is an experimental port. Use its exact image; the 1.75 model's image has different pins.

@@ -16,6 +16,8 @@ namespace {
 #define HG_BOARD_NAME "esp32s3-touch-amoled-1.75c"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_AMOLED_132
 #define HG_BOARD_NAME "waveshare-esp32-s3-touch-amoled-1.32"
+#elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_AMOLED_143C
+#define HG_BOARD_NAME "waveshare-esp32-s3-touch-amoled-1.43c"
 #elif CONFIG_HG_BOARD_AMOLED_18
 #define HG_BOARD_NAME "esp32s3-touch-amoled-1.8"
 #elif CONFIG_HG_BOARD_AMOLED_206
@@ -196,6 +198,61 @@ BoardConfig make() {
   // on GPIO 17 turns the screen off and on. Holding it releases the latch.
   b.latch_power = {true, -1, 18, -1};
   b.latch_power.key = 17;
+  b.buttons = {0, -1, -1, -1};  // BOOT is TALK
+  b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
+  return b;
+}
+#elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_AMOLED_143C
+// Waveshare ESP32-S3-Touch-AMOLED-1.43C: ESP32-S3-PICO-1-N8R8, round 466x466
+// CO5300 over QSPI, CST820 touch, ES8311 speaker and ES7210 microphones.
+// GPIO 18 enables the codec LDO. It is not a battery latch. GPIO 4 reads the
+// cell through a divider of two, and GPIO 7 is low while charging.
+// Pins: docs/hardware.md#waveshare-esp32-s3-touch-amoled-143c
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.amoled.enabled = true;
+  b.amoled.width = 466;
+  b.amoled.height = 466;
+  b.amoled.cs = 15;
+  b.amoled.sclk = 14;
+  b.amoled.d0 = 9;
+  b.amoled.d1 = 10;
+  b.amoled.d2 = 11;
+  b.amoled.d3 = 12;
+  b.amoled.rst = 13;
+  b.amoled.gap_x = 8;  // esp_lcd_panel_set_gap(panel, 8, 0)
+  b.amoled.qspi_mhz = 40;
+  b.amoled.round = true;
+  b.amoled.panel = AmoledPanel::Co5300_143c;
+  b.i2c = {47, 48, 400000};
+  // Active-high LDO for the ES8311 and the ES7210, before either codec starts.
+  b.power_rails[0] = {18, true};
+  b.power_rails_settle_ms = 10;
+  b.codec.enabled = true;
+  b.codec.mclk = 38;
+  b.codec.bclk = 39;
+  b.codec.ws = 40;
+  b.codec.dout = 41;
+  b.codec.din = 42;
+  b.codec.pa = 46;
+  b.codec.mic = MicCodec::Es7210;
+  b.codec.es7210_mics = 0x03;  // MIC1 and MIC2. MIC3 is the playback reference and stays off.
+  b.touch.enabled = true;
+  b.touch.ppi = 326;  // estimate (see TouchConfig::ppi)
+  b.touch.controller = TouchController::Cst816;  // the CST820 sends the same report
+  b.touch.addr = 0x15;
+  b.touch.rst = 16;  // INT on GPIO 17; the CST816 driver polls
+  b.touch.width = 466;
+  b.touch.height = 466;
+  b.touch.mirror_x = true;  // the panel's MADCTL 0xC0 rotates the picture 180 degrees
+  b.touch.mirror_y = true;
+  // GPIO 4 is ADC1 channel 3. The example multiplies the calibrated millivolts
+  // by two. GPIO 7 is low while the ETA6098 is charging. There is no latch.
+  b.latch_power = {true, 4, -1, 7, -1, 2};
+  b.latch_power.power_off_supported = false;
+  b.latch_power.usb_external_power = true;
   b.buttons = {0, -1, -1, -1};  // BOOT is TALK
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";

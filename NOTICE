@@ -124,6 +124,16 @@ follow xiaozhi-esp32's waveshare/esp32-s3-touch-amoled-1.32 board,
 https://github.com/78/xiaozhi-esp32/tree/49b4380b3faa0ceadd28a3e78aaf0f311c46c57e/main/boards/waveshare/esp32-s3-touch-amoled-1.32,
 MIT License. Only these hardware facts are used. No vendor source is copied.
 
+The Waveshare ESP32-S3-Touch-AMOLED-1.43C pin numbers, the CO5300 command
+bytes, the 8-pixel column gap, the codec-supply pin and the battery divider
+in firmware/esp32/main/board.cpp and firmware/esp32/main/port_amoled.cpp
+follow Waveshare's ESP32-S3-Touch-AMOLED-1.43C repository,
+https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.43C/tree/8cea11ddae6167dd591d1f5465fd7b615080360f,
+Apache License 2.0, Copyright 2026 Waveshare. The facts come from
+examples/factory/components/esp32_s3_touch_amoled_1_43c and
+examples/arduino/examples/01_ADC_Test. Only these hardware facts are used.
+No vendor source is copied.
+
 The Spotpear ESP32-S3-1.28-BOX pin map, panel settings and power wiring in
 firmware/esp32/main/board.cpp, and the GC9A01 register changes in
 firmware/esp32/main/panel_spotpear128.hpp, follow xiaozhi-esp32's
