@@ -1061,13 +1061,20 @@ err_t wireguardif_disconnect(struct netif *netif, u8_t peer_index) {
 	return result;
 }
 
+// Hermes gadget patch: a key counts while it can still carry data. The timers wipe an expired
+// current key, but nothing ages out the previous one, so a peer whose session died long ago
+// still had a "valid" previous key and read as up.
+static bool keypair_usable(const struct wireguard_keypair *keypair) {
+	return keypair->valid && !wireguard_expired(keypair->keypair_millis, REJECT_AFTER_TIME);
+}
+
 err_t wireguardif_peer_is_up(struct netif *netif, u8_t peer_index, ip_addr_t *current_ip, u16_t *current_port) {
 	struct wireguard_peer *peer;
 	struct wireguard_device *device = (struct wireguard_device *)netif->state;
 	WG_LOCK(device);  // Hermes gadget patch
 	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
 	if (result == ERR_OK) {
-		if ((peer->curr_keypair.valid) || (peer->prev_keypair.valid)) {
+		if (keypair_usable(&peer->curr_keypair) || keypair_usable(&peer->prev_keypair)) {
 			result = ERR_OK;
 		} else {
 			result = ERR_CONN;
