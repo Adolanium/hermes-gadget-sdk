@@ -4128,6 +4128,7 @@ TEST("profiles: the name and every list row are about 7 mm tall on each touch bo
   const Board boards[] = {
       {"lcd-1.54", 240, 240, false, 1, 220},   {"lcd-1.83", 240, 284, false, 1, 203},
       {"amoled-1.75", 466, 466, true, 1, 266}, {"amoled-1.32", 466, 466, true, 1, 353},
+      {"amoled-1.43c", 466, 466, true, 1, 326},
       {"amoled-1.8", 368, 432, false, 1, 322}, {"amoled-2.06", 410, 486, false, 1, 315},
       {"amoled-2.16", 480, 480, false, 1, 314}, {"lcd-1.85c", 360, 360, true, 1, 195},
       {"knob-1.8", 360, 360, true, 2, 200},     {"box-3", 320, 240, false, 1, 167},

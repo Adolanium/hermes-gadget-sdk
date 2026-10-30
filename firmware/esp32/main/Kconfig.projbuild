@@ -84,6 +84,8 @@ menu "Hermes Gadget"
             bool "Waveshare ESP32-S3-Touch-AMOLED-1.75C (32 MB flash, enclosed AMOLED)"
         config HG_BOARD_WS_ESP32S3_TOUCH_AMOLED_132
             bool "Waveshare ESP32-S3-Touch-AMOLED-1.32 (experimental, round CO5300 466x466, CST820, ES8311)"
+        config HG_BOARD_WS_ESP32S3_TOUCH_AMOLED_143C
+            bool "Waveshare ESP32-S3-Touch-AMOLED-1.43C (experimental, round CO5300 466x466, CST820, ES8311 + ES7210)"
         config HG_BOARD_AMOLED_18
             bool "Waveshare ESP32-S3-Touch-AMOLED-1.8 (rectangular AMOLED, CST820 touch, ES8311)"
         config HG_BOARD_AMOLED_206

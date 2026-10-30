@@ -10,12 +10,16 @@ namespace hgp {
 
 bool LatchPower::begin(const LatchPowerConfig& cfg) {
   cfg_ = cfg;
-  // Set the output latch before enabling the pin to avoid a low pulse at boot.
-  if (gpio_set_level(static_cast<gpio_num_t>(cfg.enable), 1) != ESP_OK) return false;
-  gpio_config_t output = {};
-  output.pin_bit_mask = 1ULL << cfg.enable;
-  output.mode = GPIO_MODE_OUTPUT;
-  if (gpio_config(&output) != ESP_OK) return false;
+  // A board can read the battery without a latch. Skip the enable pin then:
+  // -1 would select a bogus mask and collide with the flash bus.
+  if (cfg.enable >= 0) {
+    // Set the output latch before enabling the pin to avoid a low pulse at boot.
+    if (gpio_set_level(static_cast<gpio_num_t>(cfg.enable), 1) != ESP_OK) return false;
+    gpio_config_t output = {};
+    output.pin_bit_mask = 1ULL << cfg.enable;
+    output.mode = GPIO_MODE_OUTPUT;
+    if (gpio_config(&output) != ESP_OK) return false;
+  }
   if (cfg.backlight >= 0) {
     gpio_reset_pin(static_cast<gpio_num_t>(cfg.backlight));
     gpio_set_direction(static_cast<gpio_num_t>(cfg.backlight), GPIO_MODE_OUTPUT);
@@ -65,7 +69,8 @@ bool LatchPower::begin(const LatchPowerConfig& cfg) {
   calibration.bitwidth = channel.bitwidth;
   if (adc_cali_create_scheme_curve_fitting(&calibration, &calibration_) != ESP_OK) calibration_ = nullptr;
 #endif
-  ESP_LOGI("hg.power", "battery latch enabled; calibrated voltage %s", calibration_ ? "available" : "unavailable");
+  ESP_LOGI("hg.power", "%s; calibrated voltage %s", cfg.enable >= 0 ? "battery latch enabled" : "battery sense enabled",
+           calibration_ ? "available" : "unavailable");
   return true;
 }
 

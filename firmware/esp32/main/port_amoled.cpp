@@ -74,6 +74,30 @@ constexpr InitCommand kInit132[] = {
     {0x29, {}, 0, 0},    // display on
 };
 
+// Panel bring-up for the round 466x466 1.43C module, following Waveshare's
+// factory component at commit 8cea11dd. That table is the short page, tearing,
+// brightness control and a 120 ms sleep-out. It leaves COLMOD and the window to
+// the CO5300 driver, writes brightness 0x00, then calls esp_lcd_panel_mirror
+// (true, true) and esp_lcd_panel_set_gap(panel, 8, 0). This driver sends the
+// whole sequence itself, so the table below also writes RGB565, the 466 window
+// at column 8 (every flush rewrites it from gap_x), MADCTL 0xC0 and full
+// brightness. The factory image raises brightness to its 100% default only
+// after the first frame.
+constexpr InitCommand kInit143c[] = {
+    {0xFE, {0x00}, 1, 0},
+    {0xC4, {0x80}, 1, 0},
+    {0x3A, {0x55}, 1, 0},  // 16 bits per pixel
+    {0x35, {0x00}, 1, 10},  // tearing effect line on
+    {0x53, {0x20}, 1, 10},  // brightness control on
+    {0x51, {0xFF}, 1, 10},  // brightness
+    {0x63, {0xFF}, 1, 10},
+    {0x2A, {0x00, 0x08, 0x01, 0xD9}, 4, 0},  // column 8 .. 473
+    {0x2B, {0x00, 0x00, 0x01, 0xD1}, 4, 0},  // row 0 .. 465
+    {0x11, {}, 0, 120},  // sleep out
+    {0x36, {0xC0}, 1, 0},  // mirror X and Y (180 degrees)
+    {0x29, {}, 0, 0},    // display on
+};
+
 // Panel bring-up for the rectangular 368x448 1.8" module (V2: CO5300 + CST820),
 // following Waveshare's own board example: no MADCTL write and no page-2
 // registers, only the vendor page, RGB565, tearing, brightness and the window
@@ -198,7 +222,10 @@ bool AmoledDisplay::begin(const AmoledConfig& cfg) {
   }
   const InitCommand* init = kInit466;
   size_t init_len = sizeof(kInit466) / sizeof(kInit466[0]);
-  if (cfg.panel == AmoledPanel::Co5300_132) {
+  if (cfg.panel == AmoledPanel::Co5300_143c) {
+    init = kInit143c;
+    init_len = sizeof(kInit143c) / sizeof(kInit143c[0]);
+  } else if (cfg.panel == AmoledPanel::Co5300_132) {
     init = kInit132;
     init_len = sizeof(kInit132) / sizeof(kInit132[0]);
   } else if (cfg.panel == AmoledPanel::Co5300_368) {
