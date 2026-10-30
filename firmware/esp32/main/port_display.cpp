@@ -66,7 +66,7 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
   const bool qspi = cfg.controller == LcdController::St77916 || cfg.controller == LcdController::Sh8601;
   const bool st77916 = cfg.controller == LcdController::St77916;
   const bool gc9a01 = cfg.controller == LcdController::Gc9a01;
-  bool ili9341 = false;
+  bool ili9341 = cfg.controller == LcdController::Ili9341;
   bool cores3_e = false;
   if (cfg.controller == LcdController::Box3) {
     if (!i2c_bus) return false;
@@ -79,7 +79,9 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
     }
   }
   controller_name_ = cfg.controller == LcdController::Sh8601 ? "sh8601"
-                     : qspi ? "st77916" : gc9a01 ? "gc9a01" : ili9341 ? "ili9342" : "st7789";
+                     : qspi ? "st77916" : gc9a01 ? "gc9a01"
+                     : cfg.controller == LcdController::Ili9341 ? "ili9341"
+                     : ili9341 ? "ili9342" : "st7789";
   if (cfg.controller == LcdController::CoreS3) {
     if (!i2c_bus) return false;
     i2c_device_config_t device = {};

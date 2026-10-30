@@ -245,7 +245,11 @@ bool TouchInput::begin_box_touch(i2c_master_bus_handle_t bus) {
   cfg.y_max = touch_.height;
   cfg.rst_gpio_num = GPIO_NUM_NC;  // Display initialization already reset the shared line.
   cfg.int_gpio_num = touch_.int_gpio >= 0 ? static_cast<gpio_num_t>(touch_.int_gpio) : GPIO_NUM_NC;
-  cfg.flags.mirror_x = tt21100;
+  // TT21100 on BOX and BOX-3 mirrors X even when the board leaves the flag
+  // clear. A board that sets mirror_x (Korvo-2) applies it to GT911 as well.
+  cfg.flags.swap_xy = touch_.swap_xy;
+  cfg.flags.mirror_x = tt21100 || touch_.mirror_x;
+  cfg.flags.mirror_y = touch_.mirror_y;
   const esp_err_t err = tt21100 ? esp_lcd_touch_new_i2c_tt21100(io, &cfg, &managed_touch_)
                               : esp_lcd_touch_new_i2c_gt911(io, &cfg, &managed_touch_);
   if (err != ESP_OK) { esp_lcd_panel_io_del(io); return false; }

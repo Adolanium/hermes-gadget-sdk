@@ -34,6 +34,8 @@ namespace {
 #define HG_BOARD_NAME "esp32-s3-box-3"
 #elif CONFIG_HG_BOARD_ESP32S3_BOX
 #define HG_BOARD_NAME "esp32-s3-box"
+#elif CONFIG_HG_BOARD_ESP32S3_KORVO_2
+#define HG_BOARD_NAME "esp32-s3-korvo-2"
 #elif CONFIG_HG_BOARD_CORES3
 #define HG_BOARD_NAME "m5stack-cores3"
 #elif CONFIG_HG_BOARD_STICKS3
@@ -673,6 +675,55 @@ BoardConfig make() {
   b.buttons = {0, -1, -1, -1};  // BOOT is TALK. GPIO 1 is the hardware mute.
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";
+  return b;
+}
+#elif CONFIG_HG_BOARD_ESP32S3_KORVO_2
+// ESP32-S3-Korvo-2 with the LCD sub-board: 2.4" ILI9341, GT911 or TT21100,
+// ES8311 + ES7210. 16 MB flash, 8 MB octal PSRAM. Chip select, reset, backlight
+// and the LCD/touch enable are TCA9554 outputs, not ESP32 GPIOs. ADC buttons,
+// the camera, the microSD card and the expander LEDs stay off. GPIO 0 is MOSI,
+// so BOOT is not a talk button.
+// Pins: docs/hardware.md#esp32-s3-korvo-2
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.lcd.enabled = true;
+  b.lcd.controller = LcdController::Ili9341;
+  b.lcd.width = 320;
+  b.lcd.height = 240;
+  b.lcd.swap_xy = false;
+  b.lcd.mirror_x = true;
+  b.lcd.mirror_y = true;
+  b.lcd.invert = false;
+  b.lcd.bgr = true;
+  b.lcd.mosi = 0;
+  b.lcd.sclk = 1;
+  b.lcd.cs = -1;
+  b.lcd.dc = 2;
+  b.lcd.rst = -1;
+  b.lcd.backlight = -1;
+  b.lcd.spi_mhz = 40;
+  b.i2c = {17, 18, 400000};
+  b.codec = {true, 16, 9, 45, 8, 10, 48};
+  // Pin 3 (0x08) is LCD_EN and TOUCH_EN, active low. Pin 2 (0x04) is reset,
+  // active low. Pin 1 (0x02) is the backlight, active high, on or off only.
+  b.expander_levels.enabled = true;
+  b.expander_levels.low = 0x08;
+  b.expander_levels.reset = 0x04;
+  b.expander_levels.backlight = 0x02;
+  b.touch.enabled = true;
+  b.touch.ppi = 167;  // 320x240 across a 2.4 inch diagonal
+  b.touch.controller = TouchController::Box3;  // GT911 at 0x5d, else TT21100 at 0x24
+  b.touch.mirror_x = true;
+  b.touch.width = 320;
+  b.touch.height = 240;
+  b.buttons = {-1, -1, -1, -1};
+  b.talk_label = "Hold screen";
+  b.cancel_label = "Swipe down";
+  // GPIO 6 is ADC1 channel 5. The divider is 4. No charge pin and no latch.
+  b.latch_power = {true, 6, -1, -1, -1, 4};
+  b.latch_power.power_off_supported = false;
+  b.latch_power.usb_external_power = true;
   return b;
 }
 #elif CONFIG_HG_BOARD_CORES3

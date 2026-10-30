@@ -1,0 +1,6 @@
+{
+  "title": "Espressif ESP32-S3-Korvo-2",
+  "summary": "320×240 touchscreen, onboard microphones and speaker. Needs the LCD sub-board. Experimental.",
+  "docs": "docs/hardware.md#esp32-s3-korvo-2",
+  "ready_made": true
+}

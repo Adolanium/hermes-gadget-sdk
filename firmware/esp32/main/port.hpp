@@ -449,6 +449,10 @@ inline void report_band_event(const char* tag, hg::BandFlush::Event event) {
 
 // Pulses the board's TCA9554 reset lines before the display and touch start.
 bool tca9554_reset(i2c_master_bus_handle_t bus, const ExpanderResetConfig& reset);
+// Holds TCA9554 enable, reset and backlight levels. Keeps the I2C device.
+bool tca9554_levels_begin(i2c_master_bus_handle_t bus, const ExpanderLevelConfig& levels);
+// On when percent > 0. No effect until tca9554_levels_begin succeeds.
+void tca9554_backlight(uint8_t percent);
 
 namespace i2c {
 // The board's shared I2C master bus (created on first use).

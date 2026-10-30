@@ -75,7 +75,7 @@ struct DsiPanelConfig {
   int vsync_pulse_width = 10, vsync_back_porch = 23, vsync_front_porch = 12;
 };
 
-enum class LcdController { St7789, Box3, CoreS3, St77916, Gc9a01, Sh8601 };
+enum class LcdController { St7789, Box3, CoreS3, St77916, Gc9a01, Sh8601, Ili9341 };
 
 // Which vendor initialization table an ST77916 panel gets. Waveshare's 1.85C
 // tables are chosen by the panel ID the driver reads; the ESP-VoCat's glass
@@ -242,6 +242,17 @@ struct ExpanderResetConfig {
   uint16_t hold_ms = 10, settle_ms = 50;  // low pulse, then the wait before the display starts
 };
 
+// TCA9554 outputs that stay owned after boot. `low` is driven low and held
+// (an active-low enable). `reset` is pulsed low, then left high. `backlight`
+// starts high and follows screen brightness as on or off. `addr` 0 probes
+// 0x38 (TCA9554A, A2=A1=A0=0) and then 0x20 (TCA9554).
+struct ExpanderLevelConfig {
+  bool enabled = false;
+  uint8_t addr = 0;
+  uint8_t low = 0, reset = 0, backlight = 0;
+  uint16_t hold_ms = 10, settle_ms = 20;
+};
+
 // A supply switch driven straight from a GPIO, set once at boot before any
 // peripheral starts and then left alone (the ESP-VoCat's LCD/SD rail and codec
 // supply).
@@ -300,6 +311,7 @@ struct BoardConfig {
   RtcConfig rtc;
   ExpanderKeyConfig pwr_key;
   ExpanderResetConfig expander_reset;
+  ExpanderLevelConfig expander_levels;
   PowerRail power_rails[2];
   uint16_t power_rails_settle_ms = 0;  // wait after switching the rails on
   bool axp2101 = false;
