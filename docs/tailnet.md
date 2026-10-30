@@ -98,7 +98,7 @@ After Wi-Fi connects, the gadget waits for the tailnet before it contacts Hermes
 | Tailnet: approve this device in the admin console | Your tailnet requires approval and the key wasn't pre-approved. |
 | Tailnet: no auth key (set ts_key) | `tailnet` is on but no key is saved. |
 | Tailnet: Hermes host unreachable | The session with the Hermes computer stopped. Check that it's online, and that your access rules allow the gadget port. |
-| Tailnet reconnecting | The gadget lost its connection to Tailscale and to the Hermes computer, for more than 15 seconds once it had been connected, and is getting it back. When only the connection to Tailscale's servers is replaced, which happens from time to time, the session with Hermes carries on. |
+| Tailnet reconnecting | The gadget lost its connection to Tailscale and to the Hermes computer, for more than 15 seconds once it had been connected, and is getting it back. Before the first connection it shows at once. When only the connection to Tailscale's servers is replaced, which happens from time to time, the session with Hermes carries on. |
 
 Once it is up, the gadget connects as usual: pairing, Ready and replies don't change.
 
