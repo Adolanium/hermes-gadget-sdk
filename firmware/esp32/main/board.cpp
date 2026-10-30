@@ -14,6 +14,8 @@ namespace {
 #define HG_BOARD_NAME "esp32s3-touch-amoled-1.75"
 #elif CONFIG_HG_BOARD_AMOLED_175C
 #define HG_BOARD_NAME "esp32s3-touch-amoled-1.75c"
+#elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_AMOLED_132
+#define HG_BOARD_NAME "waveshare-esp32-s3-touch-amoled-1.32"
 #elif CONFIG_HG_BOARD_AMOLED_18
 #define HG_BOARD_NAME "esp32s3-touch-amoled-1.8"
 #elif CONFIG_HG_BOARD_AMOLED_206
@@ -149,6 +151,54 @@ BoardConfig make() {
   b.axp_audio_supply = true;  // ALDO1 supplies the analog audio circuit.
   b.codec.speaker_pa = true;  // the amplifier draws power only while sound plays
 #endif
+  return b;
+}
+#elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_AMOLED_132
+// Waveshare ESP32-S3-Touch-AMOLED-1.32: ESP32-S3-PICO-1-N8R8, round 466x466
+// CO5300 over QSPI, CST820 touch, one ES8311 for the speaker and the microphone.
+// GPIO 18 held high keeps the battery latch on. No battery sense pin is named
+// in the sources used here.
+// Pins: docs/hardware.md#waveshare-esp32-s3-touch-amoled-132
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.amoled.enabled = true;
+  b.amoled.width = 466;
+  b.amoled.height = 466;
+  b.amoled.cs = 10;
+  b.amoled.sclk = 11;
+  b.amoled.d0 = 12;
+  b.amoled.d1 = 13;
+  b.amoled.d2 = 14;
+  b.amoled.d3 = 15;
+  b.amoled.rst = 8;
+  b.amoled.gap_x = 6;  // esp_lcd_panel_set_gap(panel, 0x06, 0)
+  b.amoled.qspi_mhz = 40;
+  b.amoled.round = true;
+  b.amoled.panel = AmoledPanel::Co5300_132;
+  b.i2c = {47, 48, 400000};
+  b.codec.enabled = true;
+  b.codec.mclk = 38;
+  b.codec.bclk = 39;
+  b.codec.ws = 41;
+  b.codec.dout = 42;
+  b.codec.din = 40;
+  b.codec.pa = 46;
+  b.codec.mic = MicCodec::Es8311;  // the same ES8311 is the microphone
+  b.touch.enabled = true;
+  b.touch.ppi = 353;  // estimate (see TouchConfig::ppi)
+  b.touch.controller = TouchController::Cst816;  // the CST820 sends the same report
+  b.touch.addr = 0x15;
+  b.touch.rst = 7;  // INT on GPIO 6; the CST816 driver polls
+  b.touch.width = 466;
+  b.touch.height = 466;
+  // GPIO 18 held high keeps the board powered from the battery. A short press
+  // on GPIO 17 turns the screen off and on. Holding it releases the latch.
+  b.latch_power = {true, -1, 18, -1};
+  b.latch_power.key = 17;
+  b.buttons = {0, -1, -1, -1};  // BOOT is TALK
+  b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
   return b;
 }
 #elif CONFIG_HG_BOARD_AMOLED_18
