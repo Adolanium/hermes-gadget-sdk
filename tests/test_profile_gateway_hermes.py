@@ -1172,6 +1172,7 @@ def test_a_pairing_grace_from_before_a_refusal_sends_no_notice(live_rig, make_si
 def test_a_refusal_sent_before_a_welcome_is_sent_again_after_it(live_rig, hermes_home, make_sim, monkeypatch):
     """A reconnect's welcome waits on the face lookup, and the pairing check may refuse the device
     meanwhile. The welcome clears the reason on the device, so the refusal must follow it again."""
+    import asyncio
     import threading
 
     from hermes_gadget_plugin import face
@@ -1189,10 +1190,26 @@ def test_a_refusal_sent_before_a_welcome_is_sent_again_after_it(live_rig, hermes
 
     monkeypatch.setattr(face, "for_profile", held_lookup)
     sent = len(sim.received)
+    # The welcome gives up on the face lookup after 1.5 s. The pairing watch
+    # polls every 2 s, so a poll that is not already due sends the refusal
+    # after that welcome. Stop the poll and run one check while the lookup
+    # is still held.
+    await_watch = live_rig.adapter._watch_task
+
+    async def stop_watch():
+        await_watch.cancel()
+        try:
+            await await_watch
+        except asyncio.CancelledError:
+            pass
+
+    live_rig.run(stop_watch())
     try:
         sim.console("reconnect")
         assert sim.wait_for(looking.is_set, timeout=8)
         live_rig.runner.config.profile_routes = _ops_route(device)
+        session = live_rig.adapter.hub.get(device)
+        live_rig.run(live_rig.adapter._sync_pairing(session))
         assert sim.wait_for(lambda: any(m["type"] == "unpaired" for m in sim.received[sent:]), timeout=3)
     finally:
         release.set()

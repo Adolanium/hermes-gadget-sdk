@@ -618,6 +618,34 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             f"No pairing code yet. On the Hermes host run 'hermes pairing list', or allow "
             f"{session.device_id} in GADGET_ALLOWED_USERS.", ttl_s=60)
 
+    async def _sync_pairing(self, session: DeviceSession, served: set | None = None) -> set | None:
+        """One pairing-watch step for one device. Revocation first, with no await before the reset."""
+        if session.profile != "default" and not self._owner_trusts(session.device_id):
+            await self._reset_profile(session)
+        verdict = self._verdict(session)
+        if verdict is None:
+            return served
+        if session.profile != "default":
+            if served is None:
+                served = {p["id"] for p in await asyncio.to_thread(self.profiles)}
+            if session.profile not in served:
+                await self._reset_profile(session)
+        if verdict and not session.paired:
+            self._store.clear_pairing(session.device_id)
+            await session.set_paired(True)
+            logger.info("[%s] device %s approved", self.name, session.device_id)
+            await self._claim_home(session)
+            await self._push_dashboard(session)
+        elif not verdict:
+            refusal = self._refusal(session)
+            if session.paired or refusal != session.unpaired_reason:
+                self._prompts.pop(session.device_id, None)
+                await session.set_paired(False, refusal)
+                if refusal is None:  # a pairing code can let it in again
+                    await self.on_ready(session)
+        await self._follow_face(session)
+        return served
+
     async def _watch_pairing(self) -> None:
         """Mirror pairing approvals and revocations onto connected devices."""
         while True:
@@ -627,31 +655,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             served = None
             for session in list(self._hub.sessions.values()):
                 try:  # one device's closed socket must never stop the watcher for the others
-                    # Revocation first and with no await before the reset, so nothing can slip in between.
-                    if session.profile != "default" and not self._owner_trusts(session.device_id):
-                        await self._reset_profile(session)
-                    verdict = self._verdict(session)
-                    if verdict is None:
-                        continue
-                    if session.profile != "default":
-                        if served is None:
-                            served = {p["id"] for p in await asyncio.to_thread(self.profiles)}
-                        if session.profile not in served:
-                            await self._reset_profile(session)
-                    if verdict and not session.paired:
-                        self._store.clear_pairing(session.device_id)
-                        await session.set_paired(True)
-                        logger.info("[%s] device %s approved", self.name, session.device_id)
-                        await self._claim_home(session)
-                        await self._push_dashboard(session)
-                    elif not verdict:
-                        refusal = self._refusal(session)
-                        if session.paired or refusal != session.unpaired_reason:
-                            self._prompts.pop(session.device_id, None)
-                            await session.set_paired(False, refusal)
-                            if refusal is None:  # a pairing code can let it in again
-                                await self.on_ready(session)
-                    await self._follow_face(session)
+                    served = await self._sync_pairing(session, served)
                 except Exception as exc:
                     logger.debug("[%s] pairing sync failed for %s: %s", self.name, session.device_id, exc)
 
