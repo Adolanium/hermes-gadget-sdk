@@ -380,9 +380,15 @@ void IRAM_ATTR TouchInput::on_int(void* arg) {
   if (woken) portYIELD_FROM_ISR();
 }
 
-// Without INT every poll reads; with it, only a pending report or a finger still down does.
+// Without INT every poll reads; with it, only a pending report, a finger still
+// down, or a line that is still low. SPD2010 leaves INT low until a read
+// clears it. may_read consumes the pending flag before that read, so a failed
+// status read would otherwise never be retried: the line never rises, and no
+// second falling edge arrives. An idle FT3168 sits high and is not polled.
 bool TouchInput::may_read(bool was_touching) {
-  return !int_gated_ || int_pending_.exchange(false) || was_touching;
+  if (!int_gated_) return true;
+  if (int_pending_.exchange(false) || was_touching) return true;
+  return gpio_get_level(static_cast<gpio_num_t>(touch_.int_gpio)) == 0;
 }
 
 // Waits out the poll period, or less: an INT edge or an encoder detent ends
