@@ -96,6 +96,8 @@ menu "Hermes Gadget"
             bool "M5Stack StickS3 (experimental, ST7789 240x135, ES8311, M5PM1)"
         config HG_BOARD_WS_ESP32S3_LCD_154
             bool "Waveshare ESP32-S3-LCD-1.54 (ST7789 240x240, ES8311 + ES7210 codecs)"
+        config HG_BOARD_WS_ESP32S3_TOUCH_LCD_183
+            bool "Waveshare ESP32-S3-Touch-LCD-1.83 (experimental, ST7789 240x284, CST816D, ES8311 + ES7210)"
         config HG_BOARD_WS_ESP32S3_TOUCH_LCD_185C_V2
             bool "Waveshare ESP32-S3-Touch-LCD-1.85C V2 (experimental, ST77916, CST816, codecs)"
         config HG_BOARD_WS_KNOB_LCD_18

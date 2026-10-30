@@ -289,7 +289,7 @@ struct Panel {
 };
 // Every panel a board or simulator profile uses (the AMOLEDs as their UI area).
 constexpr Panel kPanels[] = {
-    {240, 135, false}, {320, 170, false}, {240, 240, false}, {240, 240, true}, {320, 240, false},
+    {240, 135, false}, {320, 170, false}, {240, 240, false}, {240, 240, true}, {240, 284, false}, {320, 240, false},
     {360, 360, true},  {368, 432, false}, {410, 486, false}, {466, 466, true}, {480, 320, false},
     {480, 480, false}, {800, 480, false},
     {480, 480, true},

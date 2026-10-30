@@ -104,6 +104,16 @@ spotpear/sp-esp32-s3-1.54-muma board,
 https://github.com/78/xiaozhi-esp32/tree/d91d6824309d12df5fc3db5edf8145ee829135d7/main/boards/spotpear/sp-esp32-s3-1.54-muma,
 MIT License. Only these hardware facts are used.
 
+The Waveshare ESP32-S3-Touch-LCD-1.83 pin numbers in
+firmware/esp32/main/board.cpp follow Waveshare's esp32_s3_touch_lcd_1_83
+board support package,
+https://github.com/waveshareteam/Waveshare-ESP32-components/tree/7945883d5d930caba5af6101af6007905748bc77/bsp/esp32_s3_touch_lcd_1_83,
+Apache License 2.0. The panel size, color inversion, SPI clock, touch reset
+and the AXP2101 microphone rail (ALDO1 at 3.3 V) follow xiaozhi-esp32's
+waveshare/esp32-s3-touch-lcd-1.83 board,
+https://github.com/78/xiaozhi-esp32/tree/49b4380b3faa0ceadd28a3e78aaf0f311c46c57e/main/boards/waveshare/esp32-s3-touch-lcd-1.83,
+MIT License. Only these hardware facts are used. No vendor source is copied.
+
 The Spotpear ESP32-S3-1.28-BOX pin map, panel settings and power wiring in
 firmware/esp32/main/board.cpp, and the GC9A01 register changes in
 firmware/esp32/main/panel_spotpear128.hpp, follow xiaozhi-esp32's
