@@ -135,8 +135,10 @@ def test_tailtiny_is_reset_only_at_boot_before_it_starts():
     for path in sorted((FIRMWARE / "esp32" / "main").glob("*.cpp")):
         function = None
         for number, code in _code_lines(path):
-            definition = re.match(r"^\S.*?\b(\w+::\w+)\s*\(", code)
-            if definition:
+            if code.startswith("}"):
+                function = None  # a definition at the top level ends here
+            definition = re.match(r"^(?![#/}])\S.*?\b(\w+(?:::\w+)?)\s*\(", code)
+            if definition and not code.rstrip().endswith(";"):
                 function = definition.group(1)
             if call.search(code):
                 found.append((path.name, function))

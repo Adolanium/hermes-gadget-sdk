@@ -903,6 +903,7 @@ class TailnetLink {
   std::string name_;       // its tailnet hostname, likewise
   uint32_t server_ip_ = 0; // Hermes's tailnet address in host order; 0 when it isn't one
   bool wifi_up_ = false;
+  bool reset_unresolved_ = false;  // a factory-reset request begin() couldn't read or carry out
   hg::TailnetWatch watch_;
   bool restart_ = false, restart_timed_ = false;
   uint32_t next_check_ = 0, restart_at_ = 0;

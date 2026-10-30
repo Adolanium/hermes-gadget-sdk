@@ -106,23 +106,37 @@ void TailnetLink::begin(hg::App& app, const std::string& name) {
   name_ = name;
   // tailtiny_factory_reset() must run before tailtiny_init() (tailtiny.h): a running
   // node's tasks use the peer cache it frees, and could write their keys back.
+  // Until the request is read and, if there is one, carried out, the node stays off (start()):
+  // it would otherwise join with the identity factory-reset asked to drop.
+  reset_unresolved_ = true;
   nvs_handle_t h;
-  if (nvs_open(kForgetNamespace, NVS_READWRITE, &h) != ESP_OK) return;
+  if (nvs_open(kForgetNamespace, NVS_READWRITE, &h) != ESP_OK) {
+    ESP_LOGE(TAG, "couldn't read whether factory-reset asked to forget the tailnet identity");
+    return;
+  }
   uint8_t pending = 0;
-  if (nvs_get_u8(h, kForgetKey, &pending) == ESP_OK && pending) {
+  const esp_err_t read = nvs_get_u8(h, kForgetKey, &pending);
+  if (read == ESP_ERR_NVS_NOT_FOUND || (read == ESP_OK && !pending)) {
+    reset_unresolved_ = false;
+  } else if (read == ESP_OK) {
     // The request stays until the erase works, so a failed one is tried again next boot.
-    if (tailtiny_factory_reset() == ESP_OK) {
-      nvs_erase_key(h, kForgetKey);
-      nvs_commit(h);
+    if (tailtiny_factory_reset() == ESP_OK && nvs_erase_key(h, kForgetKey) == ESP_OK && nvs_commit(h) == ESP_OK) {
+      reset_unresolved_ = false;
       ESP_LOGI(TAG, "forgot the tailnet identity, as factory-reset asked");
     } else {
       ESP_LOGE(TAG, "couldn't forget the tailnet identity; trying again at the next boot");
     }
+  } else {
+    ESP_LOGE(TAG, "couldn't read the factory-reset request: %s", esp_err_to_name(read));
   }
   nvs_close(h);
 }
 
 void TailnetLink::start() {
+  if (reset_unresolved_) {
+    app_->on_tunnel(false, "Tailnet: old identity not erased; restart the gadget");
+    return;
+  }
   key_ = app_->tailnet_key();
   if (key_.empty()) {
     app_->on_tunnel(false, "Tailnet: no auth key (set ts_key)");
