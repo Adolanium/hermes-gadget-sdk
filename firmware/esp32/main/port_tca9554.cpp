@@ -92,9 +92,14 @@ bool tca9554_levels_begin(i2c_master_bus_handle_t bus, const ExpanderLevelConfig
 void tca9554_backlight(uint8_t percent) {
   if (!g_levels || !g_backlight_bit) return;
   uint8_t output = 0;
-  if (!reg_read(g_levels, 1, output)) return;
+  if (!reg_read(g_levels, 1, output)) {
+    ESP_LOGW("hg.tca9554", "backlight update failed");
+    return;
+  }
   const uint8_t next = percent ? static_cast<uint8_t>(output | g_backlight_bit)
                                : static_cast<uint8_t>(output & ~g_backlight_bit);
-  if (next != output) reg_write(g_levels, 1, next);
+  if (next != output && !reg_write(g_levels, 1, next)) {
+    ESP_LOGW("hg.tca9554", "backlight update failed");
+  }
 }
 }  // namespace hgp
