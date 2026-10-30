@@ -22,7 +22,8 @@ idf.py -DHG_CJK_FONT=ON build                       # ESP32 firmware (PlatformIO
 With the option off the font is not compiled in at all: no flash is spent, and Chinese
 characters are one column wide and drawn as `?`, as before. With it on, the glyph data adds
 about 160 KB to the image. Fourteen layout tests in `test_app.cpp` assume the 9 px pitch and
-do not pass with the option on; the Chinese-text tests only run with it on.
+do not pass with the option on. The Chinese-text tests (`hg_cjk_tests`, `firmware/tests/test_cjk.cpp`)
+build against a core with the font in and run on every host build, the option on or off.
 
 ## Telling the plugin
 

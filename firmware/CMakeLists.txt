@@ -33,6 +33,15 @@ if(HG_BUILD_TESTS)
   endif()
   add_test(NAME hg_core_tests COMMAND hg_core_tests)
 
+  # The CJK font's tests, against a core built with it (docs/cjk.md), whatever HG_CJK_FONT says.
+  hg_core_library(hg_core_cjk ON)
+  add_executable(hg_cjk_tests tests/main.cpp tests/test_cjk.cpp)
+  target_link_libraries(hg_cjk_tests PRIVATE hg_core_cjk)
+  if(MSVC)
+    target_compile_options(hg_cjk_tests PRIVATE /utf-8)
+  endif()
+  add_test(NAME hg_cjk_tests COMMAND hg_cjk_tests)
+
   # TailTiny's Noise channel AEAD (esp32/components/TAILTINY.md) against RFC 8439. The vendored
   # C uses GCC builtins, so not on MSVC.
   if(NOT MSVC)

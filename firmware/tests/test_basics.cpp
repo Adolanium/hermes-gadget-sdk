@@ -4,7 +4,6 @@
 #include "check.hpp"
 #include "hg/canvas.hpp"
 #include "hg/crypto.hpp"
-#include "hg/font.hpp"
 #include "hg/json.hpp"
 #include "hg/protocol.hpp"
 #include "hg/vad.hpp"
@@ -151,27 +150,6 @@ TEST("canvas: word wrap keeps words whole and splits overlong ones") {
   CHECK_EQ(paras.size(), size_t(3));
   CHECK_EQ(paras[1], std::string());
 }
-
-#if HG_CJK_FONT
-TEST("canvas: wide characters take two columns and wrap anywhere") {
-  CHECK_EQ(hg::font::length("ab"), size_t(2));
-  CHECK_EQ(hg::font::length("\xE4\xB8\xAD\xE6\x96\x87"), size_t(4));  // two wide characters
-  CHECK_EQ(hg::Canvas::text_width("\xE4\xB8\xAD", 1), 11);
-  // 6 columns hold three wide characters per line.
-  auto lines = hg::wrap_text("\xE4\xBD\xA0\xE5\xA5\xBD\xE4\xB8\x96\xE7\x95\x8C\xE6\xAD\xA1\xE8\xBF\x8E", 6);
-  CHECK_EQ(lines.size(), size_t(2));
-  CHECK_EQ(lines[0], std::string("\xE4\xBD\xA0\xE5\xA5\xBD\xE4\xB8\x96"));
-  // Mixed text keeps narrow words whole.
-  auto mixed = hg::wrap_text("hello \xE4\xB8\xAD\xE6\x96\x87 world", 8);
-  CHECK_EQ(mixed.size(), size_t(2));
-  CHECK_EQ(hg::font::length(mixed[0]), size_t(8));
-  // Truncation never splits a character.
-  const std::string zh = "\xE4\xB8\xAD\xE6\x96\x87";
-  CHECK_EQ(hg::font::prefix(zh, 3), size_t(3));  // one character: 3 UTF-8 bytes
-  CHECK(hg::font::drawable(0x4E2D));
-  CHECK(hg::font::cjk_glyph(0x4E2D) != nullptr);
-}
-#endif
 
 TEST("canvas: drawing respects the row clip") {
   std::vector<uint16_t> px(10 * 10, 0);
