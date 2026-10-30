@@ -95,7 +95,7 @@ class TailnetWatch {
         detail = "Reaching Hermes over the tailnet";
       }
     }
-    if (up) poked_ = false;
+    if (s.peer_up) poked_ = false;  // not while a grace keeps `up`: handshakes stay kPokeMs apart
     if (!told_ || up != told_up_ || (!up && detail != told_detail_)) {
       out.tell = true;
       told_ = true;

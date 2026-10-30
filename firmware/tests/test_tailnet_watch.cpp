@@ -71,6 +71,20 @@ TEST("tailnet watch: a short gap keeps the session, a long one ends it") {
   CHECK(v.update(2000 + TailnetWatch::kDownGraceMs, true, {Node::Connected, false, ""}).up);
 }
 
+TEST("tailnet watch: during the grace, handshakes are still asked for at most every kPokeMs") {
+  TailnetWatch w;
+  w.update(0, true, {Node::Connected, true, ""});
+  int pokes = 0;
+  for (uint32_t t = 1000; t < 1000 + TailnetWatch::kDownGraceMs; t += 1000) {  // the port polls each second
+    auto s = w.update(t, true, {Node::Connected, false, ""});
+    CHECK(s.up);
+    if (s.poke) ++pokes;
+  }
+  CHECK_EQ(pokes, int(TailnetWatch::kDownGraceMs / TailnetWatch::kPokeMs));  // at 1, 6 and 11 s
+  CHECK(w.update(20000, true, {Node::Connected, true, ""}).up);
+  CHECK(w.update(21000, true, {Node::Connected, false, ""}).poke);  // a new gap pokes at once
+}
+
 TEST("tailnet watch: replacing the control server's connection keeps the session while WireGuard is up") {
   // Tailscale ends the control long-poll from time to time; TailTiny reconnects while the
   // WireGuard session with the Hermes host carries on.
