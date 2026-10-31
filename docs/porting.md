@@ -123,7 +123,7 @@ Boards with a display can offer the resting clock ([using-gadget.md](using-gadge
 
 ## Audio through a codec chip
 
-Boards like the ESP32-S3-BOX family and the ESP32-S3-Touch-AMOLED-1.75 route audio through codecs (ES7210 ADC, ES8311 DAC) configured over I2C. `CodecAudio`, `CodecMic` and `CodecSpeaker` in `port_codec.cpp` implement `hg::AudioIn` and `hg::AudioOut` on top of `esp_codec_dev` for that pair: fill in `BoardConfig::codec` and `BoardConfig::i2c`. Other codecs follow the same contracts:
+Boards like the ESP32-S3-BOX family and the ESP32-S3-Touch-AMOLED-1.75 route audio through codecs (ES7210 ADC, ES8311 DAC) configured over I2C. `CodecAudio`, `CodecMic` and `CodecSpeaker` in `port_codec.cpp` implement `hg::AudioIn` and `hg::AudioOut` on top of `esp_codec_dev` for that pair: fill in `BoardConfig::codec` and `BoardConfig::i2c`. `SpeakerCodec::Es8388` selects the ES8388 speaker driver in that same component. The microphone path stays the ES7210. No board selects the ES8388 yet. Other codecs follow the same contracts:
 
 - **`AudioIn`:**
   - `start(rate)` begins capture.

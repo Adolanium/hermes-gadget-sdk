@@ -1,6 +1,6 @@
-// The shared I2C bus, and audio through codec chips: an ES8311 DAC or AW88298
-// speaker amplifier and an ES7210 ADC for the microphones, on one duplex I2S
-// bus (esp_codec_dev does the codec register work).
+// The shared I2C bus, and audio through codec chips: an ES8311 or ES8388 DAC,
+// an AW88298 speaker amplifier, and an ES7210 ADC for the microphones, on one
+// duplex I2S bus (esp_codec_dev does the codec register work).
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h
 
 #include <cstring>
@@ -99,7 +99,10 @@ bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus)
 
   audio_codec_i2c_cfg_t dac_i2c = {};
   dac_i2c.port = I2C_NUM_0;
-  dac_i2c.addr = cfg.speaker == SpeakerCodec::Aw88298 ? AW88298_CODEC_DEFAULT_ADDR : ES8311_CODEC_DEFAULT_ADDR;
+  // Address macros are the 8-bit form. The I2C driver shifts them to 7-bit.
+  dac_i2c.addr = cfg.speaker == SpeakerCodec::Aw88298 ? AW88298_CODEC_DEFAULT_ADDR
+               : cfg.speaker == SpeakerCodec::Es8388 ? ES8388_CODEC_DEFAULT_ADDR
+                                                     : ES8311_CODEC_DEFAULT_ADDR;
   dac_i2c.bus_handle = bus;
   es8311_codec_cfg_t dac = {};
   dac.ctrl_if = audio_codec_new_i2c_ctrl(&dac_i2c);
@@ -125,6 +128,18 @@ bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus)
     amp.gpio_if = gpio_if;
     amp.hw_gain.pa_gain = 15;
     out_cfg.codec_if = aw88298_codec_new(&amp);
+  } else if (cfg.speaker == SpeakerCodec::Es8388) {
+    // DAC only. The ES8388 ADC is not the microphone path.
+    es8388_codec_cfg_t es8388 = {};
+    es8388.ctrl_if = dac.ctrl_if;
+    es8388.gpio_if = gpio_if;
+    es8388.codec_mode = ESP_CODEC_DEV_WORK_MODE_DAC;
+    es8388.pa_pin = cfg.speaker_pa ? -1 : static_cast<int16_t>(cfg.pa);
+    es8388.pa_reverted = false;
+    es8388.master_mode = false;
+    es8388.hw_gain.pa_voltage = cfg.amp_supply_v;
+    es8388.hw_gain.codec_dac_voltage = 3.3;
+    out_cfg.codec_if = es8388_codec_new(&es8388);
   } else {
     out_cfg.codec_if = es8311_codec_new(&dac);
   }

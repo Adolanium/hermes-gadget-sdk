@@ -9,7 +9,7 @@ The dependencies below keep their own licenses and are downloaded when you build
 | Third-party code | Used for | License |
 |---|---|---|
 | [ESP-IDF](https://github.com/espressif/esp-idf) | The ESP32 framework and drivers | Apache 2.0 |
-| [esp_codec_dev](https://components.espressif.com/components/espressif/esp_codec_dev) | ES8311 / ES7210 audio codecs | Apache 2.0 |
+| [esp_codec_dev](https://components.espressif.com/components/espressif/esp_codec_dev) | ES8311 / ES7210 / ES8388 audio codecs | Apache 2.0 |
 | [esp-opus](https://components.espressif.com/components/78/esp-opus) (Xiph's [libopus](https://opus-codec.org/) built for ESP-IDF) | Decoding Opus reply audio on the device | BSD 3-Clause (libopus `COPYING`); the registry lists the package as MIT |
 | [esp_websocket_client](https://components.espressif.com/components/espressif/esp_websocket_client) | The device's WebSocket connection | Apache 2.0 |
 | [esp_video 2.5.0](https://components.espressif.com/components/espressif/esp_video/versions/2.5.0) | ESP32-P4 MIPI-CSI video capture and ISP pipeline | ESPRESSIF MIT; [license](https://components.espressif.com/components/espressif/esp_video/versions/2.5.0/license?language=en), copied to `LICENSES/Espressif-MIT.txt` |
