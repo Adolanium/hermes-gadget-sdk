@@ -5546,3 +5546,65 @@ TEST("tailnet: factory reset says so when the tailnet identity can't be schedule
   CHECK(reply.find("tailnet identity") != std::string::npos);
   CHECK(r.fake.kv.find("ts_key") == r.fake.kv.end());  // the settings are erased either way
 }
+
+TEST("screen: an open profile list or dashboard times out, closes in the dark and wakes to Ready") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online_with_profiles();
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  CHECK(r.app.open_profile_picker());
+  r.advance(16000);  // half of the timeout: dim, the list still open
+  CHECK_EQ(r.fake.brightness, 10);
+  CHECK(r.app.profile_picker_open());
+  r.server(R"({"type":"ping"})");
+  r.advance(15000);  // the timeout: dark, and the list is gone
+  CHECK_EQ(r.fake.brightness, 0);
+  CHECK(!r.app.profile_picker_open());
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+
+  r.server(kDashboard);
+  tap_cancel(r);
+  CHECK(r.app.screen() == hg::Screen::Dashboard);
+  r.server(R"({"type":"ping"})");
+  r.advance(16000);
+  r.server(R"({"type":"ping"})");
+  r.advance(15000);
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+}
+
+TEST("screen: the PWR key turns the screen off over a list, a card or the menu, and wakes to Ready") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online_with_profiles();
+  CHECK(r.app.open_profile_picker());
+  r.app.on_power_key();
+  CHECK_EQ(r.fake.brightness, 0);
+  r.advance(1000);  // nothing open lights it again
+  CHECK_EQ(r.fake.brightness, 0);
+  CHECK(!r.app.profile_picker_open());
+  r.app.on_power_key();
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+
+  r.server(R"({"type":"display","title":"Note","body":"Stays until closed","ttl_s":0})");
+  CHECK(r.app.screen() == hg::Screen::Card);
+  r.app.on_power_key();
+  r.advance(1000);
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_power_key();
+  CHECK(r.app.screen() == hg::Screen::Ready);
+
+  CHECK(r.app.open_settings());
+  r.app.on_power_key();
+  CHECK_EQ(r.fake.brightness, 0);
+  CHECK(!r.app.settings_open());
+  r.app.on_power_key();
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+}

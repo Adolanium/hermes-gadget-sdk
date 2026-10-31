@@ -296,6 +296,9 @@ class App {
   // What keeps the panel busy for the user; the screen timeout and the resting
   // clock share it so the two lists cannot drift.
   bool screen_busy() const;
+  // The profile list or the dashboard: lists the user opened, which an idle
+  // screen times out over and which close when the screen goes dark.
+  bool menu_open() const;
   // Face-down sleep (app_power.cpp): dark and quiet while the gadget lies on
   // its screen, ended only by turning it back over.
   bool can_sleep_face_down() const;
