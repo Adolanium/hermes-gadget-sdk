@@ -61,6 +61,7 @@ from gateway.platforms.event import MessageEvent, MessageType
 
 from . import audio as gaudio
 from . import compat, dashboard, imaging, ota, runtime, textfmt
+from . import status as live_status
 from . import face as faces
 from .battery_log import BatteryLog
 from .hub import DeviceHub, DeviceSession, HubDelegate
@@ -76,6 +77,7 @@ PAIRING_GRACE_S = 6.0
 UPDATE_POLL_S = 3.0           # how often staged firmware ('hermes gadget update') is looked for
 DASHBOARD_POLL_S = 2.0        # how often tiles ('hermes gadget tile') and expiries are looked at
 DASHBOARD_SETTLE_S = 0.3      # session changes this close together go out as one dashboard
+STATUS_POLL_S = 2.0           # how often live device state is compared with status.json
 # Trigger text for Hermes's unauthorized-DM flow. Never reaches the agent while the
 # device is unpaired; if approval races it, it is a cheap read-only command.
 PAIRING_TRIGGER = "/status"
@@ -237,6 +239,9 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._turns: Dict[str, str] = {}
         self._watch_task: Optional[asyncio.Task] = None
         self._update_task: Optional[asyncio.Task] = None
+        self._status_task: Optional[asyncio.Task] = None
+        self._status_dir: Optional[Path] = None
+        self._status_failing = False  # warned once; again only after a write succeeds
         self._installing: Dict[str, asyncio.Task] = {}  # device id -> staged update being installed
         self._registry_key = "default"
         self._prompts: Dict[str, List[_Prompt]] = {}  # device id -> questions, oldest (shown) first
@@ -280,6 +285,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         runtime.register(self._registry_key, self)
         self._watch_task = asyncio.create_task(self._watch_pairing())
         self._update_task = asyncio.create_task(self._watch_updates())
+        self._status_dir = plugin_data_dir(PLATFORM_NAME)
+        self._status_task = asyncio.create_task(self._watch_status())
         if self._dashboard_on:
             self._tiles = dashboard.TileStore(plugin_data_dir(PLATFORM_NAME))
             self._dashboard_wake = asyncio.Event()
@@ -296,13 +303,15 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         for unsubscribe in self._boards.values():
             unsubscribe()
         self._boards.clear()
-        for task in (self._watch_task, self._update_task, self._dashboard_task):
+        for task in (self._watch_task, self._update_task, self._dashboard_task, self._status_task):
             if task:
                 task.cancel()
-        self._watch_task = self._update_task = self._dashboard_task = None
+        self._watch_task = self._update_task = self._dashboard_task = self._status_task = None
         if self._hub:
             await self._hub.stop()
             self._hub = None
+        if self._status_dir is not None:
+            self._write_status({}, running=False)  # stopped on purpose: no device is online
         self._pushed_seq.clear()  # after the stop: a push still finishing while it ran may add one
         self._mark_disconnected()
 
@@ -778,6 +787,59 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         queue.report(session.device_id, state="done", version=version)
         logger.info("[%s] %s installed firmware %s", self.name, session.device_id, version)
 
+    # -- live status for other processes ------------------------------------------------
+
+    def _status_devices(self) -> Dict[str, Dict[str, Any]]:
+        """Each connected device's live state, as status.json records it."""
+        devices: Dict[str, Dict[str, Any]] = {}
+        for session in list(self._hub.sessions.values()) if self._hub else []:
+            if session.closed:
+                continue
+            devices[session.device_id] = {
+                "online": True,
+                "paired": session.paired,
+                "profile": session.profile,
+                "connected_at": session.connected_at,
+                "battery": live_status.battery(session.sensors),
+                "sensors_at": session.sensors_at or None,
+            }
+        return devices
+
+    @staticmethod
+    def _status_key(devices: Dict[str, Dict[str, Any]]) -> str:
+        """What makes a change worth writing at once: who is online, pairing, profile and the battery's
+        percent and power source. Voltage and reading times ride along with the next write."""
+        def brief(rec: Dict[str, Any]) -> Dict[str, Any]:
+            power = {k: v for k, v in (rec.get("battery") or {}).items() if k != "battery_mv"}
+            return {**{k: v for k, v in rec.items() if k not in ("battery", "sensors_at")}, "battery": power}
+
+        return json.dumps({k: brief(v) for k, v in devices.items()}, sort_keys=True)
+
+    def _write_status(self, devices: Dict[str, Dict[str, Any]], *, running: bool = True) -> bool:
+        try:
+            live_status.write(self._status_dir, devices, running=running)
+        except OSError as exc:
+            (logger.debug if self._status_failing else logger.warning)(
+                "[%s] could not write %s: %s", self.name, live_status.FILENAME, exc)
+            self._status_failing = True
+            return False
+        self._status_failing = False
+        return True
+
+    async def _watch_status(self) -> None:
+        """Keep status.json (read by the dashboard's Gadget tab) up to date: rewritten when a device
+        connects, leaves, changes pairing or profile, or reports a new battery percent or power source,
+        and at least every ``status.REFRESH_S`` so a reader can tell a gateway that stopped."""
+        written_key: Optional[str] = None
+        written_at = 0.0
+        while True:
+            devices = self._status_devices()
+            key = self._status_key(devices)
+            if key != written_key or time.monotonic() - written_at >= live_status.REFRESH_S:
+                if self._write_status(devices):
+                    written_key, written_at = key, time.monotonic()
+            await asyncio.sleep(STATUS_POLL_S)
+
     async def _claim_home(self, session: DeviceSession) -> None:
         """Make the first approved device the platform's home channel.
 
@@ -891,6 +953,11 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if self._hub and session.device_id not in self._hub.sessions:
             self._turns.pop(session.device_id, None)
             self._pushed_seq.pop(session.device_id, None)
+            if self._store is not None:
+                try:  # last seen is when it left, not when it came (hermes gadget devices, the dashboard tab)
+                    self._store.touch(session.device_id)
+                except OSError as exc:
+                    logger.warning("[%s] could not record when %s left: %s", self.name, session.device_id, exc)
 
     # -- turn lifecycle -------------------------------------------------------------
 

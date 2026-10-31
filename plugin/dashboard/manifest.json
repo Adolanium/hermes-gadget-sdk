@@ -1,0 +1,12 @@
+{
+  "name": "gadget",
+  "label": "Gadgets",
+  "description": "The Hermes Gadget devices this Hermes knows: board, firmware, last seen, online and battery",
+  "icon": "Cpu",
+  "tab": {
+    "path": "/gadget",
+    "position": "end"
+  },
+  "entry": "dist/index.js",
+  "api": "plugin_api.py"
+}
