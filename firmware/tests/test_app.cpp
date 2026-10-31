@@ -4859,12 +4859,12 @@ std::pair<int, int> row_point(Rig& r, int row) {
 }
 }  // namespace
 
-TEST("profiles: a quick tap on the name opens the list; a hold on it talks") {
+TEST("profiles: a quick tap on the name opens the grid; a hold on it talks") {
   for (int round : {0, 466}) {
     Rig r(Rig::touch_profile());
     if (round) r.fake.make_round(round);
     r.bring_online_with_profiles();
-    CHECK_EQ(r.app.model().detail.rfind("Tap name to change", 0), size_t(0));
+    CHECK_EQ(r.app.model().detail.rfind("Swipe to change", 0), size_t(0));
     auto [x, y] = name_point(r);
     CHECK(x >= 0);
     int shared = 0;  // the name and the SETTINGS target never overlap
@@ -4885,7 +4885,10 @@ TEST("profiles: a quick tap on the name opens the list; a hold on it talks") {
     CHECK(r.app.profile_picker_open());
     CHECK_EQ(r.app.status_json().find("\"screen\":\"profiles\"") != std::string::npos, true);
     CHECK_EQ(r.app.model().dash.size(), size_t(2));
-    CHECK_EQ(r.app.model().dash[0].value, std::string("NOW"));
+    CHECK_EQ(r.app.model().dash[0].value, std::string("default"));  // the id, which colours an initial
+    CHECK(r.app.model().dash[0].tone == hg::DashRow::Tone::Waiting);  // the current one
+    CHECK_EQ(r.app.model().mascot_row, 0);  // the default profile wears the mascot
+    CHECK_EQ(r.app.model().face_row, -1);
   }
 }
 
@@ -4978,7 +4981,7 @@ TEST("profiles: a long name never runs under the name panel's marker") {
   CHECK(h.x1 < m.x0 || m.y1 < h.y0 || h.y1 < m.y0);
 }
 
-TEST("profiles: buttons and tap-to-talk show Change in Settings; one profile shows nothing new") {
+TEST("profiles: buttons show Change in Settings, tap-to-talk the swipe; one profile shows nothing new") {
   Rig buttons;
   buttons.bring_online_with_profiles();
   CHECK_EQ(buttons.app.model().detail, std::string("Change in Settings"));
@@ -4988,8 +4991,9 @@ TEST("profiles: buttons and tap-to-talk show Change in Settings; one profile sho
   Rig tap(Rig::touch_profile());
   tap.bring_online_with_profiles();
   tap.app.console("set talk_mode tap");
-  CHECK_EQ(tap.app.model().detail, std::string("Change in Settings"));
+  CHECK_EQ(tap.app.model().detail, std::string("Swipe to change"));  // a tap records, but a swipe still opens the grid
   CHECK_EQ(name_point(tap).first, -1);
+  CHECK(tap.app.profile_swipe_opens());
 
   Rig single(Rig::touch_profile());
   single.bring_online(true);
@@ -5042,7 +5046,25 @@ TEST("profiles: no answer to a switch reconnects, and the welcome says which pro
   CHECK(r.app.open_profile_picker());
 }
 
-TEST("profiles: the name and every list row are about 7 mm tall on each touch board, 2 or 8 profiles") {
+namespace {
+std::string roster_of(int n) {
+  std::string roster;
+  for (int i = 0; i < n; ++i)
+    roster += std::string(i ? "," : "") + R"({"id":"p)" + std::to_string(i) + R"(","name":"Profile )" + std::to_string(i) + "\"}";
+  return roster;
+}
+void welcome_with_roster(Rig& r, int n, const std::string& current = "p0") {
+  r.app.begin();
+  r.app.on_network(true, "wifi");
+  r.advance(1000);
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":false})");
+  r.server(R"({"type":"welcome","session":"s1","heartbeat_s":20,"paired":true,"profile":")" + current +
+           R"(","profiles":[)" + roster_of(n) + "]}");
+}
+}  // namespace
+
+TEST("profiles: the name and every grid cell are about 7 mm tall and wide on each touch board, any grid") {
   struct Board {
     const char* name;
     int w, h;
@@ -5058,54 +5080,198 @@ TEST("profiles: the name and every list row are about 7 mm tall on each touch bo
       {"amoled-1.8", 368, 432, false, 1, 322}, {"amoled-2.06", 410, 486, false, 1, 315},
       {"amoled-2.16", 480, 480, false, 1, 314}, {"lcd-1.85c", 360, 360, true, 1, 195},
       {"knob-1.8", 360, 360, true, 2, 200},     {"box-3", 320, 240, false, 1, 167},
-      {"box-1.28", 240, 240, true, 1, 188, 64},  // Spotpear BOX 1.28: two 48 px rows fill its 169 px square, ~6.49 mm
+      {"box-1.28", 240, 240, true, 1, 188, 64},  // Spotpear BOX 1.28: its 169 px square holds ~6.4 mm cells
       {"crowpanel-2.1", 480, 480, true, 1, 229},
       {"crowpanel-5.0", 800, 480, false, 1, 187}, {"p4-10.1", 1024, 600, false, 1, 118},
       {"cores3", 320, 240, false, 1, 200},
   };
   for (const Board& b : boards) {
-    for (int n : {2, 8}) {
-      hg::DeviceProfile p = Rig::touch_profile();
-      p.touch_ppi = b.ppi;
-      Rig r(p);
-      r.fake.make_panel(b.w, b.h, b.round);
-      r.fake.font_scale = b.font_scale;
-      std::string roster;
-      for (int i = 0; i < n; ++i) roster += std::string(i ? "," : "") + R"({"id":"p)" + std::to_string(i) + R"(","name":"P)" + std::to_string(i) + "\"}";
-      r.app.begin();
-      r.app.on_network(true, "wifi");
-      r.advance(1000);
-      r.app.on_transport_open();
-      r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":false})");
-      r.server(R"({"type":"welcome","session":"s1","heartbeat_s":20,"paired":true,"profile":"p0","profiles":[)" + roster + "]}");
-      const int min_px = (b.mm10 * b.ppi + 253) / 254, x = b.w / 2;
-      int name_rows = 0;
-      for (int y = 0; y < b.h; ++y) name_rows += r.app.profile_name_hit(x, y);
-      if (name_rows < min_px) std::printf("    %s, %d profiles: name %d px < %d\n", b.name, n, name_rows, min_px);
-      CHECK(name_rows >= min_px);
-      CHECK(r.app.open_profile_picker());
-      std::vector<bool> seen(static_cast<size_t>(n));
-      for (int page = 0; page < n; ++page) {  // every row on every page, then More to the next
-        int more_y = -1, run = 0, last = -1;
-        for (int y = 0; y <= b.h; ++y) {
-          const int hit = y < b.h ? r.app.profile_row_hit(x, y) : -1;
-          if (hit == last) { ++run; continue; }
-          if (last != -1) {
-            if (run < min_px) std::printf("    %s, %d profiles: row %d is %d px < %d\n", b.name, n, last, run, min_px);
-            CHECK(run >= min_px);
-            if (last >= 0) seen[static_cast<size_t>(last)] = true;
-            else more_y = y - 1;
-          }
-          last = hit;
-          run = 1;
+    for (int grid : {4, 6, 9, 16}) {
+      for (int n : {2, 8, 32}) {
+        hg::DeviceProfile p = Rig::touch_profile();
+        p.touch_ppi = b.ppi;
+        Rig r(p);
+        r.fake.make_panel(b.w, b.h, b.round);
+        r.fake.font_scale = b.font_scale;
+        r.fake.kv["profile_grid"] = std::to_string(grid);
+        welcome_with_roster(r, n);
+        const int min_px = (b.mm10 * b.ppi + 253) / 254;
+        if (grid == 4) {
+          int name_rows = 0;
+          for (int y = 0; y < b.h; ++y) name_rows += r.app.profile_name_hit(b.w / 2, y);
+          if (name_rows < min_px) std::printf("    %s, %d profiles: name %d px < %d\n", b.name, n, name_rows, min_px);
+          CHECK(name_rows >= min_px);
         }
-        if (more_y < 0) break;
-        r.app.profile_tap(x, more_y);
-        CHECK(r.app.profile_picker_open());
+        CHECK(r.app.open_profile_picker());
+        const int per = r.app.profile_per_page();
+        CHECK(per >= 1 && per <= grid);
+        std::vector<bool> seen(static_cast<size_t>(n));
+        const int pages = (n + per - 1) / std::max(1, per);
+        for (int page = 0; page < pages; ++page) {
+          // Each cell's extent through its middle, across and down.
+          std::map<int, std::pair<int, int>> across, down;  // item: first, last
+          for (int y = 0; y < b.h; y += 1)
+            for (int x = 0; x < b.w; x += 1) {
+              const int hit = r.app.profile_row_hit(x, y);
+              if (hit < 0) continue;
+              auto [ita, a_new] = across.try_emplace(hit, std::make_pair(x, x));
+              auto [itd, d_new] = down.try_emplace(hit, std::make_pair(y, y));
+              ita->second.second = std::max(ita->second.second, x);
+              itd->second.second = std::max(itd->second.second, y);
+            }
+          for (const auto& [item, ext] : across) {
+            const int wide = ext.second - ext.first + 1, tall = down[item].second - down[item].first + 1;
+            if (wide < min_px || tall < min_px)
+              std::printf("    %s, grid %d, %d profiles: cell %d is %dx%d px < %d\n", b.name, grid, n, item, wide, tall, min_px);
+            CHECK(wide >= min_px && tall >= min_px);
+            CHECK(item >= 0 && item < n);
+            if (item >= 0 && item < n) seen[static_cast<size_t>(item)] = true;
+          }
+          if (pages > 1) CHECK(r.app.profile_page_step(1));
+          CHECK(r.app.profile_picker_open());
+        }
+        for (int i = 0; i < n; ++i) CHECK(seen[static_cast<size_t>(i)]);
       }
-      for (int i = 0; i < n; ++i) CHECK(seen[static_cast<size_t>(i)]);
     }
   }
+}
+
+TEST("profiles: the 2.06 and the round 1.75 show the grid asked for; few profiles get big icons") {
+  struct Case { int w, h; bool round; uint16_t ppi; int grid, n, per; };
+  const Case cases[] = {
+      {410, 486, false, 315, 4, 16, 4},  {410, 486, false, 315, 6, 16, 6},
+      {410, 486, false, 315, 9, 16, 9},  {410, 486, false, 315, 16, 16, 16},
+      {466, 466, true, 266, 4, 16, 4},   {466, 466, true, 266, 9, 16, 9},
+      {466, 466, true, 266, 16, 16, 9},  // the round 1.75's inscribed square: 4x4 names would need smaller letters
+      {410, 486, false, 315, 16, 3, 4},  // three profiles in a 2x2, not a quarter of a 4x4
+      {410, 486, false, 315, 16, 7, 9},
+  };
+  for (const Case& c : cases) {
+    hg::DeviceProfile p = Rig::touch_profile();
+    p.touch_ppi = c.ppi;
+    Rig r(p);
+    r.fake.make_panel(c.w, c.h, c.round);
+    r.fake.kv["profile_grid"] = std::to_string(c.grid);
+    welcome_with_roster(r, c.n);
+    CHECK(r.app.open_profile_picker());
+    const int per = r.app.profile_per_page();
+    if (per != c.per) std::printf("    %dx%d grid %d, %d profiles: %d per page, want %d\n", c.w, c.h, c.grid, c.n, per, c.per);
+    CHECK_EQ(per, c.per);
+  }
+}
+
+TEST("profiles: a sideways swipe on Ready opens the grid at the current profile's page; on the grid it turns the page") {
+  hg::DeviceProfile p = Rig::touch_profile();
+  Rig r(p);
+  r.fake.make_panel(410, 486, false);
+  welcome_with_roster(r, 16, "p9");  // 2x2: page 3 of 4 holds p8..p11
+  hg::TouchGestures touch(r.app);
+  auto swipe = [&](int dx, int dy = 0) {
+    const int x = r.fake.width / 2 - dx / 2, y = r.fake.height / 2;
+    touch.update(true, x, y, r.fake.clock);
+    for (int i = 1; i <= 4; ++i) {
+      r.advance(15);
+      touch.update(true, x + dx * i / 4, y + dy * i / 4, r.fake.clock);
+    }
+    touch.update(false, 0, 0, r.fake.clock);
+  };
+  CHECK(r.app.profile_swipe_opens());
+  swipe(-120);
+  CHECK(r.app.profile_picker_open());
+  CHECK(!r.fake.mic_on);
+  CHECK_EQ(r.app.model().scroll, 8);
+  swipe(-120);  // the next page comes in from the right
+  CHECK_EQ(r.app.model().scroll, 12);
+  swipe(-120);  // and wraps around
+  CHECK_EQ(r.app.model().scroll, 0);
+  swipe(120);
+  CHECK_EQ(r.app.model().scroll, 12);
+  swipe(-30);  // too short: nothing, and no profile picked
+  CHECK_EQ(r.app.model().scroll, 12);
+  swipe(30, 120);  // more down than sideways: a swipe down closes the grid
+  CHECK(!r.app.profile_picker_open());
+  CHECK(r.fake.last("profile.select") == nullptr);
+
+  // A swipe right opens it too; a tap on a cell asks Hermes for that profile and goes back to Ready.
+  swipe(120);
+  CHECK(r.app.profile_picker_open());
+  auto [x, y] = row_point(r, 10);
+  CHECK(x >= 0);
+  touch.update(true, x, y, r.fake.clock);
+  r.advance(50);
+  touch.update(false, 0, 0, r.fake.clock);
+  const Value* select = r.fake.last("profile.select");
+  CHECK(select != nullptr);
+  if (select) CHECK_EQ((*select)["profile"].as_string(), std::string("p10"));
+  CHECK(!r.app.profile_picker_open());
+  CHECK_EQ(r.app.model().screen, hg::Screen::Ready);
+  r.server(R"({"type":"profile","profile":"p10"})");
+  CHECK_EQ(r.app.model().headline, std::string("Hi, I'm Profile 10"));
+}
+
+TEST("profiles: a sideways swipe opens nothing while a turn runs, on other screens or with one profile; a hold still talks") {
+  Rig r(Rig::touch_profile());
+  r.bring_online_with_profiles();
+  hg::TouchGestures touch(r.app);
+  const int x = r.fake.width / 2, y = r.fake.height / 2;
+  // A still finger past the hold time talks, and a drift sideways afterwards changes nothing.
+  touch.update(true, x, y, r.fake.clock);
+  r.advance(300);
+  touch.tick(r.fake.clock);
+  CHECK(r.fake.mic_on);
+  touch.update(true, x + 100, y, r.fake.clock);
+  CHECK(r.fake.mic_on);
+  CHECK(!r.app.profile_picker_open());
+  touch.update(false, 0, 0, r.fake.clock);
+  r.advance(30000);
+  CHECK(r.app.profile_swipe_opens());
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  CHECK(!r.app.profile_swipe_opens());  // a turn runs
+  r.server(R"({"type":"turn.end","turn":"t"})");
+  r.app.console("settings");
+  CHECK(!r.app.profile_swipe_opens());
+
+  Rig single(Rig::touch_profile());
+  single.bring_online(true);
+  CHECK(!single.app.profile_swipe_opens());
+  Rig buttons;
+  buttons.bring_online_with_profiles();
+  CHECK(!buttons.app.profile_swipe_opens());
+}
+
+TEST("profiles: a welcome brings up to 32 profiles; the rest are dropped") {
+  Rig r(Rig::touch_profile());
+  welcome_with_roster(r, 40);
+  r.app.console("settings");
+  CHECK(r.app.open_profile_picker());
+  CHECK_EQ(r.app.model().dash.size(), hg::App::kMaxProfiles);
+  CHECK_EQ(r.app.model().dash.back().value, std::string("p31"));
+}
+
+TEST("profiles: profile_grid is 4, 6, 9 or 16, and the settings item steps through them") {
+  Rig r(Rig::touch_profile());
+  welcome_with_roster(r, 16);
+  CHECK_EQ(r.app.console("set profile_grid 5").rfind("@error", 0), size_t(0));
+  CHECK_EQ(r.app.console("set profile_grid 9"), std::string("@ok profile_grid"));
+  CHECK(r.app.open_profile_picker());
+  CHECK_EQ(r.app.model().grid, 9);
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Cancel, false);
+  r.app.console("settings");
+  CHECK(find_setting(r, "Profiles per page"));
+  CHECK(r.app.model().body.rfind("3 x 3", 0) == 0);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK_EQ(r.fake.kv["profile_grid"], std::string("16"));
+  CHECK(r.app.model().body.rfind("4 x 4", 0) == 0);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK_EQ(r.fake.kv["profile_grid"], std::string("4"));
+
+  Rig buttons;  // no touchscreen: no grid, so no item
+  buttons.bring_online_with_profiles();
+  buttons.app.console("settings");
+  CHECK(!find_setting(buttons, "Profiles per page"));
 }
 
 TEST("profiles: a reset Hermes sends on its own does not end the wait for a pending switch") {
@@ -5228,6 +5394,27 @@ const hg::WallTime kWallSaturday{2026, 10, 24, 6, 9, 41, 0};
 // Sunday, 25 October 2026 at 00:05 — midnight in both time formats.
 const hg::WallTime kWallMidnight{2026, 10, 25, 0, 0, 5, 0};
 }  // namespace
+
+TEST("profiles: the current profile's face is its icon in the grid; the default one keeps the mascot otherwise") {
+  Rig r(Rig::touch_profile());
+  r.bring_online_with_profiles(true, "ops");
+  CHECK(r.app.open_profile_picker());
+  CHECK_EQ(r.app.model().face_row, -1);  // no face yet: Ops shows its initial
+  CHECK_EQ(r.app.model().mascot_row, 0);
+  const std::vector<uint16_t> before = r.fake.fb;
+  r.server(face_message("ops", "f1"));
+  r.advance(100);
+  CHECK_EQ(r.app.model().face_row, 1);
+  CHECK_EQ(r.app.model().mascot_row, 0);
+  CHECK(pixels_changed(before, r.fake.fb) > 100);  // the grid redrew with the face
+
+  Rig d(Rig::touch_profile());
+  d.bring_online_with_profiles(true, "default");
+  d.server(face_message("default", "f2"));
+  CHECK(d.app.open_profile_picker());
+  CHECK_EQ(d.app.model().face_row, 0);  // the default profile's own face, not the mascot
+  CHECK_EQ(d.app.model().mascot_row, -1);
+}
 
 TEST("faces: a face replaces the mascot until a face without bits brings it back") {
   Rig r;

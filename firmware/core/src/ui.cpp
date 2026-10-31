@@ -566,6 +566,8 @@ void Ui::draw_frame(const UiModel& m) {
   content.val(m.screen).add(m.detail).add(m.body).add(m.code).val(m.scroll).val(m.color_test)
       .val(m.qr ? m.qr->size : 0);
   for (const DashRow& row : m.dash) content.add(row.label).add(row.value).val(row.tone).val(row.heading);
+  if (m.screen == Screen::Profiles)
+    content.val(m.grid).val(m.face_row).val(m.mascot_row).add(m.face ? m.face->hash : std::string());
   hashes[2] = content.get();
   hashes[3] = Hash().add(m.hint).get();
 
@@ -601,13 +603,20 @@ void Ui::draw_frame(const UiModel& m) {
     int y0, y1;
     void (Ui::*draw)(Canvas&, const UiModel&);
   };
+  // The Profiles grid owns the header's rows too: it draws them with the content.
+  const bool grid = m.screen == Screen::Profiles;
+  if (grid) hashes[1] = Hash().val(hashes[1]).val(hashes[2]).get();
   const Band bands[4] = {
       {0, y_header, &Ui::draw_top},
-      {y_header, y_content, &Ui::draw_header},
+      {y_header, grid ? y_bottom : y_content, grid ? &Ui::draw_profiles : &Ui::draw_header},
       {y_content, y_bottom, &Ui::draw_content},
       {y_bottom, h, &Ui::draw_bottom},
   };
   for (int i = 0; i < 4; ++i) {
+    if (grid && i == 2) {
+      hash_[i] = 0;
+      continue;
+    }
     // An image owns the area between the bars; the app draws and flushes it.
     if (m.screen == Screen::Image && (i == 1 || i == 2)) {
       hash_[i] = 0;
@@ -880,10 +889,6 @@ void Ui::draw_content(Canvas& c, const UiModel& m) {
     draw_dashboard(c, m, y0, y1);
     return;
   }
-  if (m.screen == Screen::Profiles) {
-    draw_profiles(c, m);
-    return;
-  }
 
   if (m.screen == Screen::Boot) {
     int big = s + 2;
@@ -980,7 +985,7 @@ void Ui::draw_dashboard(Canvas& c, const UiModel& m, int y0, int y1) {
 
 Ui::Rect Ui::name_rect(const UiModel& m) const {
   if (!m.name_target || !m.hero) return {};
-  const int s = layout_.scale, lh = Canvas::line_height(s);
+  const int s = layout_.scale;
   const HeroGeom g = hero_geom(m);
   // The headline and the cue under it, padded to a finger's height.
   return {2 * s, g.caption_y - s, info_.width - 4 * s, g.name_h};
@@ -993,51 +998,142 @@ int Ui::name_marker_x() const {
 
 bool Ui::name_hit(const UiModel& m, int x, int y) const { return name_rect(m).has(x - ox_, y - oy_); }
 
-// Rows at least a finger tall. When they do not all fit, a page shows what does, starting at
-// item m.scroll, and its last row is More.
-Ui::ProfilePage Ui::profile_page(const UiModel& m) const {
-  ProfilePage p;
-  const int s = layout_.scale, y0 = layout_.top_h + layout_.header_h, y1 = info_.height - layout_.bottom_h;
-  const int n = static_cast<int>(m.dash.size()), band = y1 - y0 - 2 * s;
-  if (m.screen != Screen::Profiles || n == 0) return p;
-  const int fit = std::max(2, band / (std::max(touch_px_, Canvas::line_height(s) + 2 * s) + s));  // + the gap
-  p.more = n > fit;
-  p.first = p.more ? std::max(0, std::min(m.scroll, n - 1)) : 0;
-  p.count = p.more ? std::min(fit - 1, n - p.first) : n;
-  p.row = band / (p.more ? fit : std::max(n, std::min(4, fit)));
-  p.top = y0 + 2 * s;
-  return p;
+namespace {
+// An initial's colour, picked by the profile id so a profile keeps it on every board and page.
+uint16_t initial_color(std::string_view id) {
+  static constexpr uint16_t kColors[] = {rgb565(214, 90, 90),  rgb565(219, 129, 57), rgb565(176, 148, 40),
+                                         rgb565(76, 160, 90),  rgb565(48, 150, 160), rgb565(70, 120, 210),
+                                         rgb565(130, 100, 210), rgb565(200, 90, 160)};
+  uint32_t h = 2166136261u;  // FNV-1a
+  for (unsigned char ch : id) h = (h ^ ch) * 16777619u;
+  return kColors[h % (sizeof(kColors) / sizeof(kColors[0]))];
 }
 
-Ui::Rect Ui::ProfilePage::slot(const Ui& ui, int i) const {
-  const int s = ui.layout_.scale;
-  return {2 * s, top + i * row, ui.info_.width - 4 * s, row - s};
+// The first letter of a name, upper case when it is ASCII.
+std::string initial_of(std::string_view name) {
+  if (name.empty()) return "?";
+  const size_t n = std::max<size_t>(1, font::prefix(name, 1));
+  std::string out(name.substr(0, n));
+  if (out.size() == 1 && out[0] >= 'a' && out[0] <= 'z') out[0] = static_cast<char>(out[0] - 'a' + 'A');
+  return out;
+}
+
+// `b` scaled to a size*size square by nearest pixel, its ink in `ink`.
+void bitmap_scaled(Canvas& c, int x, int y, int size, const mascot::Bitmap& b, uint16_t ink) {
+  if (size == b.size) {
+    c.bitmap1(x, y, size, size, b.bits, ink);
+    return;
+  }
+  for (int py = 0; py < size; ++py) {
+    const int sy = py * b.size / size;
+    for (int px = 0; px < size; ++px)
+      if (b.ink(px * b.size / size, sy)) c.pixel(x + px, y + py, ink);
+  }
+}
+
+// A name in at most two lines of `cols` characters; what does not fit ends the second line with "..".
+std::vector<std::string> name_lines(const std::string& name, int cols) {
+  std::vector<std::string> lines = wrap_text(name, cols);
+  if (lines.size() > 2) {
+    std::string rest = lines[1];
+    for (size_t i = 2; i < lines.size(); ++i) rest += " " + lines[i];
+    lines.resize(2);
+    lines[1] = fit(rest, cols);  // greedy wrapping left more than a line: fit() cuts it with ".."
+  }
+  return lines;
+}
+}  // namespace
+
+// Cells at least a finger tall and wide, each with an icon and two lines of name under it. The page
+// holds the grid the model asks for, or with few profiles the smallest grid that holds them all
+// (bigger icons); a panel too small for it gets the largest smaller grid that fits.
+Ui::ProfileGrid Ui::profile_grid(const UiModel& m) const {
+  ProfileGrid g;
+  const int n = static_cast<int>(m.dash.size());
+  if (m.screen != Screen::Profiles || n == 0) return g;
+  const int s = layout_.scale, y0 = layout_.top_h, y1 = info_.height - layout_.bottom_h;
+  const int dots_h = 6 * s;
+  const int band_w = info_.width - 4 * s, band_h = y1 - y0 - dots_h - s;
+  const bool wide = band_w >= band_h;
+  const int min_icon = std::max(24, 12 * s);
+  static constexpr int kGrids[] = {16, 9, 6, 4, 2, 1};
+  int want = m.grid == 16 || m.grid == 9 || m.grid == 6 ? m.grid : 4;
+  for (int k : {4, 6, 9})  // few profiles: the smallest grid that holds them all
+    if (n <= k && k < want) want = k;
+  for (int k : kGrids) {
+    if (k > want) continue;
+    int cols = k == 16 ? 4 : k == 9 ? 3 : k == 6 ? (wide ? 3 : 2) : k == 4 ? 2 : k == 2 ? (wide ? 2 : 1) : 1;
+    if (k == 4 && band_w >= 2 * band_h) cols = 4;  // a wide, short panel: one row of four
+    const int rows = (k + cols - 1) / cols;
+    const int cw = band_w / cols, ch = band_h / rows;
+    {  // names keep the screen's text size: a grid that needs smaller letters does not fit
+      const int ls = s;
+      const int icon = std::min(cw - 4 * s, ch - 2 * Canvas::line_height(ls) - 3 * s);
+      const bool ok = (cw >= touch_px_ && ch >= touch_px_ && icon >= min_icon && cols_for(cw - 2 * s, ls) >= 5) || k == 1;
+      if (!ok) continue;
+      g.cols = cols, g.rows = rows, g.cw = cw, g.ch = ch, g.label_scale = ls;
+      g.icon = std::max(8, icon);
+      g.x0 = (info_.width - cols * cw) / 2;
+      g.y0 = y0 + s;
+      g.dots_y = y1 - dots_h / 2;
+      const int per = cols * rows;
+      g.pages = (n + per - 1) / per;
+      g.first = std::max(0, std::min(m.scroll, n - 1)) / per * per;
+      g.count = std::min(per, n - g.first);
+      return g;
+    }
+  }
+  return g;
+}
+
+int Ui::profile_per_page(const UiModel& m) const {
+  const ProfileGrid g = profile_grid(m);
+  return g.cols * g.rows;
 }
 
 int Ui::profile_row_hit(const UiModel& m, int x, int y) const {
-  const ProfilePage p = profile_page(m);
-  for (int i = 0; i < p.count + p.more; ++i)
-    if (p.slot(*this, i).has(x - ox_, y - oy_)) return i < p.count ? p.first + i : kMoreRow;
+  const ProfileGrid g = profile_grid(m);
+  for (int i = 0; i < g.count; ++i)
+    if (g.cell(i).has(x - ox_, y - oy_)) return g.first + i;
   return -1;
 }
 
-int Ui::profile_next_page(const UiModel& m) const {
-  const ProfilePage p = profile_page(m);
-  return p.first + p.count < static_cast<int>(m.dash.size()) ? p.first + p.count : 0;
-}
-
 void Ui::draw_profiles(Canvas& c, const UiModel& m) {
-  const int s = layout_.scale, glyph_h = font::kGlyphHeight * s;
-  const ProfilePage p = profile_page(m);
-  for (int i = 0; i < p.count + p.more; ++i) {
-    const Rect r = p.slot(*this, i);
-    const bool more = i == p.count;
-    const DashRow row = more ? DashRow{m.detail, ">"} : m.dash[static_cast<size_t>(p.first + i)];
-    c.fill_round_rect(r.x, r.y, r.w, r.h, 3 * s, kBar);
-    const int ty = r.y + (r.h - glyph_h) / 2, right = r.x + r.w - 3 * s;
-    const int value_w = Canvas::text_width(row.value, s);
-    c.text(right - value_w, ty, row.value, s, tone_color(row.tone));
-    c.text(r.x + 3 * s, ty, fit(row.label, cols_for(right - value_w - r.x - 5 * s, s)), s, more ? kDim : kText);
+  const int s = layout_.scale;
+  c.fill_rect(0, layout_.top_h, info_.width, info_.height - layout_.bottom_h - layout_.top_h, bg_);
+  const ProfileGrid g = profile_grid(m);
+  const int ls = g.label_scale, lh = Canvas::line_height(ls), glyph_h = font::kGlyphHeight * ls;
+  for (int i = 0; i < g.count; ++i) {
+    const Rect r = g.cell(i);
+    const int item = g.first + i;
+    const DashRow& row = m.dash[static_cast<size_t>(item)];
+    const bool current = row.tone == DashRow::Tone::Waiting;
+    const std::vector<std::string> lines = name_lines(row.label, cols_for(r.w - 2 * s, ls));
+    const int block = g.icon + 2 * s + static_cast<int>(lines.size()) * lh;
+    const int ix = r.x + (r.w - g.icon) / 2, iy = r.y + std::max(s, (r.h - block) / 2);
+    const int cx = ix + g.icon / 2, cy = iy + g.icon / 2;
+    if (item == m.face_row && m.face && m.face->rgb565) {
+      c.picture(ix, iy, g.icon, m.face->rgb565, m.face->px, nullptr, 0, 0);
+    } else if (item == m.face_row || item == m.mascot_row) {
+      const mascot::Face* face = item == m.face_row ? m.face : nullptr;
+      bitmap_scaled(c, ix, iy, g.icon, mascot::pick(g.icon, mascot::Frame::Idle, face), kText);
+    } else {
+      c.fill_circle(cx, cy, g.icon / 2, initial_color(row.value));
+      const std::string letter = initial_of(row.label);
+      const int big = std::max(1, g.icon * 9 / 20 / font::kGlyphHeight);
+      c.text(cx - Canvas::text_width(letter, big) / 2, cy - font::kGlyphHeight * big / 2, letter, big, kText);
+    }
+    if (current) c.ring(cx, cy, g.icon / 2 + s + 1, std::max(2, s), kAccent);
+    int ty = iy + g.icon + 2 * s;
+    for (const std::string& line : lines) {
+      c.text(r.x + (r.w - Canvas::text_width(line, ls)) / 2, ty + (lh - glyph_h) / 2, line, ls, current ? kAccent : kText);
+      ty += lh;
+    }
+  }
+  if (g.pages > 1) {  // which page this is: one dot per page
+    const int dr = std::max(2, s + 1), step = 4 * dr, x = (info_.width - (g.pages - 1) * step) / 2;
+    for (int p = 0; p < g.pages; ++p)
+      c.fill_circle(x + p * step, g.dots_y, dr, p == g.first / (g.cols * g.rows) ? kAccent : kFaint);
   }
 }
 

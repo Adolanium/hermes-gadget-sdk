@@ -37,7 +37,7 @@ enum class Screen : uint8_t {
   Settings,
   Setup,
   Dashboard,  // Hermes's sessions and the user's status tiles (docs/protocol.md#dashboard)
-  Profiles,   // the Hermes profiles to choose from: rows in `dash` from `scroll`; `detail` labels More
+  Profiles,   // the Hermes profiles to choose from: a grid of `dash` (name, id), the page from item `scroll`
   Alarm,      // TIMER DONE: the whole panel until dismissed (App::start_alarm)
   Clock,      // the resting clock face: the time, the date and the mascot (App::clock_tick)
   LowBattery, // the low battery alert: a red battery icon, `headline` (the percentage) large, `detail` below
@@ -89,6 +89,10 @@ struct UiModel {
   uint8_t caption_lines = 1;  // hero: lines the detail may wrap to (then "..")
   bool name_target = false;   // hero: the caption sits in a panel that a tap opens the profile list from
   const mascot::Face* face = nullptr;  // drawn instead of the mascot; borrowed like `qr`
+  // Profiles screen: profiles per page asked for (4, 6, 9 or 16; the panel may fit fewer), and the
+  // items whose icon is `face` and the mascot (-1: none). The others show their initial.
+  uint8_t grid = 4;
+  int16_t face_row = -1, mascot_row = -1;
   // Wi-Fi setup: a scannable code for the temporary network, drawn centred in
   // the content band. Null on every other screen. Borrowed, not owned: the app
   // keeps the matrix so it is encoded once, not on every model update.
@@ -178,14 +182,15 @@ class Ui {
   // Whether the face stays above its smallest size with two caption lines under it: where a spoken
   // reply's latest lines caption the talking face.
   bool talk_caption_fits() const;
-  // Touch targets (the name panel, list rows) are at least this many pixels tall.
+  // Touch targets (the name panel, grid cells) are at least this many pixels tall.
   void set_touch_px(int px) { touch_px_ = px; }
-  // Panel coordinates: the hero caption's panel (name_target), and the item of the Profiles row
-  // there (-1: none, kMoreRow: the next page). profile_next_page gives that page's first item.
-  static constexpr int kMoreRow = -2;
+  // Panel coordinates: the hero caption's panel (name_target), and the item of the Profiles cell
+  // there (-1: none).
   bool name_hit(const UiModel& m, int x, int y) const;
   int profile_row_hit(const UiModel& m, int x, int y) const;
-  int profile_next_page(const UiModel& m) const;
+  // Profiles a page of the grid holds on this panel: the model's `grid`, or the largest smaller
+  // grid whose cells stay touch targets with a readable icon and two lines of name. 0 off that screen.
+  int profile_per_page(const UiModel& m) const;
   bool title_hit(int x, int y) const {
     const int left = ox_ + (info_.width - layout_.title_w) / 2;
     return x >= left && x < left + layout_.title_w && y >= oy_ && y < oy_ + layout_.top_h;
@@ -223,12 +228,14 @@ class Ui {
   Rect name_rect(const UiModel& m) const;
   // The left edge of the name panel's "v" marker, at the panel's right end.
   int name_marker_x() const;
-  struct ProfilePage {
-    int first = 0, count = 0, row = 0, top = 0;
-    bool more = false;
-    Rect slot(const Ui& ui, int i) const;
+  // The Profiles grid: cols x rows cells of cw x ch from (x0, y0), the page's first item and how
+  // many it shows, the icon's side, the names' text scale and the page dots' row.
+  struct ProfileGrid {
+    int cols = 0, rows = 0, cw = 0, ch = 0, x0 = 0, y0 = 0;
+    int first = 0, count = 0, pages = 0, icon = 0, label_scale = 1, dots_y = 0;
+    Rect cell(int i) const { return {x0 + (i % cols) * cw, y0 + (i / cols) * ch, cw, ch}; }
   };
-  ProfilePage profile_page(const UiModel& m) const;
+  ProfileGrid profile_grid(const UiModel& m) const;
   int touch_px_ = 0;
   void draw_bottom(Canvas& c, const UiModel& m);
   void draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r);

@@ -68,6 +68,7 @@ void App::settings_input(Button button, bool pressed) {
     const auto offered = [&](Menu item) {
       switch (item) {
         case Menu::Profile: return agent_profiles_.size() > 1;
+        case Menu::ProfileGrid: return profile_.touch_screen && agent_profiles_.size() > 1 && hal_.display != nullptr;
         case Menu::Power: return hal_.power != nullptr;
         case Menu::BatteryAlert: return hal_.power != nullptr && hal_.display != nullptr;
         case Menu::BatteryAlertSound: return hal_.power != nullptr && hal_.display != nullptr && hal_.speaker != nullptr;
@@ -115,6 +116,9 @@ void App::settings_input(Button button, bool pressed) {
     case Menu::Profile:
       if (!(profile_.touch_screen ? open_profile_picker() : next_agent_profile()))
         check_result_ = tr(i18n::Msg::ProfileCantSwitch);
+      break;
+    case Menu::ProfileGrid:
+      console("set profile_grid " + std::to_string(profile_grid_ == 4 ? 6 : profile_grid_ == 6 ? 9 : profile_grid_ == 9 ? 16 : 4));
       break;
     case Menu::Microphone:
       if (hal_.mic && hal_.mic->start(profile_.mic_rate)) hardware_check_ = HardwareCheck::Microphone;
@@ -265,6 +269,12 @@ void App::settings_model() {
       m.detail = tr(Msg::ProfileSetting);
       m.body = tr(profile_.touch_screen ? Msg::ProfileSettingChoose : Msg::ProfileSettingNext, {agent_profile_name()});
       break;
+    case Menu::ProfileGrid: {
+      const int cols = profile_grid_ == 16 ? 4 : profile_grid_ == 9 ? 3 : 2;
+      m.detail = tr(Msg::ProfileGridSetting);
+      m.body = tr(Msg::ProfileGridValue, {std::to_string(cols) + " x " + std::to_string(profile_grid_ / cols)});
+      break;
+    }
     case Menu::Microphone:
       m.detail = tr(Msg::MicCheck);
       m.body = hardware_check_ == HardwareCheck::Microphone ? tr(Msg::MicCheckLive, {std::to_string(level_)})
