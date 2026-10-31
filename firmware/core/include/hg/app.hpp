@@ -497,7 +497,7 @@ class App {
   std::string profile_pending_;
   uint32_t profile_pending_at_ = 0;
   int profile_page_ = 0;  // first profile on the grid's page
-  uint8_t profile_grid_ = 4;  // the `profile_grid` setting: profiles per page (4, 6, 9 or 16)
+  uint8_t profile_grid_ = 6;  // the `profile_grid` setting: profiles per page (4, 6, 9 or 16)
   // `language` is auto: follow the language Hermes sends in `welcome` (English until it does).
   bool lang_auto_ = false;
   std::optional<i18n::Lang> hermes_lang_;  // from the last `welcome` that named one this firmware has

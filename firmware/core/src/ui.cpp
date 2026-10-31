@@ -1071,14 +1071,15 @@ Ui::ProfileGrid Ui::profile_grid(const UiModel& m) const {
   const int dots_h = 6 * s;
   const int band_w = info_.width - 4 * s, band_h = y1 - y0 - dots_h - s;
   const bool wide = band_w >= band_h;
+  const bool landscape = 2 * band_w >= 3 * band_h;  // clearly wider than tall: 6 is three across
   const int min_icon = std::max(24, 12 * s);
   static constexpr int kGrids[] = {16, 9, 6, 4, 2, 1};
-  int want = m.grid == 16 || m.grid == 9 || m.grid == 6 ? m.grid : 4;
+  int want = m.grid == 16 || m.grid == 9 || m.grid == 4 ? m.grid : 6;
   for (int k : {4, 6, 9})  // few profiles: the smallest grid that holds them all
     if (n <= k && k < want) want = k;
   for (int k : kGrids) {
     if (k > want) continue;
-    int cols = k == 16 ? 4 : k == 9 ? 3 : k == 6 ? (wide ? 3 : 2) : k == 4 ? 2 : k == 2 ? (wide ? 2 : 1) : 1;
+    int cols = k == 16 ? 4 : k == 9 ? 3 : k == 6 ? (landscape ? 3 : 2) : k == 4 ? 2 : k == 2 ? (wide ? 2 : 1) : 1;
     if (k == 4 && band_w >= 2 * band_h) cols = 4;  // a wide, short panel: one row of four
     const int rows = (k + cols - 1) / cols;
     const int cw = band_w / cols, ch = band_h / rows;

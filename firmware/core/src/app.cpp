@@ -241,8 +241,8 @@ void App::load_settings() {
   wake_talk_ = setting("wake_talk", "off") == "on";
   touch_talk_ = !profile_.talk_key || setting("touch_talk", "on") != "off";
   {
-    const int grid = std::atoi(setting("profile_grid", "4").c_str());
-    profile_grid_ = static_cast<uint8_t>(grid == 6 || grid == 9 || grid == 16 ? grid : 4);
+    const int grid = std::atoi(setting("profile_grid", "6").c_str());
+    profile_grid_ = static_cast<uint8_t>(grid == 4 || grid == 9 || grid == 16 ? grid : 6);
   }
   clock_after_ms_ = static_cast<uint32_t>(std::max(0, std::min(3600, std::atoi(setting("clock", "0").c_str())))) * 1000;
   clock_24h_ = setting("time_format", "24h") != "12h";
