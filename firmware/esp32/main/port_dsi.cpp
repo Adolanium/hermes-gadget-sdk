@@ -30,6 +30,7 @@
 #include "soc/soc_caps.h"
 #include "esp_lcd_ek79007.h"
 #include "esp_lcd_jd9365.h"
+#include "esp_lcd_st7123.h"
 #include "esp_idf_version.h"
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_lcd_panel_ops.h"
@@ -361,7 +362,8 @@ bool DsiDisplay::begin(const LcdConfig& cfg, const DsiPanelConfig& dsi) {
   dpi.flags.use_dma2d = use_dma2d_ ? 1 : 0;
 #endif
 
-  // 5. The DSI panel driver. EK79007 (CrowPanel) or JD9365 (Waveshare 3.4C).
+  // 5. The DSI panel driver. EK79007 (CrowPanel), JD9365 (Waveshare 3.4C),
+  // or ST7123. No board selects the ST7123 yet.
   esp_lcd_panel_dev_config_t panel_cfg = {};
   panel_cfg.reset_gpio_num = (cfg.rst >= 0) ? static_cast<gpio_num_t>(cfg.rst) : GPIO_NUM_NC;
   panel_cfg.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
@@ -380,6 +382,18 @@ bool DsiDisplay::begin(const LcdConfig& cfg, const DsiPanelConfig& dsi) {
       return false;
     }
     controller_name_ = "jd9365-dsi";
+  } else if (dsi_.controller == DsiController::St7123) {
+    // NULL init_cmds selects the component's own default commands.
+    st7123_vendor_config_t vendor = {};
+    vendor.mipi_config.dsi_bus = bus_;
+    vendor.mipi_config.dpi_config = &dpi;
+    panel_cfg.vendor_config = &vendor;
+    err = esp_lcd_new_panel_st7123(io_, &panel_cfg, &panel_);
+    if (err != ESP_OK) {
+      ESP_LOGE(TAG, "ST7123 panel creation failed: %s", esp_err_to_name(err));
+      return false;
+    }
+    controller_name_ = "st7123-dsi";
   } else {
     ek79007_vendor_config_t vendor = {};
     vendor.mipi_config.dsi_bus = bus_;

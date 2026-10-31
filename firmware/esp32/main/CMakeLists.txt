@@ -13,7 +13,7 @@ if(IDF_TARGET STREQUAL "esp32p4")
         "port_audio_p4.cpp"
         "port_power_p4.cpp"
         "../../drivers/stc8_battery.cpp")
-    list(APPEND HG_P4_REQUIRES esp_lcd_ek79007)
+    list(APPEND HG_P4_REQUIRES esp_lcd_ek79007 esp_lcd_st7123)
     if(CONFIG_HG_BOARD_WS_P4_TOUCH_LCD_7B)
         list(APPEND HG_P4_SOURCES "port_camera.cpp")
         list(APPEND HG_P4_REQUIRES esp_video)

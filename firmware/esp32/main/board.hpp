@@ -54,7 +54,9 @@ struct RgbPanelConfig {
 };
 
 // MIPI-DSI panel controller. Only meaningful when bus.type == Type::Dsi.
-enum class DsiController { Ek79007, Jd9365 };
+// St7123 uses Espressif esp_lcd_st7123 1.0.2 and that component's default init.
+// No board selects it yet.
+enum class DsiController { Ek79007, Jd9365, St7123 };
 
 // A MIPI-DSI panel: a serial bus on dedicated SoC pins (no GPIO numbers), a
 // PHY that needs its own internal LDO rail, and a DPI clock. The CrowPanel and

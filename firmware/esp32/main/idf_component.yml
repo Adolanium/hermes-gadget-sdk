@@ -53,6 +53,11 @@ dependencies:
     version: "2.0.2"
     rules:
       - if: target in [esp32p4]
+  # ST7123 MIPI-DSI. 1.0.2 is the ESP-IDF 6 build. No board selects it yet.
+  espressif/esp_lcd_st7123:
+    version: "1.0.2"
+    rules:
+      - if: target in [esp32p4]
   # OV5647 MIPI-CSI capture for the Waveshare P4 7B camera variant.
   espressif/esp_video:
     version: "2.5.0"
