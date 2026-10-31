@@ -242,6 +242,7 @@ hgsim* hgsim_create(const hgsim_config* cfg, const hgsim_host* host) {
   profile.has_scroll_buttons = cfg->has_scroll_buttons != 0;
   profile.talk_label = cfg->talk_label ? cfg->talk_label : "SPACE";
   profile.cancel_label = cfg->cancel_label ? cfg->cancel_label : "ESC";
+  profile.wake_key = true;  // the keyboard's TALK always reaches App::on_button, and lights a dark screen
   if (cfg->touch) {
     profile.touch_screen = true;
     if (!cfg->cancel_label) profile.cancel_label = "Swipe down";

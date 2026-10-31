@@ -55,6 +55,9 @@ struct DeviceProfile {
   // A motion sensor feeds App::on_motion 5-25 times a second. Boards with one
   // and a backlit display can sleep while lying face down (face_down_sleep).
   bool motion_sensor = false;
+  // A key can light a dark screen (TALK, or a power key read by the port), so the
+  // touchscreen may be left out of waking it (the touch_wake setting).
+  bool wake_key = false;
   // Board-specific settings the console accepts besides the core ones. Changes
   // reach the port through App::on_setting_changed.
   std::vector<std::string> extra_settings;
@@ -154,6 +157,9 @@ class App {
   const std::string& agent_profile() const { return agent_profile_; }
   // The resting clock face is up: the time, the date and the mascot.
   bool clock_showing() const { return clock_showing_; }
+  // touch_wake off: a dark screen ignores the touchscreen until a key lights it.
+  bool touch_wake() const { return touch_wake_; }
+  bool touch_ignored() const { return !touch_wake_ && display_sleeping_; }
   std::string agent_profile_name() const;
   // Returns true when this input only wakes a sleeping display.
   bool wake_display();
@@ -411,7 +417,7 @@ class App {
   bool lang_auto_ = false;
   std::optional<i18n::Lang> hermes_lang_;  // from the last `welcome` that named one this firmware has
   enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, Profile, Microphone, Speaker, Display, Inputs,
-                              Info, Power, IdleTimer, FaceDownSleep, Clock, PowerOff, WifiSetup, Phone, Language, Back };
+                              Info, Power, IdleTimer, TouchWake, FaceDownSleep, Clock, PowerOff, WifiSetup, Phone, Language, Back };
   enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };
   Menu menu_ = Menu::Closed;
   HardwareCheck hardware_check_ = HardwareCheck::None;
@@ -457,6 +463,7 @@ class App {
   uint32_t motion_at_ = 0, down_since_ = 0, up_since_ = 0;
   bool motion_seen_ = false, face_down_ = false;
   bool face_down_sleep_ = false;      // the `face_down_sleep` setting
+  bool touch_wake_ = true;            // the `touch_wake` setting
   bool reply_while_face_down_ = false;  // a reply arrived while dark; show it on the turn-over
   uint8_t wake_buttons_ = 0;
 

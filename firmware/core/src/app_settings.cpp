@@ -69,6 +69,7 @@ void App::settings_input(Button button, bool pressed) {
       switch (item) {
         case Menu::Profile: return agent_profiles_.size() > 1;
         case Menu::Power: return hal_.power != nullptr;
+        case Menu::TouchWake: return profile_.touch_screen && profile_.wake_key && hal_.display != nullptr;
         case Menu::FaceDownSleep: return can_sleep_face_down();
         case Menu::Clock: return hal_.display != nullptr;
         case Menu::PowerOff: return can_power_off;
@@ -139,6 +140,9 @@ void App::settings_input(Button button, bool pressed) {
       console("set screen_timeout " + std::to_string(next));
       break;
     }
+    case Menu::TouchWake:
+      console(touch_wake_ ? "set touch_wake off" : "set touch_wake on");
+      break;
     case Menu::FaceDownSleep:
       console(face_down_sleep_ ? "set face_down_sleep off" : "set face_down_sleep on");
       break;
@@ -284,6 +288,10 @@ void App::settings_model() {
       m.detail = tr(Msg::ScreenTimeout);
       m.body = screen_timeout_ms_ ? tr(Msg::TimeoutSeconds, {std::to_string(screen_timeout_ms_ / 1000)})
                                  : std::string(tr(Msg::TimeoutAlwaysOn));
+      break;
+    case Menu::TouchWake:
+      m.detail = tr(Msg::TouchWake);
+      m.body = tr(touch_wake_ ? Msg::TouchWakeOn : Msg::TouchWakeOff);
       break;
     case Menu::FaceDownSleep:
       m.detail = tr(Msg::FaceDownSleep);

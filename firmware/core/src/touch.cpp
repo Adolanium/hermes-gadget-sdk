@@ -44,6 +44,7 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
     // Before the wake: the touch that ends the clock face is only a wake, so its
     // tap lands on nothing and its hold talks to the Ready screen it brought back.
     from_clock_ = app_.clock_showing();
+    if (app_.touch_ignored()) { state_ = State::Ignored; return; }  // touch_wake off: a key wakes it
     if (app_.wake_display()) { state_ = State::Ignored; return; }
     state_ = app_.profile_picker_open() ? State::Picker
               : !from_clock_ && app_.settings_title_hit(x, y) ? State::Settings

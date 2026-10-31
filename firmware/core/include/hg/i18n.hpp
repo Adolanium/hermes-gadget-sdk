@@ -70,6 +70,9 @@ namespace hg::i18n {
   X(ScreenTimeout,          "Screen timeout") \
   X(TimeoutSeconds,         "{0} seconds\nDims halfway; first input wakes.") \
   X(TimeoutAlwaysOn,        "Always on\nSelect to enable automatic dimming and screen sleep.") \
+  X(TouchWake,              "Touch wakes screen") \
+  X(TouchWakeOn,            "On\nA touch lights the dark screen.") \
+  X(TouchWakeOff,           "Off\nOnly a button lights the dark screen.") \
   X(FaceDownSleep,          "Face-down sleep") \
   X(FaceDownSleepOn,        "On\nFace down, the screen sleeps and Hermes stays quiet.") \
   X(FaceDownSleepOff,       "Off\nSelect to sleep when the gadget lies face down.") \
