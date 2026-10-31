@@ -5139,6 +5139,8 @@ TEST("profiles: the name and every grid cell are about 7 mm tall and wide on eac
 TEST("profiles: the 2.06 and the round 1.75 show the grid asked for; few profiles get big icons") {
   struct Case { int w, h; bool round; uint16_t ppi; int grid, n, per; };
   const Case cases[] = {
+      {410, 486, false, 315, 0, 16, 6},  // the default: 2 across, 3 down
+      {466, 466, true, 266, 0, 16, 6},
       {410, 486, false, 315, 4, 16, 4},  {410, 486, false, 315, 6, 16, 6},
       {410, 486, false, 315, 9, 16, 9},  {410, 486, false, 315, 16, 16, 16},
       {466, 466, true, 266, 4, 16, 4},   {466, 466, true, 266, 9, 16, 9},
@@ -5151,19 +5153,25 @@ TEST("profiles: the 2.06 and the round 1.75 show the grid asked for; few profile
     p.touch_ppi = c.ppi;
     Rig r(p);
     r.fake.make_panel(c.w, c.h, c.round);
-    r.fake.kv["profile_grid"] = std::to_string(c.grid);
+    if (c.grid) r.fake.kv["profile_grid"] = std::to_string(c.grid);
     welcome_with_roster(r, c.n);
     CHECK(r.app.open_profile_picker());
     const int per = r.app.profile_per_page();
+    if (c.grid == 0 || c.grid == 6) {  // 6 is two columns of three on these portrait and square panels
+      int cols = 0;
+      for (int i = 0; i < c.n && i < per; ++i) cols += row_point(r, i).second == row_point(r, 0).second;
+      CHECK_EQ(cols, 2);
+    }
     if (per != c.per) std::printf("    %dx%d grid %d, %d profiles: %d per page, want %d\n", c.w, c.h, c.grid, c.n, per, c.per);
     CHECK_EQ(per, c.per);
   }
 }
 
-TEST("profiles: a sideways swipe on Ready opens the grid at the current profile's page; on the grid it turns the page") {
+TEST("profiles: a swipe from right to left on Ready opens the grid at the current profile's page; on the grid it turns the page") {
   hg::DeviceProfile p = Rig::touch_profile();
   Rig r(p);
   r.fake.make_panel(410, 486, false);
+  r.fake.kv["profile_grid"] = "4";
   welcome_with_roster(r, 16, "p9");  // 2x2: page 3 of 4 holds p8..p11
   hg::TouchGestures touch(r.app);
   auto swipe = [&](int dx, int dy = 0) {
@@ -5176,6 +5184,9 @@ TEST("profiles: a sideways swipe on Ready opens the grid at the current profile'
     touch.update(false, 0, 0, r.fake.clock);
   };
   CHECK(r.app.profile_swipe_opens());
+  swipe(120);  // from left to right: nothing
+  CHECK(!r.app.profile_picker_open());
+  CHECK(!r.fake.mic_on);
   swipe(-120);
   CHECK(r.app.profile_picker_open());
   CHECK(!r.fake.mic_on);
@@ -5192,8 +5203,8 @@ TEST("profiles: a sideways swipe on Ready opens the grid at the current profile'
   CHECK(!r.app.profile_picker_open());
   CHECK(r.fake.last("profile.select") == nullptr);
 
-  // A swipe right opens it too; a tap on a cell asks Hermes for that profile and goes back to Ready.
-  swipe(120);
+  // A tap on a cell asks Hermes for that profile and goes back to Ready.
+  swipe(-120);
   CHECK(r.app.profile_picker_open());
   auto [x, y] = row_point(r, 10);
   CHECK(x >= 0);
