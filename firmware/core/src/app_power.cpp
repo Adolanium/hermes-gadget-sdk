@@ -78,17 +78,27 @@ void App::on_power_key() {
     wake_display();
     return;
   }
+  // Off means off: the menu, a list or a card the user was on closes, so the
+  // next press wakes to the home screen and nothing open turns the screen back on.
+  if (settings_open()) close_settings();
+  if (overlay_ != Overlay::None) {
+    dismiss_overlay();
+    update_model();
+  }
   display_sleeping_ = true;
   apply_backlight();
 }
 
-// A turn, speech, held buttons, a prompt, Wi-Fi setup, phone pairing, an update
-// or any overlay: something for the user is on the screen. Side-effect free, so
-// the screen timeout and the resting clock can both ask.
+bool App::menu_open() const { return overlay_ == Overlay::Profiles || overlay_ == Overlay::Dashboard; }
+
+// A turn, speech, held buttons, a prompt, Wi-Fi setup, phone pairing, an update,
+// a card or an image: something for the user is on the screen. A list the user
+// opened is not: left alone, it times out like the home screen. Side-effect free,
+// so the screen timeout and the resting clock can both ask.
 bool App::screen_busy() const {
   return mode_ != Mode::Idle || speaking() || talk_held_ || cancel_held_ || prompt_showing() ||
          !wifi_setup_text_.empty() || phone_pairing_ || ota_busy() || ota_ == Ota::Restarting ||
-         overlay_ != Overlay::None;
+         (overlay_ != Overlay::None && !menu_open());
 }
 
 void App::power_tick() {
@@ -131,6 +141,11 @@ void App::power_tick() {
       if (elapsed >= screen_timeout_ms_ && !display_sleeping_) {
         display_sleeping_ = true;
         apply_backlight();
+        // A list left open closes in the dark: the wake shows the home screen.
+        if (menu_open()) {
+          dismiss_overlay();
+          update_model();
+        }
       } else if (elapsed >= screen_timeout_ms_ / 2 && !display_dimmed_ && !display_sleeping_) {
         display_dimmed_ = true;
         apply_backlight();
@@ -219,7 +234,7 @@ void App::leave_face_down() {
 bool App::clock_blocked() const {
   if (!clock_after_ms_ || !hal_.display || !wall_valid_) return true;
   if (phase_ != Phase::Online || !paired_) return true;
-  if (screen_busy() || settings_open()) return true;
+  if (screen_busy() || settings_open() || overlay_ != Overlay::None) return true;
   if (alarm_ || timer_active()) return true;
   if (!fatal_.empty() || !notice_.empty()) return true;
   // The low-battery caption (update_model) holds the Ready screen the same way.
