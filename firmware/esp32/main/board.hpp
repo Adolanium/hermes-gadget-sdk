@@ -162,9 +162,10 @@ struct I2cBusConfig {
   uint32_t hz = 400000;
 };
 
-// ES8311/AW88298 (speaker) and the microphone ADC sharing one duplex I2S bus,
-// controlled over the I2C bus.
-enum class SpeakerCodec { Es8311, Aw88298 };
+// ES8311, ES8388 or AW88298 (speaker) and the microphone ADC sharing one duplex
+// I2S bus, controlled over the I2C bus. Es8388 is the speaker only. The
+// microphone stays an ES7210. No board selects Es8388 yet.
+enum class SpeakerCodec { Es8311, Aw88298, Es8388 };
 
 // The microphone ADC: an ES7210 for MEMS microphones, or the ES8311's own ADC
 // when the board wires an analog microphone to the speaker codec.

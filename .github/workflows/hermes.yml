@@ -8,6 +8,8 @@ on:
   push:
     branches: [main]
   pull_request:
+    # A draft stays up for review. This job starts when the pull request is marked ready.
+    types: [opened, synchronize, reopened, ready_for_review]
   schedule:
     - cron: "37 5 * * *"
   workflow_dispatch:
@@ -32,6 +34,7 @@ env:
 jobs:
   integration:
     name: Plugin on Hermes (${{ github.event_name == 'schedule' && 'main' || inputs.hermes_ref || 'pinned' }})
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:

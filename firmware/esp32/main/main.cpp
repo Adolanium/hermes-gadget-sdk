@@ -453,7 +453,8 @@ extern "C" void app_main(void) {
   else
 #endif
   parts.speaker = hal.speaker == &g_codec_speaker ?
-      (board.codec.speaker == hgp::SpeakerCodec::Aw88298 ? "aw88298" : "es8311") :
+      (board.codec.speaker == hgp::SpeakerCodec::Aw88298 ? "aw88298" :
+       board.codec.speaker == hgp::SpeakerCodec::Es8388 ? "es8388" : "es8311") :
       hal.speaker == &g_speaker ? "i2s" : "none";
   parts.touch = touch && g_touch.has_touch();
   parts.key = touch && g_touch.has_key();
