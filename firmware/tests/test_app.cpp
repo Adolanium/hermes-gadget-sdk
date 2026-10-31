@@ -1446,6 +1446,50 @@ TEST("touch: hold to talk, lift to send") {
   CHECK(r.fake.last("audio.end") != nullptr);
 }
 
+TEST("touch: with touch_wake off, a dark screen ignores the touchscreen until a key lights it") {
+  hg::DeviceProfile p = Rig::touch_profile();
+  p.wake_key = true;
+  Rig r(p);
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set touch_wake off"), std::string("@ok touch_wake"));
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  r.advance(31000);
+  CHECK_EQ(r.fake.brightness, 0);
+  hg::TouchGestures touch(r.app);
+  touch.update(true, 200, 200, r.fake.clock);  // a hold on the dark screen: ignored, no wake, no talk
+  r.advance(500);
+  touch.tick(r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK_EQ(r.fake.brightness, 0);
+  CHECK(!r.fake.mic_on);
+  r.app.on_button(hg::Button::Talk, true);  // the key lights it, and its press is only a wake
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(!r.fake.mic_on);
+  touch.update(true, 200, 200, r.fake.clock);  // lit, the touchscreen works as before
+  r.advance(150);
+  touch.tick(r.fake.clock);
+  CHECK(r.fake.mic_on);
+  touch.update(false, 0, 0, r.fake.clock);
+}
+
+TEST("touch: touch_wake stays on without a key to wake the screen, and takes only on or off") {
+  Rig r(Rig::touch_profile());  // no wake_key: the touchscreen is the only way back
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set touch_wake maybe"), std::string("@error touch_wake must be on or off"));
+  CHECK_EQ(r.app.console("set touch_wake off"), std::string("@ok touch_wake"));
+  CHECK(r.app.touch_wake());
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  r.advance(31000);
+  CHECK_EQ(r.fake.brightness, 0);
+  hg::TouchGestures touch(r.app);
+  touch.update(true, 200, 200, r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK_EQ(r.fake.brightness, 100);
+}
+
 TEST("touch: swipe down while holding discards the recording") {
   Rig r(Rig::touch_profile());
   r.bring_online(true);

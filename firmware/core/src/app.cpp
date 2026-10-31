@@ -64,7 +64,7 @@ constexpr uint32_t kBackoffMs[] = {1000, 2000, 4000, 8000, 15000, 30000};
 constexpr size_t kBackoffSteps = sizeof(kBackoffMs) / sizeof(kBackoffMs[0]);
 
 const char* const kSettingKeys[] = {"name", "server", "token", "talk_mode", "volume", "brightness", "screen_timeout", "battery_display", "battery_estimate", "language", "wifi_ssid", "wifi_pass",
-                                    "face_down_sleep", "clock", "time_format"};
+                                    "face_down_sleep", "clock", "time_format", "touch_wake"};
 
 // NVS limits storage keys to 15 characters; keep the public setting name unchanged.
 std::string_view setting_storage_key(std::string_view key) {
@@ -188,6 +188,7 @@ void App::load_settings() {
   lang_auto_ = language == "auto";
   lang_ = lang_auto_ ? hermes_lang_.value_or(i18n::Lang::En) : i18n::parse(language).value_or(i18n::Lang::En);
   face_down_sleep_ = setting("face_down_sleep", "off") == "on";
+  touch_wake_ = !profile_.wake_key || setting("touch_wake", "on") != "off";
   clock_after_ms_ = static_cast<uint32_t>(std::max(0, std::min(3600, std::atoi(setting("clock", "0").c_str())))) * 1000;
   clock_24h_ = setting("time_format", "24h") != "12h";
   tailnet_on_ = profile_.tailnet && setting("tailnet", "off") == "on";
@@ -2359,6 +2360,8 @@ std::string App::console(std::string_view raw) {
       return "@error battery_estimate must be off or liion";
     if (key == "face_down_sleep" && !value.empty() && value != "on" && value != "off")
       return "@error face_down_sleep must be on or off";
+    if (key == "touch_wake" && !value.empty() && value != "on" && value != "off")
+      return "@error touch_wake must be on or off";
     if (key == "clock" && !value.empty() &&
         (value.size() > 4 || value.find_first_not_of("0123456789") != std::string::npos ||
          (std::atoi(value.c_str()) != 0 && (std::atoi(value.c_str()) < 5 || std::atoi(value.c_str()) > 3600))))
