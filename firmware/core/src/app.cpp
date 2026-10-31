@@ -67,7 +67,7 @@ constexpr uint32_t kBackoffMs[] = {1000, 2000, 4000, 8000, 15000, 30000};
 constexpr size_t kBackoffSteps = sizeof(kBackoffMs) / sizeof(kBackoffMs[0]);
 
 const char* const kSettingKeys[] = {"name", "server", "token", "talk_mode", "volume", "brightness", "screen_timeout", "battery_display", "battery_estimate", "language", "wifi_ssid", "wifi_pass",
-                                    "face_down_sleep", "clock", "time_format", "touch_wake", "battery_alert", "battery_alert_sound", "charging_notice", "charging_sound", "charged_notice", "charged_sound", "double_home", "wake_talk", "touch_talk"};
+                                    "face_down_sleep", "clock", "time_format", "touch_wake", "battery_alert", "battery_alert_sound", "charging_notice", "charging_sound", "charged_notice", "charged_sound", "double_home", "wake_talk", "touch_talk", "profile_grid"};
 
 // NVS limits storage keys to 15 characters; keep the public setting name unchanged.
 std::string_view setting_storage_key(std::string_view key) {
@@ -240,6 +240,10 @@ void App::load_settings() {
   double_home_ = setting("double_home", "on") != "off";
   wake_talk_ = setting("wake_talk", "off") == "on";
   touch_talk_ = !profile_.talk_key || setting("touch_talk", "on") != "off";
+  {
+    const int grid = std::atoi(setting("profile_grid", "4").c_str());
+    profile_grid_ = static_cast<uint8_t>(grid == 6 || grid == 9 || grid == 16 ? grid : 4);
+  }
   clock_after_ms_ = static_cast<uint32_t>(std::max(0, std::min(3600, std::atoi(setting("clock", "0").c_str())))) * 1000;
   clock_24h_ = setting("time_format", "24h") != "12h";
   tailnet_on_ = profile_.tailnet && setting("tailnet", "off") == "on";
@@ -721,7 +725,7 @@ void App::h_welcome(const json::Value& m) {
   log(LogLevel::Info, paired_ ? "online (paired)" : "online (waiting for pairing approval)");
   agent_profiles_.clear();
   for (const auto& p : m["profiles"].elements()) {
-    if (agent_profiles_.size() >= 8) break;
+    if (agent_profiles_.size() >= kMaxProfiles) break;
     const std::string& id = p["id"].as_string();
     if (id.empty()) continue;
     const std::string& name = p["name"].as_string();
@@ -896,6 +900,32 @@ bool App::open_profile_picker() {
   profile_page_ = 0;
   notice_.clear();
   update_model();
+  // Open at the page that holds the current profile; the page size is the grid that fits this panel.
+  size_t i = 0;
+  while (i < agent_profiles_.size() && agent_profiles_[i].id != agent_profile_) ++i;
+  const int per = ui_ ? ui_->profile_per_page(model_) : 0;
+  if (per > 0 && i < agent_profiles_.size() && static_cast<int>(i) >= per) {
+    profile_page_ = static_cast<int>(i) / per * per;
+    update_model();
+  }
+  return true;
+}
+
+bool App::profile_swipe_opens() const {
+  return profile_.touch_screen && !display_sleeping_ && model_.screen == Screen::Ready && !settings_open() &&
+         can_switch_profile();
+}
+
+int App::profile_per_page() const { return ui_ && profile_picker_open() ? ui_->profile_per_page(model_) : 0; }
+
+bool App::profile_page_step(int dir) {
+  if (!profile_picker_open() || !ui_) return false;
+  const int n = static_cast<int>(agent_profiles_.size()), per = ui_->profile_per_page(model_);
+  if (per <= 0 || n <= per) return false;
+  const int pages = (n + per - 1) / per;
+  const int page = (profile_page_ / per + (dir < 0 ? pages - 1 : 1)) % pages;
+  profile_page_ = page * per;
+  update_model();
   return true;
 }
 
@@ -910,12 +940,7 @@ int App::profile_row_hit(int x, int y) const { return ui_ ? ui_->profile_row_hit
 
 void App::profile_tap(int x, int y) {
   const int row = profile_row_hit(x, y);
-  if (row >= 0) {
-    select_agent_profile(static_cast<size_t>(row));
-  } else if (row == Ui::kMoreRow) {
-    profile_page_ = ui_->profile_next_page(model_);
-    update_model();
-  }
+  if (row >= 0) select_agent_profile(static_cast<size_t>(row));
 }
 
 void App::h_pairing(const json::Value& m) {
@@ -2486,11 +2511,18 @@ void App::update_model() {
   } else if (overlay_ == Overlay::Profiles) {
     m.screen = Screen::Profiles;
     m.headline = tr(Msg::ProfileListTitle);
-    for (const auto& p : agent_profiles_)
-      m.dash.push_back({p.name, p.id == agent_profile_ ? tr(Msg::ProfileListCurrent) : ">",
-                        p.id == agent_profile_ ? DashRow::Tone::Waiting : DashRow::Tone::Dim});
+    // One cell per profile: its name, and its id, which picks the colour of its initial.
+    for (size_t i = 0; i < agent_profiles_.size(); ++i) {
+      const AgentProfile& p = agent_profiles_[i];
+      const bool current = p.id == agent_profile_;
+      m.dash.push_back({p.name, p.id, current ? DashRow::Tone::Waiting : DashRow::Tone::Dim});
+      // The icon: the face the device holds for the current profile, the mascot for the default
+      // one (which wears it when it has no face of its own); an initial for the rest.
+      if (current && face_) m.face_row = static_cast<int16_t>(i);
+      else if (p.id == "default" && (!current || !face_)) m.mascot_row = static_cast<int16_t>(i);
+    }
     m.hint = tr(Msg::ProfileListHint);
-    m.detail = tr(Msg::ProfileListMore);
+    m.grid = profile_grid_;
     m.scroll = profile_page_;
   } else if (overlay_ == Overlay::Dashboard) {
     m.screen = Screen::Dashboard;
@@ -2566,7 +2598,7 @@ void App::update_model() {
       if (switching) {
         // In tap-to-talk mode a tap records, so the name is no target there, unless the touchscreen doesn't talk.
         m.name_target = profile_.touch_screen && (talk_mode_ == TalkMode::Hold || !touch_talk_);
-        m.detail = tr(m.name_target ? Msg::ProfileTapName : Msg::ProfileInSettings) +
+        m.detail = tr(profile_.touch_screen ? Msg::ProfileSwipe : Msg::ProfileInSettings) +
                    ((sessions || timing) ? "\n" + m.detail : "");
         m.caption_lines = 2;
       }
@@ -2790,6 +2822,8 @@ std::string App::console(std::string_view raw) {
       return "@error wake_talk must be on or off";
     if (key == "touch_talk" && !value.empty() && value != "on" && value != "off")
       return "@error touch_talk must be on or off";
+    if (key == "profile_grid" && !value.empty() && value != "4" && value != "6" && value != "9" && value != "16")
+      return "@error profile_grid must be 4, 6, 9 or 16";
     if (key == "clock" && !value.empty() &&
         (value.size() > 4 || value.find_first_not_of("0123456789") != std::string::npos ||
          (std::atoi(value.c_str()) != 0 && (std::atoi(value.c_str()) < 5 || std::atoi(value.c_str()) > 3600))))

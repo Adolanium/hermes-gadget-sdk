@@ -264,14 +264,14 @@ namespace hg::i18n {
   X(ProfileSetting,         "Hermes profile") \
   X(ProfileSettingNext,     "{0}\nSelect to switch to the next profile.") \
   X(ProfileSettingChoose,   "{0}\nSelect to choose a profile.") \
+  X(ProfileGridSetting,     "Profiles per page") \
+  X(ProfileGridValue,       "{0}\nSelect for another grid. A small screen shows fewer.") \
   X(ProfileCantSwitch,      "Can't switch now") \
   X(ProfileGreeting,        "Hi, I'm {0}") \
-  X(ProfileTapName,         "Tap name to change") \
+  X(ProfileSwipe,           "Swipe to change") \
   X(ProfileInSettings,      "Change in Settings") \
   X(ProfileListTitle,       "Talk to") \
   X(ProfileListHint,        "Swipe down to go back") \
-  X(ProfileListCurrent,     "NOW") \
-  X(ProfileListMore,        "More") \
   X(ProfileSwitching,       "Switching to {0}...") \
   X(ProfileSwitched,        "Now talking to {0}") \
   X(ProfileRefusedBusy,     "Finish this turn first") \
