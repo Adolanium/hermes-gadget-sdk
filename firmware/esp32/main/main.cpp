@@ -256,8 +256,12 @@ void dispatch(hg::App& app, hgp::Event& ev) {
       }
       break;
     case EventType::Key:
-      if (g_key_cancel && ev.len == sizeof(hgp::KeySample)) {
-        app.on_button(hg::Button::Cancel, reinterpret_cast<const hgp::KeySample*>(ev.data)->pressed);
+      if (ev.len == sizeof(hgp::KeySample)) {
+        const bool pressed = reinterpret_cast<const hgp::KeySample*>(ev.data)->pressed;
+        // Not CANCEL with `touch_cancel swipe`, but still a key that lights a dark screen
+        // (DeviceProfile::wake_key): with touch_wake off it may be the only way back.
+        if (g_key_cancel) app.on_button(hg::Button::Cancel, pressed);
+        else if (pressed) app.wake_display();
       }
       break;
     case EventType::Encoder:

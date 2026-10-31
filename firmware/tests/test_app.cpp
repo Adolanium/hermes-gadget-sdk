@@ -1490,6 +1490,55 @@ TEST("touch: touch_wake stays on without a key to wake the screen, and takes onl
   CHECK_EQ(r.fake.brightness, 100);
 }
 
+TEST("touch: the Touch wakes screen item follows Screen timeout on a touchscreen with a wake key, and toggles") {
+  hg::DeviceProfile p = Rig::touch_profile();
+  p.wake_key = true;
+  Rig r(p);
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 20 && r.app.model().detail != "Screen timeout"; ++i) r.app.on_button(hg::Button::Down, true);
+  CHECK_EQ(r.app.model().detail, std::string("Screen timeout"));
+  r.app.on_button(hg::Button::Down, true);
+  CHECK_EQ(r.app.model().detail, std::string("Touch wakes screen"));
+  CHECK(r.app.model().body.rfind("On\n", 0) == 0);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.model().body.rfind("Off\n", 0) == 0);
+  CHECK(!r.app.touch_wake());
+  CHECK_EQ(r.fake.kv["touch_wake"], std::string("off"));
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.model().body.rfind("On\n", 0) == 0);
+  CHECK(r.app.touch_wake());
+  r.app.close_settings();
+}
+
+TEST("touch: the Touch wakes screen item is never offered without a wake key or a touchscreen") {
+  const auto never_offered = [](Rig& r) {
+    CHECK(r.app.open_settings());
+    for (int i = 0; i < 20; ++i) {
+      r.app.on_button(hg::Button::Down, true);
+      CHECK(r.app.model().detail != std::string("Touch wakes screen"));
+    }
+    r.app.close_settings();
+  };
+  {
+    Rig r(Rig::touch_profile());  // a touchscreen, but no key to wake it
+    r.fake.backlight = true;
+    r.bring_online(true);
+    never_offered(r);
+  }
+  {
+    hg::DeviceProfile p = Rig::profile("ws://hermes.local:8765/gadget");  // a key, but no touchscreen
+    p.wake_key = true;
+    Rig r(p);
+    r.fake.backlight = true;
+    r.bring_online(true);
+    never_offered(r);
+  }
+}
+
 TEST("touch: swipe down while holding discards the recording") {
   Rig r(Rig::touch_profile());
   r.bring_online(true);
