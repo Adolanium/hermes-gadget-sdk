@@ -94,6 +94,7 @@ Tap CANCEL to move to the next item, then tap TALK to change it. On a touchscree
 | Device information | Show the board, firmware, device ID, and available audio drivers |
 | Battery and power | Show available power readings on boards with a power driver; select to choose what the top of the screen shows: icon, percentage, both, or off |
 | Screen timeout | Choose always on, 30, 60, 120, or 300 seconds |
+| Touch wakes screen | Touchscreens with a button that can wake the screen: choose whether a touch lights the dark screen; on by default |
 | Face-down sleep | Boards with a motion sensor: sleep and stay quiet while the gadget lies on its screen; off by default |
 | Clock face | Boards with a display: choose Off (the default), 30 seconds, 1, 2, or 5 minutes of rest before a resting clock shows |
 | Power off | Select twice to shut down a board with a power driver |
@@ -119,6 +120,8 @@ Both settings persist; neither is enabled automatically. The Power page labels t
 Use `set battery_estimate off` (or `set battery_estimate` to clear it) to stop deriving percentages, and `set battery_display off` to hide any indicator. The percentage remains visible while charging; charging turns percentage-only text green. Red low-battery coloring requires an explicit battery-only power reading, which the LCD-1.54 does not supply.
 
 Screen timeout is off by default. When enabled, a brightness-capable display dims halfway through the idle period, then goes dark. The first button press or touch wakes it without recording or answering a prompt. Incoming replies and prompts wake it too. Recording, playback, Wi-Fi setup, pairing (with Hermes or a phone) and updates keep it awake. The settings menu sleeps like any other screen, and the input that wakes it leaves the menu on the same item, including a running hardware check. The processor and Wi-Fi remain running; this is screen sleep. AMOLED panels also switch their output off while dark. Use the board's Power off control to shut down the device.
+
+On a touchscreen with a button that can wake the screen (TALK, BOOT or PWR), the **Touch wakes screen** settings item or `set touch_wake off` leaves the touchscreen out of waking it: while the screen is dark, touches are ignored, and only a button press lights it. That press only wakes the screen, as before. Once it is lit, the touchscreen works as usual. A gadget in a pocket or bag then stays dark however it is touched. Boards without such a button ignore the setting, since the touchscreen is their only way back. It is on by default.
 
 On the AMOLED-1.75C, a short press of PWR puts the screen to sleep the same way, whether or not Screen timeout is on. The same activities keep it awake: a press during recording, playback, Wi-Fi setup or an update does nothing. Press PWR again, touch the screen or press BOOT to wake it. Replies and prompts wake it as well; Wi-Fi or the connection to Hermes dropping and coming back does not.
 
