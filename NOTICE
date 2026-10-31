@@ -21,7 +21,8 @@ The MIT license above covers only the code and documentation written for this
 project. Except as noted below, third-party code is not included in this
 repository; it is fetched at build or install time and keeps its own license:
 ESP-IDF, esp_codec_dev, esp_websocket_client, esp_hosted 2.12.6,
-esp_wifi_remote 1.6.5, esp_lcd_ek79007 2.0.2, esp_lcd_jd9365 2.0.2, and
+esp_wifi_remote 1.6.5, esp_lcd_ek79007 2.0.2, esp_lcd_jd9365 2.0.2,
+esp_lcd_st7123 1.0.2, and
 esp_lcd_st7701 2.0.2
 (1.1.0 for ESP-IDF below 5.4; Apache License 2.0, Espressif Systems), plus the
 Python packages listed in pyproject.toml (each under its own license).
@@ -247,7 +248,7 @@ https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-1.46/ESP32-S3-Touch-LCD-1.46
 The managed esp_lcd_ili9341, esp_lcd_gc9a01, esp_lcd_touch, esp_lcd_touch_gt911,
 esp_lcd_touch_tt21100, esp_lcd_touch_ft5x06, esp_lcd_touch_spd2010 2.1.0,
 esp_lcd_st7701, esp_lcd_sh8601,
-esp_lcd_spd2010 2.0.0~1, esp_lcd_ek79007, esp_lcd_jd9365
+esp_lcd_spd2010 2.0.0~1, esp_lcd_ek79007, esp_lcd_jd9365, esp_lcd_st7123 1.0.2
 and esp_lcd_panel_io_additions drivers are Espressif components under Apache
 License 2.0. CoreS3 audio uses esp_codec_dev's AW88298 driver.
 They are fetched at build time. Binary release packages include the installed
