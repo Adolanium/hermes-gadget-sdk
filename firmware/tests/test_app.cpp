@@ -2005,6 +2005,8 @@ TEST("doze: external power never dozes, and plugging in ends a doze within 100 m
   r.fake.backlight = true;
   r.hal.power = &key;
   r.bring_online(true);
+  // The charging notice would light the screen on plugging in; this is about the doze alone.
+  CHECK_EQ(r.app.console("set charging_notice off"), std::string("@ok charging_notice"));
   key.presses = 1;
   r.advance(1000);
   CHECK_EQ(r.fake.brightness, 0);
@@ -2423,12 +2425,758 @@ TEST("power: failed readings replace stale data and shutdown requires a second l
   CHECK(status["power"]["battery_mv"].is_null());
   CHECK((*r.fake.last("state"))["sensors"]["battery_mv"].is_null());
   r.app.open_settings();
-  for (int i = 0; i < 11; ++i) r.app.console("cancel");  // the Clock face item sits before Power off
+  for (int i = 0; i < 17; ++i) r.app.console("cancel");  // the Clock face item sits before Power off
   CHECK_EQ(r.app.model().detail, std::string("Power off"));
   r.app.console("talk"); r.app.console("release");
   CHECK_EQ(battery.shutdowns, 0);
   r.app.console("talk"); r.app.console("release");
   CHECK_EQ(battery.shutdowns, 1);
+}
+
+namespace {
+// A gauge whose reading a test sets: on battery at 50% until it changes it.
+struct AlertPower : hg::Power {
+  hg::PowerStatus status{true, 3800, 50, false, false};
+  bool failing = false;  // the next readings fail, as a driver's I2C read can
+  std::optional<hg::PowerStatus> read() override {
+    if (failing) return std::nullopt;
+    return status;
+  }
+  std::optional<bool> external_power() override { return status.external_power; }
+  bool power_off() override { return false; }
+  void on_battery(uint8_t percent) { status.battery_percent = percent; status.charging = status.external_power = false; }
+  void on_usb(uint8_t percent) { status.battery_percent = percent; status.charging = status.external_power = true; }
+};
+}  // namespace
+
+TEST("battery alert: each level lights the dark screen once per discharge, and a press closes it and acts") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  // Waits in 5 s readings, with the server's heartbeat so the connection stays settled.
+  auto wait = [&](uint32_t ms) {
+    for (uint32_t done = 0; done < ms; done += 5000) {
+      r.server(R"({"type":"ping"})");
+      r.advance(std::min<uint32_t>(5000, ms - done));
+    }
+  };
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  battery.on_battery(8);
+  wait(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 0);  // off by default
+  CHECK_EQ(r.app.console("set battery_alert 5,10"), std::string("@ok battery_alert"));
+  CHECK_EQ(r.fake.kv["battery_alert"], std::string("5,10"));
+  battery.on_battery(12);
+  wait(31000);
+  CHECK_EQ(r.fake.brightness, 0);
+  CHECK_EQ(int(r.app.battery_alert()), 0);
+  battery.on_battery(10);
+  wait(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 10);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::LowBattery);
+  CHECK_EQ(r.app.model().headline, std::string("10%"));
+  CHECK_EQ(r.app.model().detail, std::string("Low battery\nConnect USB to charge"));
+  CHECK_EQ(int(r.app.model().face_battery), 10);
+  CHECK(r.app.model().hint.empty());
+  r.app.on_button(hg::Button::Talk, true);  // closes it, and the press talks as it would on Ready
+  CHECK_EQ(int(r.app.battery_alert()), 0);
+  CHECK(r.fake.mic_on);
+  CHECK(r.app.screen() == hg::Screen::Listening);
+  r.app.on_button(hg::Button::Cancel, true);  // discards the recording
+  r.app.on_button(hg::Button::Cancel, false);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(!r.fake.mic_on);
+  // A reading that wobbles across the level, or a jump past it, does not repeat it.
+  for (uint8_t percent : {11, 10, 9, 11, 6}) {
+    battery.on_battery(percent);
+    wait(5000);
+    CHECK_EQ(int(r.app.battery_alert()), 0);
+  }
+  battery.on_battery(5);
+  wait(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 5);
+  CHECK_EQ(r.app.model().headline, std::string("5%"));
+  wait(10000);  // unanswered, it goes after 10 s and the screen times out as usual
+  CHECK_EQ(int(r.app.battery_alert()), 0);
+  CHECK_EQ(r.fake.brightness, 100);
+  wait(31000);
+  CHECK_EQ(r.fake.brightness, 0);
+  battery.on_battery(3);
+  wait(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 0);
+  CHECK_EQ(r.fake.brightness, 0);
+}
+
+TEST("battery alert: never on USB, and only charging clear of a level rearms it") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set battery_alert 10"), std::string("@ok battery_alert"));
+  battery.on_usb(8);
+  r.advance(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 0);
+  battery.status.external_power.reset();  // an unknown supply is no battery-only reading
+  battery.status.charging.reset();
+  r.advance(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 0);
+  battery.on_battery(9);
+  r.advance(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 10);
+  battery.on_usb(9);  // plugging in closes it
+  r.advance(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 0);
+  battery.on_usb(14);  // a short charge: still within 5 points of the level
+  r.advance(5000);
+  battery.on_battery(10);
+  r.advance(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 0);
+  battery.on_usb(15);
+  r.advance(5000);
+  battery.on_battery(10);
+  r.advance(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 10);
+}
+
+TEST("battery alert: waits for a quiet screen and gives way to a turn or a question") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set battery_alert 10"), std::string("@ok battery_alert"));
+  r.app.on_button(hg::Button::Talk, true);  // listening: the alert waits
+  battery.on_battery(9);
+  r.advance(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 0);
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Cancel, false);
+  r.app.on_button(hg::Button::Talk, false);
+  r.advance(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 10);
+  r.server(R"({"type":"prompt","id":"q","text":"Continue?"})");
+  r.advance(10);
+  CHECK_EQ(int(r.app.battery_alert()), 0);
+  CHECK(r.app.screen() == hg::Screen::Prompt);
+}
+
+TEST("battery alert: the power key closes it and darkens the screen as usual") {
+  struct : AlertPower {
+    int presses = 0;
+    bool take_key_press() override {
+      if (!presses) return false;
+      --presses;
+      return true;
+    }
+  } battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set battery_alert 10"), std::string("@ok battery_alert"));
+  battery.on_battery(10);
+  r.advance(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 10);
+  battery.presses = 1;
+  r.advance(200);
+  CHECK_EQ(int(r.app.battery_alert()), 0);
+  CHECK_EQ(r.fake.brightness, 0);
+}
+
+TEST("battery alert: on a touchscreen a touch closes it and acts on the screen underneath") {
+  AlertPower battery;
+  Rig r(Rig::touch_profile());
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set battery_alert 10"), std::string("@ok battery_alert"));
+  battery.on_battery(10);
+  r.advance(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 10);
+  hg::TouchGestures touch(r.app);
+  touch.update(true, 200, 200, r.fake.clock);  // touch-down closes it
+  CHECK_EQ(int(r.app.battery_alert()), 0);
+  r.advance(150);
+  touch.tick(r.fake.clock);  // and a hold talks, as on Ready
+  CHECK(r.fake.mic_on);
+  touch.update(false, 0, 0, r.fake.clock);
+}
+
+TEST("battery alert: a touch that wakes a dark screen is only a wake, as before") {
+  AlertPower battery;
+  Rig r(Rig::touch_profile());
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set battery_alert 10"), std::string("@ok battery_alert"));
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  battery.on_battery(10);
+  for (int i = 0; i < 10; ++i) {  // the alert goes after 10 s, and the screen sleeps 30 s later
+    r.server(R"({"type":"ping"})");
+    r.advance(5000);
+  }
+  CHECK_EQ(int(r.app.battery_alert()), 0);
+  CHECK_EQ(r.fake.brightness, 0);
+  hg::TouchGestures touch(r.app);
+  touch.update(true, 200, 200, r.fake.clock);
+  r.advance(150);
+  touch.tick(r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(!r.fake.mic_on);
+}
+
+TEST("battery alert: beeps by default, once with each alert, and battery_alert_sound off keeps it silent") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set battery_alert 10,5"), std::string("@ok battery_alert"));
+  const size_t before = r.fake.spk_samples;
+  battery.on_battery(10);
+  r.advance(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 10);
+  // 150 ms of lead-in silence, then 880 Hz 120 ms, 80 ms, 660 Hz 160 ms
+  CHECK_EQ(r.fake.spk_samples - before, size_t(16000 * (150 + 360) / 1000));
+  const size_t after_first = r.fake.spk_samples;
+  r.advance(5000);
+  CHECK_EQ(r.fake.spk_samples, after_first);  // once, not with each reading
+  CHECK_EQ(r.app.console("set battery_alert_sound maybe"), std::string("@error battery_alert_sound must be on or off"));
+  CHECK_EQ(r.app.console("set battery_alert_sound off"), std::string("@ok battery_alert_sound"));
+  CHECK_EQ(r.fake.kv["batt_alert_snd"], std::string("off"));  // NVS keys stop at 15 characters
+  r.app.on_button(hg::Button::Cancel, true);  // closes the first alert
+  r.app.on_button(hg::Button::Cancel, false);
+  battery.on_battery(5);
+  r.advance(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 5);
+  CHECK_EQ(r.fake.spk_samples, after_first);
+}
+
+TEST("tones: each note lasts its time plus its gap, and starts and ends silent") {
+  const hg::Tone tones[] = {{1000, 100, 50, 8000}, {500, 20, 0, 8000}};
+  const auto pcm = hg::synth_tones(tones, 2, 16000);
+  CHECK_EQ(pcm.size(), size_t(16000 * 170 / 1000));
+  CHECK_EQ(pcm.front(), int16_t(0));
+  int peak = 0;
+  for (size_t i = 0; i < 1600; ++i) peak = std::max(peak, std::abs(int(pcm[i])));
+  CHECK(peak > 7000 && peak <= 8000);
+  for (size_t i = 1600; i < 2400; ++i) CHECK_EQ(pcm[i], int16_t(0));  // the gap
+  // A lead-in: that much silence first, then the same notes.
+  const auto led = hg::synth_tones(tones, 2, 16000, hg::kToneLeadMs);
+  CHECK_EQ(led.size(), pcm.size() + size_t(16000 * 150 / 1000));
+  for (size_t i = 0; i < 2400; ++i) CHECK_EQ(led[i], int16_t(0));
+  CHECK(std::equal(pcm.begin(), pcm.end(), led.begin() + 2400));
+}
+
+TEST("battery alert: the indicator turns red at 15%, or at the highest alert level when higher") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set battery_display percentage"), std::string("@ok battery_display"));
+  battery.on_battery(16);
+  r.advance(5000);
+  CHECK(!r.app.model().battery_low);
+  battery.on_battery(15);
+  r.advance(5000);
+  CHECK(r.app.model().battery_low);
+  CHECK_EQ(r.app.console("set battery_alert 10,5"), std::string("@ok battery_alert"));
+  CHECK(r.app.model().battery_low);  // lower levels keep 15%
+  CHECK_EQ(r.app.console("set battery_alert 20,10"), std::string("@ok battery_alert"));
+  r.app.on_button(hg::Button::Cancel, true);  // closes the alert at 20% that the new levels raise
+  r.app.on_button(hg::Button::Cancel, false);
+  battery.on_battery(20);
+  r.advance(5000);
+  CHECK(r.app.model().battery_low);
+  battery.on_battery(21);
+  r.advance(5000);
+  CHECK(!r.app.model().battery_low);
+  battery.on_usb(5);
+  r.advance(5000);
+  CHECK(!r.app.model().battery_low);  // never red on USB
+}
+
+TEST("charging notice: plugging in lights the dark screen with the level, which then times out as usual") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  battery.on_usb(60);  // booting on USB shows nothing: no battery-only reading came first
+  r.bring_online(true);
+  auto wait = [&](uint32_t ms) {
+    for (uint32_t done = 0; done < ms; done += 5000) {
+      r.server(R"({"type":"ping"})");
+      r.advance(std::min<uint32_t>(5000, ms - done));
+    }
+  };
+  wait(5000);
+  CHECK(!r.app.charging_notice());
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  battery.on_battery(42);
+  wait(31000);
+  CHECK_EQ(r.fake.brightness, 0);
+  battery.on_usb(42);
+  r.advance(200);  // a dark screen notices USB within the 100 ms supply poll
+  CHECK(r.app.charging_notice());
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Charging);
+  CHECK_EQ(r.app.model().headline, std::string("42%"));
+  CHECK_EQ(r.app.model().detail, std::string("Charging"));
+  CHECK_EQ(int(r.app.model().face_battery), 42);
+  wait(5000);
+  CHECK(!r.app.charging_notice());
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.fake.brightness, 100);  // lit until the normal timeout
+  wait(26000);
+  CHECK_EQ(r.fake.brightness, 0);
+  battery.on_battery(42);  // unplugging shows nothing
+  wait(5000);
+  CHECK(!r.app.charging_notice());
+  CHECK_EQ(r.fake.brightness, 0);
+}
+
+TEST("charging notice: replaces the low battery alert, a press closes it and acts, and no timeout darkens it back") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set battery_alert 10"), std::string("@ok battery_alert"));
+  battery.on_battery(9);
+  r.advance(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 10);
+  battery.on_usb(9);
+  r.advance(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 0);
+  CHECK(r.app.charging_notice());
+  r.app.on_button(hg::Button::Talk, true);  // closes it, and talks as on Ready
+  CHECK(!r.app.charging_notice());
+  CHECK(r.fake.mic_on);
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Cancel, false);
+  r.app.on_button(hg::Button::Talk, false);
+  // No screen timeout: a screen the power key darkened goes dark again after the notice.
+  struct : AlertPower {
+    int presses = 0;
+    bool take_key_press() override {
+      if (!presses) return false;
+      --presses;
+      return true;
+    }
+  } keyed;
+  Rig k;
+  k.hal.power = &keyed;
+  k.fake.backlight = true;
+  k.bring_online(true);
+  keyed.on_battery(50);
+  k.advance(5000);
+  keyed.presses = 1;
+  k.advance(200);
+  CHECK_EQ(k.fake.brightness, 0);
+  keyed.on_usb(50);
+  k.advance(200);
+  CHECK(k.app.charging_notice());
+  CHECK_EQ(k.fake.brightness, 100);
+  k.advance(5000);
+  CHECK(!k.app.charging_notice());
+  CHECK_EQ(k.fake.brightness, 0);
+}
+
+TEST("charging notice: off leaves the screen dark, and the settings item toggles it") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set charging_notice maybe"), std::string("@error charging_notice must be on or off"));
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 20 && r.app.model().detail != "Charging screen"; ++i) r.app.on_button(hg::Button::Down, true);
+  CHECK_EQ(r.app.model().detail, std::string("Charging screen"));
+  CHECK(r.app.model().body.rfind("On\n", 0) == 0);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.model().body.rfind("Off\n", 0) == 0);
+  CHECK_EQ(r.fake.kv["charging_notice"], std::string("off"));
+  r.app.close_settings();
+  battery.on_battery(50);
+  r.advance(5000);
+  battery.on_usb(50);
+  r.advance(5000);
+  CHECK(!r.app.charging_notice());
+}
+
+TEST("charging notice: silent by default; charging_sound on chirps once on plugging in") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  battery.on_battery(50);
+  r.advance(5000);
+  size_t before = r.fake.spk_samples;
+  battery.on_usb(50);
+  r.advance(5000);
+  CHECK(r.app.charging_notice());
+  CHECK_EQ(r.fake.spk_samples, before);
+  CHECK_EQ(r.app.console("set charging_sound maybe"), std::string("@error charging_sound must be on or off"));
+  CHECK_EQ(r.app.console("set charging_sound on"), std::string("@ok charging_sound"));
+  battery.on_battery(50);
+  r.advance(5000);
+  before = r.fake.spk_samples;
+  battery.on_usb(50);
+  r.advance(5000);
+  CHECK_EQ(r.fake.spk_samples - before, size_t(16000 * (150 + 240) / 1000));  // the lead-in, then 660 Hz 80 ms, 20 ms, 990 Hz 140 ms
+  r.advance(5000);
+  CHECK_EQ(r.fake.spk_samples - before, size_t(16000 * (150 + 240) / 1000));  // once per plug
+}
+
+TEST("full battery: once per charge, when charging ends or the gauge reaches 100%, with a chime") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set charged_sound on"), std::string("@ok charged_sound"));
+  battery.on_battery(90);
+  r.advance(5000);
+  battery.on_usb(90);
+  r.advance(5000);
+  CHECK(r.app.charging_notice());
+  r.advance(5000);
+  CHECK(!r.app.charging_notice());
+  size_t before = r.fake.spk_samples;
+  battery.status.battery_percent = 100;
+  battery.status.charging = false;  // charge done, still on USB
+  r.advance(5000);
+  CHECK(r.app.charged_notice());
+  CHECK(r.app.screen() == hg::Screen::Charged);
+  CHECK_EQ(r.app.model().headline, std::string("100%"));
+  CHECK_EQ(r.app.model().detail, std::string("Battery full\nYou can unplug"));
+  CHECK_EQ(int(r.app.model().face_battery), 100);
+  CHECK_EQ(r.fake.spk_samples - before, size_t(16000 * (150 + 420) / 1000));  // the lead-in, then 784 Hz 140 ms, 40 ms, 1046 Hz 240 ms
+  r.fake.spk_draining = true;  // its own chime still playing does not close it
+  r.advance(1000);
+  CHECK(r.app.charged_notice());
+  r.fake.spk_draining = false;
+  r.advance(4000);
+  CHECK(!r.app.charged_notice());  // gone after 5 s
+  battery.status.charging = true;  // the charger tops up and stops again: still the same charge
+  r.advance(5000);
+  battery.status.charging = false;
+  r.advance(5000);
+  CHECK(!r.app.charged_notice());
+  CHECK_EQ(r.fake.spk_samples - before, size_t(16000 * (150 + 420) / 1000));
+  // Unplugged and plugged back in full: nothing charged, nothing said.
+  battery.on_battery(100);
+  r.advance(5000);
+  battery.on_usb(100);
+  battery.status.charging = false;
+  r.advance(5000);
+  r.advance(5000);
+  CHECK(!r.app.charged_notice());
+  // A new charge whose gauge reaches 100% while still charging counts as full.
+  battery.on_battery(80);
+  r.advance(5000);
+  battery.on_usb(80);
+  r.advance(10000);
+  battery.status.battery_percent = 100;
+  r.advance(5000);
+  CHECK(r.app.charged_notice());
+}
+
+TEST("full battery: the screen is on by default and the chime off, so a charge ending at night is silent") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  battery.on_usb(95);
+  r.advance(5000);
+  const size_t before = r.fake.spk_samples;
+  battery.status.charging = false;
+  r.advance(15000);  // three readings in a row: the charge has ended
+  CHECK(r.app.charged_notice());
+  CHECK_EQ(r.fake.spk_samples, before);
+  r.advance(5000);
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 30 && r.app.model().detail != "Full battery sound"; ++i) r.app.on_button(hg::Button::Down, true);
+  CHECK_EQ(r.app.model().detail, std::string("Full battery sound"));
+  CHECK(r.app.model().body.rfind("Off\n", 0) == 0);
+}
+
+TEST("battery alert: on a voltage estimate, a charger's high reading rearms nothing until the battery reads clear") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  auto wait = [&](uint32_t ms) {
+    for (uint32_t done = 0; done < ms; done += 5000) {
+      r.server(R"({"type":"ping"})");
+      r.advance(std::min<uint32_t>(5000, ms - done));
+    }
+  };
+  CHECK_EQ(r.app.console("set battery_estimate liion"), std::string("@ok battery_estimate"));
+  CHECK_EQ(r.app.console("set battery_alert 10"), std::string("@ok battery_alert"));
+  auto on_battery_mv = [&](uint16_t mv) {
+    battery.status.battery_percent = std::nullopt;
+    battery.status.battery_mv = mv;
+    battery.status.charging = battery.status.external_power = false;
+  };
+  auto on_usb_mv = [&](uint16_t mv) {
+    on_battery_mv(mv);
+    battery.status.charging = battery.status.external_power = true;
+  };
+  on_battery_mv(3650);  // about 7%
+  wait(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 10);
+  wait(10000);
+  CHECK_EQ(int(r.app.battery_alert()), 0);
+  on_usb_mv(4200);  // the charger lifts the estimate to 100%
+  wait(10000);
+  on_battery_mv(3650);  // unplugged after a minute: the battery is where it was
+  wait(10000);
+  CHECK_EQ(int(r.app.battery_alert()), 0);  // still spent: the charger's reading rearmed nothing
+  on_usb_mv(4200);
+  wait(10000);
+  on_battery_mv(3900);  // a real charge: about 63% on the battery
+  wait(5000);
+  on_battery_mv(3650);
+  wait(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 10);  // rearmed once, by the battery-only reading
+}
+
+TEST("charging notice: a driver that reports only charging shows no plug-in when a charge stops and resumes") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  battery.status.battery_percent = 90;
+  battery.status.external_power = std::nullopt;  // as the STC8 on the CrowPanel P4
+  battery.status.charging = false;
+  r.advance(5000);
+  battery.status.charging = true;
+  r.advance(5000);
+  CHECK(!r.app.charging_notice());
+  battery.status.charging = false;  // the charge ends with the cable in
+  r.advance(15000);
+  battery.status.charging = true;  // and tops up again
+  r.advance(5000);
+  CHECK(!r.app.charging_notice());
+}
+
+TEST("full battery: a failed reading keeps the charge, and the chime alone waits for a free speaker") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set charged_sound on"), std::string("@ok charged_sound"));
+  battery.on_usb(95);
+  r.advance(5000);
+  battery.status.charging = false;
+  r.advance(5000);
+  battery.failing = true;  // a reading fails just as the charge ends
+  r.advance(5000);
+  battery.failing = false;
+  r.advance(10000);
+  CHECK(r.app.charged_notice());  // the charge so far was kept through the failed reading
+  r.advance(5000);
+
+  // With the screen notice off, the chime is the whole notice: a busy speaker holds it.
+  CHECK_EQ(r.app.console("set charged_notice off"), std::string("@ok charged_notice"));
+  battery.on_battery(95);
+  r.advance(5000);
+  battery.on_usb(95);
+  r.advance(5000);
+  const size_t before = r.fake.spk_samples;
+  r.fake.spk_draining = true;  // something else is playing
+  battery.status.charging = false;
+  r.advance(15000);
+  CHECK_EQ(r.fake.spk_samples, before);
+  r.fake.spk_draining = false;
+  r.advance(5000);
+  CHECK_EQ(r.fake.spk_samples - before, size_t(16000 * (150 + 420) / 1000));  // played once it was free
+  r.advance(10000);
+  CHECK_EQ(r.fake.spk_samples - before, size_t(16000 * (150 + 420) / 1000));  // and only once
+}
+
+TEST("full battery: the screen and the chime are separate settings, and a busy screen waits") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set charged_notice maybe"), std::string("@error charged_notice must be on or off"));
+  CHECK_EQ(r.app.console("set charged_sound on"), std::string("@ok charged_sound"));
+  CHECK_EQ(r.app.console("set charged_notice off"), std::string("@ok charged_notice"));
+  battery.on_usb(95);
+  r.advance(5000);
+  size_t before = r.fake.spk_samples;
+  battery.status.charging = false;
+  r.advance(15000);  // three readings in a row: the charge has ended
+  CHECK(!r.app.charged_notice());
+  CHECK_EQ(r.fake.spk_samples - before, size_t(16000 * (150 + 420) / 1000));  // the chime alone
+  CHECK_EQ(r.app.console("set charged_notice on"), std::string("@ok charged_notice"));
+  CHECK_EQ(r.app.console("set charged_sound off"), std::string("@ok charged_sound"));
+  battery.on_battery(95);
+  r.advance(5000);
+  battery.on_usb(95);
+  r.advance(6000);
+  r.app.on_button(hg::Button::Talk, true);  // talking: the notice waits
+  before = r.fake.spk_samples;
+  battery.status.charging = false;
+  r.advance(15000);
+  CHECK(!r.app.charged_notice());
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Cancel, false);
+  r.app.on_button(hg::Button::Talk, false);
+  r.advance(5000);
+  CHECK(r.app.charged_notice());
+  CHECK_EQ(r.fake.spk_samples, before);  // charged_sound off
+}
+
+TEST("full battery: a charger still starting up, or flickering off for a reading, is no full battery") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set charged_sound on"), std::string("@ok charged_sound"));
+  battery.on_battery(90);
+  r.advance(5000);
+  const size_t before = r.fake.spk_samples;
+  // Plugged in at 90%: the first reading still says not charging, the next ones charging.
+  battery.on_usb(90);
+  battery.status.charging = false;
+  r.advance(5000);
+  CHECK(r.app.charging_notice());
+  CHECK(!r.app.charged_notice());
+  battery.status.charging = true;
+  r.advance(10000);
+  CHECK(!r.app.charged_notice());
+  // One reading off, then charging again: still charging.
+  battery.status.charging = false;
+  r.advance(5000);
+  battery.status.charging = true;
+  r.advance(5000);
+  CHECK(!r.app.charged_notice());
+  battery.status.charging = false;  // two readings off: not yet
+  r.advance(10000);
+  CHECK(!r.app.charged_notice());
+  CHECK_EQ(r.fake.spk_samples, before);  // no sound at any point so far
+  r.advance(5000);  // the third in a row: the charge has ended
+  CHECK(r.app.charged_notice());
+  CHECK_EQ(r.fake.spk_samples - before, size_t(16000 * (150 + 420) / 1000));
+}
+
+TEST("power notices: every notice and sound is optional, from the settings and from the console") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.bring_online(true);
+  struct Item { const char* label; const char* key; const char* storage; const char* off; };
+  const Item items[] = {
+      {"Low battery alert", "battery_alert", "battery_alert", "off"},
+      {"Low battery sound", "battery_alert_sound", "batt_alert_snd", "off"},
+      {"Charging screen", "charging_notice", "charging_notice", "off"},
+      {"Full battery screen", "charged_notice", "charged_notice", "off"},
+      {"Full battery sound", "charged_sound", "charged_sound", "off"},
+  };
+  CHECK_EQ(r.app.console("set battery_alert 10"), std::string("@ok battery_alert"));
+  for (const Item& item : items) {
+    CHECK(r.app.open_settings());
+    for (int i = 0; i < 30 && r.app.model().detail != item.label; ++i) r.app.on_button(hg::Button::Down, true);
+    CHECK_EQ(r.app.model().detail, std::string(item.label));
+    // Each select steps the item; one of the steps is off.
+    bool reached_off = false;
+    for (int i = 0; i < 6 && !reached_off; ++i) {
+      r.app.on_button(hg::Button::Talk, true);
+      r.app.on_button(hg::Button::Talk, false);
+      reached_off = r.fake.kv[item.storage] == item.off;
+    }
+    CHECK(reached_off);
+    r.app.close_settings();
+    // The console turns each one off too (battery_alert takes levels rather than on).
+    const std::string key = item.key;
+    CHECK_EQ(r.app.console("set " + key + (key == "battery_alert" ? " 10" : " on")), "@ok " + key);
+    CHECK_EQ(r.app.console("set " + key + " off"), "@ok " + key);
+    CHECK_EQ(r.fake.kv[item.storage], std::string("off"));
+  }
+  // The charging sound is off by default, and its item turns it on and off again.
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 30 && r.app.model().detail != "Charging sound"; ++i) r.app.on_button(hg::Button::Down, true);
+  CHECK(r.app.model().body.rfind("Off\n", 0) == 0);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK_EQ(r.fake.kv["charging_sound"], std::string("on"));
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK_EQ(r.fake.kv["charging_sound"], std::string("off"));
+  r.app.close_settings();
+  // All off: a whole discharge and charge stays dark and silent.
+  r.fake.backlight = true;
+  const size_t before = r.fake.spk_samples;
+  battery.on_battery(5);
+  r.advance(5000);
+  battery.on_usb(5);
+  r.advance(5000);
+  battery.status.battery_percent = 100;
+  battery.status.charging = false;
+  r.advance(20000);
+  CHECK_EQ(int(r.app.battery_alert()), 0);
+  CHECK(!r.app.charging_notice());
+  CHECK(!r.app.charged_notice());
+  CHECK_EQ(r.fake.spk_samples, before);
+}
+
+TEST("battery alert: the setting takes off or up to three levels, and the settings item steps through presets") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.bring_online(true);
+  for (const char* bad : {"0", "51", "10,10", "10,,5", "abc", "20,10,5,3", "10,"})
+    CHECK_EQ(r.app.console(std::string("set battery_alert ") + bad),
+             std::string("@error battery_alert must be off or up to 3 percentages from 1 to 50, like 10,5"));
+  CHECK_EQ(r.app.console("set battery_alert 20,10,5"), std::string("@ok battery_alert"));
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 20 && r.app.model().detail != "Low battery alert"; ++i) r.app.on_button(hg::Button::Down, true);
+  CHECK_EQ(r.app.model().detail, std::string("Low battery alert"));
+  CHECK(r.app.model().body.rfind("At 20%, 10%, 5%\n", 0) == 0);
+  const char* expected[] = {"off", "10", "10,5", "15,10,5", "20,10", "off"};
+  const char* shown[] = {"Off\n", "At 10%\n", "At 10%, 5%\n", "At 15%, 10%, 5%\n", "At 20%, 10%\n", "Off\n"};
+  for (int i = 0; i < 6; ++i) {
+    r.app.on_button(hg::Button::Talk, true);
+    r.app.on_button(hg::Button::Talk, false);
+    CHECK_EQ(r.fake.kv["battery_alert"], std::string(expected[i]));
+    CHECK(r.app.model().body.rfind(shown[i], 0) == 0);
+  }
+  r.app.close_settings();
+}
+
+TEST("battery alert: the Low battery sound item turns the beep off and on") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 20 && r.app.model().detail != "Low battery sound"; ++i) r.app.on_button(hg::Button::Down, true);
+  CHECK_EQ(r.app.model().detail, std::string("Low battery sound"));
+  CHECK(r.app.model().body.rfind("On\n", 0) == 0);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.model().body.rfind("Off\n", 0) == 0);
+  CHECK_EQ(r.fake.kv["batt_alert_snd"], std::string("off"));
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.model().body.rfind("On\n", 0) == 0);
+  r.app.close_settings();
 }
 
 TEST("battery indicator: the top band shows the level, colours charging and low, and hides without a reading") {
@@ -3745,6 +4493,42 @@ TEST("dashboard: a session's state shows in its colour, and long lists page") {
   r.app.on_button(hg::Button::Down, true);
   r.app.on_button(hg::Button::Down, false);
   CHECK_EQ(r.app.model().scroll, 1);
+}
+
+TEST("battery alert and charging notice: show over an open dashboard, which is still there after") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  auto wait = [&](uint32_t ms) {
+    for (uint32_t done = 0; done < ms; done += 5000) {
+      r.server(R"({"type":"ping"})");
+      r.advance(std::min<uint32_t>(5000, ms - done));
+    }
+  };
+  CHECK_EQ(r.app.console("set battery_alert 10"), std::string("@ok battery_alert"));
+  battery.on_battery(20);
+  wait(5000);
+  r.server(kDashboard);
+  tap_cancel(r);
+  CHECK(r.app.screen() == hg::Screen::Dashboard);
+  battery.on_battery(10);  // a list the user opened is not busy: the alert does not wait for it
+  wait(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 10);
+  CHECK(r.app.screen() == hg::Screen::LowBattery);
+  wait(10000);
+  CHECK_EQ(int(r.app.battery_alert()), 0);
+  CHECK(r.app.screen() == hg::Screen::Dashboard);
+  battery.on_usb(10);
+  wait(5000);
+  CHECK(r.app.charging_notice());
+  CHECK(r.app.screen() == hg::Screen::Charging);
+  r.advance(1000);
+  CHECK(r.app.charging_notice());  // the open list does not close it
+  wait(5000);
+  CHECK(!r.app.charging_notice());
+  CHECK(r.app.screen() == hg::Screen::Dashboard);
 }
 
 TEST("dashboard: touch boards open it with a swipe down") {

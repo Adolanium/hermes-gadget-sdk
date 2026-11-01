@@ -69,6 +69,12 @@ void App::settings_input(Button button, bool pressed) {
       switch (item) {
         case Menu::Profile: return agent_profiles_.size() > 1;
         case Menu::Power: return hal_.power != nullptr;
+        case Menu::BatteryAlert: return hal_.power != nullptr && hal_.display != nullptr;
+        case Menu::BatteryAlertSound: return hal_.power != nullptr && hal_.display != nullptr && hal_.speaker != nullptr;
+        case Menu::ChargingNotice: return hal_.power != nullptr && hal_.display != nullptr;
+        case Menu::ChargingSound: return hal_.power != nullptr && hal_.speaker != nullptr;
+        case Menu::ChargedNotice: return hal_.power != nullptr && hal_.display != nullptr;
+        case Menu::ChargedSound: return hal_.power != nullptr && hal_.speaker != nullptr;
         case Menu::TouchWake: return profile_.touch_screen && profile_.wake_key && hal_.display != nullptr;
         case Menu::FaceDownSleep: return can_sleep_face_down();
         case Menu::Clock: return hal_.display != nullptr;
@@ -140,6 +146,35 @@ void App::settings_input(Button button, bool pressed) {
       console("set screen_timeout " + std::to_string(next));
       break;
     }
+    case Menu::BatteryAlert: {
+      // The presets in turn, then Off again; another list set from the console goes to Off.
+      static const char* const kPresets[] = {"off", "10", "10,5", "15,10,5", "20,10"};
+      constexpr size_t kCount = sizeof(kPresets) / sizeof(kPresets[0]);
+      std::string current;
+      for (uint8_t level : battery_alert_levels_)
+        if (level) current += (current.empty() ? "" : ",") + std::to_string(level);
+      if (current.empty()) current = "off";
+      size_t next = 0;  // Off, unless the current list is a preset
+      for (size_t i = 0; i < kCount; ++i)
+        if (current == kPresets[i]) next = (i + 1) % kCount;
+      console(std::string("set battery_alert ") + kPresets[next]);
+      break;
+    }
+    case Menu::BatteryAlertSound:
+      console(battery_alert_sound_ ? "set battery_alert_sound off" : "set battery_alert_sound on");
+      break;
+    case Menu::ChargingNotice:
+      console(charging_notice_enabled_ ? "set charging_notice off" : "set charging_notice on");
+      break;
+    case Menu::ChargingSound:
+      console(charging_sound_ ? "set charging_sound off" : "set charging_sound on");
+      break;
+    case Menu::ChargedNotice:
+      console(charged_notice_enabled_ ? "set charged_notice off" : "set charged_notice on");
+      break;
+    case Menu::ChargedSound:
+      console(charged_sound_ ? "set charged_sound off" : "set charged_sound on");
+      break;
     case Menu::TouchWake:
       console(touch_wake_ ? "set touch_wake off" : "set touch_wake on");
       break;
@@ -288,6 +323,34 @@ void App::settings_model() {
       m.detail = tr(Msg::ScreenTimeout);
       m.body = screen_timeout_ms_ ? tr(Msg::TimeoutSeconds, {std::to_string(screen_timeout_ms_ / 1000)})
                                  : std::string(tr(Msg::TimeoutAlwaysOn));
+      break;
+    case Menu::BatteryAlert: {
+      m.detail = tr(Msg::BatteryAlert);
+      std::string levels;
+      for (uint8_t level : battery_alert_levels_)
+        if (level) levels += (levels.empty() ? "" : ", ") + std::to_string(level) + "%";
+      m.body = levels.empty() ? std::string(tr(Msg::BatteryAlertOff)) : tr(Msg::BatteryAlertAt, {levels});
+      break;
+    }
+    case Menu::BatteryAlertSound:
+      m.detail = tr(Msg::BatteryAlertSound);
+      m.body = tr(battery_alert_sound_ ? Msg::BatteryAlertSoundOn : Msg::BatteryAlertSoundOff);
+      break;
+    case Menu::ChargingNotice:
+      m.detail = tr(Msg::ChargingNotice);
+      m.body = tr(charging_notice_enabled_ ? Msg::ChargingNoticeOn : Msg::ChargingNoticeOff);
+      break;
+    case Menu::ChargingSound:
+      m.detail = tr(Msg::ChargingSound);
+      m.body = tr(charging_sound_ ? Msg::ChargingSoundOn : Msg::ChargingSoundOff);
+      break;
+    case Menu::ChargedNotice:
+      m.detail = tr(Msg::ChargedNotice);
+      m.body = tr(charged_notice_enabled_ ? Msg::ChargedNoticeOn : Msg::ChargedNoticeOff);
+      break;
+    case Menu::ChargedSound:
+      m.detail = tr(Msg::ChargedSound);
+      m.body = tr(charged_sound_ ? Msg::ChargedSoundOn : Msg::ChargedSoundOff);
       break;
     case Menu::TouchWake:
       m.detail = tr(Msg::TouchWake);
