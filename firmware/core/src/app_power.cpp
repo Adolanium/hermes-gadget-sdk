@@ -155,14 +155,15 @@ void App::battery_alert_check() {
   if (battery_alert_sound_) play_tones(kLowBatteryTones, sizeof(kLowBatteryTones) / sizeof(kLowBatteryTones[0]));
 }
 
-void App::play_tones(const Tone* tones, size_t count) {
+bool App::play_tones(const Tone* tones, size_t count) {
   if (!hal_.speaker || in_stream_ >= 0 || speaking() || hal_.speaker->busy() || mode_ != Mode::Idle || alarm_ ||
       face_down_)
-    return;
+    return false;
   const auto pcm = synth_tones(tones, count, profile_.speaker_rate, kToneLeadMs);
-  if (pcm.empty() || !hal_.speaker->begin(profile_.speaker_rate)) return;
+  if (pcm.empty() || !hal_.speaker->begin(profile_.speaker_rate)) return false;
   hal_.speaker->write(pcm.data(), pcm.size());
   hal_.speaker->end();
+  return true;
 }
 
 void App::close_notices_for_input() {
@@ -192,7 +193,8 @@ bool App::show_power_notice(PowerNotice notice) {
 // below 100% on this plug (and, where the board reports charging, after charging was seen).
 // Once per plug; a busy screen holds it for a later reading.
 void App::charged_check() {
-  if (plugged_ != true || !power_status_) {
+  if (!power_status_) return;  // a failed reading: try again at the next one
+  if (plugged_ != true) {
     reset_charge();
     return;
   }
@@ -211,8 +213,10 @@ void App::charged_check() {
   const bool reached = gauge && *percent >= 100 && below_full_seen_ && (charge_seen_ || !p.charging.has_value());
   if (!ended && !reached) return;
   if (charged_notice_enabled_ && !show_power_notice(PowerNotice::Charged)) return;
+  const bool chimed = charged_sound_ && play_tones(kChargedTones, sizeof(kChargedTones) / sizeof(kChargedTones[0]));
+  // Without the screen, the chime is the whole notice: a busy speaker keeps it for a later reading.
+  if (!charged_notice_enabled_ && charged_sound_ && !chimed) return;
   charged_done_ = true;
-  if (charged_sound_) play_tones(kChargedTones, sizeof(kChargedTones) / sizeof(kChargedTones[0]));
 }
 
 // Each supply reading: USB coming in after a known battery-only reading lights the
@@ -259,13 +263,12 @@ void App::power_tick() {
     sensors_dirty_ = true;
     if (settings_open()) update_model();
     battery_alert_check();  // first: plugging in closes the low battery alert for the notice
+    // A failed reading says nothing about the supply: the plug and the charge so far stand.
     if (power_status_) {
       const auto& p = *power_status_;
       note_supply(p.external_power.has_value() ? p.external_power : p.charging);
-    } else {
-      note_supply(std::nullopt);
+      charged_check();
     }
-    charged_check();
   }
   // Its own sound keeps the speaker busy, so it gives way to what takes the screen, not to that.
   // An open list stays under it, as under the low battery alert.

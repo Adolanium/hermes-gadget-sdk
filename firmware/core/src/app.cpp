@@ -228,7 +228,7 @@ void App::load_settings() {
   charging_notice_enabled_ = setting("charging_notice", "on") != "off";
   charging_sound_ = setting("charging_sound", "off") == "on";
   charged_notice_enabled_ = setting("charged_notice", "on") != "off";
-  charged_sound_ = setting("charged_sound", "on") != "off";
+  charged_sound_ = setting("charged_sound", "off") == "on";  // off: a charge often ends at night
   const std::string language = setting("language", "en");
   lang_auto_ = language == "auto";
   lang_ = lang_auto_ ? hermes_lang_.value_or(i18n::Lang::En) : i18n::parse(language).value_or(i18n::Lang::En);

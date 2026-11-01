@@ -484,13 +484,13 @@ class App {
   void dismiss_battery_alert();
   // A short local sound (hg/tones.hpp), only into a quiet speaker: never over Hermes,
   // an open microphone, the alarm or a gadget lying face down.
-  void play_tones(const Tone* tones, size_t count);
+  bool play_tones(const Tone* tones, size_t count);  // false when the speaker is not free
   // The `charging_notice` setting: plugging in lights the screen with the level for a moment.
   bool charging_notice_enabled_ = true;
   bool charging_sound_ = false;           // the `charging_sound` setting: plugging in chirps
   // The `charged_notice` and `charged_sound` settings: a full battery on USB lights the
   // screen and chimes, once per charge.
-  bool charged_notice_enabled_ = true, charged_sound_ = true;
+  bool charged_notice_enabled_ = true, charged_sound_ = false;
   // The notice on screen for a few seconds: USB plugged in, or the battery full.
   enum class PowerNotice : uint8_t { None, Charging, Charged };
   PowerNotice power_notice_ = PowerNotice::None;

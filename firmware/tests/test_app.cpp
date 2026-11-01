@@ -2437,7 +2437,11 @@ namespace {
 // A gauge whose reading a test sets: on battery at 50% until it changes it.
 struct AlertPower : hg::Power {
   hg::PowerStatus status{true, 3800, 50, false, false};
-  std::optional<hg::PowerStatus> read() override { return status; }
+  bool failing = false;  // the next readings fail, as a driver's I2C read can
+  std::optional<hg::PowerStatus> read() override {
+    if (failing) return std::nullopt;
+    return status;
+  }
   std::optional<bool> external_power() override { return status.external_power; }
   bool power_off() override { return false; }
   void on_battery(uint8_t percent) { status.battery_percent = percent; status.charging = status.external_power = false; }
@@ -2837,6 +2841,7 @@ TEST("full battery: once per charge, when charging ends or the gauge reaches 100
   r.hal.power = &battery;
   r.fake.backlight = true;
   r.bring_online(true);
+  CHECK_EQ(r.app.console("set charged_sound on"), std::string("@ok charged_sound"));
   battery.on_battery(90);
   r.advance(5000);
   battery.on_usb(90);
@@ -2884,6 +2889,62 @@ TEST("full battery: once per charge, when charging ends or the gauge reaches 100
   CHECK(r.app.charged_notice());
 }
 
+TEST("full battery: the screen is on by default and the chime off, so a charge ending at night is silent") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  battery.on_usb(95);
+  r.advance(5000);
+  const size_t before = r.fake.spk_samples;
+  battery.status.charging = false;
+  r.advance(15000);  // three readings in a row: the charge has ended
+  CHECK(r.app.charged_notice());
+  CHECK_EQ(r.fake.spk_samples, before);
+  r.advance(5000);
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 30 && r.app.model().detail != "Full battery sound"; ++i) r.app.on_button(hg::Button::Down, true);
+  CHECK_EQ(r.app.model().detail, std::string("Full battery sound"));
+  CHECK(r.app.model().body.rfind("Off\n", 0) == 0);
+}
+
+TEST("full battery: a failed reading keeps the charge, and the chime alone waits for a free speaker") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set charged_sound on"), std::string("@ok charged_sound"));
+  battery.on_usb(95);
+  r.advance(5000);
+  battery.status.charging = false;
+  r.advance(5000);
+  battery.failing = true;  // a reading fails just as the charge ends
+  r.advance(5000);
+  battery.failing = false;
+  r.advance(10000);
+  CHECK(r.app.charged_notice());  // the charge so far was kept through the failed reading
+  r.advance(5000);
+
+  // With the screen notice off, the chime is the whole notice: a busy speaker holds it.
+  CHECK_EQ(r.app.console("set charged_notice off"), std::string("@ok charged_notice"));
+  battery.on_battery(95);
+  r.advance(5000);
+  battery.on_usb(95);
+  r.advance(5000);
+  const size_t before = r.fake.spk_samples;
+  r.fake.spk_draining = true;  // something else is playing
+  battery.status.charging = false;
+  r.advance(15000);
+  CHECK_EQ(r.fake.spk_samples, before);
+  r.fake.spk_draining = false;
+  r.advance(5000);
+  CHECK_EQ(r.fake.spk_samples - before, size_t(16000 * (150 + 420) / 1000));  // played once it was free
+  r.advance(10000);
+  CHECK_EQ(r.fake.spk_samples - before, size_t(16000 * (150 + 420) / 1000));  // and only once
+}
+
 TEST("full battery: the screen and the chime are separate settings, and a busy screen waits") {
   AlertPower battery;
   Rig r;
@@ -2891,6 +2952,7 @@ TEST("full battery: the screen and the chime are separate settings, and a busy s
   r.fake.backlight = true;
   r.bring_online(true);
   CHECK_EQ(r.app.console("set charged_notice maybe"), std::string("@error charged_notice must be on or off"));
+  CHECK_EQ(r.app.console("set charged_sound on"), std::string("@ok charged_sound"));
   CHECK_EQ(r.app.console("set charged_notice off"), std::string("@ok charged_notice"));
   battery.on_usb(95);
   r.advance(5000);
@@ -2924,6 +2986,7 @@ TEST("full battery: a charger still starting up, or flickering off for a reading
   r.hal.power = &battery;
   r.fake.backlight = true;
   r.bring_online(true);
+  CHECK_EQ(r.app.console("set charged_sound on"), std::string("@ok charged_sound"));
   battery.on_battery(90);
   r.advance(5000);
   const size_t before = r.fake.spk_samples;
