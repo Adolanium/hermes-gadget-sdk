@@ -96,6 +96,12 @@ void App::on_power_key() {
     wake_display();
     return;
   }
+  if (profile_picker_open()) {  // PWR is Back on the profile grid: Ready, still lit; the next press darkens
+    dismiss_overlay();
+    activity_at_ = now();
+    update_model();
+    return;
+  }
   // Off means off: the menu, a list or a card the user was on closes, so the
   // next press wakes to the home screen and nothing open turns the screen back on.
   if (settings_open()) close_settings();

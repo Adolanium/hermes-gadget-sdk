@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "hg/canvas.hpp"
@@ -57,6 +58,10 @@ struct DashRow {
   Tone tone = Tone::Dim;
   bool heading = false;
 };
+
+// The letter a profile without a face shows in the grid: the name's first character, in capitals
+// (ASCII and Latin-1), whatever case the name arrives in; "?" for an empty name.
+std::string profile_initial(std::string_view name);
 
 struct UiModel {
   Screen screen = Screen::Boot;
