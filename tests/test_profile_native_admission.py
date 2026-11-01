@@ -62,3 +62,18 @@ def test_native_route_refuses_invalid_selection(hermes_home, tmp_path, case):
     elif case == "parked":
         (hermes_home / "profiles" / "ops" / "gateway.parked").touch()
     assert adapter.validate_native_profile_route(source) is False
+
+
+def test_native_route_hook_has_the_shape_hermes_calls(hermes_home, tmp_path):
+    """Hermes looks the hook up on the adapter's class, calls it synchronously with the source, and
+    accepts the profile only when it returns the literal True (NousResearch/hermes-agent#147690).
+    An async method, or one Hermes cannot find on the class, would return something else, so every
+    switched device would get profile_mismatch again (#232)."""
+    import inspect
+
+    adapter, source = _adapter_and_source(hermes_home, tmp_path)
+    hook = getattr(type(adapter), "validate_native_profile_route", None)
+    assert callable(hook) and not inspect.iscoroutinefunction(hook)
+    assert hook(adapter, source) is True
+    source.profile = "missing"
+    assert hook(adapter, source) is False
