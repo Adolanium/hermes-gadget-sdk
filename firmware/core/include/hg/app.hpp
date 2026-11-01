@@ -119,7 +119,16 @@ class App {
   void on_transport_text(std::string_view text);
   void on_transport_binary(const uint8_t* data, size_t len);
   void on_transport_closed(std::string_view reason);
-  void on_button(Button button, bool pressed);
+  // `touch`: the press comes from the touchscreen (TouchGestures), not a key.
+  void on_button(Button button, bool pressed, bool touch = false);
+  // Two presses of the TALK key (BOOT on most boards) this close together, start to start,
+  // go home: the second press cancels what the first started, closes what is open and asks
+  // Hermes for the default profile (the `double_home` setting). The first press acts at once.
+  static constexpr uint32_t kDoublePressMs = 400;
+  bool double_home() const { return double_home_; }
+  // The `wake_talk` setting: a press of the TALK key on a dark screen lights it and talks at once
+  // (holds to talk, or starts a tap-mode recording), instead of only waking it.
+  bool wake_talk() const { return wake_talk_; }
   // Accelerometer sample in the device frame, in milli-g: +x towards the
   // picture's right, +y towards its top, +z out of the screen. Called 5-25
   // times a second from the thread that calls tick().
@@ -346,6 +355,8 @@ class App {
   bool known_setting(std::string_view key) const;
   std::string wifi_command(std::string_view args);
   void start_new_session();
+  // The double press of TALK: back to Ready with the default profile.
+  void go_home();
   void scroll_body(int delta);
   // Long text pages itself, so boards without scroll buttons can read it all.
   bool turn_page();
@@ -452,6 +463,8 @@ class App {
   bool talk_held_ = false;
   bool settings_chord_fired_ = false;
   uint32_t talk_down_at_ = 0;
+  uint32_t talk_key_at_ = 0;      // the last press of the TALK key, for a double press
+  bool talk_key_armed_ = false;   // ...and whether the next press may complete one
   std::optional<PowerStatus> power_status_;
   uint32_t power_read_at_ = 0, activity_at_ = 0, power_key_polled_at_ = 0;
   uint32_t screen_timeout_ms_ = 0;
@@ -517,6 +530,8 @@ class App {
   bool motion_seen_ = false, face_down_ = false;
   bool face_down_sleep_ = false;      // the `face_down_sleep` setting
   bool touch_wake_ = true;            // the `touch_wake` setting
+  bool double_home_ = true;           // the `double_home` setting
+  bool wake_talk_ = false;            // the `wake_talk` setting
   bool reply_while_face_down_ = false;  // a reply arrived while dark; show it on the turn-over
   uint8_t wake_buttons_ = 0;
 
