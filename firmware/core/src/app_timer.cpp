@@ -17,7 +17,6 @@ constexpr int64_t kMaxTimerS = 86400;
 constexpr size_t kMaxLabelCols = 40;     // code points, as JSON Schema counts maxLength
 constexpr uint32_t kRingMaxMs = 60000;   // beep for at most this long; the alarm stays up
 constexpr uint32_t kBeepCycleMs = 1500;  // one double beep per cycle
-constexpr double kPi = 3.14159265358979323846;
 
 json::Value int_param(const char* description, int64_t lo, int64_t hi) {
   json::Value p = json::Value::object();
@@ -192,18 +191,10 @@ void App::beep_pattern() {
   if (!hal_.speaker || in_stream_ >= 0) return;
   const uint32_t rate = profile_.speaker_rate;
   if (beep_pcm_.empty()) {
-    // Two 120 ms beeps at 880 Hz, 80 ms apart, with 5 ms ramps so they don't click.
-    const size_t beep = rate * 120 / 1000, gap = rate * 80 / 1000, ramp = rate * 5 / 1000;
-    beep_pcm_.assign(2 * beep + gap, 0);
-    const double step = 2.0 * kPi * 880.0 / static_cast<double>(rate);
-    for (size_t start : {size_t(0), beep + gap}) {
-      for (size_t i = 0; i < beep; ++i) {
-        double gain = 1.0;
-        if (i < ramp) gain = static_cast<double>(i) / static_cast<double>(ramp);
-        if (beep - i < ramp) gain = static_cast<double>(beep - i) / static_cast<double>(ramp);
-        beep_pcm_[start + i] = static_cast<int16_t>(9000.0 * gain * std::sin(step * static_cast<double>(i)));
-      }
-    }
+    // Two 120 ms beeps at 880 Hz, 80 ms apart, after the lead-in every short sound has: each
+    // double beep is a stream of its own, and the amplifier comes up with each one.
+    static constexpr Tone kBeeps[] = {{880, 120, 80, 9000}, {880, 120, 0, 9000}};
+    beep_pcm_ = synth_tones(kBeeps, 2, rate, kToneLeadMs);
   }
   if (!hal_.speaker->begin(rate)) return;
   hal_.speaker->write(beep_pcm_.data(), beep_pcm_.size());

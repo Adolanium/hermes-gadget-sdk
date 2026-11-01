@@ -219,6 +219,9 @@ const char* screen_name(Screen s) {
     case Screen::Profiles: return "profiles";
     case Screen::Alarm: return "alarm";
     case Screen::Clock: return "clock";
+    case Screen::LowBattery: return "low_battery";
+    case Screen::Charging: return "charging";
+    case Screen::Charged: return "charged";
   }
   return "unknown";
 }
@@ -389,6 +392,10 @@ void Ui::draw_frame(const UiModel& m) {
   }
   if (m.screen == Screen::Clock) {
     draw_clock(m);
+    return;
+  }
+  if (m.screen == Screen::LowBattery || m.screen == Screen::Charging || m.screen == Screen::Charged) {
+    draw_battery_face(m);
     return;
   }
   if (full_face_ != FullFace::None) {  // a face painted the whole panel: everything comes back
@@ -694,6 +701,9 @@ void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
     case Screen::Profiles:
     case Screen::Alarm:
     case Screen::Clock:
+    case Screen::LowBattery:
+    case Screen::Charging:
+    case Screen::Charged:
       break;
   }
 }
@@ -1268,6 +1278,144 @@ void Ui::draw_alarm(const UiModel& m) {
       const std::string shown = fit(label, cols);
       panel.text(cx - Canvas::text_width(shown, ls) / 2, y, shown, ls, ink);
     }
+  });
+}
+
+// The battery faces: the low battery alert (red, a "!"), plugging in (green, the level and
+// a bolt) and a full battery (green, full). The whole panel: a battery outline with its
+// terminal, the charge as a bar from the left, the mark in a gap cut out of the bar so the
+// icon reads by shape as well as colour; the percentage (`headline`) large below it, then
+// the one or two lines of `detail`. On a round panel the group keeps to the square inside
+// the glass. `face_battery` below 0 draws no bar, and an empty headline no percentage.
+void Ui::draw_battery_face(const UiModel& m) {
+  band_ = ArcSweep{};
+  band_shown_ = false;
+  const uint32_t key = Hash().val(static_cast<int>(m.screen)).add(m.headline).add(m.detail).add(m.hint)
+                           .val(m.face_battery).val(m.lang).get();
+  if (valid_ && full_face_ == FullFace::Battery && key == face_hash_) return;
+  full_face_ = FullFace::Battery;
+  face_hash_ = key;
+  valid_ = true;  // leaving it repaints everything anyway (draw_frame)
+
+  enum class Mark { Alert, Bolt, None };
+  const Mark mark = m.screen == Screen::LowBattery ? Mark::Alert : m.screen == Screen::Charging ? Mark::Bolt : Mark::None;
+  const uint16_t ink = m.screen == Screen::LowBattery ? kRed : kGreen;
+
+  const int s = layout_.scale;
+  const int W = panel_.width, H = panel_.height;
+  const int cx = W / 2, cy = H / 2;
+  const int hy = oy_ + info_.height - layout_.bottom_h;  // the hint's band
+  // The box the group keeps to: the inscribed square on a round panel.
+  const int box_w = panel_.round ? W * 70 / 100 : W - 8 * s;
+  const int lo = panel_.round ? cy - box_w / 2 : 4 * s;
+  const int hi = panel_.round ? std::min(cy + box_w / 2, hy) : hy - 2 * s;
+
+  std::string line1 = m.detail, line2;
+  if (const size_t nl = m.detail.find('\n'); nl != std::string::npos) {
+    line1 = m.detail.substr(0, nl);
+    line2 = m.detail.substr(nl + 1);
+  }
+  const int ls1 = s + 1, ls2 = s;  // the first line a step above the base scale, the second at it
+  const int gap = 5 * s;
+  const int text_h = Canvas::line_height(ls1) + (line2.empty() ? 0 : Canvas::line_height(ls2));
+  const bool number = !m.headline.empty();
+
+  // The largest percentage scale, and the icon sized from the box, that fit the box's height.
+  int ps = 1, iw = 0, ih = 0;
+  auto group_h = [&](int k, int h) { return h + gap + (number ? Canvas::line_height(k) + gap : 0) + text_h; };
+  for (int k = 12; k >= 1; --k) {
+    if (number && Canvas::text_width(m.headline, k) > box_w * 3 / 4) continue;
+    const int w = std::min(box_w * 3 / 4, (hi - lo) * 9 / 10);
+    if (group_h(k, w * 9 / 20) <= hi - lo || k == 1 || !number) {
+      ps = k;
+      iw = w;
+      ih = iw * 9 / 20;
+      while (iw > 16 && group_h(k, ih) > hi - lo) {  // shrink the icon until the group fits
+        iw = iw * 9 / 10;
+        ih = iw * 9 / 20;
+      }
+      break;
+    }
+  }
+  const int ph = number ? Canvas::line_height(ps) : 0;
+  const int group = group_h(ps, ih);
+  const int top = std::clamp(cy - group / 2, lo, std::max(lo, hi - group));
+
+  each_window(0, H, [&](int, int) {
+    Canvas panel = panel_canvas();
+    panel.fill_rect(0, 0, W, H, bg_);
+
+    // The icon: an outline (stroke t), the terminal on the right, the charge bar inside.
+    const int t = std::max(2, iw / 22);
+    const int nub_w = std::max(2, iw / 14), nub_h = ih * 2 / 5;
+    const int body_w = iw - nub_w;
+    const int x0 = cx - iw / 2, y0 = top;
+    const int r = std::max(1, ih / 6);
+    panel.fill_round_rect(x0, y0, body_w, ih, r, ink);
+    panel.fill_round_rect(x0 + t, y0 + t, body_w - 2 * t, ih - 2 * t, std::max(1, r - t), bg_);
+    panel.fill_rect(x0 + body_w, y0 + (ih - nub_h) / 2, nub_w, nub_h, ink);
+    const int pad = std::max(1, t);
+    const int in_x = x0 + t + pad, in_y = y0 + t + pad, in_w = body_w - 2 * (t + pad), in_h = ih - 2 * (t + pad);
+    if (m.face_battery >= 0)
+      panel.fill_rect(in_x, in_y, std::max(t, in_w * std::min<int>(m.face_battery, 100) / 100), in_h, ink);
+    const int mid = x0 + body_w / 2;
+    if (mark == Mark::Alert) {
+      // A stem and a dot, in a gap cut out of the bar.
+      const int ex_w = std::max(2, in_h / 5), stem_h = in_h * 11 / 20, dot_h = ex_w;
+      const int ex_x = mid - ex_w / 2;
+      const int ex_y = in_y + (in_h - (stem_h + ex_w / 2 + dot_h)) / 2;
+      panel.fill_rect(ex_x - pad, in_y, ex_w + 2 * pad, in_h, bg_);
+      panel.fill_rect(ex_x, ex_y, ex_w, stem_h, ink);
+      panel.fill_rect(ex_x, ex_y + stem_h + ex_w / 2, ex_w, dot_h, ink);
+    } else if (mark == Mark::Bolt) {
+      // A lightning bolt, row by row: a band falling to the left, a crossbar, a band falling
+      // to a point. Drawn grown by `pad` in the background first, then in the text colour.
+      const int bh = in_h * 9 / 10, bw = bh * 4 / 5;
+      const int by = in_y + (in_h - bh) / 2;
+      auto bolt = [&](int grow, uint16_t col) {
+        for (int row = -grow; row < bh + grow; ++row) {
+          const int q = std::clamp(row, 0, bh - 1) * 1000 / std::max(1, bh - 1);  // 0..1000 down the bolt
+          int xa, xb;
+          if (q < 450) {  // the upper band, from the top right towards the middle
+            const int c = bw * 20 / 100 - bw * 32 / 100 * q / 450;
+            xa = c - bw * 19 / 100;
+            xb = c + bw * 19 / 100;
+          } else if (q < 560) {  // the crossbar
+            xa = -bw * 30 / 100;
+            xb = bw * 30 / 100;
+          } else {  // the lower band, narrowing to a point at the bottom left
+            const int f = (q - 560) * 1000 / 440;
+            const int c = bw * 12 / 100 - bw * 32 / 100 * f / 1000;
+            const int half = bw * 19 / 100 * (1000 - f) / 1000;
+            xa = c - half;
+            xb = c + half;
+          }
+          panel.fill_rect(mid + xa - grow, by + row, xb - xa + 1 + 2 * grow, 1, col);
+        }
+      };
+      bolt(pad, bg_);
+      bolt(0, kText);
+    }
+
+    // The percentage, then the detail's lines.
+    int y = top + ih + gap;
+    if (number) {
+      panel.text(cx - Canvas::text_width(m.headline, ps) / 2, y, m.headline, ps, ink);
+      y += ph + gap;
+    }
+    const std::string a = fit(line1, (box_w + ls1) / (font::kCellWidth * ls1));
+    panel.text(cx - Canvas::text_width(a, ls1) / 2, y, a, ls1, kText);
+    y += Canvas::line_height(ls1);
+    if (!line2.empty()) {
+      const std::string b = fit(line2, (box_w + ls2) / (font::kCellWidth * ls2));
+      panel.text(cx - Canvas::text_width(b, ls2) / 2, y, b, ls2, kDim);
+    }
+
+    // The hint, if any, in the bottom band where the bar would be.
+    if (m.hint.empty()) return;
+    const int hw = panel_.round ? W * 60 / 100 : W - 8 * s;
+    const std::string hint = fit(m.hint, (hw + s) / (font::kCellWidth * s));
+    panel.text(cx - Canvas::text_width(hint, s) / 2, hy + s, hint, s, kDim);
   });
 }
 

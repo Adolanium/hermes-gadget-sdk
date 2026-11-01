@@ -15,6 +15,23 @@ constexpr uint32_t kMotionStaleMs = 2000;  // a silent sensor never keeps the sc
 // The resting clock's share of the brightness setting: AMOLED care, with a floor
 // so a very low setting keeps the face readable.
 constexpr int kClockPercent = 70;
+// The low battery alert stays up this long unless an input closes it first.
+constexpr uint32_t kBatteryAlertMs = 10000;
+// A spent alert level rearms once a charger lifts the reading this far above it, so
+// a percentage that wobbles across a level, or a short time on USB, never repeats it.
+constexpr int kBatteryAlertRearm = 5;
+// The low battery alert's sound: a falling double beep, 880 Hz then 660 Hz, a little
+// softer than the timer alarm's (9000).
+constexpr Tone kLowBatteryTones[] = {{880, 120, 80, 8000}, {660, 160, 0, 8000}};
+// Plugging in shows the charging notice this long; the screen then times out as usual.
+constexpr uint32_t kChargingNoticeMs = 5000;
+// Plugging in's sound, when charging_sound is on: a rising 660/990 Hz chirp.
+constexpr Tone kChargingTones[] = {{660, 80, 20, 8000}, {990, 140, 0, 8000}};
+// A full battery's sound: a soft rising 784/1046 Hz chime.
+constexpr Tone kChargedTones[] = {{784, 140, 40, 7000}, {1046, 240, 0, 7000}};
+// Readings in a row (5 s apart) that the charging signal must read false, after reading
+// true, before the charge counts as finished.
+constexpr uint8_t kChargeEndReads = 3;
 
 }  // namespace
 
@@ -74,6 +91,7 @@ void App::set_dozing(bool dozing) {
 
 void App::on_power_key() {
   if (!hal_.display || !hal_.display->info().has_backlight) return;
+  close_notices_for_input();  // like any other press: it closes the alert and does its own thing
   if (display_sleeping_ || display_dimmed_) {
     wake_display();
     return;
@@ -98,7 +116,140 @@ bool App::menu_open() const { return overlay_ == Overlay::Profiles || overlay_ =
 bool App::screen_busy() const {
   return mode_ != Mode::Idle || speaking() || talk_held_ || cancel_held_ || prompt_showing() ||
          !wifi_setup_text_.empty() || phone_pairing_ || ota_busy() || ota_ == Ota::Restarting ||
-         (overlay_ != Overlay::None && !menu_open());
+         (overlay_ != Overlay::None && !menu_open()) || battery_alert_;
+}
+
+// After each power reading. A level is crossed on battery when the percentage is at or
+// below it with an explicit battery-only reading; the lowest level crossed is the one shown.
+void App::battery_alert_check() {
+  if (!battery_alert_levels_[0] || !power_status_) return;
+  const auto percent = display_battery_percent();
+  if (!percent) return;
+  const auto& p = *power_status_;
+  if (p.external_power == true || p.charging == true) {
+    // Charging rearms the spent levels the reading has climbed clear of, lowest first.
+    while (battery_alert_spent_ && *percent >= battery_alert_spent_ + kBatteryAlertRearm) {
+      uint8_t next = 0;  // the next level above the spent one, or none
+      for (uint8_t level : battery_alert_levels_)
+        if (level > battery_alert_spent_ && (!next || level < next)) next = level;
+      battery_alert_spent_ = next;
+    }
+    if (battery_alert_) dismiss_battery_alert();  // plugging in answers it
+    return;
+  }
+  if (p.external_power != false) return;  // unknown supply: no alert, as with the red indicator
+  uint8_t crossed = 0;
+  for (uint8_t level : battery_alert_levels_)
+    if (level && *percent <= level) crossed = level;  // highest first: the last match is the lowest
+  if (!crossed || (battery_alert_spent_ && crossed >= battery_alert_spent_)) return;
+  // A busy screen, a dark face-down gadget or the boot screen: the next reading tries again.
+  if (battery_alert_ || face_down_ || alarm_ || phase_ == Phase::Boot || settings_open() || screen_busy()) return;
+  battery_alert_spent_ = crossed;
+  battery_alert_ = crossed;
+  battery_alert_percent_ = *percent;
+  battery_alert_until_ = now() + kBatteryAlertMs;
+  log(LogLevel::Info, "low battery alert: " + std::to_string(*percent) + "%");
+  wake_display();
+  if (ui_) ui_->invalidate();
+  update_model();
+  if (battery_alert_sound_) play_tones(kLowBatteryTones, sizeof(kLowBatteryTones) / sizeof(kLowBatteryTones[0]));
+}
+
+void App::play_tones(const Tone* tones, size_t count) {
+  if (!hal_.speaker || in_stream_ >= 0 || speaking() || hal_.speaker->busy() || mode_ != Mode::Idle || alarm_ ||
+      face_down_)
+    return;
+  const auto pcm = synth_tones(tones, count, profile_.speaker_rate, kToneLeadMs);
+  if (pcm.empty() || !hal_.speaker->begin(profile_.speaker_rate)) return;
+  hal_.speaker->write(pcm.data(), pcm.size());
+  hal_.speaker->end();
+}
+
+void App::close_notices_for_input() {
+  if (battery_alert_) dismiss_battery_alert();
+  if (power_notice_ != PowerNotice::None) dismiss_charging_notice(false);
+}
+
+// Lights the screen with a notice for a few seconds, unless the screen is in use or dark
+// on purpose (face down). False when it could not show.
+bool App::show_power_notice(PowerNotice notice) {
+  if (!hal_.display || face_down_ || alarm_ || settings_open() || screen_busy()) return false;
+  // A dark screen with no timeout to darken it again goes dark when the notice ends.
+  charging_notice_darkens_ = (display_sleeping_ && !screen_timeout_ms_) ||
+                             (power_notice_ != PowerNotice::None && charging_notice_darkens_);
+  power_notice_ = notice;
+  charging_notice_until_ = now() + kChargingNoticeMs;
+  wake_display();
+  if (ui_) ui_->invalidate();
+  update_model();
+  return true;
+}
+
+// Each reading on USB: the battery is full once a charge ends, or once the gauge climbs
+// to 100%. A charge has ended when the charging signal, after reading true, reads false
+// kChargeEndReads readings in a row with USB still in: a charger that is still starting
+// up, or that flickers off for a reading, ends nothing. The gauge counts only after it read
+// below 100% on this plug (and, where the board reports charging, after charging was seen).
+// Once per plug; a busy screen holds it for a later reading.
+void App::charged_check() {
+  if (plugged_ != true || !power_status_) {
+    reset_charge();
+    return;
+  }
+  if (charged_done_ || phase_ == Phase::Boot) return;
+  const auto& p = *power_status_;
+  const auto percent = display_battery_percent();
+  const bool gauge = percent && !battery_is_estimated();  // an estimate reads high on a charger
+  if (p.charging == true) {
+    charge_seen_ = true;
+    charge_stopped_reads_ = 0;
+  } else if (p.charging == false && charge_seen_ && charge_stopped_reads_ < kChargeEndReads) {
+    ++charge_stopped_reads_;
+  }
+  if (gauge && *percent < 100) below_full_seen_ = true;
+  const bool ended = charge_seen_ && charge_stopped_reads_ >= kChargeEndReads;
+  const bool reached = gauge && *percent >= 100 && below_full_seen_ && (charge_seen_ || !p.charging.has_value());
+  if (!ended && !reached) return;
+  if (charged_notice_enabled_ && !show_power_notice(PowerNotice::Charged)) return;
+  charged_done_ = true;
+  if (charged_sound_) play_tones(kChargedTones, sizeof(kChargedTones) / sizeof(kChargedTones[0]));
+}
+
+// Each supply reading: USB coming in after a known battery-only reading lights the
+// screen with the charging notice. A busy or face-down screen is left as it is.
+void App::note_supply(std::optional<bool> plugged) {
+  const bool plugged_in = plugged == true && plugged_ == false;
+  // Any change of supply starts a new charge, also an unplug and replug that only the
+  // dark screen's quick poll saw between two readings.
+  if (plugged != plugged_) reset_charge();
+  plugged_ = plugged;
+  if (!plugged_in || phase_ == Phase::Boot) return;
+  if (charging_notice_enabled_) show_power_notice(PowerNotice::Charging);
+  if (charging_sound_) play_tones(kChargingTones, sizeof(kChargingTones) / sizeof(kChargingTones[0]));
+}
+
+void App::reset_charge() {
+  charge_seen_ = charged_done_ = below_full_seen_ = false;
+  charge_stopped_reads_ = 0;
+}
+
+void App::dismiss_charging_notice(bool darken) {
+  if (power_notice_ == PowerNotice::None) return;
+  power_notice_ = PowerNotice::None;
+  if (ui_) ui_->invalidate();
+  update_model();
+  if (darken && charging_notice_darkens_) {
+    display_sleeping_ = true;
+    apply_backlight();
+  }
+  charging_notice_darkens_ = false;
+}
+
+void App::dismiss_battery_alert() {
+  if (!battery_alert_) return;
+  battery_alert_ = 0;
+  if (ui_) ui_->invalidate();
+  update_model();
 }
 
 void App::power_tick() {
@@ -107,7 +258,27 @@ void App::power_tick() {
     power_read_at_ = now();
     sensors_dirty_ = true;
     if (settings_open()) update_model();
+    battery_alert_check();  // first: plugging in closes the low battery alert for the notice
+    if (power_status_) {
+      const auto& p = *power_status_;
+      note_supply(p.external_power.has_value() ? p.external_power : p.charging);
+    } else {
+      note_supply(std::nullopt);
+    }
+    charged_check();
   }
+  // Its own sound keeps the speaker busy, so it gives way to what takes the screen, not to that.
+  // An open list stays under it, as under the low battery alert.
+  if (power_notice_ != PowerNotice::None &&
+      (static_cast<int32_t>(now() - charging_notice_until_) >= 0 || mode_ != Mode::Idle || prompt_showing() ||
+       (overlay_ != Overlay::None && !menu_open()) || battery_alert_ || alarm_ || face_down_ || settings_open() ||
+       !wifi_setup_text_.empty() || phone_pairing_ || ota_busy() || ota_ == Ota::Restarting || plugged_ != true))
+    dismiss_charging_notice(static_cast<int32_t>(now() - charging_notice_until_) >= 0);
+  // Something else took the screen, or its time ran out: the alert goes.
+  if (battery_alert_ && (static_cast<int32_t>(now() - battery_alert_until_) >= 0 || mode_ != Mode::Idle ||
+                         prompt_showing() || alarm_ || face_down_ || settings_open() || !wifi_setup_text_.empty() ||
+                         phone_pairing_ || ota_busy() || ota_ == Ota::Restarting))
+    dismiss_battery_alert();
   constexpr uint32_t kPowerKeyPollMs = 100;
   if (hal_.power && now() - power_key_polled_at_ >= kPowerKeyPollMs) {
     power_key_polled_at_ = now();
@@ -117,6 +288,7 @@ void App::power_tick() {
     if (display_sleeping_) {
       const auto external = hal_.power->external_power();
       on_battery_ = external.has_value() && !*external;
+      if (external.has_value()) note_supply(external);  // a dark screen lights at once on USB
     }
   }
   bool doze = false;

@@ -6,6 +6,7 @@
 // thread. Nothing here blocks.
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -19,6 +20,7 @@
 #include "hg/hal.hpp"
 #include "hg/i18n.hpp"
 #include "hg/json.hpp"
+#include "hg/tones.hpp"
 #include "hg/ui.hpp"
 #include "hg/vad.hpp"
 
@@ -160,6 +162,15 @@ class App {
   // touch_wake off: a dark screen ignores the touchscreen until a key lights it.
   bool touch_wake() const { return touch_wake_; }
   bool touch_ignored() const { return !touch_wake_ && display_sleeping_; }
+  // The low battery alert is on screen: the level it crossed, or 0.
+  uint8_t battery_alert() const { return battery_alert_; }
+  // An input on a lit screen closes the alert first, then goes on as usual (a touch
+  // calls this at touch-down, so its hit tests see the screen underneath).
+  void close_notices_for_input();
+  // The charging notice is on screen: USB was just plugged in.
+  bool charging_notice() const { return power_notice_ == PowerNotice::Charging; }
+  // The full battery notice is on screen.
+  bool charged_notice() const { return power_notice_ == PowerNotice::Charged; }
   std::string agent_profile_name() const;
   // Returns true when this input only wakes a sleeping display.
   bool wake_display();
@@ -420,7 +431,7 @@ class App {
   bool lang_auto_ = false;
   std::optional<i18n::Lang> hermes_lang_;  // from the last `welcome` that named one this firmware has
   enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, Profile, Microphone, Speaker, Display, Inputs,
-                              Info, Power, IdleTimer, TouchWake, FaceDownSleep, Clock, PowerOff, WifiSetup, Phone, Language, Back };
+                              Info, Power, BatteryAlert, BatteryAlertSound, ChargingNotice, ChargingSound, ChargedNotice, ChargedSound, IdleTimer, TouchWake, FaceDownSleep, Clock, PowerOff, WifiSetup, Phone, Language, Back };
   enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };
   Menu menu_ = Menu::Closed;
   HardwareCheck hardware_check_ = HardwareCheck::None;
@@ -458,6 +469,44 @@ class App {
   bool battery_is_estimated() const;
   // Whether a native or explicitly enabled display percentage is available.
   bool battery_readable() const;
+  // The `battery_alert` setting: up to three percentages, highest first, 0 = unused.
+  // Crossing one on battery lights the screen with the alert once per discharge.
+  static constexpr int kBatteryAlertLevels = 3;
+  uint8_t battery_alert_levels_[kBatteryAlertLevels] = {};
+  uint8_t battery_alert_spent_ = 0;    // the lowest level alerted this discharge, 0 = none
+  uint8_t battery_alert_ = 0;          // the level on screen, 0 = none
+  uint8_t battery_alert_percent_ = 0;  // the reading it showed
+  // The battery indicator turns red at or below this: 15%, or the highest alert level when higher.
+  uint8_t low_battery_level() const { return std::max<uint8_t>(15, battery_alert_levels_[0]); }
+  uint32_t battery_alert_until_ = 0;
+  bool battery_alert_sound_ = true;    // the `battery_alert_sound` setting
+  void battery_alert_check();
+  void dismiss_battery_alert();
+  // A short local sound (hg/tones.hpp), only into a quiet speaker: never over Hermes,
+  // an open microphone, the alarm or a gadget lying face down.
+  void play_tones(const Tone* tones, size_t count);
+  // The `charging_notice` setting: plugging in lights the screen with the level for a moment.
+  bool charging_notice_enabled_ = true;
+  bool charging_sound_ = false;           // the `charging_sound` setting: plugging in chirps
+  // The `charged_notice` and `charged_sound` settings: a full battery on USB lights the
+  // screen and chimes, once per charge.
+  bool charged_notice_enabled_ = true, charged_sound_ = true;
+  // The notice on screen for a few seconds: USB plugged in, or the battery full.
+  enum class PowerNotice : uint8_t { None, Charging, Charged };
+  PowerNotice power_notice_ = PowerNotice::None;
+  bool charging_notice_darkens_ = false;  // it lit a dark screen that no timeout will darken again
+  uint32_t charging_notice_until_ = 0;
+  std::optional<bool> plugged_;           // the last known supply: true on USB, unknown until read
+  // This plug: the battery was seen charging, the gauge read below 100%, readings in a row
+  // since charging stopped, and whether the full notice has had its turn. All reset when
+  // the supply changes.
+  bool charge_seen_ = false, below_full_seen_ = false, charged_done_ = false;
+  uint8_t charge_stopped_reads_ = 0;
+  void reset_charge();
+  void note_supply(std::optional<bool> plugged);
+  void charged_check();
+  bool show_power_notice(PowerNotice notice);
+  void dismiss_charging_notice(bool darken);
   bool display_dimmed_ = false, display_sleeping_ = false, power_off_armed_ = false;
   bool dozing_ = false, on_battery_ = false;
   void set_dozing(bool dozing);
