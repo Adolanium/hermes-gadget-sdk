@@ -4884,7 +4884,8 @@ TEST("profiles: a quick tap on the name opens the grid; a hold on it talks") {
     touch.update(false, 0, 0, r.fake.clock);
     CHECK(r.app.profile_picker_open());
     CHECK_EQ(r.app.status_json().find("\"screen\":\"profiles\"") != std::string::npos, true);
-    CHECK_EQ(r.app.model().dash.size(), size_t(2));
+    CHECK_EQ(r.app.model().dash.size(), size_t(3));  // two profiles, then Settings
+    CHECK_EQ(r.app.model().settings_row, 2);
     CHECK_EQ(r.app.model().dash[0].value, std::string("default"));  // the id, which colours an initial
     CHECK(r.app.model().dash[0].tone == hg::DashRow::Tone::Waiting);  // the current one
     CHECK_EQ(r.app.model().mascot_row, 0);  // the default profile wears the mascot
@@ -5105,8 +5106,8 @@ TEST("profiles: the name and every grid cell are about 7 mm tall and wide on eac
         CHECK(r.app.open_profile_picker());
         const int per = r.app.profile_per_page();
         CHECK(per >= 1 && per <= grid);
-        std::vector<bool> seen(static_cast<size_t>(n));
-        const int pages = (n + per - 1) / std::max(1, per);
+        std::vector<bool> seen(static_cast<size_t>(n) + 1);
+        const int pages = (n + 1 + per - 1) / std::max(1, per);
         for (int page = 0; page < pages; ++page) {
           // Each cell's extent through its middle, across and down.
           std::map<int, std::pair<int, int>> across, down;  // item: first, last
@@ -5124,13 +5125,13 @@ TEST("profiles: the name and every grid cell are about 7 mm tall and wide on eac
             if (wide < min_px || tall < min_px)
               std::printf("    %s, grid %d, %d profiles: cell %d is %dx%d px < %d\n", b.name, grid, n, item, wide, tall, min_px);
             CHECK(wide >= min_px && tall >= min_px);
-            CHECK(item >= 0 && item < n);
-            if (item >= 0 && item < n) seen[static_cast<size_t>(item)] = true;
+            CHECK(item >= 0 && item <= n);  // n: the Settings cell after the profiles
+            if (item >= 0 && item <= n) seen[static_cast<size_t>(item)] = true;
           }
           if (pages > 1) CHECK(r.app.profile_page_step(1));
           CHECK(r.app.profile_picker_open());
         }
-        for (int i = 0; i < n; ++i) CHECK(seen[static_cast<size_t>(i)]);
+        for (int i = 0; i <= n; ++i) CHECK(seen[static_cast<size_t>(i)]);
       }
     }
   }
@@ -5172,7 +5173,7 @@ TEST("profiles: a swipe from right to left on Ready opens the grid at the curren
   Rig r(p);
   r.fake.make_panel(410, 486, false);
   r.fake.kv["profile_grid"] = "4";
-  welcome_with_roster(r, 16, "p9");  // 2x2: page 3 of 4 holds p8..p11
+  welcome_with_roster(r, 16, "p9");  // 2x2: page 3 of 5 holds p8..p11; the fifth, Settings
   hg::TouchGestures touch(r.app);
   auto swipe = [&](int dx, int dy = 0) {
     const int x = r.fake.width / 2 - dx / 2, y = r.fake.height / 2;
@@ -5193,12 +5194,14 @@ TEST("profiles: a swipe from right to left on Ready opens the grid at the curren
   CHECK_EQ(r.app.model().scroll, 8);
   swipe(-120);  // the next page comes in from the right
   CHECK_EQ(r.app.model().scroll, 12);
+  swipe(-120);  // the last page: Settings alone
+  CHECK_EQ(r.app.model().scroll, 16);
   swipe(-120);  // and wraps around
   CHECK_EQ(r.app.model().scroll, 0);
   swipe(120);
-  CHECK_EQ(r.app.model().scroll, 12);
+  CHECK_EQ(r.app.model().scroll, 16);
   swipe(-30);  // too short: nothing, and no profile picked
-  CHECK_EQ(r.app.model().scroll, 12);
+  CHECK_EQ(r.app.model().scroll, 16);
   swipe(30, 120);  // more down than sideways: a swipe down closes the grid
   CHECK(!r.app.profile_picker_open());
   CHECK(r.fake.last("profile.select") == nullptr);
@@ -5309,13 +5312,54 @@ TEST("profiles: PWR on the grid goes back to Ready with the screen lit; the next
   CHECK(!r.app.profile_picker_open());
 }
 
+TEST("profiles: the grid ends with a Settings cell that opens Settings, pages like a profile and is never current") {
+  for (int round : {0, 466}) {
+    Rig r(Rig::touch_profile());
+    if (round) r.fake.make_round(round);
+    r.fake.kv["profile_grid"] = "4";
+    welcome_with_roster(r, 4, "p1");  // four profiles and Settings: two pages of 2x2
+    CHECK(r.app.open_profile_picker());
+    const hg::UiModel& m = r.app.model();
+    CHECK_EQ(m.settings_row, 4);
+    CHECK_EQ(m.dash.size(), size_t(5));
+    CHECK_EQ(m.dash[4].label, std::string("Settings"));
+    CHECK(m.dash[4].tone != hg::DashRow::Tone::Waiting);  // no ring
+    CHECK_EQ(r.app.profile_per_page(), 4);
+    CHECK_EQ(row_point(r, 4).first, -1);  // not on the first page
+    CHECK(r.app.profile_page_step(1));
+    CHECK_EQ(r.app.model().scroll, 4);
+    auto [x, y] = row_point(r, 4);
+    CHECK(x >= 0);
+    hg::TouchGestures touch(r.app);
+    touch.update(true, x, y, r.fake.clock);
+    r.advance(50);
+    touch.update(false, 0, 0, r.fake.clock);
+    CHECK(!r.app.profile_picker_open());
+    CHECK(r.app.settings_open());
+    CHECK(r.fake.last("profile.select") == nullptr);  // no switch asked for
+    CHECK_EQ(r.app.agent_profile(), std::string("p1"));
+  }
+  // In Spanish it reads Ajustes, as the settings menu does.
+  Rig es(Rig::touch_profile());
+  es.fake.kv["language"] = "es";
+  welcome_with_roster(es, 3);
+  CHECK(es.app.open_profile_picker());
+  CHECK_EQ(es.app.model().dash.back().label, std::string("Ajustes"));
+  // Few profiles: Settings takes a cell of the small grid too (three and Settings fill a 2x2).
+  Rig few(Rig::touch_profile());
+  few.fake.make_panel(410, 486, false);
+  welcome_with_roster(few, 3);
+  CHECK(few.app.open_profile_picker());
+  CHECK_EQ(few.app.profile_per_page(), 4);
+}
+
 TEST("profiles: a welcome brings up to 32 profiles; the rest are dropped") {
   Rig r(Rig::touch_profile());
   welcome_with_roster(r, 40);
   r.app.console("settings");
   CHECK(r.app.open_profile_picker());
-  CHECK_EQ(r.app.model().dash.size(), hg::App::kMaxProfiles);
-  CHECK_EQ(r.app.model().dash.back().value, std::string("p31"));
+  CHECK_EQ(r.app.model().dash.size(), hg::App::kMaxProfiles + 1);  // and Settings
+  CHECK_EQ(r.app.model().dash[hg::App::kMaxProfiles - 1].value, std::string("p31"));
 }
 
 TEST("profiles: profile_grid is 4, 6, 9 or 16, and the settings item steps through them") {

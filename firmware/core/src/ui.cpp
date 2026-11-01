@@ -567,7 +567,7 @@ void Ui::draw_frame(const UiModel& m) {
       .val(m.qr ? m.qr->size : 0);
   for (const DashRow& row : m.dash) content.add(row.label).add(row.value).val(row.tone).val(row.heading);
   if (m.screen == Screen::Profiles)
-    content.val(m.grid).val(m.face_row).val(m.mascot_row).add(m.face ? m.face->hash : std::string())
+    content.val(m.grid).val(m.face_row).val(m.mascot_row).val(m.settings_row).add(m.face ? m.face->hash : std::string())
         .val(m.thumbs_rev).val(m.thumbs.size());
   hashes[2] = content.get();
   hashes[3] = Hash().add(m.hint).get();
@@ -1011,6 +1011,18 @@ uint16_t initial_color(std::string_view id) {
 }
 
 // The first letter of a name, upper case when it is ASCII.
+// A gear in a size*size square at (x, y): eight teeth round a wheel with a hole, on a muted disc.
+void gear_icon(Canvas& c, int x, int y, int size) {
+  const int cx = x + size / 2, cy = y + size / 2;
+  c.fill_circle(cx, cy, size / 2, kFaint);
+  static constexpr int kDir[8][2] = {{1000, 0}, {707, 707}, {0, 1000}, {-707, 707},
+                                     {-1000, 0}, {-707, -707}, {0, -1000}, {707, -707}};
+  const int wheel = size * 26 / 100, tooth = std::max(2, size * 8 / 100), reach = size * 30 / 100;
+  for (const auto& d : kDir) c.fill_circle(cx + d[0] * reach / 1000, cy + d[1] * reach / 1000, tooth, kText);
+  c.fill_circle(cx, cy, wheel, kText);
+  c.fill_circle(cx, cy, std::max(2, size * 10 / 100), kFaint);
+}
+
 // `b` scaled to a size*size square by nearest pixel, its ink in `ink`.
 void bitmap_scaled(Canvas& c, int x, int y, int size, const mascot::Bitmap& b, uint16_t ink) {
   if (size == b.size) {
@@ -1133,7 +1145,9 @@ void Ui::draw_profiles(Canvas& c, const UiModel& m) {
     const int cx = ix + g.icon / 2, cy = iy + g.icon / 2;
     const uint16_t* thumb =
         static_cast<size_t>(item) < m.thumbs.size() && m.thumb_px ? m.thumbs[static_cast<size_t>(item)] : nullptr;
-    if (item == m.face_row && m.face && m.face->rgb565) {
+    if (item == m.settings_row) {
+      gear_icon(c, ix, iy, g.icon);
+    } else if (item == m.face_row && m.face && m.face->rgb565) {
       c.picture(ix, iy, g.icon, m.face->rgb565, m.face->px, nullptr, 0, 0);
     } else if (thumb && item != m.face_row) {  // the profile's own face or avatar, from Hermes
       c.picture(ix, iy, g.icon, thumb, m.thumb_px, nullptr, 0, 0);

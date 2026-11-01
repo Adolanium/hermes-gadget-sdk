@@ -98,6 +98,7 @@ struct UiModel {
   // items whose icon is `face` and the mascot (-1: none). The others show their initial.
   uint8_t grid = 4;
   int16_t face_row = -1, mascot_row = -1;
+  int16_t settings_row = -1;  // Profiles screen: the last cell, a gear that opens Settings
   // Profiles screen: each item's thumbnail from Hermes (thumb_px square RGB565, 0x0000 transparent),
   // or null for none; borrowed like `face`. `thumbs_rev` changes whenever one of them does.
   std::vector<const uint16_t*> thumbs;

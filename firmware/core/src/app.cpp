@@ -966,7 +966,7 @@ int App::profile_per_page() const { return ui_ && profile_picker_open() ? ui_->p
 
 bool App::profile_page_step(int dir) {
   if (!profile_picker_open() || !ui_) return false;
-  const int n = static_cast<int>(agent_profiles_.size()), per = ui_->profile_per_page(model_);
+  const int n = static_cast<int>(agent_profiles_.size()) + 1, per = ui_->profile_per_page(model_);  // + Settings
   if (per <= 0 || n <= per) return false;
   const int pages = (n + per - 1) / per;
   const int page = (profile_page_ / per + (dir < 0 ? pages - 1 : 1)) % pages;
@@ -986,7 +986,8 @@ int App::profile_row_hit(int x, int y) const { return ui_ ? ui_->profile_row_hit
 
 void App::profile_tap(int x, int y) {
   const int row = profile_row_hit(x, y);
-  if (row >= 0) select_agent_profile(static_cast<size_t>(row));
+  if (row >= 0 && row == model_.settings_row) open_settings();  // the gear: the grid closes under Settings
+  else if (row >= 0) select_agent_profile(static_cast<size_t>(row));
 }
 
 void App::h_pairing(const json::Value& m) {
@@ -2326,6 +2327,9 @@ void App::update_model() {
       if (current && face_) m.face_row = static_cast<int16_t>(i);
       else if (p.id == "default" && (!current || !face_)) m.mascot_row = static_cast<int16_t>(i);
     }
+    // The last cell opens Settings: it pages like a profile, and is never the current one.
+    m.settings_row = static_cast<int16_t>(m.dash.size());
+    m.dash.push_back({tr(Msg::Settings), std::string(), DashRow::Tone::Dim});
     m.hint = tr(Msg::ProfileListHint);
     if (thumb_px_) {  // the profiles' own faces, where Hermes sent them
       m.thumb_px = static_cast<uint16_t>(thumb_px_);
