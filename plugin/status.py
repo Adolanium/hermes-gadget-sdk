@@ -28,14 +28,20 @@ STALE_AFTER_S = 3 * REFRESH_S  # older than this, the gateway that wrote it is t
 
 # The readings a device's state telemetry carries about its power (firmware app_power.cpp).
 BATTERY_FIELDS = ("battery_percent", "battery_mv", "charging", "external_power", "battery_present")
+MAX_READING = 1_000_000  # far above any percent or millivolt reading; larger is a device sending junk
 
 
 def battery(sensors: dict[str, Any]) -> dict[str, Any] | None:
     """The power readings among a device's sensors, or None when it reports none."""
     # A device's own readings, unpaired ones too: NaN or Infinity (which json.loads accepts) would
     # make the dashboard's JSON response fail for every device, so only finite numbers are kept.
+    # An integer is bounded instead: math.isfinite() on a 400-digit one raises OverflowError.
     def finite(value: Any) -> bool:
-        return isinstance(value, bool) or (isinstance(value, (int, float)) and math.isfinite(value))
+        if isinstance(value, bool):
+            return True
+        if isinstance(value, int):
+            return abs(value) <= MAX_READING
+        return isinstance(value, float) and math.isfinite(value) and abs(value) <= MAX_READING
 
     out = {k: sensors[k] for k in BATTERY_FIELDS if finite(sensors.get(k))}
     if "battery_percent" not in out and finite(sensors.get("battery_pct")) and not isinstance(sensors["battery_pct"], bool):

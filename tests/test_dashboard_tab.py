@@ -70,6 +70,10 @@ def test_battery_drops_non_finite_readings_so_one_device_cannot_break_the_tab(tm
     assert live_status.battery(sensors) == {"charging": True}
     live_status.write(tmp_path, {DEVICE: {"online": True, "battery": live_status.battery(sensors)}}, now=1000.0)
     json.loads((tmp_path / live_status.FILENAME).read_text(), parse_constant=lambda c: pytest.fail(c))
+    # A 400-digit integer: math.isfinite() would raise OverflowError and stop the status writer.
+    huge = json.loads('{"battery_percent": 1' + "0" * 400 + ', "battery_mv": 3900}')
+    assert live_status.battery(huge) == {"battery_mv": 3900}
+    assert live_status.battery({"battery_pct": 10 ** 400}) is None
 
 
 def test_two_stores_in_one_process_can_write_at_once(tmp_path):
