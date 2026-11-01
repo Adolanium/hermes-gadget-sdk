@@ -70,6 +70,26 @@ namespace hg::i18n {
   X(ScreenTimeout,          "Screen timeout") \
   X(TimeoutSeconds,         "{0} seconds\nDims halfway; first input wakes.") \
   X(TimeoutAlwaysOn,        "Always on\nSelect to enable automatic dimming and screen sleep.") \
+  X(BatteryAlert,           "Low battery alert") \
+  X(BatteryAlertOff,        "Off\nSelect to light the screen when the battery runs low.") \
+  X(BatteryAlertAt,         "At {0}\nOn battery, the screen lights once at each.") \
+  X(BatteryAlertSound,      "Low battery sound") \
+  X(BatteryAlertSoundOn,    "On\nThe low battery alert beeps.") \
+  X(BatteryAlertSoundOff,   "Off\nThe low battery alert is silent.") \
+  X(ChargingNotice,         "Charging screen") \
+  X(ChargingNoticeOn,       "On\nPlugging in USB shows the battery level.") \
+  X(ChargingNoticeOff,      "Off\nPlugging in USB leaves the screen as it is.") \
+  X(ChargingSound,          "Charging sound") \
+  X(ChargingSoundOn,        "On\nPlugging in USB chirps.") \
+  X(ChargingSoundOff,       "Off\nPlugging in USB is silent.") \
+  X(ChargedNotice,          "Full battery screen") \
+  X(ChargedNoticeOn,        "On\nA full battery lights the screen once per charge.") \
+  X(ChargedNoticeOff,       "Off\nA full battery leaves the screen as it is.") \
+  X(ChargedSound,           "Full battery sound") \
+  X(ChargedSoundOn,         "On\nA full battery chimes once per charge.") \
+  X(ChargedSoundOff,        "Off\nA full battery is silent.") \
+  X(BatteryFull,            "Battery full") \
+  X(YouCanUnplug,           "You can unplug") \
   X(TouchWake,              "Touch wakes screen") \
   X(TouchWakeOn,            "On\nA touch lights the dark screen.") \
   X(TouchWakeOff,           "Off\nOnly a button lights the dark screen.") \
@@ -200,6 +220,8 @@ namespace hg::i18n {
   X(SwipeDownForSessions,   "Swipe down for sessions") \
   X(ButtonShowsSessions,    "{0} shows sessions") \
   X(LowBattery,             "Low battery: connect USB") \
+  X(LowBatteryTitle,        "Low battery") \
+  X(ConnectUsbToCharge,     "Connect USB to charge") \
   /* Timers */ \
   X(TimerLeft,              "Timer {0}") \
   X(TimerDone,              "TIMER DONE") \

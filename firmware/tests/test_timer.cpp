@@ -365,7 +365,7 @@ TEST("timer: at zero it sends timer.done, shows TIMER DONE, beeps, and a press d
   CHECK_EQ(r.app.model().headline, std::string("TIMER DONE"));
   CHECK_EQ(r.app.model().detail, std::string("Pasta"));
   CHECK_EQ(r.fake.writes, size_t(1));
-  CHECK_EQ(r.fake.samples, size_t(5120));  // two 120 ms beeps and an 80 ms gap at 16 kHz
+  CHECK_EQ(r.fake.samples, size_t(7520));  // 150 ms of lead-in, two 120 ms beeps and an 80 ms gap at 16 kHz
   CHECK(r.timer_status()["done"].as_bool());
   CHECK(r.timer_status()["ringing"].as_bool());
 

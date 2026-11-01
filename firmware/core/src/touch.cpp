@@ -46,6 +46,7 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
     from_clock_ = app_.clock_showing();
     if (app_.touch_ignored()) { state_ = State::Ignored; return; }  // touch_wake off: a key wakes it
     if (app_.wake_display()) { state_ = State::Ignored; return; }
+    app_.close_notices_for_input();  // a low battery alert goes, and the touch acts on what is under it
     state_ = app_.profile_picker_open() ? State::Picker
               : !from_clock_ && app_.settings_title_hit(x, y) ? State::Settings
               : State::Pending;

@@ -20,6 +20,7 @@ set(HG_CORE_SOURCES
     src/protocol.cpp
     src/qr.cpp
     src/setup.cpp
+    src/tones.cpp
     src/touch.cpp
     src/ui.cpp
     src/vad.cpp
