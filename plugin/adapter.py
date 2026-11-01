@@ -191,6 +191,18 @@ def confirm_text(title: str, message: str, charset: str = "ascii") -> Tuple[str,
     return head or textfmt.for_device(title, charset), detail
 
 
+def _profile_label(info: Any) -> str:
+    """A profile's name as the Hermes interface shows it: its display name, else its Desktop Bots
+    title (``profile.yaml`` ``ui_meta['hermes-bots'].title``, which Hermes reads as ``bot_title``), else its id
+    with a capital first letter."""
+    for attr in ("display_name", "bot_title"):
+        label = str(getattr(info, attr, "") or "").strip()
+        if label:
+            return label
+    name = str(info.name)
+    return name[:1].upper() + name[1:]
+
+
 class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     MAX_MESSAGE_LENGTH = MAX_MESSAGE_LENGTH
     supports_status_text = True
@@ -354,7 +366,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             return []
         if not self._offer_all:
             served &= self._offered | {"default"}
-        roster = [{"id": p.name, "name": (p.display_name or p.name)[:24]} for p in infos if p.name in served]
+        roster = [{"id": p.name, "name": _profile_label(p)[:24]} for p in infos if p.name in served]
         return sorted(roster, key=lambda p: p["id"] != "default")
 
     def _busy(self, device_id: str) -> bool:
