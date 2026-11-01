@@ -833,11 +833,14 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         written_key: Optional[str] = None
         written_at = 0.0
         while True:
-            devices = self._status_devices()
-            key = self._status_key(devices)
-            if key != written_key or time.monotonic() - written_at >= live_status.REFRESH_S:
-                if self._write_status(devices):
-                    written_key, written_at = key, time.monotonic()
+            try:  # as the other watchers: one bad pass must not end the task, or the tab says "stopped"
+                devices = self._status_devices()
+                key = self._status_key(devices)
+                if key != written_key or time.monotonic() - written_at >= live_status.REFRESH_S:
+                    if self._write_status(devices):
+                        written_key, written_at = key, time.monotonic()
+            except Exception as exc:
+                logger.warning("[%s] live status update failed: %s", self.name, exc)
             await asyncio.sleep(STATUS_POLL_S)
 
     async def _claim_home(self, session: DeviceSession) -> None:
