@@ -174,7 +174,8 @@ class App {
   std::string agent_profile_name() const;
   // Returns true when this input only wakes a sleeping display.
   bool wake_display();
-  // A short press of the PMIC's power key: turns the screen off, or back on.
+  // A short press of the PMIC's power key: turns the screen off, or back on. In
+  // the settings menu it is Back: the menu closes and the screen stays lit.
   // Wi-Fi and the Hermes connection stay up.
   void on_power_key();
   // Dozing (System::set_dozing): the port's loop may wait this long for events.

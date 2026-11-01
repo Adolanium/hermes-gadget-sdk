@@ -6416,7 +6416,7 @@ TEST("screen: an open profile list or dashboard times out, closes in the dark an
   CHECK(r.app.screen() == hg::Screen::Ready);
 }
 
-TEST("screen: the PWR key turns the screen off over a list, a card or the menu, and wakes to Ready") {
+TEST("screen: the PWR key turns the screen off over a list or a card, and wakes to Ready") {
   Rig r(Rig::touch_profile());
   r.fake.backlight = true;
   r.bring_online_with_profiles();
@@ -6437,12 +6437,54 @@ TEST("screen: the PWR key turns the screen off over a list, a card or the menu, 
   CHECK_EQ(r.fake.brightness, 0);
   r.app.on_power_key();
   CHECK(r.app.screen() == hg::Screen::Ready);
+}
 
+TEST("screen: in settings the PWR key is Back: the menu closes, the screen stays lit, the next press darkens it") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
   CHECK(r.app.open_settings());
+  r.app.console("cancel");  // a later item: Back leaves from anywhere in the list
   r.app.on_power_key();
-  CHECK_EQ(r.fake.brightness, 0);
   CHECK(!r.app.settings_open());
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.fake.brightness, 100);
+  r.advance(1000);  // nothing reopens the menu or darkens the screen
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.fake.brightness, 100);
+  r.app.on_power_key();  // on the home screen, PWR turns the screen off as before
+  CHECK_EQ(r.fake.brightness, 0);
   r.app.on_power_key();
   CHECK_EQ(r.fake.brightness, 100);
   CHECK(r.app.screen() == hg::Screen::Ready);
+}
+
+TEST("screen: the PWR key leaves a running hardware check straight to the home screen") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 3; ++i) r.app.console("cancel");
+  CHECK_EQ(r.app.model().detail, std::string("Microphone check"));
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK(r.fake.mic_on);
+  r.app.on_power_key();
+  CHECK(!r.fake.mic_on);  // the check stops with the menu
+  CHECK(!r.app.settings_open());
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.fake.brightness, 100);
+
+  // The display check's colour bands go too.
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 5; ++i) r.app.console("cancel");
+  CHECK_EQ(r.app.model().detail, std::string("Display check"));
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK(r.app.model().color_test);
+  r.app.on_power_key();
+  CHECK(!r.app.settings_open());
+  CHECK(!r.app.model().color_test);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.fake.brightness, 100);
 }
