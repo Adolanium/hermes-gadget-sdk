@@ -33,6 +33,8 @@ class Canvas {
   // Restricts drawing to rows [y0, y1); everything outside is left untouched.
   void set_clip_rows(int y0, int y1);
   void reset_clip() { set_clip_rows(0, h_); }
+  int clip_y0() const { return clip_y0_; }
+  int clip_y1() const { return clip_y1_; }
 
   void pixel(int x, int y, uint16_t color);
   void fill_rect(int x, int y, int w, int h, uint16_t color);

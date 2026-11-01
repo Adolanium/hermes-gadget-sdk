@@ -125,7 +125,7 @@ On a board, open `hermes-gadget console --port <port>` and run the same commands
 
 | Command | Effect |
 |---|---|
-| `perf bench [scroll \| mascot \| redraw \| all]` | Draws a fixed workload, 120 updates each, one per app tick, with the device's own bars. `scroll` moves a 60-paragraph reply one line per update, `mascot` animates the talking mascot, and `redraw` repaints the whole screen every update. `all` runs the three in turn. The normal screen returns afterwards |
+| `perf bench [scroll \| mascot \| redraw \| all \| settings]` | Draws a fixed workload, 120 updates each, one per app tick, with the device's own bars. `scroll` moves a 60-paragraph reply one line per update, `mascot` animates the talking mascot, and `redraw` repaints the whole screen every update. `all` runs the three in turn. `settings` scrolls the settings list 3 pixels per text scale each update, down to the end and back, without opening the menu; `all` leaves it out. The normal screen returns afterwards |
 | `perf` | `@perf` JSON: the live statistics while timing is on, and the last bench under `bench` |
 | `perf on` / `perf off` | Time the device's own screen updates |
 | `perf reset` | Clear the live statistics |

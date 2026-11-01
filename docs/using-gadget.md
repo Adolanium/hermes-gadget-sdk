@@ -94,12 +94,18 @@ On ESP32 boards, `set timezone` chooses the clock's timezone as a POSIX TZ strin
 
 Hold TALK and CANCEL together for one second to open or close device settings. On a touchscreen, hold the title bar for one second. Round displays have no title bar; they show a **SETTINGS** target beneath the status dot instead. Hold it for one second. Touches in the target do not start recording. The target is hidden while a question, update or Wi-Fi setup is on screen, because holding it does nothing then. While settings is open, its label reads **BACK TO HERMES**; hold it again for one second to return. Settings also work while the device is offline. Opening settings stops the current recording or reply.
 
-Tap CANCEL to move to the next item, then tap TALK to change it. On a touchscreen, swipe down for the next item and tap to select. Boards with Up and Down buttons can move in either direction. Select **Back to Hermes** to leave.
+Settings is one list. Each row shows a small icon, the item's name, and its state at the right: a value, an on/off switch, a percentage, or `>` for an action. The selected row is highlighted and shows its description underneath; volume and brightness also show a slider there.
+
+Tap CANCEL to move to the next item, then tap TALK to change it. Boards with Up and Down buttons, or a knob, can move in either direction. The list scrolls smoothly to keep the selected row in view.
+
+On a touchscreen, drag the list up or down to scroll it, and tap a row to change it. The first tap on an on/off item flips it. The first tap on volume or brightness opens its slider; tap or drag along the bar to set the level, in steps of 5 percent. A drag only scrolls; it changes nothing. While a hardware check runs, a tap stops it and a swipe down moves to the next item, as before.
+
+Select **Back to Hermes** to leave.
 
 | Item | What it does |
 |---|---|
-| Speaker volume | Change volume in steps of 10 percent |
-| Screen brightness | Choose 10, 25, 50, 75, or 100 percent when the display supports it |
+| Speaker volume | Change volume in steps of 10 percent, or set it with the slider on a touchscreen |
+| Screen brightness | Choose 10, 25, 50, 75, or 100 percent when the display supports it, or set it with the slider on a touchscreen (5 to 100 percent) |
 | Talk mode | Choose hold-to-talk or tap-to-talk with silence detection |
 | Hermes profile | Choose the Hermes profile (touchscreens), or switch to the next one; shown only when Hermes offers more than one |
 | Microphone check | Show the live input level; nothing is saved or sent to Hermes |

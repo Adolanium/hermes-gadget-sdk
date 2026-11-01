@@ -1721,7 +1721,7 @@ TEST("settings: hardware checks are local and prompts release the microphone") {
   CHECK(!r.app.open_settings());
 }
 
-TEST("settings: title hold and menu swipe work without starting a recording") {
+TEST("settings: title hold and a drag on the list work without starting a recording") {
   Rig r(Rig::touch_profile());
   r.bring_online(true);
   hg::TouchGestures touch(r.app);
@@ -1733,10 +1733,12 @@ TEST("settings: title hold and menu swipe work without starting a recording") {
   CHECK(r.app.screen() == hg::Screen::Settings);
   CHECK(!r.fake.mic_on);
   CHECK_EQ(r.app.model().detail, std::string("Speaker volume"));
-  touch.update(true, 100, 80, r.fake.clock);
-  touch.update(true, 100, 150, r.fake.clock + 30);
+  touch.update(true, 100, 200, r.fake.clock);  // a drag up scrolls; the selection stays
+  touch.update(true, 100, 120, r.fake.clock + 30);
   touch.update(false, 0, 0, r.fake.clock + 40);
-  CHECK_EQ(r.app.model().detail, std::string("Screen brightness"));
+  CHECK_EQ(r.app.model().detail, std::string("Speaker volume"));
+  CHECK(r.app.model().settings_scroll > 0);
+  CHECK(!r.fake.mic_on);
   touch.update(true, 100, 4, r.fake.clock);
   r.advance(1100);
   touch.tick(r.fake.clock);
@@ -6487,4 +6489,276 @@ TEST("screen: the PWR key leaves a running hardware check straight to the home s
   CHECK(!r.app.model().color_test);
   CHECK(r.app.screen() == hg::Screen::Ready);
   CHECK_EQ(r.fake.brightness, 100);
+}
+
+// ---- The settings list: rows, touch and scrolling ----
+
+namespace {
+// Taps (x, y): a press and a lift with no movement.
+void tap_at(Rig& r, hg::TouchGestures& touch, int x, int y) {
+  touch.update(true, x, y, r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock + 50);
+}
+
+int settings_row(const Rig& r, const std::string& label) {
+  const auto& rows = r.app.model().settings;
+  for (size_t i = 0; i < rows.size(); ++i)
+    if (rows[i].label == label) return static_cast<int>(i);
+  return -1;
+}
+}  // namespace
+
+TEST("settings list: every offered item is a row with its icon and state, and the selected one is marked") {
+  hg::DeviceProfile p = Rig::touch_profile();
+  p.motion_sensor = true;
+  Rig r(p);
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  const auto& rows = r.app.model().settings;
+  CHECK(rows.size() > 10);
+  CHECK_EQ(r.app.model().settings_sel, 0);
+  CHECK_EQ(rows[0].label, std::string("Speaker volume"));
+  CHECK(rows[0].kind == hg::SettingRow::Kind::Slider);
+  CHECK(rows[0].icon == hg::SettingRow::Icon::Volume);
+  CHECK_EQ(int(rows[0].level), 70);
+  CHECK_EQ(rows[0].value, std::string("70%"));
+  const int bright = settings_row(r, "Screen brightness");
+  CHECK(bright == 1 && rows[1].kind == hg::SettingRow::Kind::Slider && rows[1].level == 100);
+  const int talk = settings_row(r, "Talk mode");
+  CHECK(talk > 0 && rows[static_cast<size_t>(talk)].value == "Hold");
+  const int face = settings_row(r, "Face-down sleep");
+  CHECK(face > 0 && rows[static_cast<size_t>(face)].kind == hg::SettingRow::Kind::Toggle);
+  CHECK_EQ(int(rows[static_cast<size_t>(face)].level), 0);
+  const int mic = settings_row(r, "Microphone check");
+  CHECK(mic > 0 && rows[static_cast<size_t>(mic)].kind == hg::SettingRow::Kind::Action);
+  CHECK(rows[static_cast<size_t>(mic)].value.empty());
+  CHECK_EQ(rows.back().label, std::string("Back to Hermes"));
+  CHECK(settings_row(r, "Power off") < 0);  // not offered on this board: no row
+  // Buttons move the selection; the model's detail and body follow it.
+  r.app.on_button(hg::Button::Down, true);
+  CHECK_EQ(r.app.model().settings_sel, 1);
+  CHECK_EQ(r.app.model().detail, std::string("Screen brightness"));
+  // Spanish: the short talk mode value is translated too.
+  r.app.console("set language es");
+  CHECK_EQ(r.app.model().settings[static_cast<size_t>(talk)].value, std::string("Mantener"));
+}
+
+TEST("settings list: the battery alert and charging items have their icons and switches") {
+  KeyPower key;
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.hal.power = &key;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  using Icon = hg::SettingRow::Icon;
+  using Kind = hg::SettingRow::Kind;
+  const auto row = [&](const char* label) -> const hg::SettingRow& {
+    const int i = settings_row(r, label);
+    CHECK(i >= 0);
+    return r.app.model().settings[static_cast<size_t>(i < 0 ? 0 : i)];
+  };
+  const auto is = [&](const char* label, Icon icon, Kind kind) {
+    const hg::SettingRow& x = row(label);
+    CHECK(x.icon == icon);
+    CHECK(x.kind == kind);
+  };
+  is("Low battery alert", Icon::Bell, Kind::Value);
+  is("Low battery sound", Icon::Volume, Kind::Toggle);
+  is("Charging screen", Icon::Bolt, Kind::Toggle);
+  is("Charging sound", Icon::Volume, Kind::Toggle);
+  is("Full battery screen", Icon::Check, Kind::Toggle);
+  is("Full battery sound", Icon::Volume, Kind::Toggle);
+  // A switch follows its setting.
+  const int before = row("Charging sound").level;
+  r.app.console(before ? "set charging_sound off" : "set charging_sound on");
+  CHECK_EQ(int(row("Charging sound").level), before ? 0 : 1);
+}
+
+TEST("settings list: buttons scroll the list smoothly to the selection, and back to the top on the next visit") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  CHECK_EQ(r.app.model().settings_scroll, 0);
+  r.app.on_button(hg::Button::Up, true);  // wraps to the last row, Back
+  CHECK_EQ(r.app.model().detail, std::string("Back to Hermes"));
+  CHECK_EQ(r.app.model().settings_scroll, 0);  // nothing jumps: the list eases there
+  std::vector<int> path;
+  for (int i = 0; i < 30; ++i) {
+    r.advance(10);
+    if (path.empty() || path.back() != r.app.model().settings_scroll) path.push_back(r.app.model().settings_scroll);
+  }
+  CHECK(path.size() >= 4);  // several frames in between
+  for (size_t i = 1; i < path.size(); ++i) CHECK(path[i] > path[i - 1]);
+  const int end = path.back();
+  CHECK(end > 0);
+  r.advance(500);
+  CHECK_EQ(r.app.model().settings_scroll, end);  // and it stays there
+  r.app.on_button(hg::Button::Down, true);  // wraps to the top: it eases back to 0
+  r.advance(500);
+  CHECK_EQ(r.app.model().settings_scroll, 0);
+  r.app.on_button(hg::Button::Up, true);
+  r.advance(500);
+  r.app.close_settings();
+  CHECK(r.app.open_settings());
+  CHECK_EQ(r.app.model().settings_scroll, 0);
+}
+
+TEST("settings list: a drag scrolls with the finger, stops at the ends, and changes nothing") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  hg::TouchGestures touch(r.app);
+  const std::string volume = r.fake.kv["volume"];
+  touch.update(true, 150, 200, r.fake.clock);
+  touch.update(true, 150, 190, r.fake.clock + 10);  // within the slop: still a tap
+  CHECK_EQ(r.app.model().settings_scroll, 0);
+  touch.update(true, 150, 160, r.fake.clock + 20);
+  CHECK_EQ(r.app.model().settings_scroll, 40);  // from the press, not the slop
+  touch.update(true, 150, 120, r.fake.clock + 30);
+  CHECK_EQ(r.app.model().settings_scroll, 80);
+  touch.update(true, 150, 140, r.fake.clock + 40);
+  CHECK_EQ(r.app.model().settings_scroll, 60);
+  touch.update(false, 0, 0, r.fake.clock + 50);
+  r.advance(300);  // a drag leaves the list where the finger put it
+  CHECK_EQ(r.app.model().settings_scroll, 60);
+  CHECK_EQ(r.app.model().detail, std::string("Speaker volume"));
+  CHECK_EQ(r.fake.kv["volume"], volume);
+  // Past the top it stops at 0; past the end, at the last row.
+  touch.update(true, 150, 60, r.fake.clock);
+  touch.update(true, 150, 230, r.fake.clock + 10);
+  touch.update(false, 0, 0, r.fake.clock + 20);
+  CHECK_EQ(r.app.model().settings_scroll, 0);
+  int last = -1;
+  for (int i = 0; i < 6; ++i) {
+    touch.update(true, 150, 230, r.fake.clock);
+    touch.update(true, 150, 60, r.fake.clock + 10);
+    touch.update(false, 0, 0, r.fake.clock + 20);
+    last = r.app.model().settings_scroll;
+  }
+  CHECK(last > 0);
+  touch.update(true, 150, 230, r.fake.clock);
+  touch.update(true, 150, 60, r.fake.clock + 10);
+  touch.update(false, 0, 0, r.fake.clock + 20);
+  CHECK_EQ(r.app.model().settings_scroll, last);
+  // Buttons bring the list back to the selection.
+  r.app.on_button(hg::Button::Down, true);
+  r.advance(500);
+  CHECK(r.app.model().settings_scroll < last);
+}
+
+TEST("settings list: a tap selects a row and changes it; toggles flip on the first tap") {
+  hg::DeviceProfile p = Rig::touch_profile();
+  p.motion_sensor = true;
+  Rig r(p);
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  hg::TouchGestures touch(r.app);
+  const int talk = settings_row(r, "Talk mode");
+  auto [tx, ty] = find_point(r, [&](int x, int y) { return r.app.settings_row_hit(x, y) == talk; });
+  CHECK(tx >= 0);
+  tap_at(r, touch, tx, ty);
+  CHECK_EQ(r.app.model().detail, std::string("Talk mode"));
+  CHECK_EQ(r.fake.kv["talk_mode"], std::string("tap"));
+  CHECK(!r.fake.mic_on);  // a tap in the list never talks
+  CHECK(r.fake.last("audio.start") == nullptr);
+  tap_at(r, touch, tx, ty);
+  CHECK_EQ(r.fake.kv["talk_mode"], std::string("hold"));
+
+  // A toggle further down: buttons bring it into view, then a tap on it flips it.
+  const int face = settings_row(r, "Face-down sleep");
+  while (r.app.model().settings_sel < face - 1) r.app.on_button(hg::Button::Down, true);
+  r.advance(500);
+  auto [fx, fy] = find_point(r, [&](int x, int y) { return r.app.settings_row_hit(x, y) == face; });
+  CHECK(fx >= 0);
+  tap_at(r, touch, fx, fy);
+  CHECK_EQ(r.app.model().detail, std::string("Face-down sleep"));
+  CHECK_EQ(r.fake.kv["face_down_sleep"], std::string("on"));
+  CHECK_EQ(int(r.app.model().settings[static_cast<size_t>(face)].level), 1);
+  r.advance(500);
+  auto [gx, gy] = find_point(r, [&](int x, int y) { return r.app.settings_row_hit(x, y) == face; });
+  tap_at(r, touch, gx, gy);
+  CHECK_EQ(r.fake.kv["face_down_sleep"], std::string("off"));
+
+  // Back closes the menu.
+  const int back = static_cast<int>(r.app.model().settings.size()) - 1;
+  while (r.app.model().settings_sel != back) r.app.on_button(hg::Button::Down, true);
+  r.advance(500);
+  auto [bx, by] = find_point(r, [&](int x, int y) { return r.app.settings_row_hit(x, y) == back; });
+  CHECK(bx >= 0);
+  tap_at(r, touch, bx, by);
+  CHECK(!r.app.settings_open());
+  CHECK(r.app.screen() == hg::Screen::Ready);
+}
+
+TEST("settings list: a slider opens on the first tap, then a tap or a drag on its bar sets the level") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  hg::TouchGestures touch(r.app);
+  // Brightness is closed: a tap on its row selects it and changes nothing.
+  auto [rx, ry] = find_point(r, [&](int x, int y) { return r.app.settings_row_hit(x, y) == 1; });
+  tap_at(r, touch, rx, ry);
+  CHECK_EQ(r.app.model().detail, std::string("Screen brightness"));
+  CHECK_EQ(r.fake.brightness, 100);
+  r.advance(500);
+  // Its bar: the left end, the middle and the right end.
+  int left = -1, right = -1, bar_y = -1;
+  for (int y = 0; y < r.fake.height && bar_y < 0; ++y)
+    for (int x = 0; x < r.fake.width; ++x)
+      if (r.app.settings_slider_hit(x, y) == 0 && r.app.settings_slider_hit(x + 1, y) > 0) { left = x; bar_y = y; break; }
+  CHECK(bar_y >= 0);
+  for (int x = r.fake.width - 1; x > left; --x)
+    if (r.app.settings_slider_hit(x, bar_y) == 100 && r.app.settings_slider_hit(x - 1, bar_y) < 100) { right = x; break; }
+  CHECK(right > left);
+  CHECK(r.app.settings_row_hit(rx, ry) == 1);
+  tap_at(r, touch, (left + right) / 2, bar_y);
+  CHECK_EQ(r.fake.kv["brightness"], std::string("50"));
+  CHECK_EQ(r.fake.brightness, 50);
+  CHECK_EQ(r.app.model().settings[1].value, std::string("50%"));
+  tap_at(r, touch, left, bar_y);  // the far left is the floor, 5%
+  CHECK_EQ(r.fake.kv["brightness"], std::string("5"));
+  // A drag follows the finger on screen and saves once, on the lift, in steps of 5.
+  int saves = 0;
+  r.app.on_setting_changed = [&](std::string_view key) { saves += key == "brightness"; };
+  touch.update(true, left, bar_y, r.fake.clock);
+  touch.update(true, left + (right - left) / 4, bar_y + 30, r.fake.clock + 10);  // height doesn't matter once sliding
+  CHECK(r.app.model().settings[1].level >= 24 && r.app.model().settings[1].level <= 26);
+  CHECK_EQ(saves, 0);
+  CHECK_EQ(r.fake.kv["brightness"], std::string("5"));
+  touch.update(true, left + (right - left) * 3 / 4 + 1, bar_y, r.fake.clock + 20);
+  touch.update(false, 0, 0, r.fake.clock + 30);
+  CHECK_EQ(saves, 1);
+  CHECK_EQ(r.fake.kv["brightness"], std::string("75"));
+  CHECK_EQ(int(r.app.model().settings[1].level), 75);
+  CHECK_EQ(r.app.model().detail, std::string("Screen brightness"));
+}
+
+TEST("settings list: with a check running, a tap stops it and a swipe down moves on, as before") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 3; ++i) r.app.console("cancel");
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK(r.fake.mic_on);
+  CHECK(!r.app.settings_list_live());
+  hg::TouchGestures touch(r.app);
+  tap_at(r, touch, 150, 150);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.app.model().body.find("Check stopped") != std::string::npos);
+  CHECK(r.app.settings_list_live());
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK(r.fake.mic_on);
+  touch.update(true, 150, 80, r.fake.clock);
+  touch.update(true, 150, 160, r.fake.clock + 30);
+  touch.update(false, 0, 0, r.fake.clock + 40);
+  CHECK(!r.fake.mic_on);
+  CHECK_EQ(r.app.model().detail, std::string("Speaker check"));
 }

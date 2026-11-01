@@ -16,6 +16,28 @@ bool App::settings_title_hit(int x, int y) const {
   return ui_ && settings_hold_live() && ui_->title_hit(x, y);
 }
 
+// Steps over the items this board can't offer.
+bool App::menu_offered(Menu item) const {
+  switch (item) {
+    case Menu::Profile: return agent_profiles_.size() > 1;
+    case Menu::Power: return hal_.power != nullptr;
+    case Menu::BatteryAlert: return hal_.power != nullptr && hal_.display != nullptr;
+    case Menu::BatteryAlertSound: return hal_.power != nullptr && hal_.display != nullptr && hal_.speaker != nullptr;
+    case Menu::ChargingNotice: return hal_.power != nullptr && hal_.display != nullptr;
+    case Menu::ChargingSound: return hal_.power != nullptr && hal_.speaker != nullptr;
+    case Menu::ChargedNotice: return hal_.power != nullptr && hal_.display != nullptr;
+    case Menu::ChargedSound: return hal_.power != nullptr && hal_.speaker != nullptr;
+    case Menu::TouchWake: return profile_.touch_screen && profile_.wake_key && hal_.display != nullptr;
+    case Menu::FaceDownSleep: return can_sleep_face_down();
+    case Menu::Clock: return hal_.display != nullptr;
+    case Menu::PowerOff: return hal_.power && hal_.power->can_power_off();
+    case Menu::WifiSetup: return static_cast<bool>(on_wifi_setup);
+    case Menu::Phone: return static_cast<bool>(on_phone_pair);
+    case Menu::Closed: return false;
+    default: return true;
+  }
+}
+
 bool App::open_settings() {
   // The alarm too: a hold that began just before it rang must not cover it and silence it.
   if (face_down_ || prompt_showing() || ota_busy() || ota_ == Ota::Restarting || !wifi_setup_text_.empty() ||
@@ -44,6 +66,11 @@ void App::stop_hardware_check() {
 void App::close_settings() {
   stop_hardware_check();
   menu_ = Menu::Closed;
+  // The next visit starts at the top.
+  settings_scroll_ = settings_target_ = 0;
+  settings_follow_ = true;
+  sliding_ = false;
+  slide_level_ = -1;
   check_result_.clear();
   if (ui_) ui_->invalidate();
   update_model();
@@ -63,33 +90,13 @@ void App::settings_input(Button button, bool pressed) {
     stop_hardware_check();
     check_result_.clear();
     power_off_armed_ = false;
-    const bool can_power_off = hal_.power && hal_.power->can_power_off();
-    // Steps over the items this board can't offer.
-    const auto offered = [&](Menu item) {
-      switch (item) {
-        case Menu::Profile: return agent_profiles_.size() > 1;
-        case Menu::Power: return hal_.power != nullptr;
-        case Menu::BatteryAlert: return hal_.power != nullptr && hal_.display != nullptr;
-        case Menu::BatteryAlertSound: return hal_.power != nullptr && hal_.display != nullptr && hal_.speaker != nullptr;
-        case Menu::ChargingNotice: return hal_.power != nullptr && hal_.display != nullptr;
-        case Menu::ChargingSound: return hal_.power != nullptr && hal_.speaker != nullptr;
-        case Menu::ChargedNotice: return hal_.power != nullptr && hal_.display != nullptr;
-        case Menu::ChargedSound: return hal_.power != nullptr && hal_.speaker != nullptr;
-        case Menu::TouchWake: return profile_.touch_screen && profile_.wake_key && hal_.display != nullptr;
-        case Menu::FaceDownSleep: return can_sleep_face_down();
-        case Menu::Clock: return hal_.display != nullptr;
-        case Menu::PowerOff: return can_power_off;
-        case Menu::WifiSetup: return static_cast<bool>(on_wifi_setup);
-        case Menu::Phone: return static_cast<bool>(on_phone_pair);
-        default: return true;
-      }
-    };
+    settings_follow_ = true;
     do {
       int item = static_cast<int>(menu_) + (button == Button::Up ? -1 : 1);
       if (item < static_cast<int>(Menu::Volume)) item = static_cast<int>(Menu::Back);
       if (item > static_cast<int>(Menu::Back)) item = static_cast<int>(Menu::Volume);
       menu_ = static_cast<Menu>(item);
-    } while (!offered(menu_));
+    } while (!menu_offered(menu_));
     return;
   }
   if (button != Button::Talk || pressed) return;
@@ -219,6 +226,14 @@ void App::settings_input(Button button, bool pressed) {
 }
 
 void App::settings_tick() {
+  // The list eases toward its target: half the way each step, about 60 steps a second.
+  constexpr uint32_t kScrollStepMs = 16;
+  if (settings_open() && settings_scroll_ != settings_target_ && now() - settings_step_at_ >= kScrollStepMs) {
+    settings_step_at_ = now();
+    const int d = settings_target_ - settings_scroll_;
+    settings_scroll_ += d > 0 ? (d + 1) / 2 : (d - 1) / 2;
+    update_model();
+  }
   if (talk_held_ && cancel_held_ && !settings_chord_fired_ &&
       now() - talk_down_at_ >= 1000 && now() - cancel_down_at_ >= 1000) {
     if (open_settings()) {
@@ -247,7 +262,171 @@ void App::settings_model() {
   const std::string talk = control(profile_.talk_label);
   m.hint = profile_.touch_screen ? std::string(tr(Msg::SettingsHintTouch))
                                 : tr(Msg::SettingsHintButtons, {talk, control(profile_.cancel_label)});
-  switch (menu_) {
+  // Every item the board offers is a row; the selected one also fills detail and body.
+  m.settings.clear();
+  m.settings_sel = 0;
+  UiModel item_text;
+  for (int i = static_cast<int>(Menu::Volume); i <= static_cast<int>(Menu::Back); ++i) {
+    const Menu item = static_cast<Menu>(i);
+    if (!menu_offered(item)) continue;
+    item_text.detail.clear();
+    item_text.body.clear();
+    item_text.color_test = false;
+    settings_item(item, item_text);
+    m.settings.push_back(settings_row(item, item_text.detail, item_text.body));
+    if (item != menu_) continue;
+    m.settings_sel = static_cast<int>(m.settings.size()) - 1;
+    m.detail = std::move(item_text.detail);
+    m.body = std::move(item_text.body);
+    m.color_test = item_text.color_test;
+  }
+  if (!check_result_.empty()) m.body += "\n" + check_result_;
+  if (!ui_) settings_scroll_ = settings_target_ = 0;
+  else if (settings_follow_) settings_target_ = ui_->settings_scroll_for(m, settings_target_);
+  m.settings_scroll = settings_scroll_;
+}
+
+// The state at the right of an item's row: by default the first line of its text.
+SettingRow App::settings_row(Menu item, const std::string& label, const std::string& body) const {
+  using Icon = SettingRow::Icon;
+  using Kind = SettingRow::Kind;
+  SettingRow row;
+  row.label = label;
+  row.value = body.substr(0, body.find('\n'));
+  switch (item) {
+    case Menu::Volume:
+      row.icon = Icon::Volume;
+      if (hal_.speaker) { row.kind = Kind::Slider; row.level = static_cast<uint8_t>(volume_); }
+      if (row.kind == Kind::Slider && item == menu_ && slide_level_ >= 0) row.level = static_cast<uint8_t>(slide_level_);
+      break;
+    case Menu::Brightness:
+      row.icon = Icon::Sun;
+      if (hal_.display && hal_.display->info().has_backlight) { row.kind = Kind::Slider; row.level = static_cast<uint8_t>(brightness_); }
+      if (row.kind == Kind::Slider && item == menu_ && slide_level_ >= 0) row.level = static_cast<uint8_t>(slide_level_);
+      break;
+    case Menu::TalkMode:
+      row.icon = Icon::Talk;
+      row.value = hal_.mic ? tr(talk_mode_ == TalkMode::Hold ? i18n::Msg::TalkHold : i18n::Msg::TalkTap) : "";
+      break;
+    case Menu::Profile: row.icon = Icon::Person; break;
+    case Menu::Microphone: row.icon = Icon::Mic; row.kind = Kind::Action; break;
+    case Menu::Speaker: row.icon = Icon::Note; row.kind = Kind::Action; break;
+    case Menu::Display: row.icon = Icon::Screen; row.kind = Kind::Action; break;
+    case Menu::Inputs: row.icon = Icon::Keys; row.kind = Kind::Action; break;
+    case Menu::Info: row.icon = Icon::Info; row.kind = Kind::Action; break;
+    case Menu::Power:
+      row.icon = Icon::Battery;
+      row.value.clear();
+      if (const auto percent = display_battery_percent()) row.value = std::to_string(*percent) + "%";
+      break;
+    case Menu::BatteryAlert: row.icon = Icon::Bell; break;
+    case Menu::BatteryAlertSound: row.icon = Icon::Volume; row.kind = Kind::Toggle; row.level = battery_alert_sound_; break;
+    case Menu::ChargingNotice: row.icon = Icon::Bolt; row.kind = Kind::Toggle; row.level = charging_notice_enabled_; break;
+    case Menu::ChargingSound: row.icon = Icon::Volume; row.kind = Kind::Toggle; row.level = charging_sound_; break;
+    case Menu::ChargedNotice: row.icon = Icon::Check; row.kind = Kind::Toggle; row.level = charged_notice_enabled_; break;
+    case Menu::ChargedSound: row.icon = Icon::Volume; row.kind = Kind::Toggle; row.level = charged_sound_; break;
+    case Menu::IdleTimer: row.icon = Icon::Timer; break;
+    case Menu::TouchWake: row.icon = Icon::Touch; row.kind = Kind::Toggle; row.level = touch_wake_; break;
+    case Menu::FaceDownSleep: row.icon = Icon::FaceDown; row.kind = Kind::Toggle; row.level = face_down_sleep_; break;
+    case Menu::Clock: row.icon = Icon::Clock; break;
+    case Menu::PowerOff: row.icon = Icon::Power; row.kind = Kind::Action; break;
+    case Menu::WifiSetup: row.icon = Icon::Wifi; row.kind = Kind::Action; break;
+    case Menu::Phone: row.icon = Icon::Phone; row.kind = Kind::Action; break;
+    case Menu::Language: row.icon = Icon::Globe; break;
+    case Menu::Back: row.icon = Icon::Back; row.kind = Kind::Action; break;
+    case Menu::Closed: break;
+  }
+  if (row.kind == Kind::Action) row.value.clear();
+  if (row.kind == Kind::Slider) row.value = std::to_string(row.level) + "%";
+  return row;
+}
+
+bool App::settings_list_live() const {
+  return ui_ && settings_open() && hardware_check_ == HardwareCheck::None;
+}
+
+App::Menu App::settings_item_at(int row) const {
+  for (int i = static_cast<int>(Menu::Volume); i <= static_cast<int>(Menu::Back); ++i) {
+    const Menu item = static_cast<Menu>(i);
+    if (menu_offered(item) && row-- == 0) return item;
+  }
+  return Menu::Closed;
+}
+
+void App::settings_select(Menu item) {
+  stop_hardware_check();
+  check_result_.clear();
+  power_off_armed_ = false;
+  menu_ = item;
+  settings_follow_ = true;
+}
+
+// Slider levels land on steps of 5, the steps a finger can pick on a small screen.
+void App::settings_set_level(int level) {
+  level = (level + 2) / 5 * 5;
+  if (menu_ == Menu::Volume) console("set volume " + std::to_string(level));
+  else if (menu_ == Menu::Brightness) console("set brightness " + std::to_string(std::max(5, level)));
+}
+
+void App::settings_press(int x, int y) {
+  press_y_ = y;
+  press_scroll_ = settings_scroll_;
+  slide_level_ = -1;
+  sliding_ = settings_list_live() && ui_->settings_slider_at(model_, x, y, false) >= 0;
+}
+
+void App::settings_drag(int x, int y) {
+  if (!settings_list_live()) return;
+  if (sliding_) {
+    slide_level_ = ui_->settings_slider_at(model_, x, y, true);
+  } else {
+    // The list follows the finger, within its ends.
+    settings_follow_ = false;
+    settings_scroll_ = settings_target_ =
+        std::max(0, std::min(press_scroll_ - (y - press_y_), ui_->settings_max_scroll(model_)));
+  }
+  update_model();
+}
+
+void App::settings_tap(int x, int y) {
+  sliding_ = false;
+  if (!settings_list_live()) return;
+  const int level = ui_->settings_slider_at(model_, x, y, false);
+  if (level >= 0) {
+    settings_set_level(level);
+    update_model();
+    return;
+  }
+  const int row = ui_->settings_row_hit(model_, x, y);
+  if (row < 0) return;
+  const Menu item = settings_item_at(row);
+  if (item == Menu::Closed) return;
+  if (item != menu_) {
+    const bool slider = model_.settings[static_cast<size_t>(row)].kind == SettingRow::Kind::Slider;
+    settings_select(item);
+    if (slider) {  // the first tap opens the slider; the next ones on the bar set it
+      update_model();
+      return;
+    }
+  }
+  settings_input(Button::Talk, false);
+  update_model();
+}
+
+void App::settings_lift() {
+  sliding_ = false;
+  if (slide_level_ >= 0) {
+    const int level = slide_level_;
+    slide_level_ = -1;
+    settings_set_level(level);
+  }
+  update_model();
+}
+
+void App::settings_item(Menu item, UiModel& m) const {
+  using i18n::Msg;
+  const std::string talk = control(profile_.talk_label);
+  switch (item) {
     case Menu::Volume:
       m.detail = tr(Msg::SpeakerVolume);
       m.body = hal_.speaker ? std::to_string(volume_) + "%\n" + tr(Msg::ChangesSaved) : std::string(tr(Msg::NoSpeakerDriver));
@@ -395,7 +574,6 @@ void App::settings_model() {
       break;
     case Menu::Closed: break;
   }
-  if (!check_result_.empty()) m.body += "\n" + check_result_;
 }
 
 bool App::start_wifi_setup() {

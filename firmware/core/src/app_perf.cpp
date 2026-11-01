@@ -16,6 +16,7 @@ const char* bench_name(int b) {
     case 1: return "scroll";
     case 2: return "mascot";
     case 3: return "redraw";
+    case 4: return "settings";
     default: return "none";
   }
 }
@@ -89,8 +90,9 @@ std::string App::perf_command(std::string_view args) {
     if (which == "scroll") first = last = Bench::Scroll;
     else if (which == "mascot") first = last = Bench::Mascot;
     else if (which == "redraw") first = last = Bench::Redraw;
+    else if (which == "settings") first = last = Bench::Settings;
     else if (which == "all") first = Bench::Scroll, last = Bench::Redraw;
-    else return "@error usage: perf bench [scroll | mascot | redraw | all]";
+    else return "@error usage: perf bench [scroll | mascot | redraw | all | settings]";
     if (!ui_) return "@error this device has no display";
     if (bench_ != Bench::None) return "@error a bench is running";
     if (display_sleeping_) return "@error the screen is off";
@@ -102,7 +104,7 @@ std::string App::perf_command(std::string_view args) {
            std::to_string(kBenchFrames * (static_cast<int>(last) - static_cast<int>(first) + 1)) +
            " frames, one per tick; read the result with perf";
   }
-  return "@error usage: perf [on | off | reset | budget <us> | bench [scroll | mascot | redraw | all]]";
+  return "@error usage: perf [on | off | reset | budget <us> | bench [scroll | mascot | redraw | all | settings]]";
 }
 
 void App::perf_tick() {
@@ -135,6 +137,21 @@ void App::bench_step() {
     m.detail = m.hero ? "Talking for the frame timer" : "";
     m.body = m.hero ? "" : bench_transcript();
     m.scroll = 0;
+    if (bench_ == Bench::Settings) {
+      // The settings list as it opens, without opening it: the menu's state comes back after.
+      const Menu menu = menu_;
+      const int scroll = settings_scroll_, target = settings_target_;
+      menu_ = Menu::Volume;
+      settings_model();
+      m = model_;
+      m.hero = false;  // settings_model fills a model update_model has already reset
+      m.qr = nullptr;
+      m.face = nullptr;
+      menu_ = menu;
+      settings_scroll_ = scroll;
+      settings_target_ = target;
+      m.settings_scroll = 0;
+    }
     // The first, full draw sets the scene and isn't counted.
     ui_->invalidate();
     ui_->render(m);
@@ -153,6 +170,13 @@ void App::bench_step() {
     }
     case Bench::Mascot: m.frame = static_cast<uint32_t>(2 * i); break;  // the mouth moves every 2 frames
     case Bench::Redraw: ui_->invalidate(); break;
+    case Bench::Settings: {
+      // The list moves 3 px per scale step per frame, down to the end and back, as a drag would.
+      const int span = std::max(1, ui_->settings_max_scroll(m)), px = 3 * ui_->layout().scale;
+      const int step = (i * px) % (2 * span);
+      m.settings_scroll = step <= span ? step : 2 * span - step;
+      break;
+    }
     case Bench::None: return;
   }
   ui_->render(m);

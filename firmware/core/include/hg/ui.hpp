@@ -58,6 +58,18 @@ struct DashRow {
   bool heading = false;
 };
 
+// One row of the settings list: a small icon, the item's name, and its state at the
+// right edge (text, an on/off switch, or a level bar with its percentage).
+struct SettingRow {
+  enum class Kind : uint8_t { Value, Toggle, Slider, Action };
+  enum class Icon : uint8_t { Volume, Sun, Talk, Person, Mic, Note, Screen, Keys, Info, Battery, Timer, Touch,
+                              FaceDown, Clock, Power, Wifi, Phone, Globe, Back, Bell, Bolt, Check };
+  std::string label, value;  // Value: the text at the right; Slider: its percentage
+  Icon icon = Icon::Info;
+  Kind kind = Kind::Value;
+  uint8_t level = 0;  // Toggle: 0 off, 1 on; Slider: 0..100
+};
+
 struct UiModel {
   Screen screen = Screen::Boot;
   Link link = Link::Offline;
@@ -93,6 +105,11 @@ struct UiModel {
   // the content band. Null on every other screen. Borrowed, not owned: the app
   // keeps the matrix so it is encoded once, not on every model update.
   const qr::Code* qr = nullptr;
+  // Settings screen: every item, the selected one (whose `detail`/`body` the model also carries),
+  // and how far the list is scrolled, in pixels from its top.
+  std::vector<SettingRow> settings;
+  int settings_sel = 0;
+  int settings_scroll = 0;
   // Dashboard screen: its rows, drawn from `scroll` (0 = the top).
   std::vector<DashRow> dash;
   // A running timer: thousandths of its length still to go, or -1 for none. The round
@@ -186,6 +203,19 @@ class Ui {
   bool name_hit(const UiModel& m, int x, int y) const;
   int profile_row_hit(const UiModel& m, int x, int y) const;
   int profile_next_page(const UiModel& m) const;
+  // Settings list geometry, in panel coordinates for the hit test: the list's
+  // visible height, a row's top and height (the selected row grows by its
+  // description) measured from the list's top, the scroll that keeps the
+  // selected row in view from `scroll`, and the row under a point (-1: none).
+  int settings_view_h() const;
+  int settings_row_top(const UiModel& m, int i) const;
+  int settings_row_h(const UiModel& m, int i) const;
+  int settings_scroll_for(const UiModel& m, int scroll) const;
+  int settings_max_scroll(const UiModel& m) const;
+  int settings_row_hit(const UiModel& m, int x, int y) const;
+  // The level (0..100) a touch at (x, y) picks on the selected row's slider, or -1 off
+  // it. `anywhere`: a slide already under way follows the finger at any height.
+  int settings_slider_at(const UiModel& m, int x, int y, bool anywhere) const;
   bool title_hit(int x, int y) const {
     const int left = ox_ + (info_.width - layout_.title_w) / 2;
     return x >= left && x < left + layout_.title_w && y >= oy_ && y < oy_ + layout_.top_h;
@@ -215,6 +245,8 @@ class Ui {
   bool draw_qr(Canvas& c, const UiModel& m, int y0, int y1);
   void draw_dashboard(Canvas& c, const UiModel& m, int y0, int y1);
   void draw_profiles(Canvas& c, const UiModel& m);
+  void draw_settings(Canvas& c, const UiModel& m, int y0, int y1);
+  std::vector<std::string> settings_desc(const UiModel& m) const;  // the selected row's description lines
   struct Rect {
     int x = 0, y = 0, w = 0, h = 0;
     bool has(int px, int py) const { return px >= x && px < x + w && py >= y && py < y + h; }
@@ -229,6 +261,7 @@ class Ui {
     Rect slot(const Ui& ui, int i) const;
   };
   ProfilePage profile_page(const UiModel& m) const;
+  Rect settings_bar(const UiModel& m) const;
   int touch_px_ = 0;
   void draw_bottom(Canvas& c, const UiModel& m);
   void draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r);
