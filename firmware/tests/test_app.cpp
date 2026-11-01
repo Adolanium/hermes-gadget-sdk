@@ -2909,6 +2909,68 @@ TEST("full battery: the screen is on by default and the chime off, so a charge e
   CHECK(r.app.model().body.rfind("Off\n", 0) == 0);
 }
 
+TEST("battery alert: on a voltage estimate, a charger's high reading rearms nothing until the battery reads clear") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  auto wait = [&](uint32_t ms) {
+    for (uint32_t done = 0; done < ms; done += 5000) {
+      r.server(R"({"type":"ping"})");
+      r.advance(std::min<uint32_t>(5000, ms - done));
+    }
+  };
+  CHECK_EQ(r.app.console("set battery_estimate liion"), std::string("@ok battery_estimate"));
+  CHECK_EQ(r.app.console("set battery_alert 10"), std::string("@ok battery_alert"));
+  auto on_battery_mv = [&](uint16_t mv) {
+    battery.status.battery_percent = std::nullopt;
+    battery.status.battery_mv = mv;
+    battery.status.charging = battery.status.external_power = false;
+  };
+  auto on_usb_mv = [&](uint16_t mv) {
+    on_battery_mv(mv);
+    battery.status.charging = battery.status.external_power = true;
+  };
+  on_battery_mv(3650);  // about 7%
+  wait(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 10);
+  wait(10000);
+  CHECK_EQ(int(r.app.battery_alert()), 0);
+  on_usb_mv(4200);  // the charger lifts the estimate to 100%
+  wait(10000);
+  on_battery_mv(3650);  // unplugged after a minute: the battery is where it was
+  wait(10000);
+  CHECK_EQ(int(r.app.battery_alert()), 0);  // still spent: the charger's reading rearmed nothing
+  on_usb_mv(4200);
+  wait(10000);
+  on_battery_mv(3900);  // a real charge: about 63% on the battery
+  wait(5000);
+  on_battery_mv(3650);
+  wait(5000);
+  CHECK_EQ(int(r.app.battery_alert()), 10);  // rearmed once, by the battery-only reading
+}
+
+TEST("charging notice: a driver that reports only charging shows no plug-in when a charge stops and resumes") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  battery.status.battery_percent = 90;
+  battery.status.external_power = std::nullopt;  // as the STC8 on the CrowPanel P4
+  battery.status.charging = false;
+  r.advance(5000);
+  battery.status.charging = true;
+  r.advance(5000);
+  CHECK(!r.app.charging_notice());
+  battery.status.charging = false;  // the charge ends with the cable in
+  r.advance(15000);
+  battery.status.charging = true;  // and tops up again
+  r.advance(5000);
+  CHECK(!r.app.charging_notice());
+}
+
 TEST("full battery: a failed reading keeps the charge, and the chime alone waits for a free speaker") {
   AlertPower battery;
   Rig r;

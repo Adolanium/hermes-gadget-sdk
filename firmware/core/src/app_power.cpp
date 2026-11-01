@@ -126,18 +126,28 @@ void App::battery_alert_check() {
   const auto percent = display_battery_percent();
   if (!percent) return;
   const auto& p = *power_status_;
-  if (p.external_power == true || p.charging == true) {
-    // Charging rearms the spent levels the reading has climbed clear of, lowest first.
+  // Charging rearms the spent levels the reading has climbed clear of, lowest first.
+  const auto rearm = [&] {
     while (battery_alert_spent_ && *percent >= battery_alert_spent_ + kBatteryAlertRearm) {
       uint8_t next = 0;  // the next level above the spent one, or none
       for (uint8_t level : battery_alert_levels_)
         if (level > battery_alert_spent_ && (!next || level < next)) next = level;
       battery_alert_spent_ = next;
     }
+  };
+  if (p.external_power == true || p.charging == true) {
+    // A charger lifts a voltage estimate, so an estimate is judged once, on the first
+    // battery-only reading after it; a gauge's own reading counts at once.
+    if (battery_is_estimated()) battery_rearm_pending_ = true;
+    else rearm();
     if (battery_alert_) dismiss_battery_alert();  // plugging in answers it
     return;
   }
   if (p.external_power != false) return;  // unknown supply: no alert, as with the red indicator
+  if (battery_rearm_pending_) {
+    battery_rearm_pending_ = false;
+    rearm();
+  }
   uint8_t crossed = 0;
   for (uint8_t level : battery_alert_levels_)
     if (level && *percent <= level) crossed = level;  // highest first: the last match is the lowest
@@ -264,9 +274,11 @@ void App::power_tick() {
     if (settings_open()) update_model();
     battery_alert_check();  // first: plugging in closes the low battery alert for the notice
     // A failed reading says nothing about the supply: the plug and the charge so far stand.
+    // The plug is what the driver says about USB. `charging` is not a plug signal: it stops
+    // when a charge ends with the cable still in, and a driver that reports only it (the
+    // STC8 on the CrowPanel P4) would read that as an unplug, then a top-up as a plug-in.
     if (power_status_) {
-      const auto& p = *power_status_;
-      note_supply(p.external_power.has_value() ? p.external_power : p.charging);
+      note_supply(power_status_->external_power);
       charged_check();
     }
   }

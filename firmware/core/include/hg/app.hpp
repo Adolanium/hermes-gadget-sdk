@@ -474,6 +474,7 @@ class App {
   static constexpr int kBatteryAlertLevels = 3;
   uint8_t battery_alert_levels_[kBatteryAlertLevels] = {};
   uint8_t battery_alert_spent_ = 0;    // the lowest level alerted this discharge, 0 = none
+  bool battery_rearm_pending_ = false;  // a voltage estimate charged: rearm on the next battery-only reading
   uint8_t battery_alert_ = 0;          // the level on screen, 0 = none
   uint8_t battery_alert_percent_ = 0;  // the reading it showed
   // The battery indicator turns red at or below this: 15%, or the highest alert level when higher.
