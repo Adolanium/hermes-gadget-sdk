@@ -579,7 +579,8 @@ void Ui::draw_frame(const UiModel& m) {
     for (const SettingRow& row : m.settings) content.add(row.label).add(row.value).val(row.icon).val(row.kind).val(row.level);
   }
   if (m.screen == Screen::Profiles)
-    content.val(m.grid).val(m.face_row).val(m.mascot_row).add(m.face ? m.face->hash : std::string());
+    content.val(m.grid).val(m.face_row).val(m.mascot_row).add(m.face ? m.face->hash : std::string())
+        .val(m.thumbs_rev).val(m.thumbs.size());
   hashes[2] = content.get();
   hashes[3] = Hash().add(m.hint).get();
 
@@ -1112,6 +1113,14 @@ Ui::ProfileGrid Ui::profile_grid(const UiModel& m) const {
   return g;
 }
 
+int Ui::profile_thumb_px(int cap) const {
+  UiModel m;
+  m.screen = Screen::Profiles;
+  m.grid = 4;
+  m.dash.resize(4);
+  return std::min(cap, profile_grid(m).icon);
+}
+
 int Ui::profile_per_page(const UiModel& m) const {
   const ProfileGrid g = profile_grid(m);
   return g.cols * g.rows;
@@ -1138,8 +1147,12 @@ void Ui::draw_profiles(Canvas& c, const UiModel& m) {
     const int block = g.icon + 2 * s + static_cast<int>(lines.size()) * lh;
     const int ix = r.x + (r.w - g.icon) / 2, iy = r.y + std::max(s, (r.h - block) / 2);
     const int cx = ix + g.icon / 2, cy = iy + g.icon / 2;
+    const uint16_t* thumb =
+        static_cast<size_t>(item) < m.thumbs.size() && m.thumb_px ? m.thumbs[static_cast<size_t>(item)] : nullptr;
     if (item == m.face_row && m.face && m.face->rgb565) {
       c.picture(ix, iy, g.icon, m.face->rgb565, m.face->px, nullptr, 0, 0);
+    } else if (thumb && item != m.face_row) {  // the profile's own face or avatar, from Hermes
+      c.picture(ix, iy, g.icon, thumb, m.thumb_px, nullptr, 0, 0);
     } else if (item == m.face_row || item == m.mascot_row) {
       const mascot::Face* face = item == m.face_row ? m.face : nullptr;
       bitmap_scaled(c, ix, iy, g.icon, mascot::pick(g.icon, mascot::Frame::Idle, face), kText);

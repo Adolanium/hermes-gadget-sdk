@@ -7107,6 +7107,177 @@ TEST("tailnet: factory reset says so when the tailnet identity can't be schedule
   CHECK(r.fake.kv.find("ts_key") == r.fake.kv.end());  // the settings are erased either way
 }
 
+namespace {
+
+hg::DeviceProfile thumb_profile() {
+  hg::DeviceProfile p = Rig::touch_profile();
+  p.colour_face_alloc = std::malloc;
+  return p;
+}
+
+int thumb_px(Rig& r) {
+  const Value* hello = r.fake.last("hello");
+  return hello ? static_cast<int>((*hello)["caps"]["faces"]["thumbs"].as_int(0)) : 0;
+}
+
+std::string thumb_start(const std::string& profile, const std::string& hash, int px, int stream = 9) {
+  return R"({"type":"face.thumb.start","stream":)" + std::to_string(stream) + R"(,"profile":")" + profile +
+         R"(","hash":")" + hash + R"(","width":)" + std::to_string(px) + R"(,"height":)" + std::to_string(px) +
+         R"(,"format":"rgb565"})";
+}
+
+std::string thumb_end(int stream = 9) { return R"({"type":"face.thumb.end","stream":)" + std::to_string(stream) + "}"; }
+
+void send_thumb(Rig& r, const std::string& profile, const std::string& hash, uint16_t pixel, int stream = 9) {
+  const int px = thumb_px(r);
+  r.server(thumb_start(profile, hash, px, stream));
+  send_pixels(r, px, pixel, stream);
+  r.server(thumb_end(stream));
+}
+
+// The thumbnails the device names in its last hello: profile id -> hash.
+std::map<std::string, std::string> held_thumbs(Rig& r) {
+  std::map<std::string, std::string> out;
+  const Value* hello = r.fake.last("hello");
+  if (!hello) return out;
+  for (const auto& member : (*hello)["thumbs"].members()) out[member.first] = member.second.as_string();
+  return out;
+}
+
+void reconnect_with_roster(Rig& r, int n, bool paired = true) {
+  r.app.on_transport_closed("bye");
+  r.fake.sent.clear();  // so the hello checked is this connection's
+  for (int i = 0; i < 120 && !r.fake.last("hello"); ++i) {  // whenever the device dials again
+    r.advance(250);
+    r.app.on_transport_open();
+  }
+  r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":true})");
+  r.server(std::string(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":)") + (paired ? "true" : "false") +
+           R"(,"profile":"p0","profiles":[)" + roster_of(n) + "]}");
+}
+
+}  // namespace
+
+TEST("profile thumbnails: a touch board with room asks for the grid's largest icon and draws them") {
+  Rig r(thumb_profile());
+  r.fake.make_panel(410, 486, false);
+  welcome_with_roster(r, 8);
+  const int px = thumb_px(r);
+  CHECK(px >= hg::App::kMinThumbPx && px <= hg::App::kMaxThumbPx);
+  CHECK_EQ(px, r.app.thumb_px());
+  const Value* hello = r.fake.last("hello");
+  CHECK(hello && (*hello)["thumbs"].is_object() && (*hello)["thumbs"].members().empty());
+  CHECK(r.app.open_profile_picker());
+  r.advance(50);
+  CHECK_EQ(count_px(r.fake.fb, kRose), size_t(0));
+  send_thumb(r, "p3", "t3", kRose);
+  r.advance(50);
+  CHECK(count_px(r.fake.fb, kRose) > 0);  // p3's cell shows its picture, the others their initials
+  CHECK_EQ(r.app.model().thumbs.size(), size_t(8));
+  CHECK(r.app.model().thumbs[3] != nullptr && r.app.model().thumbs[2] == nullptr);
+}
+
+TEST("profile thumbnails: kept by hash through reconnects; a new one replaces only its profile's") {
+  Rig r(thumb_profile());
+  welcome_with_roster(r, 8);
+  send_thumb(r, "p3", "t3", kRose);
+  send_thumb(r, "p4", "t4", kTeal);
+  reconnect_with_roster(r, 8);
+  auto held = held_thumbs(r);
+  CHECK_EQ(held.size(), size_t(2));
+  CHECK_EQ(held["p3"], std::string("t3"));
+  CHECK_EQ(held["p4"], std::string("t4"));
+  send_thumb(r, "p3", "t3b", kTeal);  // p3's avatar changed in Hermes
+  CHECK(r.app.open_profile_picker());
+  CHECK(r.app.model().thumbs[3] != nullptr && r.app.model().thumbs[4] != nullptr);
+  reconnect_with_roster(r, 8);
+  held = held_thumbs(r);
+  CHECK_EQ(held.size(), size_t(2));
+  CHECK_EQ(held["p3"], std::string("t3b"));
+  CHECK_EQ(held["p4"], std::string("t4"));
+}
+
+TEST("profile thumbnails: a clear, a profile no longer offered and unpairing bring the initials back") {
+  Rig r(thumb_profile());
+  welcome_with_roster(r, 8);
+  send_thumb(r, "p3", "t3", kRose);
+  send_thumb(r, "p6", "t6", kTeal);
+  send_thumb(r, "p2", "t2", kTeal);
+  r.server(R"({"type":"face.thumb","profile":"p3"})");
+  CHECK(r.app.open_profile_picker());
+  CHECK(r.app.model().thumbs[3] == nullptr && r.app.model().thumbs[6] != nullptr);
+  reconnect_with_roster(r, 5);  // p6 is no longer offered: the welcome drops it
+  CHECK_EQ(held_thumbs(r).count("p6"), size_t(1));  // the hello, before the welcome, still named it
+  CHECK(r.app.open_profile_picker());
+  CHECK_EQ(r.app.model().thumbs.size(), size_t(5));
+  CHECK(r.app.model().thumbs[2] != nullptr);
+  reconnect_with_roster(r, 5);
+  CHECK_EQ(held_thumbs(r).size(), size_t(1));  // p2's alone
+  r.server(R"({"type":"unpaired"})");  // unpairing drops them at once
+  r.server(R"({"type":"paired"})");
+  CHECK(r.app.open_profile_picker());
+  for (const uint16_t* t : r.app.model().thumbs) CHECK(t == nullptr);
+  send_thumb(r, "p2", "t2", kTeal);
+  CHECK(r.app.model().thumbs[2] != nullptr);
+  reconnect_with_roster(r, 5, false);  // an unpaired welcome drops them too
+  reconnect_with_roster(r, 5);
+  CHECK(held_thumbs(r).empty());
+}
+
+TEST("profile thumbnails: a malformed or interrupted one is ignored, and a colour face still arrives beside it") {
+  Rig r(thumb_profile());
+  welcome_with_roster(r, 8);
+  const int px = thumb_px(r);
+  r.server(thumb_start("nosuch", "t", px));  // not offered
+  send_pixels(r, px, kRose, 9);
+  r.server(thumb_end());
+  r.server(thumb_start("p1", "t", px + 1));  // another size
+  r.server(thumb_end());
+  r.server(thumb_start("p1", "", px));  // no hash
+  r.server(thumb_end());
+  r.server(thumb_start("p2", "t2", px));
+  send_pixels(r, px, kRose, 9, 0, 4096);  // ends short
+  r.server(thumb_end());
+  CHECK(r.app.open_profile_picker());
+  for (const uint16_t* t : r.app.model().thumbs) CHECK(t == nullptr);
+  // A thumbnail's chunks on their own stream leave a colour face arriving on another intact.
+  r.server(colour_start("p0", "c1", colour_px(r), 7));
+  r.server(thumb_start("p5", "t5", px, 9));
+  send_pixels(r, colour_px(r), kRose, 7);
+  send_pixels(r, px, kTeal, 9);
+  r.server(colour_end(7));
+  r.server(thumb_end(9));
+  r.advance(10);
+  CHECK(r.app.model().thumbs[5] != nullptr);
+  CHECK_EQ(r.app.model().face_row, 0);  // the current profile shows its own face
+}
+
+TEST("profile thumbnails: none without room, without colour faces or without a touchscreen") {
+  Rig plain(Rig::touch_profile());  // no PSRAM to spare
+  welcome_with_roster(plain, 8);
+  CHECK_EQ(thumb_px(plain), 0);
+  CHECK(plain.fake.last("hello") && !(*plain.fake.last("hello"))["thumbs"].is_object());
+  plain.server(thumb_start("p3", "t3", 96));
+  send_pixels(plain, 96, kRose, 9);
+  plain.server(thumb_end());
+  CHECK(plain.app.open_profile_picker());
+  CHECK(plain.app.model().thumbs.empty());
+
+  hg::DeviceProfile tight = thumb_profile();  // room for the colour face, then for nothing else
+  tight.colour_face_alloc = [](size_t n) -> void* {
+    static int calls = 0;
+    return calls++ ? nullptr : std::malloc(n);
+  };
+  Rig small(tight);
+  welcome_with_roster(small, 8);
+  CHECK(colour_px(small) > 0);
+  CHECK_EQ(thumb_px(small), 0);
+
+  Rig buttons(colour_profile());
+  buttons.bring_online(true);
+  CHECK_EQ(thumb_px(buttons), 0);
+}
+
 TEST("screen: an open profile list or dashboard times out, closes in the dark and wakes to Ready") {
   Rig r(Rig::touch_profile());
   r.fake.backlight = true;
@@ -7143,6 +7314,9 @@ TEST("screen: the PWR key turns the screen off over a list or a card, and wakes 
   r.fake.backlight = true;
   r.bring_online_with_profiles();
   CHECK(r.app.open_profile_picker());
+  r.app.on_power_key();  // PWR is Back on the profile grid: Ready, still lit
+  CHECK(!r.app.profile_picker_open());
+  CHECK_EQ(r.fake.brightness, 100);
   r.app.on_power_key();
   CHECK_EQ(r.fake.brightness, 0);
   r.advance(1000);  // nothing open lights it again

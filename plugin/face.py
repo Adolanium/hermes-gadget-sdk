@@ -158,6 +158,8 @@ FACE_FILE_KIND = b"hermes-gadget face file\n"
 AVATAR_DRAWING = b"hermes-gadget avatar 2\n"
 COLOUR_AVATAR = b"hermes-gadget colour avatar 1\n"  # followed by the size, as two little-endian bytes
 COLOUR_FRAMES = b"hermes-gadget colour avatar frames 2\n"  # then the size and the pictures; change it when frames are drawn differently
+THUMB = b"hermes-gadget profile thumbnail 1\n"  # then the size and the source's kind and bytes; change it when thumbnails are drawn differently
+THUMB_INK = (232, 238, 242)  # a face file's ink in a thumbnail: the colour the firmware draws one-colour faces in
 PICTURE_TYPES = ("png", "jpg", "webp")
 SAME = 16  # a frame's pixel within this many levels (of 255) of the avatar's is unchanged: lossy WebP's noise
 
@@ -368,6 +370,42 @@ def stamp(home: Path, convert: bool = True) -> tuple:
             continue
         found.append((path, st.st_size, st.st_mtime_ns))
     return tuple(found)
+
+
+def thumb_from_face_file(data: bytes, px: int) -> bytes:
+    """A face file's idle frame at its largest size, scaled to px square RGB565: its ink in THUMB_INK on
+    transparent (0x0000). Needs no Pillow."""
+    size = SIZES[-1]
+    row = (size + 7) // 8
+    start = sum(3 * ((s + 7) // 8) * s for s in SIZES[:-1])
+    r, g, b = THUMB_INK
+    ink = struct.pack("<H", ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3))
+    out = bytearray(px * px * 2)
+    for y in range(px):
+        sy = start + (y * size // px) * row
+        for x in range(px):
+            sx = x * size // px
+            if data[sy + sx // 8] & (0x80 >> (sx % 8)):
+                out[2 * (y * px + x): 2 * (y * px + x) + 2] = ink
+    return bytes(out)
+
+
+def thumb_for_profile(home: Path, convert: bool = True, px: int = 0) -> ProfileFace | None:
+    """A Hermes profile's thumbnail for a device's profile grid (docs/protocol.md#profile-thumbnails), px
+    square: its face file's idle frame, else its avatar in colour when `convert`, else None for the
+    initial. Like for_profile, this reads the source to name it; drawing waits for `load()`."""
+    size = px.to_bytes(2, "little")
+    path = home / FACE_FILE
+    if path.is_file():
+        data = path.read_bytes()
+        if len(data) == FACE_BYTES:
+            return ProfileFace(digest(THUMB + size + FACE_FILE_KIND + data), lambda: thumb_from_face_file(data, px))
+    avatar = next((p for p in _pictures(home, "avatar") if p.is_file()), None) if convert else None
+    if avatar is None:
+        return None
+    source = avatar.read_bytes()
+    return ProfileFace(digest(THUMB + size + COLOUR_AVATAR + source),
+                       lambda: colour_from_picture(io.BytesIO(source), px).rgb565)
 
 
 def for_profile(home: Path, convert: bool = True, colour_px: int = 0, frames: bool = False) -> ProfileFace | None:

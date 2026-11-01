@@ -65,6 +65,47 @@ def test_roster_names_on_a_hermes_without_bot_title():
     assert _profile_label(types.SimpleNamespace(name="x", display_name="", bot_title="Travel")) == "Travel"
 
 
+def test_a_profiles_thumbnail_follows_its_avatar_once_the_file_holds_still(hermes_home):
+    """thumb() stats each time, reads only after a change has held still for a second look, and keeps
+    the last thumbnail meanwhile; a profile without a face file or avatar has none."""
+    import asyncio
+    import os
+    import types
+
+    pytest.importorskip("PIL")
+    from PIL import Image
+
+    from gateway.config import PlatformConfig
+    from hermes_gadget_plugin.adapter import GadgetAdapter
+
+    adapter = GadgetAdapter(PlatformConfig(enabled=True, extra={"profiles": "all"}))
+    session = types.SimpleNamespace(thumb_px=64)
+    assets = hermes_home / "profiles" / "ops" / "assets"
+    assets.mkdir()
+    thumb = lambda: asyncio.run(adapter.thumb(session, "ops"))  # noqa: E731
+    assert thumb() is None
+
+    def avatar(colour, when):
+        Image.new("RGB", (80, 80), colour).save(assets / "avatar.png")
+        os.utime(assets / "avatar.png", ns=(when, when))
+
+    avatar((20, 170, 160), 1_000_000_000)
+    assert thumb() is None  # a new file, maybe still being written: nothing yet
+    first = thumb()
+    assert first is not None and len(first.load()) == 64 * 64 * 2
+    fresh = GadgetAdapter(PlatformConfig(enabled=True, extra={"profiles": "all"}))
+    assert asyncio.run(fresh.thumb(session, "ops")).hash == first.hash  # the first look reads at once
+    assert thumb().hash == first.hash
+    avatar((240, 200, 40), 2_000_000_000)
+    assert thumb().hash == first.hash  # changed, maybe still being written: the old one stays
+    second = thumb()  # the same on the next look: read
+    assert second.hash != first.hash
+    (assets / "avatar.png").unlink()
+    assert thumb().hash == second.hash
+    assert thumb() is None  # gone, and still gone: the initial again
+    assert asyncio.run(adapter.thumb(types.SimpleNamespace(thumb_px=0), "ops")) is None  # no thumbnails asked
+
+
 def test_without_the_key_a_device_behaves_as_before(hermes_home, tmp_path):
     import asyncio
 

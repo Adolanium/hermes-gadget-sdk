@@ -200,6 +200,9 @@ class App {
   void profile_tap(int x, int y);
   // The roster a welcome may bring: the device keeps the first kMaxProfiles entries.
   static constexpr size_t kMaxProfiles = 32;
+  // Profile thumbnails' side: the grid's largest icon, held to this range (docs/protocol.md#profile-thumbnails).
+  static constexpr int kMaxThumbPx = 128, kMinThumbPx = 32;
+  int thumb_px() const { return thumb_px_; }
   const std::string& agent_profile() const { return agent_profile_; }
   // The resting clock face is up: the time, the date and the mascot.
   bool clock_showing() const { return clock_showing_; }
@@ -342,6 +345,13 @@ class App {
   void h_face_end(const json::Value& m);
   void face_chunk(uint8_t stream, uint16_t seq, const uint8_t* data, size_t len);
   void drop_face();
+  void h_face_thumb(const json::Value& m);
+  void h_face_thumb_start(const json::Value& m);
+  void h_face_thumb_end(const json::Value& m);
+  // The slot holding `id`'s thumbnail, or kMaxProfiles for none.
+  size_t thumb_slot(const std::string& id) const;
+  void drop_thumb(size_t slot);
+  void drop_thumbs();
   size_t face_bytes() const;
   bool can_switch_profile() const;
   void set_agent_profile(const std::string& id);
@@ -493,6 +503,24 @@ class App {
     uint16_t seq = 0;
   };
   std::optional<FaceTransfer> face_in_;
+  // Thumbnails of the offered profiles' faces for the grid (docs/protocol.md#profile-thumbnails):
+  // kMaxProfiles slots of thumb_px_ square RGB565 in one block set aside at start-up, each named by its
+  // profile and hash, kept through reconnects. 0: no thumbnails (no PSRAM, or no room).
+  struct Thumb {
+    std::string id, hash;
+    bool ready = false;  // all its pixels arrived
+  };
+  std::unique_ptr<uint16_t, mascot::Face::Free> thumbs_;
+  int thumb_px_ = 0;
+  std::vector<Thumb> thumb_slots_;
+  uint32_t thumbs_rev_ = 0;  // changes with any thumbnail, so the grid redraws
+  struct ThumbTransfer {
+    int stream;
+    size_t slot;
+    size_t got = 0;
+    uint16_t seq = 0;
+  };
+  std::optional<ThumbTransfer> thumb_in_;
   // A profile.select awaiting Hermes's answer; one at a time (empty: none).
   std::string profile_pending_;
   uint32_t profile_pending_at_ = 0;
