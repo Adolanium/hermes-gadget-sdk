@@ -62,8 +62,8 @@ std::string fit(std::string_view s, int max_chars) {
 
 int cols_for(int width_px, int scale) { return width_px / (font::kCellWidth * scale); }
 
-// The edge arc's angles are integers: sine and cosine times kArcScale, so the per-pixel
-// test is a sign check and one cross product. The sweep is computed once per frame.
+// The edge ring's level arcs use integer angles: sine and cosine times kArcScale, so the
+// per-pixel test is a sign check and one cross product. The sweep is computed once per frame.
 constexpr int32_t kArcScale = 4096;
 constexpr double kTau = 6.28318530717958647692;
 
@@ -98,6 +98,97 @@ bool in_arc(int dx, int dy, const ArcSweep& s) {
 int isqrt(int64_t v) {
   int r = 0;
   while (static_cast<int64_t>(r + 1) * (r + 1) <= v) ++r;
+  return r;
+}
+
+// The edge ring's angles are in 1/64 degree: a whole turn, and the comet's tail.
+constexpr int32_t kTurn64 = 360 * 64;
+constexpr int32_t kTail64 = 70 * 64;
+// Listening turns amber in the last sixth of the recording limit: its last 5 of 30 s.
+constexpr int16_t kLateListening = 834;
+
+// atan(n / d) for 0 <= n <= d, d > 0, in 1/64 degree: (pi/4) t + 0.273 t (1 - t) radians
+// for t = n / d, within a quarter of a degree.
+int32_t atan64(int32_t n, int32_t d) {
+  const int32_t t = (n << 14) / d;  // 0..16384
+  return (2880 * t + 1001 * ((t * (16384 - t)) >> 14)) >> 14;
+}
+
+// The angle of (dx, dy) from the centre, clockwise from 12 o'clock, in 1/64 degree:
+// [0, kTurn64). Integer arithmetic only, so every port draws the same ring.
+int32_t ring_angle64(int dx, int dy) {
+  const int32_t up = -dy, au = std::abs(up), ar = std::abs(dx);
+  if (!au && !ar) return 0;
+  const int32_t q = ar <= au ? atan64(ar, au) : 90 * 64 - atan64(au, ar);  // within the quadrant
+  if (dx >= 0) return up >= 0 ? q : 180 * 64 - q;
+  return up < 0 ? 180 * 64 + q : (kTurn64 - q) % kTurn64;
+}
+
+// An RGB565 colour's channels at 8 bits.
+void channels(uint16_t c, uint8_t out[3]) {
+  out[0] = static_cast<uint8_t>((((c >> 11) & 31) * 527 + 23) >> 6);
+  out[1] = static_cast<uint8_t>((((c >> 5) & 63) * 259 + 33) >> 6);
+  out[2] = static_cast<uint8_t>(((c & 31) * 527 + 23) >> 6);
+}
+
+// What a round panel's edge ring shows for this model; the first match wins. A recording or
+// an update takes the ring from a running timer, and the timer keeps it while Hermes thinks
+// or speaks. The alarm and the battery faces have none; the resting clock has its ticks.
+// Comets lap the ring once per 24 frames (2.4 s at the app's 10 frames a second), or 40
+// while Hermes speaks.
+EdgeRing edge_ring(const UiModel& m) {
+  EdgeRing r;
+  const auto level = [&r](int permille, uint16_t colour, uint16_t dim) {
+    r.kind = EdgeRing::Kind::Level;
+    r.permille = static_cast<int16_t>(std::clamp(permille, 0, 1000));
+    r.colour = colour;
+    r.dim = dim;
+  };
+  const auto comet = [&r, &m](uint32_t lap, uint16_t colour) {
+    r.kind = EdgeRing::Kind::Comet;
+    r.colour = colour;
+    r.head = static_cast<uint16_t>(m.frame % lap * 360 / lap);
+  };
+  switch (m.screen) {
+    case Screen::Alarm:
+    case Screen::LowBattery:
+    case Screen::Charging:
+    case Screen::Charged:
+      return r;
+    case Screen::Clock:
+      r.kind = EdgeRing::Kind::Ticks;
+      r.colour = kAccent;
+      r.second = static_cast<uint8_t>(m.clock_second % 60);
+      return r;
+    case Screen::Listening:
+      if (m.progress_permille >= 0) {
+        const bool late = m.progress_permille >= kLateListening;
+        level(m.progress_permille, late ? kAccent : kGreen, late ? kAccentDim : kGreenDim);
+        return r;
+      }
+      break;
+    case Screen::Updating:
+      if (m.progress_permille >= 0) {
+        level(m.progress_permille, kAccent, kAccentDim);
+        return r;
+      }
+      break;
+    default:
+      break;
+  }
+  if (m.timer_permille >= 0) {
+    level(m.timer_permille, kAccent, kAccentDim);
+    return r;
+  }
+  switch (m.screen) {
+    case Screen::Thinking: comet(24, kBlue); break;
+    case Screen::Responding:
+      if (m.speaking) comet(40, kAccent);
+      break;
+    case Screen::Boot:
+    case Screen::Connecting: comet(24, kAccent); break;
+    default: break;
+  }
   return r;
 }
 
@@ -261,27 +352,45 @@ Ui::Ui(Display& display)
   // The headline is centred, so keeping clear of the marker on the right costs the same on the left.
   layout_.name_cols = cols_for(2 * (name_marker_x() - s) - w, s);
   if (panel_.round) {
-    // The edge arc's band (draw_frame): a ring 2s + 2 px in from the glass, 3s + 2 px thick.
+    // The edge ring's band (draw_frame): a ring 2s + 2 px in from the glass, 3s + 2 px thick.
     const int R = std::min(panel_.width, panel_.height) / 2;
     band_out_ = R - (2 * s + 2);
     band_in_ = std::max(0, band_out_ - (3 * s + 2));
     const int cx = panel_.width / 2, cy = panel_.height / 2;
-    band_rows_.assign(static_cast<size_t>(panel_.height), BandRow{});
-    for (int y = 0; y < panel_.height; ++y) {
-      BandRow& row = band_rows_[static_cast<size_t>(y)];
-      const int dy = y - cy;
-      int run = -1;  // the run being filled: a row holds at most two
-      bool inside = false;
-      for (int x = 0; x < panel_.width; ++x) {
-        const int dx = x - cx, d2 = dx * dx + dy * dy;
-        const bool in = d2 <= band_out_ * band_out_ && d2 > band_in_ * band_in_;
-        if (in && !inside) {
-          run = std::min(run + 1, 1);
-          row.x0[run] = static_cast<int16_t>(x);
+    // Each row's runs (at most two) of the pixels `in` takes.
+    const auto runs = [&](std::vector<BandRow>& rows, auto in) {
+      rows.assign(static_cast<size_t>(panel_.height), BandRow{});
+      for (int y = 0; y < panel_.height; ++y) {
+        BandRow& row = rows[static_cast<size_t>(y)];
+        const int dy = y - cy;
+        int run = -1;  // the run being filled
+        bool inside = false;
+        for (int x = 0; x < panel_.width; ++x) {
+          const int dx = x - cx;
+          const bool here = in(dx * dx + dy * dy);
+          if (here && !inside) {
+            run = std::min(run + 1, 1);
+            row.x0[run] = static_cast<int16_t>(x);
+          }
+          if (here) row.x1[run] = static_cast<int16_t>(x + 1);
+          inside = here;
         }
-        if (in) row.x1[run] = static_cast<int16_t>(x + 1);
-        inside = in;
       }
+    };
+    runs(band_rows_, [&](int d2) { return d2 <= band_out_ * band_out_ && d2 > band_in_ * band_in_; });
+    // The resting clock's ring takes the band and the seconds dot's reach, which is wider:
+    // radii within the dot's radius, 4s, of the band's middle, plus a pixel. In half pixels,
+    // so every bound is a whole number: the reach is 8s plus 2. Past the band, ring_pixel
+    // paints only the dot (or the background), so the ticks stay inside it.
+    const int mid2 = band_in_ + band_out_ + 1, reach2 = 8 * s + 2;
+    runs(clock_rows_, [&](int d2) {
+      return 4 * d2 >= (mid2 - reach2) * (mid2 - reach2) && 4 * d2 <= (mid2 + reach2) * (mid2 + reach2);
+    });
+    // The resting clock's ticks: every 6 degrees, clockwise from 12 o'clock.
+    for (int k = 0; k < 60; ++k) {
+      const double theta = kTau * k / 60.0;
+      tick_cos_[k] = static_cast<int16_t>(std::lround(std::cos(theta) * kArcScale));
+      tick_sin_[k] = static_cast<int16_t>(std::lround(std::sin(theta) * kArcScale));
     }
   }
 }
@@ -329,7 +438,7 @@ void Ui::draw_bands(int y0, int y1, void (Ui::*draw)(Canvas&, const UiModel&), c
     if (banded && ox_) {
       // The rows go out full width, and this window last held other rows: put
       // back the background beside the UI square, which a whole-panel
-      // framebuffer keeps from the full repaint (push then paints the arc).
+      // framebuffer keeps from the full repaint (push then paints the ring).
       Canvas panel = panel_canvas();
       panel.fill_rect(0, a, ox_, b - a, bg_);
       panel.fill_rect(ox_ + info_.width, a, panel_.width - ox_ - info_.width, b - a, bg_);
@@ -341,7 +450,11 @@ void Ui::draw_bands(int y0, int y1, void (Ui::*draw)(Canvas&, const UiModel&), c
 }
 
 void Ui::push(int y0, int y1) {
-  if (band_.permille >= 0) paint_band(y0, y1);  // the arc goes over whatever these rows drew
+  paint_ring(y0, y1);  // the ring goes over whatever these rows drew
+  send(y0, y1);
+}
+
+void Ui::send(int y0, int y1) {
   if (!stats_) {
     display_.flush(static_cast<uint16_t>(y0), static_cast<uint16_t>(y1));
     return;
@@ -386,12 +499,33 @@ void Ui::draw_frame(const UiModel& m) {
   // A display that holds only a band of rows cannot resend rows it missed, so it
   // asks for the whole screen again rather than leave a stale band on the panel.
   if (display_.take_redraw_request()) valid_ = false;
+  // The edge ring (round panels). One that appears or goes repaints the panel once: without a
+  // ring the bands own its pixels in the UI square's corners. A banded framebuffer no longer
+  // holds the rows a change would resend, so any change repaints it. Otherwise only the
+  // band's pixels that changed go out, after whatever this frame draws (update_ring).
+  const EdgeRing ring = panel_.round ? edge_ring(m) : EdgeRing{};
+  if ((ring.kind == EdgeRing::Kind::None) != (ring_.kind == EdgeRing::Kind::None)) valid_ = false;
+  if (ring != ring_ && display_.framebuffer_rows() > 0) valid_ = false;
+  bool ring_moved = valid_ && ring != ring_;
+  // On the clock only the seconds dot moves from one second to the next: where it was.
+  const bool dot_moved = ring_moved && ring_.kind == EdgeRing::Kind::Ticks && ring.kind == EdgeRing::Kind::Ticks;
+  const int32_t dot_was = ring_dot_y16_;
+  set_ring(ring);
   if (m.screen == Screen::Alarm) {
     draw_alarm(m);
     return;
   }
   if (m.screen == Screen::Clock) {
-    draw_clock(m);
+    draw_clock(m);  // the face stays within a minute
+    if (dot_moved) {
+      // Only the rows of the dot's old and new places change: its radius, whole pixels,
+      // either side of each centre's row.
+      const int cy = panel_.height / 2, reach = isqrt(ring_dot_r2_) / 16;
+      const int32_t top = std::min(dot_was, ring_dot_y16_), bottom = std::max(dot_was, ring_dot_y16_);
+      update_ring(cy + top / 16 - reach, cy + bottom / 16 + reach + 1);
+    } else if (ring_moved) {
+      update_ring(0, panel_.height);
+    }
     return;
   }
   if (m.screen == Screen::LowBattery || m.screen == Screen::Charging || m.screen == Screen::Charged) {
@@ -401,28 +535,15 @@ void Ui::draw_frame(const UiModel& m) {
   if (full_face_ != FullFace::None) {  // a face painted the whole panel: everything comes back
     full_face_ = FullFace::None;
     valid_ = false;
+    ring_moved = false;
   }
   const int h = info_.height;
-  // The edge arc (round panels) appears and goes with the timer; either repaints the panel once.
-  const bool arc = panel_.round && m.timer_permille >= 0;
-  if (arc != band_shown_) {
-    band_shown_ = arc;
-    valid_ = false;
-  }
-  const ArcSweep before = band_;
-  band_ = arc ? arc_sweep(m.timer_permille) : ArcSweep{};
-  const bool swept = valid_ && arc && before.permille >= 0 && before.permille != band_.permille;
-  // A banded framebuffer no longer holds the rest of the rows the sweep crossed,
-  // so it repaints the whole panel instead.
-  if (swept && display_.framebuffer_rows() > 0) valid_ = false;
   if (!valid_ && (ox_ || oy_)) {
     // Round panel: everything outside the UI area stays the background colour.
-    // Each push paints the arc too.
+    // Each push paints the ring too.
     each_window(0, panel_.height, [&](int, int) { panel_canvas().fill_rect(0, 0, panel_.width, panel_.height, bg_); });
   }
   if (panel_.round) draw_round_battery(m);
-  // Only the sweep moved: repaint the rows it crossed (the rest of the panel is unchanged).
-  if (swept && valid_) push_band_change(before, band_);
   const int y_header = layout_.top_h;
   const int y_content = y_header + layout_.header_h;
   const int y_bottom = h - layout_.bottom_h;
@@ -471,6 +592,7 @@ void Ui::draw_frame(const UiModel& m) {
     hero_valid_ = true;
     hash_[1] = hash_[2] = 0;  // header and content must repaint when hero mode ends
     valid_ = true;
+    if (ring_moved) update_ring(0, panel_.height);
     return;
   }
   hero_valid_ = false;
@@ -496,6 +618,7 @@ void Ui::draw_frame(const UiModel& m) {
     hash_[i] = hashes[i];
   }
   valid_ = true;
+  if (ring_moved) update_ring(0, panel_.height);
 }
 
 void Ui::draw_top(Canvas& c, const UiModel& m) {
@@ -546,16 +669,16 @@ void Ui::draw_top(Canvas& c, const UiModel& m) {
   c.text(pad, ty, fit(m.title, title_cols), s, kText);
 }
 
-// Round panels: the battery is centred at the very top of the panel, above the UI
-// square, as high as the circle leaves it room plus a small margin.
+// Round panels: the battery is centred at the top of the panel, above the UI square,
+// just below the edge ring's band plus a small margin, whether a ring shows or not.
 void Ui::draw_round_battery(const UiModel& m) {
   const int s = layout_.scale;
   const int bh = 7 * s;  // the taller of the icon (5s + 1) and the text (7s)
   const int hw = (m.battery >= 0 ? battery_width(m) : 0) / 2 + 2 * s;
-  // The glass centre's row, and the circle the strip's top corners must lie in: the glass
-  // edge, or while the arc shows, the band's inner edge (the strip starts below the arc).
+  // The glass centre's row, and the circle the strip's top corners must lie in: the band's
+  // inner edge, so the strip stays put as the ring comes and goes.
   const int half = panel_.width / 2;
-  const int radius = band_.permille >= 0 ? band_in_ : half;
+  const int radius = band_in_;
   int y0 = 0;
   // The first row where the strip's top corners lie inside that circle.
   while (y0 < oy_ && (half - y0) * (half - y0) + hw * hw > radius * radius) ++y0;
@@ -1139,38 +1262,123 @@ void Ui::draw_bottom(Canvas& c, const UiModel& m) {
   c.text((info_.width - Canvas::text_width(hint, s)) / 2, y0 + s, hint, s, kDim);
 }
 
-void Ui::paint_band(int y0, int y1) {
-  if (band_rows_.empty()) return;
-  Canvas panel = panel_canvas();  // push() runs inside the window that holds these rows
-  const int cx = panel_.width / 2, cy = panel_.height / 2;
-  for (int y = std::max(0, y0); y < std::min<int>(panel_.height, y1); ++y) {
-    const BandRow& row = band_rows_[static_cast<size_t>(y)];
-    for (int run = 0; run < 2; ++run) {
-      for (int x = row.x0[run]; x < row.x1[run]; ++x) {
-        panel.pixel(x, y, in_arc(x - cx, y - cy, band_) ? kAccent : kAccentDim);
-      }
+// What this frame's ring needs per pixel, worked out once: the level's sweep, the comet's
+// head and colours, the seconds dot's centre on the band's middle radius and its radius,
+// 4s px: about twice the band's width, so it stands out from the ticks.
+void Ui::set_ring(const EdgeRing& ring) {
+  ring_ = ring;
+  switch (ring.kind) {
+    case EdgeRing::Kind::Level:
+      ring_sweep_ = arc_sweep(ring.permille);
+      break;
+    case EdgeRing::Kind::Comet:
+      ring_head64_ = static_cast<int32_t>(ring.head % 360) * 64;
+      channels(ring.colour, ring_fg_);
+      channels(bg_, ring_bg_);
+      break;
+    case EdgeRing::Kind::Ticks: {
+      const double mid = (band_in_ + band_out_ + 1) / 2.0, theta = kTau * ring.second / 60.0;
+      ring_dot_x16_ = static_cast<int32_t>(std::lround(mid * std::sin(theta) * 16));
+      ring_dot_y16_ = static_cast<int32_t>(std::lround(-mid * std::cos(theta) * 16));
+      const int32_t r16 = 64 * layout_.scale;
+      ring_dot_r2_ = r16 * r16;
+      break;
     }
+    case EdgeRing::Kind::None:
+      break;
   }
 }
 
-// Sends the panel rows the arc crossed when its end moved from `from` to `to`. The rows lie
-// between the two ends at both radii, widened to the top or bottom of the band when the
-// sweep passed those points.
-void Ui::push_band_change(const ArcSweep& from, const ArcSweep& to) {
-  const int cy = panel_.height / 2;
-  int lo = panel_.height, hi = 0;
-  for (const ArcSweep* s : {&from, &to}) {
-    for (int r : {band_in_, band_out_}) {
-      const int y = cy + static_cast<int>(static_cast<int64_t>(r) * s->ey / kArcScale);
-      lo = std::min(lo, y);
-      hi = std::max(hi, y + 1);
+// The colour of the ring's pixel at (dx, dy) from the centre, for this frame's ring.
+uint16_t Ui::ring_pixel(int dx, int dy) const {
+  switch (ring_.kind) {
+    case EdgeRing::Kind::Level:
+      return in_arc(dx, dy, ring_sweep_) ? ring_.colour : ring_.dim;
+    case EdgeRing::Kind::Comet: {
+      // Whole at the head, fading as (1 - t / 70)^2 over the t degrees behind it, with a
+      // one-degree ramp ahead of it; blended over the background.
+      const int32_t behind = (ring_head64_ - ring_angle64(dx, dy) + kTurn64) % kTurn64;
+      int32_t a = 0;  // of 256
+      if (behind <= kTail64) {
+        const int32_t u = kTail64 - behind;
+        a = u * u / (kTail64 * kTail64 / 256);  // kTail64 squared is 256 * 78400
+      } else if (kTurn64 - behind < 64) {
+        a = (64 - (kTurn64 - behind)) * 4;
+      }
+      if (a <= 0) return bg_;
+      if (a >= 256) return ring_.colour;
+      const auto mix = [a](uint8_t f, uint8_t b) { return static_cast<uint8_t>((f * a + b * (256 - a) + 128) >> 8); };
+      return rgb565(mix(ring_fg_[0], ring_bg_[0]), mix(ring_fg_[1], ring_bg_[1]), mix(ring_fg_[2], ring_bg_[2]));
     }
+    case EdgeRing::Kind::Ticks: {
+      const int32_t ex = dx * 16 - ring_dot_x16_, ey = dy * 16 - ring_dot_y16_;
+      if (ex * ex + ey * ey <= ring_dot_r2_) return ring_.colour;  // the seconds dot, over the ticks
+      const int32_t d2 = dx * dx + dy * dy;
+      if (d2 <= band_in_ * band_in_ || d2 > band_out_ * band_out_) return bg_;  // the dot's reach: only the dot
+      // The nearest tick, and the distance from its centre line (times kArcScale). The ticks
+      // are the date's grey, so they show at the clock's dimmed brightness; the dot alone is amber.
+      const int k = static_cast<int>((ring_angle64(dx, dy) + 192) / 384 % 60);
+      const int32_t d = std::abs(dx * tick_cos_[k] + dy * tick_sin_[k]);
+      const int s = layout_.scale;
+      if (k % 5 == 0) return d < (s + 1) * kArcScale ? kDim : bg_;  // the hours: 2s + 1 px, across the band
+      const int32_t mid2 = band_in_ + band_out_ + 1;  // twice the band's middle radius
+      return 4 * d2 > mid2 * mid2 && 2 * d <= s * kArcScale ? kDim : bg_;  // the minutes: thinner, its outer half
+    }
+    case EdgeRing::Kind::None:
+      break;
   }
-  if (in_arc(0, -band_out_, from) != in_arc(0, -band_out_, to)) lo = std::min(lo, cy - band_out_);
-  if (in_arc(0, band_out_, from) != in_arc(0, band_out_, to)) hi = std::max(hi, cy + band_out_ + 1);
-  lo = std::max(0, lo - 1);
-  hi = std::min<int>(panel_.height, hi + 1);
-  if (lo < hi) push(lo, hi);
+  return bg_;
+}
+
+// The rows the ring owns: the band, or on the resting clock the band and the dot's reach.
+const std::vector<Ui::BandRow>& Ui::ring_rows() const {
+  return ring_.kind == EdgeRing::Kind::Ticks ? clock_rows_ : band_rows_;
+}
+
+// Paints the ring over panel rows [y0, y1) (push(), inside the window that holds them).
+void Ui::paint_ring(int y0, int y1) {
+  if (ring_.kind == EdgeRing::Kind::None || band_rows_.empty()) return;
+  Canvas panel = panel_canvas();
+  const int cx = panel_.width / 2, cy = panel_.height / 2;
+  const std::vector<BandRow>& rows = ring_rows();
+  for (int y = std::max(0, y0); y < std::min<int>(panel_.height, y1); ++y) {
+    const BandRow& row = rows[static_cast<size_t>(y)];
+    for (int run = 0; run < 2; ++run)
+      for (int x = row.x0[run]; x < row.x1[run]; ++x) panel.pixel(x, y, ring_pixel(x - cx, y - cy));
+  }
+}
+
+// Only the ring changed on a panel that stays: writes the ring's pixels in panel rows [y0, y1)
+// that differ and sends their rows, changed rows at most 8 apart as one run. A framebuffer that
+// holds the whole panel only (draw_frame repaints a banded one).
+void Ui::update_ring(int y0, int y1) {
+  if (ring_.kind == EdgeRing::Kind::None || band_rows_.empty() || display_.framebuffer_rows() > 0) return;
+  uint16_t* fb = display_.framebuffer();
+  const int w = panel_.width, cx = w / 2, cy = panel_.height / 2;
+  const std::vector<BandRow>& rows = ring_rows();
+  int first = -1, last = -1;  // the run of changed rows not sent yet
+  for (int y = std::max(0, y0); y < std::min<int>(panel_.height, y1); ++y) {
+    const BandRow& row = rows[static_cast<size_t>(y)];
+    uint16_t* line = fb + static_cast<size_t>(y) * static_cast<size_t>(w);
+    bool changed = false;
+    for (int run = 0; run < 2; ++run) {
+      for (int x = row.x0[run]; x < row.x1[run]; ++x) {
+        uint16_t c = ring_pixel(x - cx, y - cy);
+        if (panel_.swap_bytes) c = static_cast<uint16_t>((c >> 8) | (c << 8));
+        if (line[x] == c) continue;
+        line[x] = c;
+        changed = true;
+      }
+    }
+    if (!changed) continue;
+    if (first >= 0 && y - last > 8) {
+      send(first, last + 1);
+      first = -1;
+    }
+    if (first < 0) first = y;
+    last = y;
+  }
+  if (first >= 0) send(first, last + 1);
 }
 
 // TIMER DONE. The whole panel: green while `flash`, else the background. The hint sits in the
@@ -1179,8 +1387,7 @@ void Ui::push_band_change(const ArcSweep& from, const ArcSweep& to) {
 // the group is centred on the glass and kept clear of the hint. Round panels fit every line to
 // the chord at its own rows.
 void Ui::draw_alarm(const UiModel& m) {
-  band_ = ArcSweep{};  // no arc over the alarm
-  band_shown_ = false;
+  // No ring over the alarm (edge_ring): it owns the whole panel.
   const uint32_t key = Hash().val(m.flash).add(m.headline).add(m.detail).add(m.hint).val(m.lang)
                            .add(m.face ? m.face->hash : std::string()).get();
   if (valid_ && full_face_ == FullFace::Alarm && key == face_hash_) return;  // invalidate() repaints it too
@@ -1288,8 +1495,7 @@ void Ui::draw_alarm(const UiModel& m) {
 // the one or two lines of `detail`. On a round panel the group keeps to the square inside
 // the glass. `face_battery` below 0 draws no bar, and an empty headline no percentage.
 void Ui::draw_battery_face(const UiModel& m) {
-  band_ = ArcSweep{};
-  band_shown_ = false;
+  // No ring over the battery faces (edge_ring): they own the whole panel.
   const uint32_t key = Hash().val(static_cast<int>(m.screen)).add(m.headline).add(m.detail).add(m.hint)
                            .val(m.face_battery).val(m.lang).get();
   if (valid_ && full_face_ == FullFace::Battery && key == face_hash_) return;
@@ -1426,8 +1632,8 @@ void Ui::draw_battery_face(const UiModel& m) {
 // the per-minute shift can move it. The face changes once a minute: the burn-in
 // shift keys the hash on the minute too.
 void Ui::draw_clock(const UiModel& m) {
-  band_ = ArcSweep{};  // no arc over the clock
-  band_shown_ = false;
+  // The ring's ticks go on with the clock: each push paints them, and a new second moves
+  // only the dot (draw_frame, update_ring).
   const uint32_t key = Hash().add(m.clock_time).add(m.clock_date).val(m.clock_minute).val(m.lang)
                            .add(m.face ? m.face->hash : std::string()).get();
   if (valid_ && full_face_ == FullFace::Clock && key == face_hash_) return;  // invalidate() repaints it too

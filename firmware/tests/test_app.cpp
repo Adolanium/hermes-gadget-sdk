@@ -463,6 +463,30 @@ TEST("app: push-to-talk streams audio and shows the reply") {
   CHECK_EQ(r.app.model().body, std::string("It is sunny."));
 }
 
+TEST("ring: the listening arc grows with the seconds and turns amber in the last 5 s") {
+  constexpr uint16_t kGreen = hg::rgb565(61, 214, 140);
+  constexpr uint16_t kGreenDim = hg::rgb565(28, 92, 62);
+  constexpr uint16_t kAccent = hg::rgb565(242, 179, 61);
+  Rig r;
+  r.fake.make_round(466);
+  r.bring_online(true);
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK(r.app.screen() == hg::Screen::Listening);
+  const auto at = [&](int x, int y) { return r.fake.fb[static_cast<size_t>(y * 466 + x)]; };
+
+  r.advance(15000);  // half of the 30 s recording limit (the last frame may lag a little)
+  const int16_t half = r.app.model().progress_permille;
+  CHECK(half >= 490 && half <= 500);
+  CHECK_EQ(at(456, 233), kGreen);    // 3 o'clock, on the arc
+  CHECK_EQ(at(10, 233), kGreenDim);  // 9 o'clock, past it
+
+  r.advance(11000);  // 26 s in: the last 5 s of the limit
+  CHECK(r.app.model().progress_permille >= 834);
+  CHECK_EQ(at(456, 233), kAccent);  // amber now
+  CHECK(r.app.screen() == hg::Screen::Listening);
+  r.app.on_button(hg::Button::Talk, false);
+}
+
 TEST("app: a turn lasts from TALK until the reply has finished playing") {
   Rig r;
   r.bring_online(true);
@@ -854,17 +878,27 @@ TEST("ota: an authorized image streams in, is checked, and the device restarts i
   CHECK(ack && (*ack)["offset"].as_int() == 0);
   CHECK(upd.open);
   CHECK_EQ(r.app.screen(), hg::Screen::Updating);
+  CHECK_EQ(r.app.model().progress_permille, int16_t(0));  // nothing received yet
   CHECK(r.app.model().detail.find("9.9.9: 0% of 40 KB") != std::string::npos);
 
-  s.send_all();
+  s.chunk(0, 4096);   // 8 of 40 KB: the edge ring follows the bytes received
+  s.chunk(4096, 4096);
+  r.advance(150);  // the model refreshes on the next frame
+  CHECK_EQ(r.app.model().progress_permille, int16_t(204));
+  for (size_t off = 8192; off < s.image.size(); off += 4096)
+    s.chunk(off, std::min<size_t>(4096, s.image.size() - off));
   ack = r.fake.last("ota.ack");
   CHECK(ack && (*ack)["offset"].as_int() == 40000);  // 16 KB steps, then the end
+  CHECK_EQ(r.app.model().progress_permille, int16_t(1000));
   CHECK_EQ(r.app.model().detail, std::string("firmware 9.9.9: 100% of 40 KB"));
   r.server(R"({"type":"ota.end"})");
   const Value* done = r.fake.last("ota.done");
   CHECK(done && (*done)["version"].as_string() == "9.9.9");
   CHECK(upd.installed && upd.image == s.image);
   CHECK(!upd.restarted);  // ota.done leaves first
+  r.advance(150);  // restarting: the ring stays full while it waits to restart
+  CHECK_EQ(r.app.screen(), hg::Screen::Updating);
+  CHECK_EQ(r.app.model().progress_permille, int16_t(1000));
   r.advance(1100);
   CHECK(upd.restarted);
 }
@@ -3247,7 +3281,13 @@ TEST("battery indicator: the top band shows the level, colours charging and low,
             CHECK(dx * dx + dy * dy < w * w);
           }
       CHECK(std::abs((min_x + max_x) / 2 - w / 2) <= 2);
-      CHECK(min_y < 20);
+      CHECK(min_y < 30);
+      // The strip's top corners lie inside the band's inner edge (radius 219 on 466),
+      // so it stays put as the edge ring comes and goes.
+      for (int x : {min_x, max_x}) {
+        const int dx = x - w / 2, dy = min_y - w / 2;
+        CHECK(dx * dx + dy * dy <= 219 * 219);
+      }
     }
   }
 }
@@ -3933,10 +3973,19 @@ static void same_screens_banded(int width, int height, bool round, int band_rows
   };
   both([](Rig& r) { r.bring_online(true); r.advance(300); }, "ready");
   CHECK(banded.app.screen() == hg::Screen::Ready);
-  both([](Rig& r) { r.app.on_button(hg::Button::Talk, true); r.advance(300); }, "listening");
+  both([](Rig& r) { r.app.on_button(hg::Button::Talk, true); r.advance(2000); }, "listening");
+  both([](Rig& r) { r.app.on_button(hg::Button::Talk, false); r.advance(300); }, "thinking");
+  CHECK(banded.app.screen() == hg::Screen::Thinking);  // the blue comet repaints the bands
   both([](Rig& r) {
-    r.app.on_button(hg::Button::Talk, false);
-    r.server(R"({"type":"reply","text":"A reply long enough to wrap over several lines, so the content band fills up."})");
+    r.server(R"({"type":"turn.start","turn":"a1"})");
+    r.server(R"({"type":"audio.start","stream":5,"rate":16000,"format":"pcm16"})");
+    r.advance(300);
+  }, "speaking");
+  CHECK(banded.app.screen() == hg::Screen::Responding);  // the amber comet, one lap in 4 s
+  both([](Rig& r) {
+    r.server(R"({"type":"reply","turn":"a1","text":"A reply long enough to wrap over several lines, so the content band fills up."})");
+    r.server(R"({"type":"audio.end","stream":5})");
+    r.server(R"({"type":"turn.end","turn":"a1","outcome":"success"})");
     r.advance(300);
   }, "a reply");
   both([](Rig& r) {
@@ -5830,6 +5879,11 @@ TEST("clock: after a rest it shows at 70% of the brightness setting") {
   CHECK_EQ(r.app.model().clock_time, std::string("09:41"));
   CHECK_EQ(r.app.model().clock_date, std::string("SAT OCT 24"));
   CHECK_EQ(int(r.app.model().clock_minute), 41);
+  CHECK_EQ(int(r.app.model().clock_second), 0);  // kWallSaturday's second: the dot's place
+  r.fake.wall = hg::WallTime{2026, 10, 24, 6, 9, 41, 42};  // the next second, the same minute
+  r.advance(200);
+  CHECK_EQ(int(r.app.model().clock_second), 42);  // the ring's dot moves every second
+  CHECK_EQ(r.app.model().clock_time, std::string("09:41"));  // the face's text does not
   CHECK(r.app.status_json().find("\"screen\":\"clock\"") != std::string::npos);
   // A lit clock is a lit screen: Hermes is never told it is dark.
   const Value* dark = last_display_state(r.fake);

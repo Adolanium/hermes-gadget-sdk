@@ -22,16 +22,18 @@ namespace {
 constexpr uint16_t kText = hg::rgb565(232, 238, 242);
 constexpr uint16_t kDim = hg::rgb565(132, 146, 160);
 constexpr uint16_t kGreen = hg::rgb565(61, 214, 140);
+constexpr uint16_t kAccent = hg::rgb565(242, 179, 61);  // the ring's seconds dot
 
 // A panel the test renders on. Emissive, so the background is 0 and any ink shows.
 struct FaceDisplay : hg::Display {
   hg::DisplayInfo d;
   std::vector<uint16_t> fb;
   int flushed = 0;  // panel rows sent to the panel
-  FaceDisplay(int w, int h, bool round) : fb(static_cast<size_t>(w * h)) {
+  FaceDisplay(int w, int h, bool round, int font_scale = 1) : fb(static_cast<size_t>(w * h)) {
     d.width = static_cast<uint16_t>(w);
     d.height = static_cast<uint16_t>(h);
     d.round = round;
+    d.font_scale = static_cast<uint8_t>(font_scale);
     d.emissive = true;
   }
   hg::DisplayInfo info() const override { return d; }
@@ -42,7 +44,7 @@ struct FaceDisplay : hg::Display {
 struct Face {
   FaceDisplay display;
   hg::Ui ui;
-  Face(int w, int h, bool round) : display(w, h, round), ui(display) {}
+  Face(int w, int h, bool round, int font_scale = 1) : display(w, h, round, font_scale), ui(display) {}
   uint16_t at(int x, int y) const { return display.fb[static_cast<size_t>(y * display.d.width + x)]; }
   int width() const { return display.d.width; }
   int height() const { return display.d.height; }
@@ -104,28 +106,72 @@ struct SolidFace {
 
 }  // namespace
 
-TEST("clock face: the time, the date and the mascot stay inside the glass at every shift") {
-  const struct { int w, h; } panels[] = {{466, 466}, {360, 360}, {240, 240}};
-  for (const auto& p : panels) {
-    Face f(p.w, p.h, true);
-    const int cx = p.w / 2, cy = p.h / 2, r = p.w / 2;
-    bool saw_time = false, saw_date = false;
+TEST("clock face: the face's ink keeps 3 px clear of the clock ring at every shift, on every round size") {
+  // Every round panel, the Knob's larger font included. The widest minute ("23:58") and a
+  // long Spanish date, at all 60 burn-in shifts: the face's own ink keeps 3 px inside the
+  // band and never enters the clock ring's annulus (the band and the dot's reach, which
+  // the ring paints over whatever was there), and nothing draws outside the glass. The
+  // face's closest ink measures 3.92 px inside the band (the 240, at the shifts that move 4 px).
+  const struct { int w, fs; } panels[] = {{240, 1}, {360, 1}, {360, 2}, {412, 1},
+                                          {466, 1}, {480, 1}, {800, 1}};
+  for (const auto& t : panels) {
+    Face f(t.w, t.w, true, t.fs);
+    const int cx = t.w / 2, cy = t.w / 2, r = t.w / 2;
+    const int s = f.ui.layout().scale;
+    const int band_out = r - (2 * s + 2), band_in = band_out - (3 * s + 2);
+    // The clock ring's annulus (ui.cpp, clock_rows_), in half pixels.
+    const int mid2 = band_in + band_out + 1, reach2 = 8 * s + 2;
+    const auto in_ring = [&](int64_t d2) {
+      return 4 * d2 >= static_cast<int64_t>(mid2 - reach2) * (mid2 - reach2) &&
+             4 * d2 <= static_cast<int64_t>(mid2 + reach2) * (mid2 + reach2);
+    };
+    bool saw_time = false, saw_date = false, saw_dot = false;
     for (int minute = 0; minute < 60; ++minute) {
-      f.ui.render(clock_model(static_cast<uint8_t>(minute)));
-      for (int y = 0; y < p.h; ++y)
-        for (int x = 0; x < p.w; ++x) {
+      hg::UiModel m = clock_model(static_cast<uint8_t>(minute), "MI\xC3\x89 30 SEPT", hg::i18n::Lang::Es);
+      m.clock_time = "23:58";
+      f.ui.render(m);
+      for (int y = 0; y < t.w; ++y)
+        for (int x = 0; x < t.w; ++x) {
           if (f.at(x, y) == 0) continue;
-          const int64_t dx = x - cx, dy = y - cy;
-          if (dx * dx + dy * dy > static_cast<int64_t>(r) * r)
+          const int64_t dx = x - cx, dy = y - cy, d2 = dx * dx + dy * dy;
+          if (d2 > static_cast<int64_t>(r) * r)
             check::fail(__FILE__, __LINE__,
-                        "ink outside the glass at " + std::to_string(x) + "," + std::to_string(y) + " (minute " +
-                            std::to_string(minute) + ")");
+                        "ink outside the glass at " + std::to_string(x) + "," + std::to_string(y) +
+                            " (minute " + std::to_string(minute) + ")");
+          if (in_ring(d2)) {
+            // The ring's own ground: the amber dot anywhere in its reach, and the grey
+            // ticks inside the band. Nothing else may light it: not the dot's reach
+            // outside the band, and not the face's ink.
+            if (f.at(x, y) == kAccent) {
+              saw_dot = true;
+              continue;
+            }
+            if (d2 > static_cast<int64_t>(band_in) * band_in && d2 <= static_cast<int64_t>(band_out) * band_out &&
+                f.at(x, y) == kDim)
+              continue;  // a tick
+            check::fail(__FILE__, __LINE__,
+                        "ink inside the clock ring at " + std::to_string(x) + "," + std::to_string(y) +
+                            " (minute " + std::to_string(minute) + ")");
+            continue;
+          }
+          if (d2 > static_cast<int64_t>(band_in - 3) * (band_in - 3) && d2 <= static_cast<int64_t>(band_in) * band_in)
+            check::fail(__FILE__, __LINE__,
+                        "ink within 3 px of the band at " + std::to_string(x) + "," + std::to_string(y) +
+                            " (minute " + std::to_string(minute) + ")");
         }
       saw_time |= ink_of(f, kText).any();
-      saw_date |= ink_of(f, kDim).any();
+      for (int y = 0; y < t.w && !saw_date; ++y)  // the date's grey, well clear of the ring
+        for (int x = 0; x < t.w; ++x) {
+          const int64_t dx = x - cx, dy = y - cy, d2 = dx * dx + dy * dy;
+          if (d2 <= static_cast<int64_t>(band_in - 10) * (band_in - 10) && f.at(x, y) == kDim) {
+            saw_date = true;
+            break;
+          }
+        }
     }
     CHECK(saw_time);
     CHECK(saw_date);
+    CHECK(saw_dot);  // the second 0 dot at 12 o'clock, over the ticks
   }
 }
 
@@ -152,7 +198,22 @@ TEST("clock face: the Spanish date draws whole") {
   Face f(466, 466, true);
   const std::string date = "S\xC3\x81" "B 24 OCT";  // SÁB 24 OCT
   f.ui.render(clock_model(41, date, hg::i18n::Lang::Es));
-  const Box d = ink_of(f, kDim);
+  // The date's grey is the ring's tick grey too, so the box looks only well inside the band.
+  Box d;
+  const int limit = 219 - 8;  // the band's inner edge on 466, less the ring's reach
+  for (int y = 0; y < 466; ++y)
+    for (int x = 0; x < 466; ++x) {
+      const int dx = x - 233, dy = y - 233;
+      if (dx * dx + dy * dy > limit * limit || f.at(x, y) != kDim) continue;
+      if (!d.any()) {
+        d = {x, y, x, y};
+      } else {
+        if (x < d.x0) d.x0 = x;
+        if (x > d.x1) d.x1 = x;
+        if (y < d.y0) d.y0 = y;
+        if (y > d.y1) d.y1 = y;
+      }
+    }
   CHECK(d.any());
   CHECK_EQ(d.x1 - d.x0 + 1, hg::Canvas::text_width(date, 3));  // the alarm label's scale
 }
