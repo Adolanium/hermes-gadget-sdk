@@ -9,6 +9,10 @@
 //   tap a list row     asks Hermes for that profile
 //   swipe down         a CANCEL press and release (discard, close, stop, "no")
 //
+// With the touch_talk setting off, holds and taps press TALK only where it doesn't
+// record (settings, a question, a ringing alarm); elsewhere they do nothing, and the
+// name opens the profile list in tap-to-talk mode too.
+//
 // Feed it raw touch samples; it calls App::on_button. Portable and clock-free,
 // so the simulator and the tests drive it exactly like the firmware does.
 #pragma once

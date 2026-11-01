@@ -12,7 +12,10 @@ void TouchGestures::tick(uint32_t now_ms) {
     state_ = State::Ignored;
     app_.open_settings();
   }
-  if (state_ == State::Pending && static_cast<int32_t>(now_ms - t0_) >= static_cast<int32_t>(cfg_.hold_ms)) {
+  // With touch_talk off a still finger stays Pending where TALK would record: its lift is a tap
+  // that does nothing there, and it can still become a swipe down.
+  if (state_ == State::Pending && static_cast<int32_t>(now_ms - t0_) >= static_cast<int32_t>(cfg_.hold_ms) &&
+      app_.touch_presses_talk()) {
     state_ = State::Talk;
     press(Button::Talk);
   }
@@ -28,6 +31,7 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
           app_.open_profile_picker();
           break;
         }
+        if (!app_.touch_presses_talk()) break;  // touch_talk off: only TALK records
         press(Button::Talk);
         release(Button::Talk);
         break;

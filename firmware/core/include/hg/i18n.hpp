@@ -35,6 +35,9 @@ namespace hg::i18n {
   X(NoMicDriver,            "No microphone driver is active.") \
   X(TalkModeHold,           "Hold to record; release to send.") \
   X(TalkModeTap,            "Tap to record; pause or tap to send.") \
+  X(TouchTalk,              "Touch to talk") \
+  X(TouchTalkOn,            "On\nTouch the screen to talk.") \
+  X(TouchTalkOff,           "Off\nTalk with {0}; touch only navigates.") \
   X(MicCheck,               "Microphone check") \
   X(MicCheckLive,           "Speak now. Level: {0}%\nLocal only. Nothing is sent.") \
   X(MicCheckIntro,          "Start to check the microphone level. No recording is saved or sent.") \
