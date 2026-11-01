@@ -1026,14 +1026,6 @@ uint16_t initial_color(std::string_view id) {
 }
 
 // The first letter of a name, upper case when it is ASCII.
-std::string initial_of(std::string_view name) {
-  if (name.empty()) return "?";
-  const size_t n = std::max<size_t>(1, font::prefix(name, 1));
-  std::string out(name.substr(0, n));
-  if (out.size() == 1 && out[0] >= 'a' && out[0] <= 'z') out[0] = static_cast<char>(out[0] - 'a' + 'A');
-  return out;
-}
-
 // `b` scaled to a size*size square by nearest pixel, its ink in `ink`.
 void bitmap_scaled(Canvas& c, int x, int y, int size, const mascot::Bitmap& b, uint16_t ink) {
   if (size == b.size) {
@@ -1060,6 +1052,23 @@ std::vector<std::string> name_lines(const std::string& name, int cols) {
 }
 }  // namespace
 
+std::string profile_initial(std::string_view name) {
+  size_t start = 0;
+  while (start < name.size() && name[start] == ' ') ++start;
+  name.remove_prefix(start);
+  if (name.empty()) return "?";
+  const size_t n = std::max<size_t>(1, font::prefix(name, 1));
+  std::string out(name.substr(0, n));
+  const auto b0 = static_cast<unsigned char>(out[0]);
+  if (out.size() == 1 && b0 >= 'a' && b0 <= 'z') {
+    out[0] = static_cast<char>(b0 - 'a' + 'A');
+  } else if (out.size() == 2 && b0 == 0xC3) {  // Latin-1 small letters U+00E0..U+00FE, but not U+00F7
+    const auto b1 = static_cast<unsigned char>(out[1]);
+    if (b1 >= 0xA0 && b1 <= 0xBE && b1 != 0xB7) out[1] = static_cast<char>(b1 - 0x20);
+  }
+  return out;
+}
+
 // Cells at least a finger tall and wide, each with an icon and two lines of name under it. The page
 // holds the grid the model asks for, or with few profiles the smallest grid that holds them all
 // (bigger icons); a panel too small for it gets the largest smaller grid that fits.
@@ -1074,7 +1083,7 @@ Ui::ProfileGrid Ui::profile_grid(const UiModel& m) const {
   const bool landscape = 2 * band_w >= 3 * band_h;  // clearly wider than tall: 6 is three across
   const int min_icon = std::max(24, 12 * s);
   static constexpr int kGrids[] = {16, 9, 6, 4, 2, 1};
-  int want = m.grid == 16 || m.grid == 9 || m.grid == 4 ? m.grid : 6;
+  int want = m.grid == 16 || m.grid == 6 || m.grid == 4 ? m.grid : 9;
   for (int k : {4, 6, 9})  // few profiles: the smallest grid that holds them all
     if (n <= k && k < want) want = k;
   for (int k : kGrids) {
@@ -1136,7 +1145,7 @@ void Ui::draw_profiles(Canvas& c, const UiModel& m) {
       bitmap_scaled(c, ix, iy, g.icon, mascot::pick(g.icon, mascot::Frame::Idle, face), kText);
     } else {
       c.fill_circle(cx, cy, g.icon / 2, initial_color(row.value));
-      const std::string letter = initial_of(row.label);
+      const std::string letter = profile_initial(row.label);
       const int big = std::max(1, g.icon * 9 / 20 / font::kGlyphHeight);
       c.text(cx - Canvas::text_width(letter, big) / 2, cy - font::kGlyphHeight * big / 2, letter, big, kText);
     }

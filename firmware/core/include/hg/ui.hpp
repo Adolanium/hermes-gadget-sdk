@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "hg/canvas.hpp"
@@ -69,6 +70,10 @@ struct SettingRow {
   Kind kind = Kind::Value;
   uint8_t level = 0;  // Toggle: 0 off, 1 on; Slider: 0..100
 };
+
+// The letter a profile without a face shows in the grid: the name's first character, in capitals
+// (ASCII and Latin-1), whatever case the name arrives in; "?" for an empty name.
+std::string profile_initial(std::string_view name);
 
 struct UiModel {
   Screen screen = Screen::Boot;

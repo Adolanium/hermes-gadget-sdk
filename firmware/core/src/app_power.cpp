@@ -106,6 +106,12 @@ void App::on_power_key() {
     wake_display();
     return;
   }
+  if (profile_picker_open()) {  // PWR is Back on the profile grid: Ready, still lit; the next press darkens
+    dismiss_overlay();
+    activity_at_ = now();
+    update_model();
+    return;
+  }
   // In the settings menu the press is Back: it closes the menu (and any check
   // running in it) and leaves the screen lit on the home screen. The next press
   // there turns the screen off.

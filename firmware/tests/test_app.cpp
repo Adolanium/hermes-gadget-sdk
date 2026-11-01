@@ -5604,8 +5604,8 @@ TEST("profiles: the name and every grid cell are about 7 mm tall and wide on eac
 TEST("profiles: the 2.06 and the round 1.75 show the grid asked for; few profiles get big icons") {
   struct Case { int w, h; bool round; uint16_t ppi; int grid, n, per; };
   const Case cases[] = {
-      {410, 486, false, 315, 0, 16, 6},  // the default: 2 across, 3 down
-      {466, 466, true, 266, 0, 16, 6},
+      {410, 486, false, 315, 0, 16, 9},  // the default: 3 x 3
+      {466, 466, true, 266, 0, 16, 9},
       {410, 486, false, 315, 4, 16, 4},  {410, 486, false, 315, 6, 16, 6},
       {410, 486, false, 315, 9, 16, 9},  {410, 486, false, 315, 16, 16, 16},
       {466, 466, true, 266, 4, 16, 4},   {466, 466, true, 266, 9, 16, 9},
@@ -5622,7 +5622,7 @@ TEST("profiles: the 2.06 and the round 1.75 show the grid asked for; few profile
     welcome_with_roster(r, c.n);
     CHECK(r.app.open_profile_picker());
     const int per = r.app.profile_per_page();
-    if (c.grid == 0 || c.grid == 6) {  // 6 is two columns of three on these portrait and square panels
+    if (c.grid == 6) {  // 6 is two columns of three on these portrait and square panels
       int cols = 0;
       for (int i = 0; i < c.n && i < per; ++i) cols += row_point(r, i).second == row_point(r, 0).second;
       CHECK_EQ(cols, 2);
@@ -5713,6 +5713,65 @@ TEST("profiles: a sideways swipe opens nothing while a turn runs, on other scree
   Rig buttons;
   buttons.bring_online_with_profiles();
   CHECK(!buttons.app.profile_swipe_opens());
+}
+
+TEST("profiles: a profile's initial is always a capital letter") {
+  CHECK_EQ(hg::profile_initial("fiscal"), std::string("F"));
+  CHECK_EQ(hg::profile_initial("garagem"), std::string("G"));
+  CHECK_EQ(hg::profile_initial("Saude"), std::string("S"));
+  CHECK_EQ(hg::profile_initial(" work"), std::string("W"));
+  CHECK_EQ(hg::profile_initial("\xc3\xa9tica"), std::string("\xc3\x89"));  // é becomes É
+  CHECK_EQ(hg::profile_initial("\xc3\xb7x"), std::string("\xc3\xb7"));  // ÷ has no capital
+  CHECK_EQ(hg::profile_initial("2fa"), std::string("2"));
+  CHECK_EQ(hg::profile_initial(""), std::string("?"));
+}
+
+TEST("profiles: the grid dims and darkens on the screen timeout; a touch on it keeps it lit") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online_with_profiles();
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  hg::TouchGestures touch(r.app);
+  CHECK(r.app.open_profile_picker());
+  r.advance(10000);
+  CHECK_EQ(r.fake.brightness, 100);
+  // A touch on the grid (here a swipe too short to turn the page) counts as activity.
+  touch.update(true, 100, 200, r.fake.clock);
+  r.advance(20);
+  touch.update(true, 120, 200, r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock);
+  r.advance(14000);
+  CHECK_EQ(r.fake.brightness, 100);  // 14 s after the touch: still lit
+  CHECK(r.app.profile_picker_open());
+  r.advance(2000);
+  CHECK_EQ(r.fake.brightness, 10);  // half the timeout: dimmed, the grid still up
+  CHECK(r.app.profile_picker_open());
+  r.advance(15000);
+  CHECK_EQ(r.fake.brightness, 0);  // the whole timeout: dark, and the grid closed
+  CHECK(!r.app.profile_picker_open());
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK(r.fake.last("profile.select") == nullptr);
+}
+
+TEST("profiles: PWR on the grid goes back to Ready with the screen lit; the next press darkens it") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online_with_profiles();
+  CHECK(r.app.open_profile_picker());
+  r.app.on_power_key();
+  CHECK(!r.app.profile_picker_open());
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.fake.last("profile.select") == nullptr);
+  r.app.on_power_key();
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_power_key();
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK(!r.app.profile_picker_open());
 }
 
 TEST("profiles: a welcome brings up to 32 profiles; the rest are dropped") {
