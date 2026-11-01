@@ -36,6 +36,35 @@ def test_extra_profiles_limits_the_roster(hermes_home, offered, ids):
     assert sorted(p["id"] for p in roster) == sorted(ids) and roster[:1] == [r for r in roster if r["id"] == "default"]
 
 
+def test_roster_names_follow_the_hermes_interface(hermes_home):
+    """display_name, else the Desktop Bots title, else the id with a capital first letter."""
+    from gateway.config import PlatformConfig
+    from hermes_gadget_plugin.adapter import GadgetAdapter
+
+    for name, meta in (("lab", "display_name: Research Lab\n"),
+                       ("garage", "ui_meta:\n  hermes-bots:\n    title: My Garage\n"),
+                       ("saude", "")):
+        (hermes_home / "profiles" / name).mkdir()
+        (hermes_home / "profiles" / name / "config.yaml").write_text("{}\n")
+        if meta:
+            (hermes_home / "profiles" / name / "profile.yaml").write_text(meta)
+    roster = GadgetAdapter(PlatformConfig(enabled=True, extra={"profiles": "all"})).profiles()
+    names = {p["id"]: p["name"] for p in roster}
+    assert names["lab"] == "Research Lab"
+    assert names["garage"] == "My Garage"
+    assert names["saude"] == "Saude"
+    assert names["ops"] == "Ops"
+
+
+def test_roster_names_on_a_hermes_without_bot_title():
+    import types
+    from hermes_gadget_plugin.adapter import _profile_label
+
+    assert _profile_label(types.SimpleNamespace(name="fiscal", display_name="")) == "Fiscal"
+    assert _profile_label(types.SimpleNamespace(name="x", display_name=" X Bot ", bot_title="T")) == "X Bot"
+    assert _profile_label(types.SimpleNamespace(name="x", display_name="", bot_title="Travel")) == "Travel"
+
+
 def test_without_the_key_a_device_behaves_as_before(hermes_home, tmp_path):
     import asyncio
 
