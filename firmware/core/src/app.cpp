@@ -182,6 +182,8 @@ const App::Route App::kRoutes[] = {
     {"ota.abort", &App::h_ota_abort},     {"dashboard", &App::h_dashboard},
     {"profile", &App::h_profile},         {"face", &App::h_face},
     {"face.start", &App::h_face_start},   {"face.end", &App::h_face_end},
+    {"face.thumb", &App::h_face_thumb},   {"face.thumb.start", &App::h_face_thumb_start},
+    {"face.thumb.end", &App::h_face_thumb_end},
 };
 
 App::App(Hal& hal, DeviceProfile profile) : hal_(hal), profile_(std::move(profile)) {}
@@ -372,6 +374,17 @@ void App::begin() {
   }
   if (ui_ && profile_.touch_screen)  // about 7 mm: 7 * ppi / 25.4, rounded up
     ui_->set_touch_px((70 * (profile_.touch_ppi ? profile_.touch_ppi : DeviceProfile::kDefaultTouchPpi) + 253) / 254);
+  // Thumbnails for the profile grid, with colour faces: the largest icon the grid draws, at most 128 px,
+  // else smaller ones while there is no room (1 MB for 32 at 128 px).
+  if (ui_ && colour_px_ && profile_.touch_screen && !thumbs_) {
+    for (int px = ui_->profile_thumb_px(kMaxThumbPx); px >= kMinThumbPx && !thumbs_; px = px * 3 / 4) {
+      thumbs_.reset(static_cast<uint16_t*>(
+          profile_.colour_face_alloc(kMaxProfiles * static_cast<size_t>(px) * static_cast<size_t>(px) * 2)));
+      thumb_px_ = thumbs_ ? px : 0;
+    }
+    thumb_slots_.assign(thumbs_ ? kMaxProfiles : 0, Thumb{});
+    if (!thumbs_) log(LogLevel::Warn, "no room for profile thumbnails: the grid shows initials");
+  }
   if (profile_.frame_stats) set_frame_stats(true);
   phase_ = Phase::Boot;
   phase_since_ = now();
@@ -571,6 +584,7 @@ void App::send_hello() {
   if (ui_ && profile_.faces) {
     json::Value colour = json::Value::object().set("v", 2).set("px", colour_px_);
     if (colour_bands_) colour.set("frames", true);
+    if (thumb_px_) colour.set("thumbs", thumb_px_);
     caps.set("faces", colour_px_ ? std::move(colour) : json::Value(1));
   }
   if (hal_.updater) {
@@ -600,6 +614,10 @@ void App::send_hello() {
   const std::string stored = setting("profile", "");  // only what Hermes confirmed, never what it showed
   if (!stored.empty()) hello.set("profile", stored);
   if (face_) hello.set("face", face_->hash);
+  json::Value held = json::Value::object();  // the thumbnails kept from an earlier connection
+  for (const Thumb& t : thumb_slots_)
+    if (t.ready) held.set(t.id, t.hash);
+  if (thumb_px_) hello.set("thumbs", std::move(held));
   if (!access_token_.empty()) hello.set("token", access_token_);
   if (display_sleeping_) hello.set("display_sleeping", true);
   send(hello);
@@ -669,6 +687,13 @@ void App::h_welcome(const json::Value& m) {
   }
   if (m["profile"].is_string()) set_agent_profile(m["profile"].as_string());
   profile_pending_.clear();  // the welcome says which profile answers
+  // Thumbnails go with pairing, like the face, and with the profiles no longer offered.
+  thumb_in_.reset();
+  for (size_t i = 0; i < thumb_slots_.size(); ++i) {
+    bool offered = false;
+    for (const auto& p : agent_profiles_) offered = offered || p.id == thumb_slots_[i].id;
+    if (!paired_ || !offered) drop_thumb(i);
+  }
   // A freshly installed firmware has reached Hermes, so it can take the next update: keep it.
   if (hal_.updater && hal_.updater->pending_verify()) {
     hal_.updater->confirm();
@@ -706,6 +731,78 @@ void App::h_face(const json::Value& m) {
   face_ = std::move(face);
 }
 
+size_t App::thumb_slot(const std::string& id) const {
+  for (size_t i = 0; i < thumb_slots_.size(); ++i)
+    if (!thumb_slots_[i].id.empty() && thumb_slots_[i].id == id) return i;
+  return kMaxProfiles;
+}
+
+void App::drop_thumb(size_t slot) {
+  if (slot >= thumb_slots_.size() || thumb_slots_[slot].id.empty()) return;
+  if (thumb_in_ && thumb_in_->slot == slot) thumb_in_.reset();
+  thumb_slots_[slot] = Thumb{};
+  ++thumbs_rev_;
+}
+
+void App::drop_thumbs() {
+  for (size_t i = 0; i < thumb_slots_.size(); ++i) drop_thumb(i);
+  thumb_in_.reset();
+}
+
+// A profile's thumbnail goes back to its initial.
+void App::h_face_thumb(const json::Value& m) {
+  if (!thumb_px_ || !paired_) return;
+  drop_thumb(thumb_slot(m["profile"].as_string()));
+  update_model();
+}
+
+// A profile's thumbnail: checked whole, then its pixels on channel 4 go into its slot (face_chunk), and
+// face.thumb.end shows it. The slot shows the initial meanwhile; other profiles' thumbnails stay.
+void App::h_face_thumb_start(const json::Value& m) {
+  if (!thumb_px_ || !paired_) return;
+  thumb_in_.reset();
+  const std::string& id = m["profile"].as_string();
+  const std::string& hash = m["hash"].as_string();
+  const int64_t stream = whole_in(m["stream"], 0, 255);
+  bool offered = false;
+  for (const auto& p : agent_profiles_) offered = offered || p.id == id;
+  if (!offered || hash.empty() || hash.size() > 64 || stream < 0 || whole_in(m["width"], thumb_px_, thumb_px_) < 0 ||
+      whole_in(m["height"], thumb_px_, thumb_px_) < 0 || m["format"].as_string() != "rgb565") {
+    log(LogLevel::Warn, "ignored a malformed profile thumbnail");
+    return;
+  }
+  size_t slot = thumb_slot(id);
+  if (slot == kMaxProfiles) {  // a free slot, else one whose profile is no longer offered
+    for (size_t i = 0; i < thumb_slots_.size() && slot == kMaxProfiles; ++i)
+      if (thumb_slots_[i].id.empty()) slot = i;
+    for (size_t i = 0; i < thumb_slots_.size() && slot == kMaxProfiles; ++i) {
+      bool kept = false;
+      for (const auto& p : agent_profiles_) kept = kept || p.id == thumb_slots_[i].id;
+      if (!kept) slot = i;
+    }
+    if (slot == kMaxProfiles) return;  // cannot happen: the roster holds at most kMaxProfiles
+  }
+  drop_thumb(slot);
+  thumb_slots_[slot].id = id;
+  thumb_slots_[slot].hash = hash;
+  thumb_in_ = ThumbTransfer{static_cast<int>(stream), slot};
+  update_model();
+}
+
+void App::h_face_thumb_end(const json::Value& m) {
+  if (!thumb_in_ || whole_in(m["stream"], 0, 255) != thumb_in_->stream) return;
+  const size_t slot = thumb_in_->slot;
+  if (thumb_in_->got == static_cast<size_t>(thumb_px_) * thumb_px_ * 2) {
+    thumb_slots_[slot].ready = true;
+    ++thumbs_rev_;
+  } else {
+    log(LogLevel::Warn, "dropped a profile thumbnail that ended short");
+    thumb_slots_[slot] = Thumb{};
+  }
+  thumb_in_.reset();
+  update_model();
+}
+
 void App::drop_face() {
   face_.reset();
   face_in_.reset();
@@ -741,6 +838,19 @@ size_t App::face_bytes() const {
 }
 
 void App::face_chunk(uint8_t stream, uint16_t seq, const uint8_t* data, size_t len) {
+  if (thumb_in_ && stream == thumb_in_->stream) {  // a profile thumbnail's pixels, on the same channel
+    const size_t total = static_cast<size_t>(thumb_px_) * thumb_px_ * 2;
+    if (seq != thumb_in_->seq || len > total - thumb_in_->got) {
+      log(LogLevel::Warn, "dropped a profile thumbnail: a chunk out of place");
+      thumb_slots_[thumb_in_->slot] = Thumb{};
+      thumb_in_.reset();
+      return;
+    }
+    std::memcpy(reinterpret_cast<uint8_t*>(thumbs_.get()) + thumb_in_->slot * total + thumb_in_->got, data, len);
+    thumb_in_->got += len;
+    ++thumb_in_->seq;
+    return;
+  }
   if (!face_in_ || stream != face_in_->stream) return;
   const size_t total = face_bytes();
   if (seq != face_in_->seq || len > total - face_in_->got) {
@@ -902,6 +1012,7 @@ void App::h_unpaired(const json::Value& m) {
     pairing_command_.clear();
   }
   drop_face();
+  drop_thumbs();
   mode_ = Mode::Idle;
   stop_playback();
 }
@@ -2216,6 +2327,16 @@ void App::update_model() {
       else if (p.id == "default" && (!current || !face_)) m.mascot_row = static_cast<int16_t>(i);
     }
     m.hint = tr(Msg::ProfileListHint);
+    if (thumb_px_) {  // the profiles' own faces, where Hermes sent them
+      m.thumb_px = static_cast<uint16_t>(thumb_px_);
+      m.thumbs_rev = thumbs_rev_;
+      m.thumbs.assign(agent_profiles_.size(), nullptr);
+      for (size_t i = 0; i < agent_profiles_.size(); ++i) {
+        const size_t slot = thumb_slot(agent_profiles_[i].id);
+        if (slot < thumb_slots_.size() && thumb_slots_[slot].ready)
+          m.thumbs[i] = thumbs_.get() + slot * static_cast<size_t>(thumb_px_) * thumb_px_;
+      }
+    }
     m.grid = profile_grid_;
     m.scroll = profile_page_;
   } else if (overlay_ == Overlay::Dashboard) {

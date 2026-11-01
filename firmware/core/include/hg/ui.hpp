@@ -98,6 +98,11 @@ struct UiModel {
   // items whose icon is `face` and the mascot (-1: none). The others show their initial.
   uint8_t grid = 4;
   int16_t face_row = -1, mascot_row = -1;
+  // Profiles screen: each item's thumbnail from Hermes (thumb_px square RGB565, 0x0000 transparent),
+  // or null for none; borrowed like `face`. `thumbs_rev` changes whenever one of them does.
+  std::vector<const uint16_t*> thumbs;
+  uint16_t thumb_px = 0;
+  uint32_t thumbs_rev = 0;
   // Wi-Fi setup: a scannable code for the temporary network, drawn centred in
   // the content band. Null on every other screen. Borrowed, not owned: the app
   // keeps the matrix so it is encoded once, not on every model update.
@@ -196,6 +201,9 @@ class Ui {
   // Profiles a page of the grid holds on this panel: the model's `grid`, or the largest smaller
   // grid whose cells stay touch targets with a readable icon and two lines of name. 0 off that screen.
   int profile_per_page(const UiModel& m) const;
+  // The side of the largest profile icon this panel draws (a page of up to four, at the touch size
+  // set): the size Hermes sends thumbnails at, at most `cap`. 0 without a grid.
+  int profile_thumb_px(int cap) const;
   bool title_hit(int x, int y) const {
     const int left = ox_ + (info_.width - layout_.title_w) / 2;
     return x >= left && x < left + layout_.title_w && y >= oy_ && y < oy_ + layout_.top_h;

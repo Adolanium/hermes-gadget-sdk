@@ -898,3 +898,32 @@ def test_a_frame_with_transparent_eyes_is_cropped_like_its_opaque_avatar(tmp_pat
     assert face.blink is not None
     y, rows, _ = face.blink
     assert 40 <= y and y + rows <= 66  # the eyes, rows 100-120 of 300, are rows 48-58 of 144
+
+
+def test_a_profile_thumbnail_is_its_avatar_in_colour_or_its_face_files_idle_frame(tmp_path):
+    home = tmp_path / "ops"
+    (home / "assets").mkdir(parents=True)
+    assert profile_faces.thumb_for_profile(home, px=96) is None  # nothing to show: the initial
+    _badge(home / "assets" / "avatar.png", True)
+    thumb = profile_faces.thumb_for_profile(home, px=96)
+    data = thumb.load()
+    assert len(data) == 96 * 96 * 2
+    rose = (220 & 0xF8) << 8 | (60 & 0xFC) << 3 | 120 >> 3
+    pixels = [p for (p,) in struct.iter_unpack("<H", data)]
+    assert pixels[0] == 0  # the transparent corner stays transparent
+    assert pixels.count(rose) > 1000  # the rose disc, in colour
+    # Named by its picture and size, apart from the profile's own face of the same picture.
+    assert profile_faces.thumb_for_profile(home, px=96).hash == thumb.hash
+    assert len({thumb.hash, profile_faces.thumb_for_profile(home, px=64).hash,
+                profile_faces.for_profile(home, colour_px=96).hash}) == 3
+    assert profile_faces.thumb_for_profile(home, convert=False, px=96) is None  # no Pillow: face files only
+
+    # A face file wins, as it does for the profile's face: its idle frame in the one-colour face's ink.
+    assert cli.main(["face", "--out", str(home / profile_faces.FACE_FILE), "--preview", str(tmp_path / "p.png")]) == 0
+    from_file = profile_faces.thumb_for_profile(home, convert=False, px=96)
+    assert from_file is not None and from_file.hash != thumb.hash
+    ink = set(p for (p,) in struct.iter_unpack("<H", from_file.load()))
+    r, g, b = profile_faces.THUMB_INK
+    assert ink == {0, (r & 0xF8) << 8 | (g & 0xFC) << 3 | b >> 3}
+    (home / profile_faces.FACE_FILE).write_bytes(b"not a face")  # a broken face file: the avatar again
+    assert profile_faces.thumb_for_profile(home, px=96).hash == thumb.hash

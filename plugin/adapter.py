@@ -241,6 +241,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._pushed_seq: Dict[str, int] = {}  # device -> the newest push that read a roster for it
         # connection -> its last face lookup; it goes with the connection, and a replaced one keeps its own
         self._face_from: "weakref.WeakKeyDictionary[DeviceSession, _FaceLook]" = weakref.WeakKeyDictionary()
+        # Profile thumbnails (thumb()): (profile, size, avatars on) -> (the files' stamp, the thumbnail), and
+        # a stamp seen changing that has yet to hold still.
+        self._thumbs: Dict[tuple, tuple] = {}
+        self._thumb_changing: Dict[tuple, tuple] = {}
         self._battery_log: Optional[BatteryLog] = None
         self._tls_cert = extra.get("tls_cert")
         self._tls_key = extra.get("tls_key")
@@ -533,6 +537,33 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             logger.warning("[%s] no face for profile %s: %s", self.name, profile, exc)
             return None
 
+    async def thumb(self, session: DeviceSession, profile: str) -> Optional[faces.ProfileFace]:
+        """``profile``'s thumbnail for a device's grid: its face file or avatar, as its own face would be.
+        Each profile's files are stat'ed on every call and read only when they changed and then held
+        still until the next call, a debounce for a file being written; until then the last one stays."""
+        if not self._profile_faces or not session.thumb_px:
+            return None
+        if self._convert_avatars is None:
+            self._convert_avatars = imaging.pillow_available()
+        key = (profile, session.thumb_px, self._convert_avatars)
+        try:
+            home = self._profile_home(profile)
+            now = await asyncio.to_thread(faces.stamp, home, self._convert_avatars)
+            cached = self._thumbs.get(key)
+            if cached is not None and cached[0] == now:
+                return cached[1]
+            if cached is not None and self._thumb_changing.get(key) != now:
+                self._thumb_changing[key] = now  # changed since: read it once it holds still
+                return cached[1]
+            found = await asyncio.to_thread(faces.thumb_for_profile, home, self._convert_avatars, session.thumb_px)
+        except Exception as exc:  # an unreadable profile keeps what the device shows
+            logger.debug("[%s] no thumbnail for profile %s: %s", self.name, profile, exc)
+            cached = self._thumbs.get(key)
+            return cached[1] if cached else None
+        self._thumbs[key] = (now, found)
+        self._thumb_changing.pop(key, None)
+        return found
+
     @staticmethod
     def _unsettled(look: _FaceLook) -> faces.ProfileFace:
         """The files changed after they settled, before or while they were read: they settle again."""
@@ -665,6 +696,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 if refusal is None:  # a pairing code can let it in again
                     await self.on_ready(session)
         await self._follow_face(session)
+        session.update_thumbs()  # a profile's new face file or avatar reaches the grid at the next checks
         return served
 
     async def _watch_pairing(self) -> None:
