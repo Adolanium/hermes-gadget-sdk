@@ -8,6 +8,10 @@
   var { Badge, Button, Card, CardContent, CardHeader, CardTitle } = SDK.components;
   var { timeAgo } = SDK.utils;
   var API = "/api/plugins/gadget";
+  function devicesUrl() {
+    const profile = new URLSearchParams(window.location.search).get("profile");
+    return profile ? `${API}/devices?profile=${encodeURIComponent(profile)}` : `${API}/devices`;
+  }
   var REFRESH_MS = 1e4;
   function errorText(err) {
     return String(err && err.message || err).replace(/^Error:\s*/, "");
@@ -20,9 +24,11 @@
     return typeof ts === "number" ? new Date(ts * 1e3).toLocaleString() : "";
   }
   function Status({ device }) {
-    if (device.online) return /* @__PURE__ */ React.createElement(Badge, { tone: "success", variant: "default" }, "Online");
-    if (device.pending) return /* @__PURE__ */ React.createElement(Badge, { tone: "warning", variant: "outline" }, "Waiting to pair");
-    return /* @__PURE__ */ React.createElement(Badge, { tone: "outline", variant: "secondary" }, "Offline");
+    const pending = device.pending ? /* @__PURE__ */ React.createElement(Badge, { tone: "warning", variant: "outline" }, "Waiting to pair") : null;
+    if (device.online) {
+      return /* @__PURE__ */ React.createElement("span", { className: "inline-flex gap-1" }, /* @__PURE__ */ React.createElement(Badge, { tone: "success", variant: "default" }, "Online"), pending);
+    }
+    return pending || /* @__PURE__ */ React.createElement(Badge, { tone: "outline", variant: "secondary" }, "Offline");
   }
   function Battery({ battery }) {
     if (!battery) return /* @__PURE__ */ React.createElement("span", { className: "text-muted-foreground" }, "-");
@@ -49,7 +55,7 @@
     const [loading, setLoading] = useState(false);
     const load = useCallback(() => {
       setLoading(true);
-      SDK.fetchJSON(`${API}/devices`).then((d) => {
+      SDK.fetchJSON(devicesUrl()).then((d) => {
         setData(d);
         setError("");
       }).catch((e) => setError(errorText(e))).finally(() => setLoading(false));

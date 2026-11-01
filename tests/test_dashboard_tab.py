@@ -63,6 +63,54 @@ def test_battery_keeps_power_readings_only():
     assert live_status.battery({}) is None
 
 
+def test_battery_drops_non_finite_readings_so_one_device_cannot_break_the_tab(tmp_path):
+    # json.loads accepts NaN and Infinity in a device's state frame; the dashboard's JSON response
+    # does not, so one such reading from any connected device would fail /devices for all of them.
+    sensors = json.loads('{"battery_percent": NaN, "battery_mv": Infinity, "battery_pct": -Infinity, "charging": 1}')
+    assert live_status.battery(sensors) == {"charging": True}
+    live_status.write(tmp_path, {DEVICE: {"online": True, "battery": live_status.battery(sensors)}}, now=1000.0)
+    json.loads((tmp_path / live_status.FILENAME).read_text(), parse_constant=lambda c: pytest.fail(c))
+
+
+def test_two_stores_in_one_process_can_write_at_once(tmp_path):
+    # The gateway's store, and the CLI's or the dashboard's, in one process: each save uses its own
+    # temporary file, so neither replaces the other's and both writes land.
+    import threading
+
+    a, b = DeviceStore(tmp_path), DeviceStore(tmp_path)
+    errors = []
+
+    def save(store):
+        try:
+            for _ in range(200):
+                with store._lock:
+                    store._save()
+        except OSError as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=save, args=(s,)) for s in (a, b)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_the_wheel_carries_the_dashboard_files():
+    # hermes-gadget plugin install copies the installed package directory, so a file missing from
+    # package-data never reaches Hermes. Every file the tab needs must match one of its globs.
+    import fnmatch
+    import re
+
+    text = (REPO / "pyproject.toml").read_text(encoding="utf-8")
+    line = re.search(r"^hermes_gadget_plugin = \[(.*)\]$", text, re.M).group(1)
+    globs = re.findall(r'"([^"]+)"', line)
+    for path in ("dashboard/manifest.json", "dashboard/plugin_api.py", "dashboard/dist/index.js"):
+        assert (REPO / "plugin" / path).is_file()
+        assert any(fnmatch.fnmatch(path, g) for g in globs), path
+
+
 # -- the tab's API routes ---------------------------------------------------------------------
 
 

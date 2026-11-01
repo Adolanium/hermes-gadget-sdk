@@ -14,7 +14,9 @@ another process (the Hermes dashboard's Gadget tab) never sees half of it.
 from __future__ import annotations
 
 import json
+import math
 import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -30,8 +32,13 @@ BATTERY_FIELDS = ("battery_percent", "battery_mv", "charging", "external_power",
 
 def battery(sensors: dict[str, Any]) -> dict[str, Any] | None:
     """The power readings among a device's sensors, or None when it reports none."""
-    out = {k: sensors[k] for k in BATTERY_FIELDS if isinstance(sensors.get(k), (bool, int, float))}
-    if "battery_percent" not in out and isinstance(sensors.get("battery_pct"), (int, float)):
+    # A device's own readings, unpaired ones too: NaN or Infinity (which json.loads accepts) would
+    # make the dashboard's JSON response fail for every device, so only finite numbers are kept.
+    def finite(value: Any) -> bool:
+        return isinstance(value, bool) or (isinstance(value, (int, float)) and math.isfinite(value))
+
+    out = {k: sensors[k] for k in BATTERY_FIELDS if finite(sensors.get(k))}
+    if "battery_percent" not in out and finite(sensors.get("battery_pct")) and not isinstance(sensors["battery_pct"], bool):
         out["battery_percent"] = sensors["battery_pct"]  # the protocol guide's example sensor name
     for flag in ("charging", "external_power", "battery_present"):
         if flag in out:
@@ -53,13 +60,14 @@ def write(directory: Path | str, devices: dict[str, dict[str, Any]], *, running:
         "devices": devices,
     }
     path = directory / FILENAME
-    tmp = path.with_name(f"{path.stem}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=f"{path.stem}.", suffix=".tmp")  # unique, mode 600
     try:
-        os.chmod(tmp, 0o600)
-    except OSError:
-        pass
-    os.replace(tmp, path)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data, indent=2, sort_keys=True, allow_nan=False))
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def read(directory: Path | str, *, now: float | None = None) -> dict[str, Any]:

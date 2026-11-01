@@ -39,7 +39,8 @@ package-dir = { "hermes_gadget" = "python/hermes_gadget", "hermes_gadget_plugin"
 packages = ["hermes_gadget", "hermes_gadget.sim", "hermes_gadget.linux", "hermes_gadget_plugin"]
 
 [tool.setuptools.package-data]
-hermes_gadget_plugin = ["plugin.yaml"]
+# The dashboard tab is data, not a package: Hermes loads dashboard/ from the installed plugin directory.
+hermes_gadget_plugin = ["plugin.yaml", "dashboard/manifest.json", "dashboard/plugin_api.py", "dashboard/dist/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -11,6 +11,14 @@ const { Badge, Button, Card, CardContent, CardHeader, CardTitle } = SDK.componen
 const { timeAgo } = SDK.utils;
 
 const API = "/api/plugins/gadget";
+
+// The dashboard adds the selected profile to its own profile-scoped requests, but not to plugin
+// routes (/api/plugins/ is not among them). The route resolves the plugin's data directory from
+// `?profile=`, so pass along the one the dashboard page was opened with, when there is one.
+function devicesUrl() {
+  const profile = new URLSearchParams(window.location.search).get("profile");
+  return profile ? `${API}/devices?profile=${encodeURIComponent(profile)}` : `${API}/devices`;
+}
 const REFRESH_MS = 10000;
 
 function errorText(err) {
@@ -28,9 +36,12 @@ function fullDate(ts) {
 
 // Newer dashboards style a Badge by `tone`, older ones by `variant`; each ignores the other.
 function Status({ device }) {
-  if (device.online) return <Badge tone="success" variant="default">Online</Badge>;
-  if (device.pending) return <Badge tone="warning" variant="outline">Waiting to pair</Badge>;
-  return <Badge tone="outline" variant="secondary">Offline</Badge>;
+  const pending = device.pending ? <Badge tone="warning" variant="outline">Waiting to pair</Badge> : null;
+  // A device that is connected but not yet approved is both: online, and waiting to pair.
+  if (device.online) {
+    return <span className="inline-flex gap-1"><Badge tone="success" variant="default">Online</Badge>{pending}</span>;
+  }
+  return pending || <Badge tone="outline" variant="secondary">Offline</Badge>;
 }
 
 function Battery({ battery }) {
@@ -99,7 +110,7 @@ function GadgetsPage() {
 
   const load = useCallback(() => {
     setLoading(true);
-    SDK.fetchJSON(`${API}/devices`)
+    SDK.fetchJSON(devicesUrl())
       .then((d) => { setData(d); setError(""); })
       .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
