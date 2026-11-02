@@ -1975,6 +1975,7 @@ void App::update_model() {
   m.color_test = false;
   m.settings_hold = settings_hold_live();
   m.timer_permille = timer_permille();
+  m.progress_permille = -1;
   m.flash = false;
   m.battery = m.face_battery = -1;
   m.battery_charging = m.battery_low = false;
@@ -2055,10 +2056,14 @@ void App::update_model() {
     if (ota_ == Ota::Restarting) {
       m.headline = tr(Msg::Restarting);
       m.detail = tr(Msg::Installed, {version});
+      m.progress_permille = 1000;
     } else {
       m.headline = tr(Msg::Updating);
-      unsigned pct = ota_size_ ? static_cast<unsigned>(static_cast<uint64_t>(ota_received_) * 100 / ota_size_) : 0;
-      m.detail = tr(Msg::UpdateProgress, {version, std::to_string(pct), std::to_string((ota_size_ + 1023) / 1024)});
+      const unsigned permille =
+          ota_size_ ? static_cast<unsigned>(static_cast<uint64_t>(ota_received_) * 1000 / ota_size_) : 0;
+      m.progress_permille = static_cast<int16_t>(permille);
+      m.detail = tr(Msg::UpdateProgress,
+                    {version, std::to_string(permille / 10), std::to_string((ota_size_ + 1023) / 1024)});
     }
     m.hint = tr(Msg::KeepPowerOn);
   } else if (alarm_) {
@@ -2155,6 +2160,9 @@ void App::update_model() {
                : profile_.touch_screen ? std::string(tr(Msg::LiftFingerToSend))
                                        : tr(Msg::ReleaseToSend, {talk});
     m.hint = tr(Msg::ButtonToDiscard, {cancel});
+    // The part of the recording limit used so far (the edge ring).
+    m.progress_permille = static_cast<int16_t>(
+        std::min<uint64_t>(1000, static_cast<uint64_t>(now() - mode_since_) * 1000 / kMaxUtteranceMs));
   } else if (!prompt_id_.empty()) {
     m.screen = Screen::Prompt;
     m.hero = true;
@@ -2266,6 +2274,7 @@ void App::update_model() {
                          tr(static_cast<Msg>(static_cast<int>(Msg::MonthJan) + std::clamp<int>(wall_.month, 1, 12) - 1)),
                          std::to_string(wall_.day)});
       m.clock_minute = wall_.minute;
+      m.clock_second = wall_.second;
       m.hero = false;
       m.name_target = false;
       m.hint.clear();
