@@ -67,7 +67,7 @@ Hermes transcribes a gadget's voice with the `stt` settings of the profile that 
 hermes config set platforms.gadget.extra.stt_language pt
 ```
 
-Use the language code your STT provider takes, such as `pt`, `es` or `de`. The default, `auto`, leaves every profile's STT settings as they are. Voice notes from other platforms keep their profile's settings either way. The plugin sets the language through Hermes's `pre_transcription` plugin hook, which wins over `stt.<provider>.language`. Restart the gateway after changing it.
+Use the language code your STT provider takes, such as `pt`, `es` or `de`. A value that isn't a language code (for example `Portuguese`) is ignored with a warning in the gateway log, and each profile's own STT settings apply. The default, `auto`, leaves every profile's STT settings as they are. Voice notes from other platforms keep their profile's settings either way. The plugin sets the language through Hermes's `pre_transcription` plugin hook, which wins over `stt.<provider>.language`. Restart the gateway after changing it.
 
 On a multiplexed gateway, set it in the profile that runs the gadget platform, usually `default`. Hermes fires the hooks of the profile that answers, so the language applies to a profile only when that profile has the gadget plugin enabled and its copy of the plugin is this version or newer ([cloned profiles keep their own copy](#running-against-a-profile-or-a-multiplexed-gateway)). When the configured provider fails and Hermes falls back to local whisper on its own, that fallback doesn't fire the hook, so it uses the profile's own `stt.local` settings.
 

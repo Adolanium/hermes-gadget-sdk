@@ -40,6 +40,14 @@ def test_auto_or_blank_leaves_the_language_to_the_profile():
     assert stt.normalize("  AUTO ") is None
     assert stt.normalize(" pt ") == "pt"
     assert stt.normalize("pt-BR") == "pt-BR"
+    assert stt.normalize("PT") == "pt"  # the primary code lowercased, as Whisper expects
+
+
+def test_a_value_that_is_not_a_language_code_keeps_the_profiles_settings(caplog):
+    # Passed on, "Portuguese" would make every gadget transcription fail; None keeps the profile's own.
+    for bad in ("Portuguese", "pt_BR", "p", "en; rm", "12"):
+        assert stt.normalize(bad) is None, bad
+    assert "not a language code" in caplog.text
 
 
 def test_the_plugin_registers_the_pre_transcription_hook():
