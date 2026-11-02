@@ -73,6 +73,13 @@ bool App::wake_display() {
   const bool was_clock = clock_showing_;
   clock_showing_ = false;  // the clock ends at once, with the dim and sleep states
   if (display_dimmed_ || sleeping || was_clock) {
+    if (sleeping && reply_unread_ && mode_ == Mode::Idle && !reply_.empty()) {
+      // A reply no input has met since it arrived: the screen may have gone dark
+      // before anyone read it. The wake shows it again from the top, for the usual time.
+      reply_until_ = now() + kReplyLingerMs;
+      scroll_ = 0;
+      page_at_ = now() + page_dwell_ms();
+    }
     display_dimmed_ = display_sleeping_ = false;
     on_battery_ = false;  // checked afresh before the next doze
     set_dozing(false);  // before drawing: the port wakes its peripherals
@@ -103,6 +110,7 @@ void App::on_power_key() {
     dismiss_overlay();
     update_model();
   }
+  mark_reply_read();  // turning the screen off is an answer to what was on it
   display_sleeping_ = true;
   apply_backlight();
 }
@@ -174,6 +182,11 @@ bool App::play_tones(const Tone* tones, size_t count) {
   hal_.speaker->write(pcm.data(), pcm.size());
   hal_.speaker->end();
   return true;
+}
+
+void App::mark_reply_read() {
+  // Only an input over the reply's text counts: one over the mascot leaves it unread.
+  if (model_.screen == Screen::Responding || (model_.screen == Screen::Ready && !model_.hero)) reply_unread_ = false;
 }
 
 void App::close_notices_for_input() {
