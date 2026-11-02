@@ -78,6 +78,7 @@ These images show the simulator's device display. The [simulator guide](docs/sim
 | Use a gadget | Build with the SDK |
 |---|---|
 | [Choose a starting point](docs/getting-started.md) | [Development and tests](docs/development.md) |
+| [See every feature and board](docs/features.md) | |
 | [Set up a board](docs/setup-board.md) | [Add a board, actions, or sensors](docs/porting.md) |
 | [Try the simulator](docs/desktop.md) | [Customize the face](docs/faces.md) |
 | [Run a Linux gadget](docs/linux.md) | [Hardware verification](docs/hardware-validation.md) |

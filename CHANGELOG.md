@@ -60,6 +60,10 @@
 - The plugin sends a colour face's blink and talk pictures to firmware that takes them, measuring the rows each one changes from the pixels: those that differ from the avatar by more than 16 levels in a colour, or in transparency. A picture that changes more rows than the device has room for, two that do together, or a file that cannot be read or is not a picture leaves the face still, and the log names the file, how many rows it changes and what to fix, once for each file. The pictures join the files a connected device follows, so adding or removing one shows within a few seconds. [Faces](docs/faces.md#a-face-for-each-hermes-profile). Contributed by @mforce.
 - A connected device now gets a profile's new face within a few seconds when the profile's `gadget-face.bin` or Hermes avatar is added, changed or removed, and the mascot when both are removed. Before, the new face arrived only after the device reconnected or switched profile. The pairing check that already runs every 2 seconds compares the size and modification time of those files, and looks the face up again only after they change and then stay the same on two checks in a row; if they change again before or while they are read, the device keeps its face until they settle once more. A new one-colour face replaces the old one directly, without the mascot in between; a colour face shows the mascot while its pixels arrive. A face the device already holds is not sent again, so touching a file or saving the same picture again sends nothing. [Faces](docs/faces.md). Contributed by @mforce.
 
+### Tools and documentation
+
+- A [Features](docs/features.md) guide lists what the gadget does, grouped by use, with a line and a link for each feature, simulator screenshots, and a table of which features each supported board has. It sits under **Get started** on the website, and the README links it. Contributed by @BrOrlandi.
+
 ## 0.4.1
 
 Hermes Gadget 0.4.1 fixes `hermes gadget update --latest`, which could install an older release over a device running newer firmware, such as a build from `main`. The firmware is unchanged from 0.4.0 apart from its version number.
