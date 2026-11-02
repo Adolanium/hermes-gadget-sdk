@@ -103,6 +103,9 @@ void App::on_power_key() {
     wake_display();
     return;
   }
+  // Turning the screen off is an answer to what was on it, before anything closes:
+  // a reply under a card the press closes stays unread.
+  mark_reply_read();
   // Off means off: the menu, a list or a card the user was on closes, so the
   // next press wakes to the home screen and nothing open turns the screen back on.
   if (settings_open()) close_settings();
@@ -110,7 +113,6 @@ void App::on_power_key() {
     dismiss_overlay();
     update_model();
   }
-  mark_reply_read();  // turning the screen off is an answer to what was on it
   display_sleeping_ = true;
   apply_backlight();
 }
@@ -185,8 +187,9 @@ bool App::play_tones(const Tone* tones, size_t count) {
 }
 
 void App::mark_reply_read() {
-  // Only an input over the reply's text counts: one over the mascot leaves it unread.
-  if (model_.screen == Screen::Responding || (model_.screen == Screen::Ready && !model_.hero)) reply_unread_ = false;
+  // Only an input over the reply's text counts: one over the mascot, idle or speaking,
+  // leaves it unread.
+  if (!model_.hero && (model_.screen == Screen::Responding || model_.screen == Screen::Ready)) reply_unread_ = false;
 }
 
 void App::close_notices_for_input() {

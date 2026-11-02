@@ -1352,6 +1352,47 @@ TEST("app: an input over the mascot leaves the reply unread") {
   CHECK_EQ(r.app.model().body, std::string("Here is the answer."));
 }
 
+TEST("app: a press over the speaking mascot leaves the reply unread") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(R"({"type":"audio.start","stream":2,"rate":16000,"format":"pcm16"})");
+  r.server(R"({"type":"reply","turn":"t","text":"Here is the answer."})");
+  CHECK(r.app.screen() == hg::Screen::Responding && r.app.model().hero);
+  r.app.on_button(hg::Button::Down, true);  // over the talking face, not the text
+  r.app.on_button(hg::Button::Down, false);
+  r.server(R"({"type":"audio.end","stream":2})");
+  r.server(R"({"type":"turn.end","turn":"t","outcome":"success"})");
+  wait_quietly(r, 80000);
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_button(hg::Button::Cancel, true);  // a wake
+  r.app.on_button(hg::Button::Cancel, false);
+  r.advance(200);
+  CHECK(!r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string("Here is the answer."));
+}
+
+TEST("app: PWR over a card leaves the reply under it unread") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(R"({"type":"reply","turn":"t","text":"Here is the answer."})");
+  r.server(R"({"type":"turn.end","turn":"t","outcome":"success"})");
+  wait_quietly(r, 10000);  // the turn settles; the reply's text still shows under what comes next
+  r.server(R"({"type":"display","title":"Note","body":"Stays until closed","ttl_s":0})");
+  CHECK(r.app.screen() == hg::Screen::Card);
+  r.app.on_power_key();  // closes the card and turns the screen off
+  CHECK_EQ(r.fake.brightness, 0);
+  wait_quietly(r, 30000);  // dark past the reply's 20 s
+  r.app.on_power_key();  // the wake shows the reply the card covered
+  r.advance(200);
+  CHECK(!r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string("Here is the answer."));
+}
+
 TEST("app: hero animation redraws only a slice of the screen") {
   Rig r;
   r.bring_online(true);
