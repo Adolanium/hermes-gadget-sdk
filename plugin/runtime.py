@@ -72,6 +72,7 @@ def boards(profiles: Iterable[str]) -> list[Any]:
 
 
 def _stem(path: str) -> str:
+    """The file name without its directory or extension: ``/cache/audio_ab12.wav`` -> ``audio_ab12``."""
     return os.path.splitext(os.path.basename(str(path or "")))[0]
 
 

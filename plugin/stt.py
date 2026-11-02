@@ -24,9 +24,11 @@ def normalize(value: Any) -> Optional[str]:
 
 
 def pre_transcription(file_path: Optional[str] = None, **_: Any) -> Optional[dict]:
+    """Hermes's ``pre_transcription`` hook: ``{"language": ...}`` for a gadget recording, else None."""
     language = runtime.clip_language(file_path)
     return {"language": language} if language else None
 
 
 def register(ctx) -> None:
+    """Register the hook in this profile's copy of the plugin."""
     ctx.register_hook("pre_transcription", pre_transcription)

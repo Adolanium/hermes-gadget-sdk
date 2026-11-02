@@ -89,6 +89,7 @@ def _record(adapter, monkeypatch) -> str:
     seen = {}
 
     def event(session, msg_id, text, **kw):
+        """Stand-in for ``_event`` that keeps the keyword arguments, media paths included."""
         seen.update(kw)
         return kw
 
@@ -119,6 +120,7 @@ def _transcribe(monkeypatch, path: str, stt_config: dict):
     given = {}
 
     def local(file_path, model_name, language=None, prompt=None):
+        """Stand-in for the local whisper backend that records the language it was given."""
         given["language"] = language
         return {"success": True, "transcript": "oi", "provider": "local"}
 

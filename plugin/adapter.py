@@ -921,6 +921,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         await self._forward(session, self._event(session, msg_id, text, message_type=MessageType.TEXT))
 
     async def on_utterance(self, session: DeviceSession, msg_id: str, wav: bytes, seconds: float) -> None:
+        """Cache a finished recording and hand it to Hermes as a voice message, noting its STT language."""
         path = await cache_audio_from_bytes_async(wav, ".wav")
         if self._stt_language:
             runtime.note_clip(path, self._stt_language)
