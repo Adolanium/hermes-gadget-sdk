@@ -53,7 +53,7 @@ def _parse_target(raw: str):
 
 
 def register(ctx) -> None:
-    from . import cli
+    from . import cli, stt
     from .dashboard import BOARD
     from .tools import register_tools
 
@@ -77,6 +77,7 @@ def register(ctx) -> None:
     )
     register_tools(ctx)
     BOARD.register(ctx)  # session state for the dashboard
+    stt.register(ctx)  # platforms.gadget.extra.stt_language for gadget recordings
     ctx.register_cli_command(
         name="gadget",
         help="Manage Hermes gadgets (ESP32 devices)",
