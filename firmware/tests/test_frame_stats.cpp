@@ -284,6 +284,7 @@ TEST("frame stats: the settings bench scrolls the settings list without opening 
   for (int i = 0; i < 130; ++i) {
     dev.clock_ms += 10;
     app.tick();
+    CHECK(app.screen() == before);  // while it runs too: the bench draws its own model, not the live one
   }
   const Value p = perf(app);
   CHECK(!p.has("bench_running"));

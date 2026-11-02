@@ -141,9 +141,11 @@ void App::bench_step() {
       // The settings list as it opens, without opening it: the menu's state comes back after.
       const Menu menu = menu_;
       const int scroll = settings_scroll_, target = settings_target_;
+      const UiModel live = model_;  // settings_model() writes model_; the live screen must not change
       menu_ = Menu::Volume;
       settings_model();
       m = model_;
+      model_ = live;
       m.hero = false;  // settings_model fills a model update_model has already reset
       m.qr = nullptr;
       m.face = nullptr;
