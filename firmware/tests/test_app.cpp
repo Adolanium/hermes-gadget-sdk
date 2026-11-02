@@ -5974,6 +5974,45 @@ const hg::WallTime kWallSaturday{2026, 10, 24, 6, 9, 41, 0};
 const hg::WallTime kWallMidnight{2026, 10, 25, 0, 0, 5, 0};
 }  // namespace
 
+TEST("profiles: the names of cells side by side never touch, on the 2.06 and the round 1.75") {
+  for (int round : {0, 466}) {
+    Rig r(Rig::touch_profile());
+    if (round) r.fake.make_round(round);
+    else r.fake.make_panel(410, 486);
+    r.fake.kv["profile_grid"] = "4";
+    // Long one-line names: thirteen letters fit a 2 x 2 cell of the round panel's inscribed square.
+    std::string roster;
+    for (int i = 0; i < 4; ++i)
+      roster += std::string(i ? "," : "") + R"({"id":"p)" + std::to_string(i) + R"(","name":"My Health Bot"})";
+    r.app.begin();
+    r.app.on_network(true, "wifi");
+    r.advance(1000);
+    r.app.on_transport_open();
+    r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":false})");
+    r.server(R"({"type":"welcome","session":"s1","heartbeat_s":20,"paired":true,"profile":"p0","profiles":[)" + roster +
+             "]}");
+    CHECK(r.app.open_profile_picker());
+    r.advance(100);
+    CHECK_EQ(r.app.profile_per_page(), 4);
+    const auto [x0, y0] = row_point(r, 0);
+    int edge = x0;  // the first column of the cell to the right of profile 0
+    while (edge < r.fake.width && r.app.profile_row_hit(edge, y0) != 1) ++edge;
+    CHECK(edge < r.fake.width);
+    int top = y0, bottom = y0;
+    while (top > 0 && r.app.profile_row_hit(edge - 1, top - 1) == 0) --top;
+    while (bottom + 1 < r.fake.height && r.app.profile_row_hit(edge - 1, bottom + 1) == 0) ++bottom;
+    // Below the icons, where the names are: two dots either side of the edge stay background, so two
+    // names in a row read as two, not as one name with a space in it.
+    const int dot = 2;  // both panels draw text at scale 2
+    const uint16_t bg = r.fake.fb[static_cast<size_t>(bottom * r.fake.width + edge)];
+    int lit = 0;
+    for (int y = (top + bottom) / 2; y <= bottom; ++y)
+      for (int x = edge - 2 * dot; x < edge + 2 * dot; ++x) lit += r.fake.fb[static_cast<size_t>(y * r.fake.width + x)] != bg;
+    if (lit) std::printf("    %s: %d name pixels at the edge between two cells\n", round ? "round" : "2.06", lit);
+    CHECK_EQ(lit, 0);
+  }
+}
+
 TEST("profiles: the current profile's face is its icon in the grid; the default one keeps the mascot otherwise") {
   Rig r(Rig::touch_profile());
   r.bring_online_with_profiles(true, "ops");
