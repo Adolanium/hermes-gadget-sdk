@@ -557,6 +557,9 @@ class App {
   bool hands_free_ = false;
   uint8_t mic_stream_ = 0;
   uint32_t mic_unsent_ = 0;  // frames of this recording the transport refused
+  std::vector<int16_t> mic_pending_;  // the frame being built (mic_frame_samples())
+  size_t mic_frame_samples() const;
+  void send_mic_frame();
   uint16_t mic_seq_ = 0;
   std::string request_id_;
   std::string active_turn_;

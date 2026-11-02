@@ -3,13 +3,16 @@
 // task as events.
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_private/esp_clk.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 
 namespace hgp {
 namespace {
@@ -37,6 +40,16 @@ struct EspOps {
 };
 
 uint32_t now_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
+
+int rssi_now() {
+  wifi_ap_record_t ap = {};
+  return esp_wifi_sta_get_ap_info(&ap) == ESP_OK ? ap.rssi : 0;
+}
+
+// What the send task did in the last second, for the uplink line.
+struct Meter {
+  uint32_t since = 0, bytes = 0, msgs = 0, longest_ms = 0, queue_peak = 0, failed = 0;
+};
 
 uint32_t generation_of(const esp_websocket_event_data_t* d) {
   return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(d->user_context));
@@ -100,7 +113,10 @@ bool WsTransport::stuck() const { return handoff_failed_ || watch_.stuck(now_ms(
 
 bool WsTransport::enqueue(uint8_t opcode, const void* data, size_t len) {
   if (!client_ || !esp_websocket_client_is_connected(client_)) return false;
-  if (!hg::ws::may_queue_message(uxQueueSpacesAvailable(tx_), opcode)) return false;  // the link isn't keeping up
+  if (!hg::ws::may_queue_message(uxQueueSpacesAvailable(tx_), opcode)) {  // the link isn't keeping up
+    ++refused_;
+    return false;
+  }
   auto* copy = static_cast<uint8_t*>(heap_caps_malloc(len ? len : 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (!copy) copy = static_cast<uint8_t*>(malloc(len ? len : 1));
   if (!copy) return false;
@@ -121,12 +137,40 @@ void WsTransport::tx_task(void* arg) {
   auto* self = static_cast<WsTransport*>(arg);
   EspOps ops;
   TxItem item;
+  Meter m;
   for (;;) {
-    if (xQueueReceive(self->tx_, &item, portMAX_DELAY) != pdTRUE) continue;
-    self->watch_.begin(now_ms());
-    if (hg::ws::process(item, self->gens_.current(), ops) == hg::ws::Outcome::Failed) ESP_LOGW(TAG, "send failed");
-    self->watch_.end();
-    free(const_cast<uint8_t*>(item.data));
+    // Wakes at least once a second while metering, so a stalled link still gets its line.
+    const bool got = xQueueReceive(self->tx_, &item, self->metering_ ? pdMS_TO_TICKS(1000) : portMAX_DELAY) == pdTRUE;
+    const uint32_t began = now_ms();
+    if (got) {
+      m.queue_peak = std::max<uint32_t>(m.queue_peak, uxQueueMessagesWaiting(self->tx_) + 1);
+      self->watch_.begin(began);
+      const auto outcome = hg::ws::process(item, self->gens_.current(), ops);
+      self->watch_.end();
+      const uint32_t took = now_ms() - began;
+      if (outcome == hg::ws::Outcome::Failed) {
+        ++m.failed;
+        ESP_LOGW(TAG, "send of %u B failed after %u ms", static_cast<unsigned>(item.len), static_cast<unsigned>(took));
+      } else if (outcome == hg::ws::Outcome::Sent) {
+        m.bytes += item.len;
+        ++m.msgs;
+      }
+      m.longest_ms = std::max(m.longest_ms, took);
+      free(const_cast<uint8_t*>(item.data));
+    }
+    const uint32_t now = now_ms();
+    if (!m.since) m.since = now;
+    if (now - m.since >= 1000) {
+      const uint32_t refused = self->refused_.exchange(0);
+      if (self->metering_ && (m.msgs || m.failed || refused))
+        ESP_LOGI(TAG, "uplink: %u B/s in %u msgs, longest send %u ms, queue peak %u/%u, refused %u, failed %u, cpu %d MHz, rssi %d",
+                 static_cast<unsigned>(m.bytes * 1000ull / (now - m.since)), static_cast<unsigned>(m.msgs),
+                 static_cast<unsigned>(m.longest_ms), static_cast<unsigned>(m.queue_peak),
+                 static_cast<unsigned>(hg::ws::kTxMessages + hg::ws::kTxReserved), static_cast<unsigned>(refused),
+                 static_cast<unsigned>(m.failed), esp_clk_cpu_freq() / 1000000, rssi_now());
+      m = Meter{};
+      m.since = now;
+    }
   }
 }
 

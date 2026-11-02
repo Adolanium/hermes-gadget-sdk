@@ -568,6 +568,51 @@ TEST("app: microphone frames the link refused are counted when the recording end
   for (const auto& l : r.fake.logs) CHECK(l.find("recording:") == std::string::npos);
 }
 
+TEST("app: microphone audio goes in 40 ms frames whatever size the port delivers") {
+  // The codec boards record at 24 kHz and deliver 320 samples (13 ms) at a time: before, each
+  // went as its own message, 75 a second, and the send queue held under a second of audio.
+  hg::DeviceProfile p = Rig::profile("ws://hermes.local:8765/gadget");
+  p.mic_rate = 24000;
+  Rig r(p);
+  r.bring_online(true);
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> all;
+  int16_t next = 0;
+  for (int i = 0; i < 31; ++i) {  // 9,920 samples: ten 960-sample frames and 320 over
+    std::vector<int16_t> pcm(320);
+    for (auto& v : pcm) v = next++;
+    all.insert(all.end(), pcm.begin(), pcm.end());
+    r.app.on_mic_samples(pcm.data(), pcm.size());
+    r.advance(10);
+  }
+  CHECK_EQ(r.fake.sent_binary.size(), size_t(10));
+  for (const auto& f : r.fake.sent_binary) CHECK_EQ(f.size(), hg::proto::kBinaryHeader + 960 * 2);
+  r.advance(400);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK_EQ(r.fake.sent_binary.size(), size_t(11));  // the part frame goes before audio.end
+  CHECK_EQ(r.fake.sent_binary.back().size(), hg::proto::kBinaryHeader + 320 * 2);
+  std::vector<int16_t> got;
+  uint16_t seq = 0;
+  for (const auto& f : r.fake.sent_binary) {
+    hg::proto::BinaryFrame b;
+    CHECK(hg::proto::parse_binary(f.data(), f.size(), b));
+    CHECK_EQ(b.seq, seq++);
+    const auto* sm = reinterpret_cast<const int16_t*>(f.data() + hg::proto::kBinaryHeader);
+    got.insert(got.end(), sm, sm + (f.size() - hg::proto::kBinaryHeader) / 2);
+  }
+  CHECK(got == all);
+  CHECK(r.fake.last("audio.end") != nullptr);
+
+  // At 16 kHz, 640 samples, as before.
+  Rig sixteen;
+  sixteen.bring_online(true);
+  sixteen.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(1600, 1);
+  sixteen.app.on_mic_samples(pcm.data(), pcm.size());
+  CHECK_EQ(sixteen.fake.sent_binary.size(), size_t(2));
+  CHECK_EQ(sixteen.fake.sent_binary[0].size(), hg::proto::kBinaryHeader + 640 * 2);
+}
+
 TEST("app: a recording whose end can't be sent says so instead of waiting for a reply") {
   Rig r;
   r.bring_online(true);

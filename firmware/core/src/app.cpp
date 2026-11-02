@@ -56,7 +56,10 @@ constexpr uint32_t kSensorIntervalMs = 2000;
 constexpr uint32_t kDefaultCardMs = 15000;
 constexpr int kDashboardVersion = 1;    // the dashboard message this firmware draws
 constexpr size_t kDashMaxEach = 12;     // sessions, and tiles, kept from one dashboard message
-constexpr size_t kMicChunkSamples = 640;  // 40 ms at 16 kHz per binary frame
+// Microphone audio goes in 40 ms frames whatever the port delivers (the codec boards hand
+// over 13 ms at a time): each frame is a WebSocket message, a TLS record and a queue slot, so
+// three times as many small ones cost the uplink, and fill the send queue three times sooner.
+constexpr uint32_t kMicFrameMs = 40;
 constexpr size_t kOtaAckBytes = 16 * 1024;  // a firmware update acknowledges every 16 KB written
 constexpr uint32_t kOtaIdleMs = 30000;      // ...and is abandoned when no data comes for this long
 constexpr uint32_t kOtaRestartMs = 1000;    // time for ota.done to leave before the restart
@@ -1389,6 +1392,8 @@ void App::start_listening(bool hands_free) {
   mic_stream_ = static_cast<uint8_t>(mic_stream_ % 250 + 1);
   mic_seq_ = 0;
   mic_unsent_ = 0;
+  mic_pending_.clear();
+  mic_pending_.reserve(mic_frame_samples());
   request_id_ = next_id('a');
   level_ = 0;
   Vad::Config vc;
@@ -1410,8 +1415,23 @@ void App::start_listening(bool hands_free) {
   scroll_ = -1;
 }
 
+size_t App::mic_frame_samples() const {
+  return std::max<size_t>(1, static_cast<size_t>(profile_.mic_rate) * kMicFrameMs / 1000);
+}
+
+// The frame built so far (all of it, or the part left at the end) as one binary message.
+void App::send_mic_frame() {
+  if (mic_pending_.empty()) return;
+  frame_buf_.resize(proto::kBinaryHeader + mic_pending_.size() * 2);
+  proto::write_binary_header(frame_buf_.data(), proto::Channel::Audio, mic_stream_, mic_seq_++);
+  std::memcpy(frame_buf_.data() + proto::kBinaryHeader, mic_pending_.data(), mic_pending_.size() * 2);
+  if (!hal_.transport->send_binary(frame_buf_.data(), frame_buf_.size())) ++mic_unsent_;
+  mic_pending_.clear();
+}
+
 void App::finish_listening() {
   if (hal_.mic) hal_.mic->stop();
+  send_mic_frame();  // the last part frame, before audio.end
   json::Value end = proto::message("audio.end");
   end.set("id", request_id_).set("stream", mic_stream_).set("duration_ms", now() - mode_since_);
   if (mic_unsent_)
@@ -1476,14 +1496,14 @@ void App::on_mic_samples(const int16_t* samples, size_t count) {
   }
   if (mode_ != Mode::Listening || count == 0) return;
   level_ = level_percent(rms(samples, count));
+  const size_t frame = mic_frame_samples();
   size_t off = 0;
   while (off < count) {
-    size_t n = std::min(kMicChunkSamples, count - off);
-    frame_buf_.resize(proto::kBinaryHeader + n * 2);
-    proto::write_binary_header(frame_buf_.data(), proto::Channel::Audio, mic_stream_, mic_seq_++);
-    std::memcpy(frame_buf_.data() + proto::kBinaryHeader, samples + off, n * 2);
-    if (!hal_.transport->send_binary(frame_buf_.data(), frame_buf_.size())) ++mic_unsent_;
+    // Fills the frame being built; a full one goes.
+    const size_t n = std::min(frame - mic_pending_.size(), count - off);
+    mic_pending_.insert(mic_pending_.end(), samples + off, samples + off + n);
     off += n;
+    if (mic_pending_.size() == frame) send_mic_frame();
   }
   if (hands_free_) {
     Vad::Result r = vad_.feed(samples, count);
