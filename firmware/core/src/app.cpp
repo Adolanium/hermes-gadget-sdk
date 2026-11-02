@@ -399,7 +399,9 @@ void App::on_network(bool up, std::string_view detail) {
   if (!up) {
     if (phase_ == Phase::Connecting || phase_ == Phase::Handshake || phase_ == Phase::Online) {
       hal_.transport->close();
-      drop_session("network lost");
+      // The port's words ("Wi-Fi lost (reason 200 beacon timeout, rssi -78)") stay in the close
+      // history: network_detail_ is replaced once the network is back.
+      drop_session(detail.empty() ? std::string_view("network lost") : detail);
     }
     if (phase_ != Phase::Boot) {
       phase_ = Phase::NoNetwork;
@@ -488,7 +490,13 @@ void App::drop_session(std::string_view reason) {
     ota_reset();
     log(LogLevel::Warn, "firmware update abandoned: the connection dropped");
   }
-  if (mode_ == Mode::Listening && hal_.mic) hal_.mic->stop();
+  if (mode_ == Mode::Listening) {
+    if (hal_.mic) hal_.mic->stop();
+    // A recording the loss cut short is the last recording diag reports.
+    rec_stats_.any = true;
+    rec_stats_.last_ms = now() - mode_since_;
+    rec_stats_.last_unsent = mic_unsent_;
+  }
   stop_playback();
   mode_ = Mode::Idle;
   overlay_ = Overlay::None;

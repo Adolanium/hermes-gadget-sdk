@@ -6542,7 +6542,28 @@ TEST("diag: every lost connection is logged and kept with what the device was do
   bool timeout = false;
   for (const auto& c : closes) timeout |= c["reason"].as_string() == "connect timeout";
   CHECK(timeout);
-  CHECK_EQ(closes.back()["reason"].as_string(), std::string("network lost"));  // the Wi-Fi loss ends the attempt
+  // The Wi-Fi loss ends the attempt, and its reason and signal stay after the network is back.
+  r.app.on_network(true, "192.168.1.20");
+  v = diag_of(r);
+  const auto& after = v["connection"]["closes"].elements();
+  CHECK(!after.empty());
+  if (after.empty()) return;
+  CHECK_EQ(after.back()["reason"].as_string(), std::string("Wi-Fi lost (reason 200 beacon timeout, rssi -80)"));
+}
+
+TEST("diag: a recording a lost connection cut short is the last recording") {
+  Rig r;
+  r.bring_online(true);
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(640, 1000);
+  for (int i = 0; i < 15; ++i) {
+    r.app.on_mic_samples(pcm.data(), pcm.size());
+    r.advance(40);
+  }
+  r.app.on_transport_closed("disconnected");
+  const Value v = diag_of(r);
+  CHECK(v["recordings"]["last"]["ms"].as_int() >= 600);
+  CHECK_EQ(v["recordings"]["last"]["frames_lost"].as_int(), int64_t(0));
 }
 
 TEST("diag: the close history keeps the last five") {

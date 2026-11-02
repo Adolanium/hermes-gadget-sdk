@@ -1,6 +1,6 @@
 dependencies:
   idf: ">=5.3"
-  espressif/esp_websocket_client: "^1.2.3"
+  espressif/esp_websocket_client: "^1.8.0"  # 1.8.0 reports the server's close code (port_ws.cpp)
   # ESP32-P4 CrowPanel: Wi-Fi via the ESP32-C6 coprocessor over SDIO.
   # Pinned to the ESP-IDF 6.1-compatible component releases.
   espressif/esp_hosted:
