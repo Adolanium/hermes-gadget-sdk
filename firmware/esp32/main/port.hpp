@@ -208,6 +208,7 @@ class WsTransport final : public hg::Transport {
   // The send in flight on the send task (generation 0: none), for the close reason on_event
   // reports: a failed send closes the connection before it returns.
   std::atomic<uint32_t> sending_gen_{0}, sending_since_{0};
+  std::atomic<uint32_t> connected_gen_{0};  // the last client generation that reached CONNECTED
   std::atomic<size_t> sending_bytes_{0};
 };
 

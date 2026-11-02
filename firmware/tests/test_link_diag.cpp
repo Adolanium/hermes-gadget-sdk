@@ -40,6 +40,14 @@ TEST("link diag: a close names the client's error, a refused upgrade and the ser
   CHECK_EQ(hg::link::ws_closed("disconnected", hg::link::WsError{}, nullptr, 0), std::string("disconnected"));
 }
 
+TEST("link diag: the upgrade status explains only a failed connect attempt") {
+  CHECK_EQ(hg::link::upgrade_status(401, true), 401);   // a proxy refused the upgrade
+  CHECK_EQ(hg::link::upgrade_status(404, true), 404);
+  CHECK_EQ(hg::link::upgrade_status(101, true), 0);     // switching protocols: not a refusal
+  CHECK_EQ(hg::link::upgrade_status(0, true), 0);       // the attempt failed before any reply
+  CHECK_EQ(hg::link::upgrade_status(401, false), 0);    // a stale value on a later drop
+}
+
 TEST("link diag: a refused upgrade keeps its HTTP status though the client reports a transport error") {
   // esp_websocket_client 1.8.0 aborts a refused upgrade as WEBSOCKET_ERROR_TYPE_TCP_TRANSPORT.
   hg::link::WsError e;

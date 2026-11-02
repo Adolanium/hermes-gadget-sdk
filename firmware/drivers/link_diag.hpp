@@ -61,6 +61,14 @@ struct WsError {
   int close_code = 0;   // the server's RFC 6455 close code, 0 if none
 };
 
+// The upgrade's HTTP status worth reporting: esp_websocket_client stores it when a connect
+// attempt fails (and reports that failure as a transport error, not a handshake one) and never
+// clears it. So it explains only the event that ends a connect attempt, never a later drop of a
+// connection that was up, and only when it is set and isn't 101 (switching protocols).
+inline int upgrade_status(int stored, bool ends_connect_attempt) {
+  return ends_connect_attempt && stored > 0 && stored != 101 ? stored : 0;
+}
+
 inline const char* ws_error_type_name(int type) {
   switch (type) {
     case 1: return "transport";
