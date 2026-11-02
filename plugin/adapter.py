@@ -571,7 +571,9 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         except Exception as exc:  # an unreadable profile keeps what the device shows
             logger.debug("[%s] no thumbnail for profile %s: %s", self.name, profile, exc)
             cached = self._thumbs.get(key)
-            return cached[1] if cached else None
+            if cached:
+                return cached[1]
+            raise  # nothing known yet: not "no thumbnail", which would clear the one the device holds
         self._thumbs[key] = (now, found)
         self._thumb_changing.pop(key, None)
         return found
