@@ -257,3 +257,39 @@ TEST("ws: no item that ends by itself is taken for stuck") {
   CHECK(hg::ws::kStuckMs >= 2 * send);
   CHECK(hg::ws::kStuckMs >= 2 * close);
 }
+
+// --- The uplink line ----------------------------------------------------------
+
+TEST("ws: the uplink meter's first window starts with the turn, not after the last message") {
+  hg::ws::UplinkMeter m;
+  hg::ws::UplinkMeter::Report r;
+  m.set_on(true, 1000);
+  m.item(1, 5, 2000, true, false);
+  CHECK(m.take(2000, r));
+  CHECK_EQ(r.bytes_per_s, uint32_t(2000));
+  m.set_on(false, 2000);  // the turn ends; the send task then waits without a limit
+  // A minute later the next turn starts: its first second counts from then.
+  m.set_on(true, 62000);
+  m.item(3, 40, 48000, true, false);
+  CHECK(!m.take(62500, r));  // not a second yet
+  CHECK(m.take(63000, r));
+  CHECK_EQ(r.bytes_per_s, uint32_t(48000));
+  CHECK_EQ(r.msgs, uint32_t(1));
+  CHECK_EQ(r.longest_ms, uint32_t(40));
+  CHECK_EQ(r.queue_peak, uint32_t(3));
+  m.item(1, 10000, 1924, false, true);  // a send that gave up
+  CHECK(m.take(64000, r));
+  CHECK_EQ(r.failed, uint32_t(1));
+  CHECK_EQ(r.bytes_per_s, uint32_t(0));
+}
+
+TEST("ws: turning metering on again mid-turn doesn't restart the window") {
+  hg::ws::UplinkMeter m;
+  hg::ws::UplinkMeter::Report r;
+  m.set_on(true, 0);
+  m.item(1, 1, 500, true, false);
+  m.set_on(true, 600);  // still on: the same window
+  m.item(1, 1, 500, true, false);
+  CHECK(m.take(1000, r));
+  CHECK_EQ(r.msgs, uint32_t(2));
+}

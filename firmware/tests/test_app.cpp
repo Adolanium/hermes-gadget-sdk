@@ -6914,6 +6914,9 @@ TEST("diag: every lost connection is logged and kept with what the device was do
   // A reconnect that times out counts too.
   r.advance(12000);
   CHECK(logged(r, "connection closed: connect timeout (idle)"));
+  // The Wi-Fi goes while the next attempt is connecting: that attempt ends with the Wi-Fi's reason.
+  const int attempts = r.fake.connects;
+  for (int i = 0; i < 100 && r.fake.connects == attempts; ++i) r.advance(100);
   r.app.on_network(false, "Wi-Fi lost (reason 200 beacon timeout, rssi -80)");
   CHECK(logged(r, "network down: Wi-Fi lost (reason 200 beacon timeout, rssi -80) (idle)"));
 
@@ -6934,6 +6937,25 @@ TEST("diag: every lost connection is logged and kept with what the device was do
   CHECK(!after.empty());
   if (after.empty()) return;
   CHECK_EQ(after.back()["reason"].as_string(), std::string("Wi-Fi lost (reason 200 beacon timeout, rssi -80)"));
+}
+
+TEST("diag: a Wi-Fi loss after the WebSocket reported its own loss counts once") {
+  Rig r;
+  r.bring_online(true);
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(640, 1000);
+  r.app.on_mic_samples(pcm.data(), pcm.size());
+  r.app.on_transport_closed("disconnected; rssi -82");
+  r.app.on_network(false, "Wi-Fi lost (reason 200 beacon timeout, rssi -82)");
+  CHECK(logged(r, "network down: Wi-Fi lost (reason 200 beacon timeout, rssi -82) (idle)"));
+  const Value v = diag_of(r);
+  CHECK_EQ(v["connection"]["closes_total"].as_int(), int64_t(1));
+  const auto& closes = v["connection"]["closes"].elements();
+  CHECK_EQ(closes.size(), size_t(1));
+  if (closes.empty()) return;
+  CHECK_EQ(closes[0]["reason"].as_string(), std::string("disconnected; rssi -82"));
+  CHECK_EQ(closes[0]["during"].as_string(), std::string("recording"));
+  CHECK(r.app.screen() == hg::Screen::Offline);  // the network state still moves on
 }
 
 TEST("diag: a recording a lost connection cut short is the last recording") {

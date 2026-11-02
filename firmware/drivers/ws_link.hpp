@@ -94,6 +94,49 @@ class TxWatch {
   std::atomic<uint32_t> since_{0};
 };
 
+// What the send task did in the current window, for its once-a-second "uplink:" line while a
+// turn runs. Turning metering on starts a fresh window: the send task waits without a limit
+// while it is off, and idle time before a turn must not count against that turn's rate.
+class UplinkMeter {
+ public:
+  struct Report {
+    uint32_t bytes_per_s, msgs, longest_ms, queue_peak, failed;
+  };
+  void set_on(bool on, uint32_t now_ms) {
+    if (on && !on_) restart(now_ms);
+    on_ = on;
+  }
+  bool on() const { return on_; }
+  // One queued item the send task handled: the queue's depth when it took it, how long it took,
+  // and whether it was sent or failed (neither: dropped, or a client closed).
+  void item(uint32_t queue_depth, uint32_t took_ms, size_t bytes, bool sent, bool failed) {
+    if (queue_depth > queue_peak_) queue_peak_ = queue_depth;
+    if (took_ms > longest_ms_) longest_ms_ = took_ms;
+    if (sent) {
+      bytes_ += bytes;
+      ++msgs_;
+    }
+    if (failed) ++failed_;
+  }
+  // Once a second has passed since the window began: fills `r` and starts the next window.
+  bool take(uint32_t now_ms, Report& r) {
+    const uint32_t span = now_ms - since_;
+    if (span < 1000) return false;
+    r = {static_cast<uint32_t>(bytes_ * 1000ull / span), msgs_, longest_ms_, queue_peak_, failed_};
+    restart(now_ms);
+    return true;
+  }
+
+ private:
+  void restart(uint32_t now_ms) {
+    since_ = now_ms;
+    bytes_ = msgs_ = longest_ms_ = queue_peak_ = failed_ = 0;
+  }
+  bool on_ = false;
+  uint32_t since_ = 0, msgs_ = 0, longest_ms_ = 0, queue_peak_ = 0, failed_ = 0;
+  uint64_t bytes_ = 0;
+};
+
 struct TxItem {
   void* client;
   uint32_t generation;

@@ -397,7 +397,10 @@ void App::on_network(bool up, std::string_view detail) {
   network_up_ = up;
   network_detail_ = std::string(detail);
   if (!up) {
-    if (phase_ == Phase::Connecting || phase_ == Phase::Handshake || phase_ == Phase::Online) {
+    // Only a connection (or a connect in flight) the network took with it: after the WebSocket
+    // reported its loss, the session already ended, and a second close would count it twice.
+    if (transport_active_ &&
+        (phase_ == Phase::Connecting || phase_ == Phase::Handshake || phase_ == Phase::Online)) {
       hal_.transport->close();
       // The port's words ("Wi-Fi lost (reason 200 beacon timeout, rssi -78)") stay in the close
       // history: network_detail_ is replaced once the network is back.

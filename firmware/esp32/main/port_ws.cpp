@@ -48,10 +48,6 @@ int rssi_now() {
   return esp_wifi_sta_get_ap_info(&ap) == ESP_OK ? ap.rssi : 0;
 }
 
-// What the send task did in the last second, for the uplink line.
-struct Meter {
-  uint32_t since = 0, bytes = 0, msgs = 0, longest_ms = 0, queue_peak = 0, failed = 0;
-};
 
 uint32_t generation_of(const esp_websocket_event_data_t* d) {
   return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(d->user_context));
@@ -139,13 +135,17 @@ void WsTransport::tx_task(void* arg) {
   auto* self = static_cast<WsTransport*>(arg);
   EspOps ops;
   TxItem item;
-  Meter m;
+  hg::ws::UplinkMeter meter;
   for (;;) {
     // Wakes at least once a second while metering, so a stalled link still gets its line.
     const bool got = xQueueReceive(self->tx_, &item, self->metering_ ? pdMS_TO_TICKS(1000) : portMAX_DELAY) == pdTRUE;
     const uint32_t began = now_ms();
+    // A turn starting begins a fresh window, before its first message counts (refusals too).
+    const bool on = self->metering_;
+    if (on && !meter.on()) self->refused_ = 0;
+    meter.set_on(on, began);
     if (got) {
-      m.queue_peak = std::max<uint32_t>(m.queue_peak, uxQueueMessagesWaiting(self->tx_) + 1);
+      const uint32_t depth = uxQueueMessagesWaiting(self->tx_) + 1;
       self->watch_.begin(began);
       // A send that fails makes the client close the connection from inside the send, so the
       // close event (on_event) learns of it from here: what is in flight, and since when.
@@ -156,29 +156,20 @@ void WsTransport::tx_task(void* arg) {
       self->sending_gen_ = 0;
       self->watch_.end();
       const uint32_t took = now_ms() - began;
-      if (outcome == hg::ws::Outcome::Failed) {
-        ++m.failed;
+      if (outcome == hg::ws::Outcome::Failed)
         ESP_LOGW(TAG, "send of %u B gave up after %u ms (rssi %d)", static_cast<unsigned>(item.len),
                  static_cast<unsigned>(took), rssi_now());
-      } else if (outcome == hg::ws::Outcome::Sent) {
-        m.bytes += item.len;
-        ++m.msgs;
-      }
-      m.longest_ms = std::max(m.longest_ms, took);
+      meter.item(depth, took, item.len, outcome == hg::ws::Outcome::Sent, outcome == hg::ws::Outcome::Failed);
       free(const_cast<uint8_t*>(item.data));
     }
-    const uint32_t now = now_ms();
-    if (!m.since) m.since = now;
-    if (now - m.since >= 1000) {
+    hg::ws::UplinkMeter::Report r;
+    if (meter.on() && meter.take(now_ms(), r)) {
       const uint32_t refused = self->refused_.exchange(0);
-      if (self->metering_ && (m.msgs || m.failed || refused))
+      if (r.msgs || r.failed || refused)
         ESP_LOGI(TAG, "uplink: %u B/s in %u msgs, longest send %u ms, queue peak %u/%u, refused %u, failed %u, cpu %d MHz, rssi %d",
-                 static_cast<unsigned>(m.bytes * 1000ull / (now - m.since)), static_cast<unsigned>(m.msgs),
-                 static_cast<unsigned>(m.longest_ms), static_cast<unsigned>(m.queue_peak),
-                 static_cast<unsigned>(hg::ws::kTxMessages + hg::ws::kTxReserved), static_cast<unsigned>(refused),
-                 static_cast<unsigned>(m.failed), esp_clk_cpu_freq() / 1000000, rssi_now());
-      m = Meter{};
-      m.since = now;
+                 static_cast<unsigned>(r.bytes_per_s), static_cast<unsigned>(r.msgs), static_cast<unsigned>(r.longest_ms),
+                 static_cast<unsigned>(r.queue_peak), static_cast<unsigned>(hg::ws::kTxMessages + hg::ws::kTxReserved),
+                 static_cast<unsigned>(refused), static_cast<unsigned>(r.failed), esp_clk_cpu_freq() / 1000000, rssi_now());
     }
   }
 }
