@@ -52,11 +52,26 @@ if ping -c1 -W2 nas.lan >/dev/null; then hermes gadget tile set nas up --state o
 
 The device gets a new dashboard only when something on it changes. While the screen is dark, it gets the latest one when the screen lights up. To turn the dashboard off, set `dashboard: false` under `platforms.gadget.extra` ([configuration](hermes-integration.md#configuration)). Boards without a CANCEL button or a touchscreen don't show it.
 
+## Round screens
+
+On a round display, a thin ring just inside the glass edge shows what the device is doing. It is always on; there is no setting for it. Rectangular screens do not change. The first state that matches wins:
+
+- **Timer alarm, low battery alert, charging and full battery screens:** no ring.
+- **Resting clock:** 60 marks around the edge, in the grey of the date: the 12 hour marks are wider and run across the whole band, and the minute marks sit in the band's outer half. An amber dot, about twice as wide as the band, moves to the current second, once a second.
+- **Listening:** a green arc grows clockwise from 12 o'clock over a dim green track, showing the part of the 30-second recording limit used. It turns amber in the last 5 seconds. In tap-to-talk mode, a pause usually ends the recording before the arc fills.
+- **Firmware update:** an amber arc over a dim amber track shows the part of the image received. It is full while the device restarts.
+- **Running timer:** the countdown arc, amber over dim amber, shrinking clockwise from 12 o'clock.
+- **Thinking:** a blue comet laps the ring every 2.4 seconds.
+- **Speaking:** an amber comet laps the ring every 4 seconds.
+- **Starting up and connecting:** an amber comet, one lap every 2.4 seconds.
+
+Anything else shows no ring. A recording, an update or a battery screen takes the ring from a running timer while it lasts, and the timer's arc comes back after it. Screens not in the list, such as settings, cards and the dashboard, still show the timer's arc while a timer runs.
+
 ## Timers
 
 Ask Hermes for a timer, for example "set a pasta timer for nine minutes". Hermes starts it on the device with the `timer.start` action. Any gadget with a display or a speaker can run a timer. Hermes can also ask how much time is left, or cancel the timer.
 
-- **Time left:** every screen shows it. On a round screen, an arc runs around the edge and shrinks as the time runs out. On a rectangular screen, a line runs along the bottom of the top bar. The Ready screen also shows the time as text, for example "Timer 6:18".
+- **Time left:** every screen shows it. On a round screen, an arc runs around the edge and shrinks as the time runs out; a recording, a firmware update or a battery screen takes the ring while it lasts, and the arc comes back after. On a rectangular screen, a line runs along the bottom of the top bar. The Ready screen also shows the time as text, for example "Timer 6:18".
 - **Alarm:** at zero, the screen shows TIMER DONE and the timer's name. A board with a speaker beeps twice every 1.5 seconds for one minute, and the screen flashes green with each beep. A board without a speaker shows the alarm without sound. The Knob 1.8, CrowPanel 2.1, CrowPanel 5.0 and T-Display-S3 have no speaker.
 - **Stop it:** press a button, tap the screen, or swipe down. The press only stops the alarm; it does not start a recording. Hermes can stop it with `timer.cancel`.
 - **Quiet alarm:** after one minute the beeps stop, but TIMER DONE stays on screen until you stop it. If the screen went dark, a press lights it and shows the alarm again.
@@ -67,7 +82,7 @@ Ask Hermes for a timer, for example "set a pasta timer for nine minutes". Hermes
 
 Any board with a display can show a large clock when there is nothing else on the screen: an idle Ready screen, online and paired, after `clock` seconds of rest. It is off by default. Turn it on with the **Clock face** settings item (Off, 30 s, 1 min, 2 min, 5 min) or on the console with `set clock 60` (0 turns it off, or 5..3600 seconds).
 
-The face shows the time and the date, with the mascot (or the profile's own face, where Hermes sends one) above them, at 70 percent of the brightness setting, and shifts by a few pixels each minute to spare the panel. Anything on screen keeps it away: speech or a reply from Hermes, a card or a picture shown until dismissed, a question, a notice, a running timer, the alarm, the low-battery warning, or the settings menu. When the last of them is gone, the rest starts again.
+The face shows the time and the date, with the mascot (or the profile's own face, where Hermes sends one) above them, at 70 percent of the brightness setting, and shifts by a few pixels each minute to spare the panel. On a round screen, the ring shows the 60 marks and a dot for the seconds; the marks do not move with the face's per-minute shift. Anything on screen keeps it away: speech or a reply from Hermes, a card or a picture shown until dismissed, a question, a notice, a running timer, the alarm, the low-battery warning, or the settings menu. When the last of them is gone, the rest starts again.
 
 A quick tap brings Ready back and does nothing else. A hold still talks, a swipe down still cancels, and the buttons work as on Ready; the PWR key turns a lit clock's screen off. The screen timeout still applies on top: the clock first dims, then goes dark, and the next input wakes to Ready.
 
@@ -112,7 +127,7 @@ When Hermes offers several profiles (the host turns this on; see [Hermes integra
 
 Volume, brightness, talk mode, battery indicator, low battery alert, low battery sound, charging screen, charging sound, full battery screen and sound, screen timeout, face-down sleep, clock face, time format and language survive restarts. Unavailable drivers show as unavailable. These checks help you test the hardware; a completed tone does not prove that a physical speaker produced sound.
 
-The battery indicator is off by default. When a driver percentage or explicitly enabled voltage estimate is available, each select on **Battery and power** moves to the next choice: icon only, percentage only, both, or off. It sits in the title bar, or centred at the top edge of a round display; without an available percentage it shows nothing. The icon fills green while charging and turns red at 15 percent or less (or at the highest low battery alert level, when that is higher) with an explicit battery-only power reading; with the percentage alone, the number changes color instead. The percentage is the same value as in **Battery and power**. From the USB console, use `set battery_display icon`, `percentage`, `both` or `off`.
+The battery indicator is off by default. When a driver percentage or explicitly enabled voltage estimate is available, each select on **Battery and power** moves to the next choice: icon only, percentage only, both, or off. It sits in the title bar, or centred at the top edge of a round display, just below the ring; without an available percentage it shows nothing. The icon fills green while charging and turns red at 15 percent or less (or at the highest low battery alert level, when that is higher) with an explicit battery-only power reading; with the percentage alone, the number changes color instead. The percentage is the same value as in **Battery and power**. From the USB console, use `set battery_display icon`, `percentage`, `both` or `off`.
 
 On voltage-only boards, first confirm that a compatible **single-cell 3.7 V Li-ion battery is actually fitted**, then enable the rough display estimate from the serial console:
 

@@ -1,6 +1,7 @@
 // Timers: the device actions, the countdown, the alarm and its beeps, the screen
 // it lights, and the pixels of the edge arc, the top-bar line and the alarm screen.
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -22,6 +23,7 @@ constexpr uint16_t kBg = hg::rgb565(10, 14, 20);
 constexpr uint16_t kAccent = hg::rgb565(242, 179, 61);
 constexpr uint16_t kAccentDim = hg::rgb565(110, 82, 30);
 constexpr uint16_t kGreen = hg::rgb565(61, 214, 140);
+constexpr uint16_t kGreenDim = hg::rgb565(28, 92, 62);
 constexpr uint16_t kAlarmInk = hg::rgb565(4, 40, 24);
 constexpr uint16_t kDim = hg::rgb565(132, 146, 160);
 constexpr uint16_t kText = hg::rgb565(232, 238, 242);
@@ -569,6 +571,36 @@ TEST("timer: round panel: the arc shows the time left clockwise from 12 o'clock,
   CHECK_EQ(r.fake.at(456, 233), kAccent);     // 3 o'clock: still to go
   CHECK_EQ(r.fake.at(10, 233), kAccentDim);   // 9 o'clock: gone
   CHECK_EQ(r.fake.at(233, 10), kAccent);      // 12 o'clock: where the arc starts
+}
+
+TEST("ring: a recording takes the ring from a running timer, and the timer's arc returns after the turn") {
+  Rig r;
+  r.fake.panel(466, 466, true);
+  r.online();
+  r.action("timer.start", R"({"seconds":90})");
+  r.idle(200);
+  CHECK_EQ(r.fake.at(456, 233), kAccent);  // the timer's arc, at 3 o'clock
+
+  r.app.on_button(hg::Button::Talk, true);
+  r.idle(15000);  // half the recording limit (the last frame may lag a little)
+  CHECK(r.app.model().progress_permille >= 490);
+  CHECK_EQ(r.fake.at(456, 233), kGreen);    // the recording owns the ring now
+  CHECK_EQ(r.fake.at(10, 233), kGreenDim);  // the timer's amber is gone with it
+  r.app.on_button(hg::Button::Talk, false);
+
+  r.server(R"({"type":"turn.start","turn":"a1"})");
+  r.server(R"({"type":"reply","turn":"a1","text":"Done."})");
+  r.server(R"({"type":"turn.end","turn":"a1","outcome":"success"})");
+  r.idle(200);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  const int permille = r.app.model().timer_permille;
+  CHECK(permille > 780 && permille < 840);  // about 16 s of the 90 s used
+  CHECK_EQ(r.fake.at(456, 233), kAccent);   // the timer's arc is back
+  // ...and it is the timer's partial arc, not a full ring: dim past its end.
+  const double end = permille * 360.0 / 1000.0;
+  const int beyond_x = 233 + static_cast<int>(223 * std::sin((end + 30.0) * 3.14159265 / 180.0));
+  const int beyond_y = 233 - static_cast<int>(223 * std::cos((end + 30.0) * 3.14159265 / 180.0));
+  CHECK_EQ(r.fake.at(beyond_x, beyond_y), kAccentDim);
 }
 
 TEST("timer: round panel: the arc stays in the corner wedge where the UI square meets the glass") {
