@@ -121,7 +121,7 @@ The screenshots come from the desktop simulator, which runs the same device core
 
 ## Supported hardware
 
-The table shows what each board profile drives. In the battery column, "Voltage" means the level comes from a voltage reading, which is rough; "Gauge" means a power chip reports it, though most gauges are not calibrated; "Estimate" means a charger chip reports a voltage and a percentage that are both uncalibrated estimates. Every board port is experimental until a complete physical report is recorded; the last column summarises how far testing has gone. See [Supported hardware](supported-hardware.md) for controls and setup, and [Hardware verification](hardware-validation.md) for the reports.
+The table shows what each board profile drives. In the battery column, "Voltage" means the level comes from a voltage reading, which is rough, and "Voltage (measured curves)" that it follows charge and discharge curves measured on that board's cell; "Gauge" means a power chip reports it, though most gauges are not calibrated; "Estimate" means a charger chip reports a voltage and a percentage that are both uncalibrated estimates. Every board port is experimental until a complete physical report is recorded; the last column summarises how far testing has gone. See [Supported hardware](supported-hardware.md) for controls and setup, and [Hardware verification](hardware-validation.md) for the reports.
 
 | Board | Touch | Microphone | Speaker | Battery level | Also | Tested on a board |
 |---|---|---|---|---|---|---|
@@ -132,7 +132,7 @@ The table shows what each board profile drives. In the battery column, "Voltage"
 | Waveshare ESP32-S3-Touch-AMOLED-1.32 | Yes | Yes | Yes | No | | Not run on a board |
 | Waveshare ESP32-S3-Touch-AMOLED-1.43C | Yes | Yes | Yes | Voltage | | Not run on a board |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | Yes | Yes | Yes | Gauge | Face-down sleep, clock chip | Some features checked |
-| Waveshare ESP32-S3-Touch-AMOLED-1.75C | Yes | Yes | Yes | Gauge | Light sleep | Report, on a branch build |
+| Waveshare ESP32-S3-Touch-AMOLED-1.75C | Yes | Yes | Yes | Voltage (measured curves) | Light sleep | Report, on a branch build |
 | Waveshare ESP32-S3-Touch-AMOLED-1.8 (V2) | Yes | Yes | Yes | Gauge | | Smoke test |
 | Waveshare ESP32-S3-Touch-AMOLED-2.06 (watch) | Yes | Yes | Yes | Gauge | Light sleep, clock chip | Partial report |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | Yes | Yes | Yes | Gauge | Clock chip | Smoke test |
@@ -151,7 +151,7 @@ The table shows what each board profile drives. In the battery column, "Voltage"
 | Elecrow CrowPanel 2.1-inch HMI | Yes | No | No | No | Knob; text through the USB console | Smoke test |
 | Elecrow CrowPanel 5.0-inch HMI | Yes | No | No | No | Text through the USB console | Boot check |
 | ESP32-2432S028 CYD | No | Optional, on the header | Beeps only | No | Text through the USB console | Smoke test, earlier build |
-| Elecrow CrowPanel Advanced 10.1-inch ESP32-P4 | Yes | Yes | Yes | Estimate (STC8) | | Partial report |
+| Elecrow CrowPanel Advanced 10.1-inch ESP32-P4 | Yes | Yes | Yes | Estimate (STC8) | | Partial report, earlier build |
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-7B | Not yet checked | Initialised, not yet checked | Initialised, not yet checked | No | Camera | Smoke test |
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C | Yes | Yes | Yes | No | | Partial report |
 | Raspberry Pi 4 or 5 | Optional screen | USB audio | USB audio | No | GPIO buttons and outputs | No report yet |
