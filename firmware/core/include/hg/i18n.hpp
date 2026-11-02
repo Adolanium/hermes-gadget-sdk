@@ -24,7 +24,7 @@ namespace hg::i18n {
 #define HG_I18N_MESSAGES(X) \
   /* Settings menu */ \
   X(Settings,               "Settings") \
-  X(SettingsHintTouch,      "Tap: change | Swipe: next") \
+  X(SettingsHintTouch,      "Tap: change | Drag: scroll") \
   X(SettingsHintButtons,    "{0}: change | {1}: next") \
   X(SpeakerVolume,          "Speaker volume") \
   X(ChangesSaved,           "Changes are saved.") \
@@ -35,6 +35,8 @@ namespace hg::i18n {
   X(NoMicDriver,            "No microphone driver is active.") \
   X(TalkModeHold,           "Hold to record; release to send.") \
   X(TalkModeTap,            "Tap to record; pause or tap to send.") \
+  X(TalkHold,               "Hold") \
+  X(TalkTap,                "Tap") \
   X(MicCheck,               "Microphone check") \
   X(MicCheckLive,           "Speak now. Level: {0}%\nLocal only. Nothing is sent.") \
   X(MicCheckIntro,          "Start to check the microphone level. No recording is saved or sent.") \
