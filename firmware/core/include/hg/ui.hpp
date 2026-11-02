@@ -96,13 +96,18 @@ struct UiModel {
   // Dashboard screen: its rows, drawn from `scroll` (0 = the top).
   std::vector<DashRow> dash;
   // A running timer: thousandths of its length still to go, or -1 for none. The round
-  // panel's edge arc and the rectangular top bar's line show it.
+  // panel's edge ring and the rectangular top bar's line show it.
   int16_t timer_permille = -1;
+  // The round panel's edge ring: while recording, thousandths of the recording limit used
+  // so far; while updating, of the firmware image received (1000 while restarting). -1: none.
+  int16_t progress_permille = -1;
   bool flash = false;  // Screen::Alarm: the green half of a beep cycle
   // Screen::Clock: the time and the date as the app formats them, and the minute
-  // that picks the burn-in shift. No seconds: the face changes once a minute.
+  // that picks the burn-in shift. The face's text changes once a minute; on a round
+  // panel the edge ring's dot moves every second.
   std::string clock_time, clock_date;
   uint8_t clock_minute = 0;
+  uint8_t clock_second = 0;
 };
 
 struct UiLayout {
@@ -115,11 +120,32 @@ struct UiLayout {
   int name_cols = 0;  // hero headline characters in a name panel, clear of its marker
 };
 
-// The edge arc's sweep: the end direction, clockwise from 12 o'clock, as (sin, -cos) times
-// a fixed scale, plus the fraction it covers. permille -1 means no arc.
+// A level arc's sweep (the edge ring): the end direction, clockwise from 12 o'clock, as
+// (sin, -cos) times a fixed scale, plus the fraction it covers. permille -1 means none.
 struct ArcSweep {
   int permille = -1;
   int32_t ex = 0, ey = 0;
+};
+
+// What a round panel's edge ring shows on one frame. Angles are degrees clockwise from
+// 12 o'clock. The renderer derives it from the model (ui.cpp, edge_ring).
+struct EdgeRing {
+  enum class Kind : uint8_t {
+    None,   // no ring: the bands own the band's pixels in the UI square's corners
+    Level,  // `colour` from 12 o'clock clockwise over `permille` thousandths of a turn, `dim` after
+    Comet,  // a `colour` head at `head` with a tail that fades out over 70 degrees behind it
+    Ticks,  // the resting clock: 60 ticks and a `colour` dot at `second`
+  };
+  Kind kind = Kind::None;
+  uint16_t colour = 0, dim = 0;
+  int16_t permille = 0;
+  uint16_t head = 0;
+  uint8_t second = 0;
+  bool operator==(const EdgeRing& o) const {
+    return kind == o.kind && colour == o.colour && dim == o.dim && permille == o.permille && head == o.head &&
+           second == o.second;
+  }
+  bool operator!=(const EdgeRing& o) const { return !(*this == o); }
 };
 
 class Ui {
@@ -179,8 +205,10 @@ class Ui {
   void each_window(int y0, int y1, Draw&& draw);
   // A canvas over the whole panel (not just the UI area) for the current window.
   Canvas panel_canvas();
-  // Sends panel rows [y0, y1) to the display, timed while measuring.
+  // Sends panel rows [y0, y1) to the display, the edge ring painted over them first.
   void push(int y0, int y1);
+  // Sends panel rows [y0, y1) as they are, timed while measuring.
+  void send(int y0, int y1);
   void draw_top(Canvas& c, const UiModel& m);
   void draw_header(Canvas& c, const UiModel& m);
   void draw_content(Canvas& c, const UiModel& m);
@@ -218,9 +246,13 @@ class Ui {
   void draw_hero(Canvas& c, const UiModel& m);
   // Rows [y0, y1) that hero animations may touch for this screen.
   void hero_anim_rows(const UiModel& m, int& y0, int& y1) const;
-  // Round panels: the edge arc, and the whole-panel faces (draw_alarm, draw_clock).
-  void paint_band(int y0, int y1);
-  void push_band_change(const ArcSweep& from, const ArcSweep& to);
+  // Round panels: the edge ring (set_ring derives what its pixels need once per frame;
+  // paint_ring paints it over rows; update_ring writes and sends only what changed), and
+  // the whole-panel faces (draw_alarm, draw_clock).
+  void set_ring(const EdgeRing& ring);
+  uint16_t ring_pixel(int dx, int dy) const;
+  void paint_ring(int y0, int y1);
+  void update_ring(int y0, int y1);
   void draw_alarm(const UiModel& m);
   void draw_clock(const UiModel& m);
   void draw_battery_face(const UiModel& m);  // LowBattery, Charging, Charged
@@ -245,15 +277,24 @@ class Ui {
   uint32_t bands_ = 0;
   uint64_t input_at_ = 0;
   bool input_pending_ = false;
-  // Round panels: the edge arc's band per panel row (up to two runs of pixels), the radii it
-  // spans, and the sweep push() paints it with. band_ is -1 while no arc shows.
+  // Round panels: the edge ring's band per panel row (up to two runs of pixels), the rows the
+  // resting clock's ring takes (the band and the seconds dot's reach past it) and the radii
+  // the band spans; what push() paints the ring with this frame, and what that needs per
+  // pixel: the level's sweep, the comet's head (1/64 degree) and its colour and the
+  // background as 8-bit channels, the dot's centre (1/16 px) and radius squared, and the 60
+  // ticks' directions (cos, sin times 4096).
   struct BandRow {
     int16_t x0[2] = {0, 0}, x1[2] = {0, 0};
   };
-  std::vector<BandRow> band_rows_;
+  const std::vector<BandRow>& ring_rows() const;
+  std::vector<BandRow> band_rows_, clock_rows_;
   int band_out_ = 0, band_in_ = 0;
-  ArcSweep band_;
-  bool band_shown_ = false;  // the arc was on the last frame
+  EdgeRing ring_;
+  ArcSweep ring_sweep_;
+  int32_t ring_head64_ = 0;
+  uint8_t ring_fg_[3] = {0, 0, 0}, ring_bg_[3] = {0, 0, 0};
+  int32_t ring_dot_x16_ = 0, ring_dot_y16_ = 0, ring_dot_r2_ = 0;
+  int16_t tick_cos_[60] = {}, tick_sin_[60] = {};
   // The screen that owns the whole panel right now, and the hash of what it drew.
   // Leaving it repaints everything (draw_frame); each face repaints when the flag
   // is not itself, so Clock -> Alarm -> Clock in one minute still redraws.
