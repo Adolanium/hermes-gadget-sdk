@@ -8254,3 +8254,53 @@ TEST("diag: a recording dropped for want of a connection is counted") {
   CHECK_EQ(diag_of(r)["recordings"]["dropped"].as_int(), int64_t(1));
   CHECK(logged(r, "dropped a held recording: no connection within 45 s"));
 }
+
+namespace {
+// PSRAM free for psram_alloc, the allocator main.cpp gives a board with PSRAM: it sets the
+// buffer aside only when RecordingBuffer::kPsramHeadroom stays free after it.
+size_t g_psram_free = 0;
+void* psram_alloc(size_t n) {
+  return hg::RecordingBuffer::leaves_headroom(g_psram_free, n) ? std::malloc(n) : nullptr;
+}
+}  // namespace
+
+TEST("recording buffer: set aside only when about 1 MB of PSRAM stays free after it") {
+  using hg::RecordingBuffer;
+  const size_t n = RecordingBuffer::bytes_for(hg::App::kMaxUtteranceMs, 24000);  // the 2.06's 1.5 MB
+  CHECK(RecordingBuffer::leaves_headroom(n + RecordingBuffer::kPsramHeadroom, n));
+  CHECK(!RecordingBuffer::leaves_headroom(n + RecordingBuffer::kPsramHeadroom - 1, n));
+  CHECK(!RecordingBuffer::leaves_headroom(n - 1, n));  // no wrap-around when PSRAM is short
+
+  // A small PSRAM part (2 MB, 1.5 MB of it free): no buffer, and a lost connection ends the
+  // recording as before. Start-up says so.
+  hg::DeviceProfile small = Rig::profile("ws://hermes.local:8765/gadget");
+  small.mic_rate = 24000;
+  small.recording_alloc = psram_alloc;
+  g_psram_free = 1536 * 1024;
+  Rig r(small);
+  r.bring_online(true);
+  CHECK(logged(r, "no room for the recording buffer: a lost connection ends a recording"));
+  CHECK_EQ(diag_of(r)["recordings"]["buffer"].as_int(), int64_t(0));
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(960, 1);
+  r.app.on_mic_samples(pcm.data(), pcm.size());
+  r.advance(500);
+  r.app.on_transport_closed("disconnected");
+  CHECK(!r.app.in_turn());
+  CHECK(!r.fake.mic_on);
+
+  // An 8 MB part with room to spare: the buffer is on, start-up says so, and a recording
+  // outlives a lost connection.
+  hg::DeviceProfile big = small;
+  g_psram_free = 7 * 1024 * 1024;
+  Rig b(big);
+  b.bring_online(true);
+  CHECK(logged(b, "recording buffer on: " + std::to_string(n / 1024) + " KB, a lost connection keeps the recording"));
+  CHECK_EQ(diag_of(b)["recordings"]["buffer"].as_int(), static_cast<int64_t>(n));
+  b.app.on_button(hg::Button::Talk, true);
+  b.app.on_mic_samples(pcm.data(), pcm.size());
+  b.advance(500);
+  b.app.on_transport_closed("disconnected");
+  CHECK(b.app.in_turn());
+  CHECK(b.fake.mic_on);
+}

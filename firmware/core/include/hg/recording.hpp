@@ -22,6 +22,14 @@ class RecordingBuffer {
     return (static_cast<size_t>(max_ms) + 1000) * rate / 1000 * 2;
   }
 
+  // PSRAM that must stay free after the buffer is set aside: faces, WebSocket send copies and
+  // event payloads prefer PSRAM and fall back to internal RAM, so a small PSRAM part keeps the
+  // buffer off rather than push them there (main.cpp's recording_alloc).
+  static constexpr size_t kPsramHeadroom = 1024 * 1024;
+  static constexpr bool leaves_headroom(size_t free_bytes, size_t bytes) {
+    return free_bytes >= bytes && free_bytes - bytes >= kPsramHeadroom;
+  }
+
   // Sets aside `bytes` with `alloc` (released with std::free); false leaves the
   // buffer off, and the caller streams as before.
   bool reserve(void* (*alloc)(size_t), size_t bytes) {

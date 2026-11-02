@@ -486,10 +486,23 @@ extern "C" void app_main(void) {
   // From PSRAM only, after the framebuffer: without room there, one-colour faces.
   if (profile.faces)
     profile.colour_face_alloc = [](size_t n) { return heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); };
-  // The recording buffer (1 MB for 30 s at 16 kHz, 1.5 MB at 24 kHz), PSRAM only: a board without it streams
-  // as before, and a connection lost mid-recording ends the recording.
+  // The recording buffer (1 MB for 30 s at 16 kHz, 1.5 MB at 24 kHz), PSRAM only, and only when
+  // about 1 MB of PSRAM stays free after it (RecordingBuffer::leaves_headroom). Otherwise the board
+  // streams as before, and a connection lost mid-recording ends the recording.
   if (esp_psram_is_initialized())
-    profile.recording_alloc = [](size_t n) { return heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); };
+    profile.recording_alloc = [](size_t n) -> void* {
+      const size_t free_bytes = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+      if (!hg::RecordingBuffer::leaves_headroom(free_bytes, n)) {
+        ESP_LOGW(TAG, "recording buffer off: %u KB of PSRAM free, it needs %u KB and %u KB to spare",
+                 static_cast<unsigned>(free_bytes / 1024), static_cast<unsigned>(n / 1024),
+                 static_cast<unsigned>(hg::RecordingBuffer::kPsramHeadroom / 1024));
+        return nullptr;
+      }
+      void* p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      ESP_LOGI(TAG, "recording buffer %s: %u KB of PSRAM, %u KB free before", p ? "on" : "off (allocation failed)",
+               static_cast<unsigned>(n / 1024), static_cast<unsigned>(free_bytes / 1024));
+      return p;
+    };
 #else
   profile.faces = false;
 #endif

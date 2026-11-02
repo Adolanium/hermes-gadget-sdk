@@ -85,7 +85,7 @@ Every screen that isn't showing reply text uses a **hero layout**: the Hermes Ag
 
 ### The recording buffer
 
-On boards with PSRAM (`DeviceProfile::recording_alloc`), a recording is kept whole on the device while it uploads (`hg::RecordingBuffer`, 1 MB for the 30 s limit at 16 kHz, 1.5 MB at 24 kHz, set aside at start-up). The microphone writes to the buffer, and the app sends from it in 40 ms frames as the link takes them:
+On boards with PSRAM (`DeviceProfile::recording_alloc`), a recording is kept whole on the device while it uploads (`hg::RecordingBuffer`, 1 MB for the 30 s limit at 16 kHz, 1.5 MB at 24 kHz, set aside at start-up, and only when about 1 MB of PSRAM stays free after it; start-up logs `recording buffer on` or why not). The microphone writes to the buffer, and the app sends from it in 40 ms frames as the link takes them:
 
 - **A slow link** delays frames instead of dropping them. `audio.end` waits until the link has taken all of the recording.
 - **A lost connection mid-recording** doesn't end it. The screen stays on Listening with "Offline, still recording", and the recording ends as usual: release, a tap, the VAD, or the 30 s limit. The app reconnects in the background, starting at the shortest backoff.

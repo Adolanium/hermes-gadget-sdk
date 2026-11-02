@@ -111,7 +111,7 @@ A display that advertises `has_backlight` must accept zero percent to turn dark.
 
 ## Motion
 
-A board with PSRAM sets `DeviceProfile::recording_alloc` to a PSRAM allocator (`main.cpp` does when `esp_psram_is_initialized()`). The app then keeps each recording whole while it uploads, so a slow link delays audio instead of dropping it and a connection lost mid-recording loses nothing ([the recording buffer](architecture.md#the-recording-buffer)). It takes 1 MB at 16 kHz or 1.5 MB at 24 kHz at start-up. Leave it unset without PSRAM.
+A board with PSRAM sets `DeviceProfile::recording_alloc` to a PSRAM allocator (`main.cpp` does when `esp_psram_is_initialized()`). The app then keeps each recording whole while it uploads, so a slow link delays audio instead of dropping it and a connection lost mid-recording loses nothing ([the recording buffer](architecture.md#the-recording-buffer)). It takes 1 MB at 16 kHz or 1.5 MB at 24 kHz at start-up. Have it return null unless about 1 MB of PSRAM stays free afterwards (`RecordingBuffer::leaves_headroom`), as `main.cpp` does: faces, WebSocket send copies and event payloads prefer PSRAM and would otherwise fall back to internal RAM. Leave it unset without PSRAM.
 
 Boards with an accelerometer can offer face-down sleep. Set `DeviceProfile::motion_sensor` when the sensor starts, and call `App::on_motion(x_mg, y_mg, z_mg)` from the app task 5-25 times a second with lightly smoothed milli-g values in the device frame: `+x` towards the right of the picture, `+y` towards its top, `+z` out of the screen towards the viewer. A board lying flat with the screen up reads about `(0, 0, +1000)`. Samples older than two seconds are ignored, so a stalled sensor cannot keep the screen dark.
 

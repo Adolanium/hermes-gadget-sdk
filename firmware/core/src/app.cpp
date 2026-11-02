@@ -372,9 +372,15 @@ void App::begin() {
     colour_px_ = colour_ ? px : 0;
     if (!colour_) log(LogLevel::Warn, "no room for a colour face: one-colour faces only");
   }
-  if (profile_.recording_alloc && !rec_.ready() &&
-      !rec_.reserve(profile_.recording_alloc, RecordingBuffer::bytes_for(kMaxUtteranceMs, profile_.mic_rate)))
-    log(LogLevel::Warn, "no room for the recording buffer: a lost connection ends a recording");
+  if (profile_.recording_alloc && !rec_.ready()) {
+    // Which way it went, at start-up: a report shows whether a lost connection keeps a recording.
+    const size_t bytes = RecordingBuffer::bytes_for(kMaxUtteranceMs, profile_.mic_rate);
+    if (rec_.reserve(profile_.recording_alloc, bytes))
+      log(LogLevel::Info, "recording buffer on: " + std::to_string(bytes / 1024) +
+                              " KB, a lost connection keeps the recording");
+    else
+      log(LogLevel::Warn, "no room for the recording buffer: a lost connection ends a recording");
+  }
   if (ui_ && profile_.touch_screen)  // about 7 mm: 7 * ppi / 25.4, rounded up
     ui_->set_touch_px((70 * (profile_.touch_ppi ? profile_.touch_ppi : DeviceProfile::kDefaultTouchPpi) + 253) / 254);
   if (profile_.frame_stats) set_frame_stats(true);
