@@ -1454,6 +1454,29 @@ async def _call(fn):
     return fn()
 
 
+def test_a_profile_no_longer_offered_gets_no_thumbnail_until_the_next_welcome(loop_thread, tmp_path, make_sim):
+    delegate = _Thumbs()
+    hub = _hub(loop_thread, tmp_path, delegate)
+    thumbs = lambda: [m for m in sim.received if m.get("type") == "face.thumb.start"]  # noqa: E731
+    try:
+        sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget", board="sim-410x486")
+        assert sim.wait_screen("ready", timeout=10)
+        assert sim.wait_for(lambda: len(thumbs()) == 2, timeout=5)
+        session = hub.get(sim.status()["device_id"])
+        delegate.colours["ops"] = (240, 200, 40)  # both pictures change, but Lab was parked meanwhile
+        delegate.colours["lab"] = (60, 60, 220)
+        delegate.loads.clear()
+        task = loop_thread.run(_call(lambda: session.update_thumbs({"default", "ops"})))
+        assert sim.wait_for(task.done, timeout=5)
+        assert sim.wait_for(lambda: len(thumbs()) == 3, timeout=5)
+        sim.run_for(0.3)
+        assert thumbs()[-1]["profile"] == "ops" and len(thumbs()) == 3
+        assert delegate.loads == ["ops"]  # Lab's picture is not even read
+        assert not [m for m in sim.received if m.get("type") == "face.thumb"]
+    finally:
+        loop_thread.run(hub.stop())
+
+
 def test_a_board_without_a_touchscreen_or_room_gets_no_thumbnails(loop_thread, tmp_path, make_sim):
     delegate = _Thumbs()
     hub = _hub(loop_thread, tmp_path, delegate)
