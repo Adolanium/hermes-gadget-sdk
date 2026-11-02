@@ -106,9 +106,16 @@ void App::on_power_key() {
     wake_display();
     return;
   }
-  // Off means off: the menu, a list or a card the user was on closes, so the
-  // next press wakes to the home screen and nothing open turns the screen back on.
-  if (settings_open()) close_settings();
+  // In the settings menu the press is Back: it closes the menu (and any check
+  // running in it) and leaves the screen lit on the home screen. The next press
+  // there turns the screen off.
+  if (settings_open()) {
+    close_settings();
+    activity_at_ = now();  // the screen timeout starts again from the press
+    return;
+  }
+  // Off means off: a list or a card the user was on closes, so the next press
+  // wakes to the home screen and nothing open turns the screen back on.
   if (overlay_ != Overlay::None) {
     dismiss_overlay();
     update_model();

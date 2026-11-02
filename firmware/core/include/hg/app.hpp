@@ -60,6 +60,10 @@ struct DeviceProfile {
   // A key can light a dark screen (TALK, or a power key read by the port), so the
   // touchscreen may be left out of waking it (the touch_wake setting).
   bool wake_key = false;
+  // A physical TALK key (BOOT on many boards) reaches App::on_button. Next to a touchscreen it lets
+  // the touchscreen be left out of talking (`touch_talk`); it can double-press home (`double_home`)
+  // and talk from a dark screen (`wake_talk`). Boards without one hide all three.
+  bool talk_key = true;
   // Board-specific settings the console accepts besides the core ones. Changes
   // reach the port through App::on_setting_changed.
   std::vector<std::string> extra_settings;
@@ -119,7 +123,16 @@ class App {
   void on_transport_text(std::string_view text);
   void on_transport_binary(const uint8_t* data, size_t len);
   void on_transport_closed(std::string_view reason);
-  void on_button(Button button, bool pressed);
+  // `touch`: the press comes from the touchscreen (TouchGestures), not a key.
+  void on_button(Button button, bool pressed, bool touch = false);
+  // Two presses of the TALK key (BOOT on most boards) this close together, start to start,
+  // go home: the second press cancels what the first started, closes what is open and asks
+  // Hermes for the default profile (the `double_home` setting). The first press acts at once.
+  static constexpr uint32_t kDoublePressMs = 400;
+  bool double_home() const { return double_home_; }
+  // The `wake_talk` setting: a press of the TALK key on a dark screen lights it and talks at once
+  // (holds to talk, or starts a tap-mode recording), instead of only waking it.
+  bool wake_talk() const { return wake_talk_; }
   // Accelerometer sample in the device frame, in milli-g: +x towards the
   // picture's right, +y towards its top, +z out of the screen. Called 5-25
   // times a second from the thread that calls tick().
@@ -141,6 +154,21 @@ class App {
   void close_settings();
   bool settings_open() const { return menu_ != Menu::Closed; }
   bool settings_title_hit(int x, int y) const;
+  // Touch on the settings list (TouchGestures), in panel coordinates. While it is
+  // live (open, no hardware check running), a press starts a touch; a drag scrolls
+  // the list with the finger, or moves the selected row's slider when the press
+  // landed on it; a tap (a press that did not move) selects a row and changes it;
+  // lift ends a drag, setting the slider's level.
+  bool settings_list_live() const;
+  // The list row under a point (-1: none), and the level the selected row's slider picks there (-1: off it).
+  int settings_row_hit(int x, int y) const { return ui_ && settings_open() ? ui_->settings_row_hit(model_, x, y) : -1; }
+  int settings_slider_hit(int x, int y) const {
+    return ui_ && settings_open() ? ui_->settings_slider_at(model_, x, y, false) : -1;
+  }
+  void settings_press(int x, int y);
+  void settings_drag(int x, int y);
+  void settings_tap(int x, int y);
+  void settings_lift();
   // Hermes profiles: which one answers this device. Switching asks the server; the
   // device keeps a profile only once Hermes confirms it, and asks again only after an answer.
   bool next_agent_profile();
@@ -174,10 +202,16 @@ class App {
   bool charging_notice() const { return power_notice_ == PowerNotice::Charging; }
   // The full battery notice is on screen.
   bool charged_notice() const { return power_notice_ == PowerNotice::Charged; }
+  // touch_talk off: the touchscreen never records; TALK does. touch_presses_talk() says whether a
+  // touch may still press TALK now: in settings, at a question and on a ringing alarm it navigates,
+  // answers or dismisses, and nothing there opens the microphone.
+  bool touch_talk() const { return touch_talk_; }
+  bool touch_presses_talk() const;
   std::string agent_profile_name() const;
   // Returns true when this input only wakes a sleeping display.
   bool wake_display();
-  // A short press of the PMIC's power key: turns the screen off, or back on.
+  // A short press of the PMIC's power key: turns the screen off, or back on. In
+  // the settings menu it is Back: the menu closes and the screen stays lit.
   // Wi-Fi and the Hermes connection stay up.
   void on_power_key();
   // Dozing (System::set_dozing): the port's loop may wait this long for events.
@@ -349,6 +383,8 @@ class App {
   bool known_setting(std::string_view key) const;
   std::string wifi_command(std::string_view args);
   void start_new_session();
+  // The double press of TALK: back to Ready with the default profile.
+  void go_home();
   void scroll_body(int delta);
   // Long text pages itself, so boards without scroll buttons can read it all.
   bool turn_page();
@@ -433,10 +469,26 @@ class App {
   // `language` is auto: follow the language Hermes sends in `welcome` (English until it does).
   bool lang_auto_ = false;
   std::optional<i18n::Lang> hermes_lang_;  // from the last `welcome` that named one this firmware has
-  enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, Profile, Microphone, Speaker, Display, Inputs,
-                              Info, Power, BatteryAlert, BatteryAlertSound, ChargingNotice, ChargingSound, ChargedNotice, ChargedSound, IdleTimer, TouchWake, FaceDownSleep, Clock, PowerOff, WifiSetup, Phone, Language, Back };
+  enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, TouchTalk, Profile, Microphone, Speaker, Display, Inputs,
+                              Info, Power, BatteryAlert, BatteryAlertSound, ChargingNotice, ChargingSound, ChargedNotice, ChargedSound, IdleTimer, TouchWake, FaceDownSleep, Clock, PowerOff, WifiSetup, Phone, Language, DoubleHome, WakeTalk, Back };
   enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };
   Menu menu_ = Menu::Closed;
+  // The settings list's scroll in pixels, and where it eases to. It follows the
+  // selected row until a drag moves it by hand, and again once the selection moves.
+  int settings_scroll_ = 0, settings_target_ = 0;
+  bool settings_follow_ = true;
+  uint32_t settings_step_at_ = 0;
+  int press_y_ = 0, press_scroll_ = 0;
+  bool sliding_ = false;  // the press landed on the selected row's slider
+  int slide_level_ = -1;  // a slider being dragged: its level until the finger lifts
+  Menu slide_item_ = Menu::Closed;  // the item a drag on its slider began on
+  Menu settings_item_at(int row) const;
+  void settings_select(Menu item);
+  void settings_set_level(int level);
+  bool menu_offered(Menu item) const;
+  // An item's name and text, in `m`'s detail and body (the model's own for the selected item), and its row.
+  void settings_item(Menu item, UiModel& m) const;
+  SettingRow settings_row(Menu item, const std::string& label, const std::string& body) const;
   HardwareCheck hardware_check_ = HardwareCheck::None;
   std::string check_result_;
   std::string wifi_setup_text_;
@@ -455,6 +507,8 @@ class App {
   bool talk_held_ = false;
   bool settings_chord_fired_ = false;
   uint32_t talk_down_at_ = 0;
+  uint32_t talk_key_at_ = 0;      // the last press of the TALK key, for a double press
+  bool talk_key_armed_ = false;   // ...and whether the next press may complete one
   std::optional<PowerStatus> power_status_;
   uint32_t power_read_at_ = 0, activity_at_ = 0, power_key_polled_at_ = 0;
   uint32_t screen_timeout_ms_ = 0;
@@ -520,6 +574,9 @@ class App {
   bool motion_seen_ = false, face_down_ = false;
   bool face_down_sleep_ = false;      // the `face_down_sleep` setting
   bool touch_wake_ = true;            // the `touch_wake` setting
+  bool double_home_ = true;           // the `double_home` setting
+  bool wake_talk_ = false;            // the `wake_talk` setting
+  bool touch_talk_ = true;            // the `touch_talk` setting
   bool reply_while_face_down_ = false;  // a reply arrived while dark; show it on the turn-over
   uint8_t wake_buttons_ = 0;
 
@@ -658,7 +715,7 @@ class App {
   // frame timing: the running statistics while `perf` is on, and the bench
   std::unique_ptr<FrameStats> frame_stats_;
   uint32_t frame_log_at_ = 0, frame_log_frames_ = 0;
-  enum class Bench : uint8_t { None, Scroll, Mascot, Redraw };
+  enum class Bench : uint8_t { None, Scroll, Mascot, Redraw, Settings };
   Bench bench_ = Bench::None, bench_last_ = Bench::None;  // running; the last one to run of `perf bench all`
   int bench_frame_ = 0;
   FrameStats bench_stats_;
