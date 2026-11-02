@@ -1477,6 +1477,29 @@ def test_a_profile_no_longer_offered_gets_no_thumbnail_until_the_next_welcome(lo
         loop_thread.run(hub.stop())
 
 
+def test_a_thumbnail_lookup_that_fails_keeps_what_the_device_shows(loop_thread, tmp_path, make_sim):
+    delegate = _Thumbs()
+    hub = _hub(loop_thread, tmp_path, delegate)
+    try:
+        sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget", board="sim-410x486")
+        assert sim.wait_screen("ready", timeout=10)
+        assert sim.wait_for(lambda: len([m for m in sim.received if m.get("type") == "face.thumb.start"]) == 2,
+                            timeout=5)
+        session = hub.get(sim.status()["device_id"])
+
+        async def broken(session, profile):  # say, a profile tree that can't be read after a restart
+            raise OSError("unreadable")
+
+        delegate.thumb = broken
+        task = loop_thread.run(_call(session.update_thumbs))
+        assert sim.wait_for(task.done, timeout=5)
+        sim.run_for(0.3)
+        assert not [m for m in sim.received if m.get("type") == "face.thumb"]  # no clear
+        assert set(session.thumb_hashes) == {"ops", "lab"}
+    finally:
+        loop_thread.run(hub.stop())
+
+
 def test_a_board_without_a_touchscreen_or_room_gets_no_thumbnails(loop_thread, tmp_path, make_sim):
     delegate = _Thumbs()
     hub = _hub(loop_thread, tmp_path, delegate)

@@ -563,6 +563,10 @@ class DeviceSession:
                 digest = None
                 try:
                     thumb = await self.hub.delegate.thumb(self, profile)
+                except Exception as exc:  # a lookup that failed says nothing: the device keeps what it shows
+                    log.debug("thumbnail lookup of %s for %s failed: %s", profile, self.device_id, exc)
+                    continue
+                try:
                     digest = thumb.hash if thumb else None
                     if digest == self.thumb_hashes.get(profile) or (digest and digest == self._thumb_failed.get(profile)):
                         continue
