@@ -15,6 +15,8 @@ const API = "/api/plugins/gadget";
 // The dashboard adds the selected profile to its own profile-scoped requests, but not to plugin
 // routes (/api/plugins/ is not among them). The route resolves the plugin's data directory from
 // `?profile=`, so pass along the one the dashboard page was opened with, when there is one.
+let latestRequest = 0;  // the number of the last /devices request the tab made
+
 function devicesUrl() {
   const profile = new URLSearchParams(window.location.search).get("profile");
   return profile ? `${API}/devices?profile=${encodeURIComponent(profile)}` : `${API}/devices`;
@@ -109,11 +111,13 @@ function GadgetsPage() {
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(() => {
+    // The timer and the Refresh button can overlap: only the latest request's answer is shown.
+    const request = ++latestRequest;
     setLoading(true);
     SDK.fetchJSON(devicesUrl())
-      .then((d) => { setData(d); setError(""); })
-      .catch((e) => setError(errorText(e)))
-      .finally(() => setLoading(false));
+      .then((d) => { if (request === latestRequest) { setData(d); setError(""); } })
+      .catch((e) => { if (request === latestRequest) setError(errorText(e)); })
+      .finally(() => { if (request === latestRequest) setLoading(false); });
   }, []);
 
   useEffect(() => {

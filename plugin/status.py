@@ -25,6 +25,7 @@ FILENAME = "status.json"
 VERSION = 1
 REFRESH_S = 30.0  # the gateway rewrites the file at least this often while it runs
 STALE_AFTER_S = 3 * REFRESH_S  # older than this, the gateway that wrote it is taken as gone
+FUTURE_SKEW_S = 5.0  # a file this far in the future is still believed; further, it is not
 
 # The readings a device's state telemetry carries about its power (firmware app_power.cpp).
 BATTERY_FIELDS = ("battery_percent", "battery_mv", "charging", "external_power", "battery_present")
@@ -91,7 +92,11 @@ def read(directory: Path | str, *, now: float | None = None) -> dict[str, Any]:
         updated_at = float(updated_at) if isinstance(updated_at, (int, float)) else None
     except OverflowError:
         return {"running": False, "updated_at": None, "devices": {}}
-    fresh = updated_at is not None and now - updated_at <= STALE_AFTER_S
+    # Fresh means written in the last STALE_AFTER_S. A time in the future (a clock set back, a
+    # hand-edited file) or Infinity would otherwise read as fresh for ever; a few seconds of
+    # skew between the gateway's and the dashboard's clocks are allowed.
+    age = now - updated_at if updated_at is not None and math.isfinite(updated_at) else None
+    fresh = age is not None and -FUTURE_SKEW_S <= age <= STALE_AFTER_S
     running = bool(raw.get("running")) and fresh
     devices = raw.get("devices") if running and isinstance(raw.get("devices"), dict) else {}
     return {"running": running, "updated_at": updated_at,

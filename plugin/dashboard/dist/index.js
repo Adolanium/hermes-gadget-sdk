@@ -8,6 +8,7 @@
   var { Badge, Button, Card, CardContent, CardHeader, CardTitle } = SDK.components;
   var { timeAgo } = SDK.utils;
   var API = "/api/plugins/gadget";
+  var latestRequest = 0;
   function devicesUrl() {
     const profile = new URLSearchParams(window.location.search).get("profile");
     return profile ? `${API}/devices?profile=${encodeURIComponent(profile)}` : `${API}/devices`;
@@ -54,11 +55,18 @@
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
     const load = useCallback(() => {
+      const request = ++latestRequest;
       setLoading(true);
       SDK.fetchJSON(devicesUrl()).then((d) => {
-        setData(d);
-        setError("");
-      }).catch((e) => setError(errorText(e))).finally(() => setLoading(false));
+        if (request === latestRequest) {
+          setData(d);
+          setError("");
+        }
+      }).catch((e) => {
+        if (request === latestRequest) setError(errorText(e));
+      }).finally(() => {
+        if (request === latestRequest) setLoading(false);
+      });
     }, []);
     useEffect(() => {
       load();
