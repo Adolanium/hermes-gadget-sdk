@@ -530,10 +530,10 @@ extern "C" void app_main(void) {
     if (key == "wifi_ssid" || key == "wifi_pass") app.close_wifi_setup();
     if (key == "wifi_ssid" || key == "wifi_pass" || key == "wifi_nets") g_wifi.networks_changed();
     if (key == "touch_cancel") apply_touch_cancel();
-    if (key == "touch_wake") g_touch.set_wakes(app.touch_wake());
     if (key == "clock") g_time.set_wanted(app.clock_enabled());
     if (key == "timezone") g_time.apply_timezone(g_storage);
 #if !CONFIG_HG_BOARD_ESP32_CYD
+    if (key == "touch_wake") g_touch.set_wakes(app.touch_wake());
     if (key == "name" && hgp::board_config().bluetooth) g_phone.set_name(device_name());
     if (key == "tailnet" || key == "ts_key") g_tailnet.settings_changed();
 #endif
@@ -572,7 +572,9 @@ extern "C" void app_main(void) {
   };
 #endif
   app.begin();
+#if !CONFIG_HG_BOARD_ESP32_CYD
   g_touch.set_wakes(app.touch_wake());
+#endif
   g_time.set_wanted(app.clock_enabled());  // SNTP only while the clock face is on
   hgp::console::begin();
 
