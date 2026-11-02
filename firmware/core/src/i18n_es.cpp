@@ -11,7 +11,7 @@ extern const size_t kSpanishCount;
 const Entry kSpanish[] = {
     // Settings menu
     {Msg::Settings, "Ajustes"},
-    {Msg::SettingsHintTouch, "Toca cambia, desliza pasa"},
+    {Msg::SettingsHintTouch, "Toca cambia, desliza mueve"},
     {Msg::SettingsHintButtons, "{0}: cambia | {1}: pasa"},
     {Msg::SpeakerVolume, "Volumen"},
     {Msg::ChangesSaved, "Los cambios se guardan."},
@@ -22,6 +22,8 @@ const Entry kSpanish[] = {
     {Msg::NoMicDriver, "No hay controlador de micrófono activo."},
     {Msg::TalkModeHold, "Mantén para grabar; suelta para enviar."},
     {Msg::TalkModeTap, "Toca para grabar; pausa o toca para enviar."},
+    {Msg::TalkHold, "Mantener"},
+    {Msg::TalkTap, "Tocar"},
     {Msg::MicCheck, "Prueba de micrófono"},
     {Msg::MicCheckLive, "Habla ahora. Nivel: {0}%\nSolo local. No se envía nada."},
     {Msg::MicCheckIntro, "Inicia para medir el nivel del micrófono. No se guarda ni se envía nada."},
