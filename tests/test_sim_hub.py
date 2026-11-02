@@ -1404,6 +1404,56 @@ def test_profile_thumbnails_reach_the_grid_once_and_follow_changes(loop_thread, 
         loop_thread.run(hub.stop())
 
 
+class _BrokenThumbs(_Thumbs):
+    """Ops's picture cannot be read and Lab's comes out the wrong size, until ``fixed``."""
+
+    def __init__(self):
+        super().__init__()
+        self.fixed = False
+
+    async def thumb(self, session, profile):
+        face = await super().thumb(session, profile)
+        if face is None or self.fixed:
+            return face
+        loads = self.loads
+
+        def broken():
+            loads.append(profile)
+            if profile == "ops":
+                raise OSError("truncated file")
+            return b"\0" * 10
+
+        return ProfileFace(face.hash, broken)
+
+
+def test_a_thumbnail_that_cannot_be_made_is_tried_once_per_hash(loop_thread, tmp_path, make_sim):
+    delegate = _BrokenThumbs()
+    hub = _hub(loop_thread, tmp_path, delegate)
+    thumbs = lambda: [m for m in sim.received if m.get("type") == "face.thumb.start"]  # noqa: E731
+    try:
+        sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget", board="sim-410x486")
+        assert sim.wait_screen("ready", timeout=10)
+        assert sim.wait_for(lambda: sorted(delegate.loads) == ["lab", "ops"], timeout=5)
+        session = hub.get(sim.status()["device_id"])
+        for _ in range(3):  # pairing checks with the same pictures: neither is read again
+            task = loop_thread.run(_call(session.update_thumbs))
+            assert sim.wait_for(task.done, timeout=5)
+        assert sorted(delegate.loads) == ["lab", "ops"] and not thumbs()
+
+        delegate.colours["ops"] = (240, 200, 40)  # new pictures: tried again, and sent once they read
+        delegate.colours["lab"] = (60, 60, 220)
+        delegate.fixed = True
+        task = loop_thread.run(_call(session.update_thumbs))
+        assert sim.wait_for(task.done, timeout=5)
+        assert sim.wait_for(lambda: {m["profile"] for m in thumbs()} == {"ops", "lab"}, timeout=5)
+    finally:
+        loop_thread.run(hub.stop())
+
+
+async def _call(fn):
+    return fn()
+
+
 def test_a_board_without_a_touchscreen_or_room_gets_no_thumbnails(loop_thread, tmp_path, make_sim):
     delegate = _Thumbs()
     hub = _hub(loop_thread, tmp_path, delegate)

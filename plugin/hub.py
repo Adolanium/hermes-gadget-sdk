@@ -301,6 +301,8 @@ class DeviceSession:
             str(k): v for k, v in held.items() if isinstance(v, str) and 0 < len(v) <= 64
         } if isinstance(held, dict) and self.thumb_px else {}
         self._thumb_task: asyncio.Task | None = None  # update_thumbs(): one at a time
+        # profile -> the hash of a thumbnail that could not be made: not tried again until the hash changes
+        self._thumb_failed: dict[str, str] = {}
         self._thumbs_dirty = False
         self._ota_inbox: asyncio.Queue | None = None  # the device's ota.* replies, while an update runs
         self._dashboard_sent: dict | None = None  # the last dashboard this connection delivered
@@ -551,20 +553,28 @@ class DeviceSession:
             for profile in list(self.roster_ids):
                 if self._thumbs_dirty or not self.current() or not self.paired:
                     break
+                digest = None
                 try:
                     thumb = await self.hub.delegate.thumb(self, profile)
                     digest = thumb.hash if thumb else None
-                    if digest == self.thumb_hashes.get(profile):
+                    if digest == self.thumb_hashes.get(profile) or (digest and digest == self._thumb_failed.get(profile)):
                         continue
+                    self._thumb_failed.pop(profile, None)
                     if thumb is None:
                         await self.send_json(protocol.message("face.thumb", profile=profile))
                         self.thumb_hashes.pop(profile, None)
                         continue
                     data = await asyncio.to_thread(thumb.load)
-                except Exception as exc:  # an unreadable picture leaves what the device shows
+                except Exception as exc:  # an unreadable picture leaves what the device shows, once per hash
+                    if digest:
+                        self._thumb_failed[profile] = digest
                     log.warning("no thumbnail of %s for %s: %s", profile, self.device_id, exc)
                     continue
-                if len(data) != px * px * 2 or not self.current() or not self.paired:
+                if len(data) != px * px * 2:
+                    self._thumb_failed[profile] = digest
+                    log.warning("no thumbnail of %s for %s: %d bytes, not %d", profile, self.device_id, len(data), px * px * 2)
+                    continue
+                if not self.current() or not self.paired:
                     continue
                 self.thumb_hashes.pop(profile, None)  # until the last message is out
                 stream = self._next_stream()

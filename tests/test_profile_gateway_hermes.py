@@ -65,9 +65,10 @@ def test_roster_names_on_a_hermes_without_bot_title():
     assert _profile_label(types.SimpleNamespace(name="x", display_name="", bot_title="Travel")) == "Travel"
 
 
-def test_a_profiles_thumbnail_follows_its_avatar_once_the_file_holds_still(hermes_home):
-    """thumb() stats each time, reads only after a change has held still for a second look, and keeps
-    the last thumbnail meanwhile; a profile without a face file or avatar has none."""
+def test_a_profiles_thumbnail_follows_its_avatar_once_the_file_holds_still(hermes_home, monkeypatch):
+    """thumb() stats each time, reads only after a change has held still for a second look at least
+    THUMB_HOLD_S later, and keeps the last thumbnail meanwhile; a profile without a face file or
+    avatar has none."""
     import asyncio
     import os
     import types
@@ -76,13 +77,19 @@ def test_a_profiles_thumbnail_follows_its_avatar_once_the_file_holds_still(herme
     from PIL import Image
 
     from gateway.config import PlatformConfig
-    from hermes_gadget_plugin.adapter import GadgetAdapter
+    from hermes_gadget_plugin import adapter as adapter_module
+    from hermes_gadget_plugin.adapter import PAIRING_POLL_S, THUMB_HOLD_S, GadgetAdapter
 
+    clock = [1000.0]
+    monkeypatch.setattr(adapter_module.time, "monotonic", lambda: clock[0])
     adapter = GadgetAdapter(PlatformConfig(enabled=True, extra={"profiles": "all"}))
     session = types.SimpleNamespace(thumb_px=64)
     assets = hermes_home / "profiles" / "ops" / "assets"
     assets.mkdir()
-    thumb = lambda: asyncio.run(adapter.thumb(session, "ops"))  # noqa: E731
+
+    def thumb():  # one look per pairing check
+        clock[0] += PAIRING_POLL_S
+        return asyncio.run(adapter.thumb(session, "ops"))
     assert thumb() is None
 
     def avatar(colour, when):
@@ -98,6 +105,11 @@ def test_a_profiles_thumbnail_follows_its_avatar_once_the_file_holds_still(herme
     assert thumb().hash == first.hash
     avatar((240, 200, 40), 2_000_000_000)
     assert thumb().hash == first.hash  # changed, maybe still being written: the old one stays
+    other = types.SimpleNamespace(thumb_px=64)  # a second device in the same pairing check waits too
+    assert asyncio.run(adapter.thumb(other, "ops")).hash == first.hash
+    clock[0] += THUMB_HOLD_S - 0.1  # and so does a look that comes too soon
+    assert asyncio.run(adapter.thumb(other, "ops")).hash == first.hash
+    clock[0] -= THUMB_HOLD_S - 0.1
     second = thumb()  # the same on the next look: read
     assert second.hash != first.hash
     (assets / "avatar.png").unlink()

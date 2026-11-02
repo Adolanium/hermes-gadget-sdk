@@ -74,6 +74,8 @@ PLATFORM_NAME = "gadget"
 MAX_MESSAGE_LENGTH = 4000
 PAIRING_TTL_S = 3600          # mirrors Hermes's pairing-code lifetime
 PAIRING_POLL_S = 2.0
+# A profile's changed face or avatar files are read for its thumbnail once they have held still this long.
+THUMB_HOLD_S = 1.5
 PAIRING_GRACE_S = 6.0
 UPDATE_POLL_S = 3.0           # how often staged firmware ('hermes gadget update') is looked for
 DASHBOARD_POLL_S = 2.0        # how often tiles ('hermes gadget tile') and expiries are looked at
@@ -245,7 +247,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         # connection -> its last face lookup; it goes with the connection, and a replaced one keeps its own
         self._face_from: "weakref.WeakKeyDictionary[DeviceSession, _FaceLook]" = weakref.WeakKeyDictionary()
         # Profile thumbnails (thumb()): (profile, size, avatars on) -> (the files' stamp, the thumbnail), and
-        # a stamp seen changing that has yet to hold still.
+        # a stamp seen changing that has yet to hold still, with when it was first seen.
         self._thumbs: Dict[tuple, tuple] = {}
         self._thumb_changing: Dict[tuple, tuple] = {}
         self._battery_log: Optional[BatteryLog] = None
@@ -543,7 +545,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     async def thumb(self, session: DeviceSession, profile: str) -> Optional[faces.ProfileFace]:
         """``profile``'s thumbnail for a device's grid: its face file or avatar, as its own face would be.
         Each profile's files are stat'ed on every call and read only when they changed and then held
-        still until the next call, a debounce for a file being written; until then the last one stays."""
+        still until a call at least THUMB_HOLD_S later, a debounce for a file being written;
+        until then the last one stays."""
         if not self._profile_faces or not session.thumb_px:
             return None
         if self._convert_avatars is None:
@@ -555,9 +558,15 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             cached = self._thumbs.get(key)
             if cached is not None and cached[0] == now:
                 return cached[1]
-            if cached is not None and self._thumb_changing.get(key) != now:
-                self._thumb_changing[key] = now  # changed since: read it once it holds still
-                return cached[1]
+            if cached is not None:
+                # Changed since: read it once it has held still for THUMB_HOLD_S, about a pairing check.
+                # Several devices ask in the same check, so the second one to see the change waits too.
+                seen = self._thumb_changing.get(key)
+                if seen is None or seen[0] != now:
+                    self._thumb_changing[key] = (now, time.monotonic())
+                    return cached[1]
+                if time.monotonic() - seen[1] < THUMB_HOLD_S:
+                    return cached[1]
             found = await asyncio.to_thread(faces.thumb_for_profile, home, self._convert_avatars, session.thumb_px)
         except Exception as exc:  # an unreadable profile keeps what the device shows
             logger.debug("[%s] no thumbnail for profile %s: %s", self.name, profile, exc)

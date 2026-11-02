@@ -214,7 +214,8 @@ The thumbnails follow the files the same way: every 2 seconds the plugin compare
 profile's face file and avatars with what it last read, and reads them again once they have
 changed and then stayed the same on two checks in a row. Only the thumbnail that changed is sent;
 the device keeps the others, and keeps them all through a reconnect, so nothing unchanged is sent
-again. Removing a profile's face file and avatar brings its initial back.
+again. Removing a profile's face file and avatar brings its initial back. A picture that cannot be read keeps what
+the device shows, and is tried again only once the files change.
 
 ## Placing the eye and the mouth
 
