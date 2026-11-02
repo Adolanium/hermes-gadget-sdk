@@ -361,6 +361,7 @@ BoardConfig make() {
   b.touch.width = 410;
   b.touch.height = 502;
   b.touch.offset_y = 8;     // touch reports glass rows; the UI starts at row 8
+  b.touch.int_wakes = true;  // its short report needs the CPU awake at once (light_sleep below)
   b.axp2101 = true;
   b.rtc.enabled = true;  // PCF85063 at 0x51 on the shared bus keeps UTC across power loss
   // PWR reaches only the AXP2101 (PWRON): its short press is read there. Holding it
@@ -369,8 +370,9 @@ BoardConfig make() {
   b.buttons = {0, -1, -1, -1};  // BOOT is TALK
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";
-  // The FT3168's short INT pulse is not configured as a light-sleep wake
-  // source. Keep the CPU awake to read its report before it expires.
+  // Light sleep while dozing: the FT3168's INT (low level) wakes the CPU, and the touch
+  // task reads the report right after (TouchInput::arm_sleep_wake).
+  b.light_sleep = true;
   return b;
 }
 #elif CONFIG_HG_BOARD_AMOLED_216
