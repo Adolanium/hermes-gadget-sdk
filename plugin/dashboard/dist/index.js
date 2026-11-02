@@ -57,7 +57,7 @@
     const load = useCallback(() => {
       const request = ++latestRequest;
       setLoading(true);
-      SDK.fetchJSON(devicesUrl()).then((d) => {
+      return SDK.fetchJSON(devicesUrl()).then((d) => {
         if (request === latestRequest) {
           setData(d);
           setError("");
@@ -69,9 +69,16 @@
       });
     }, []);
     useEffect(() => {
-      load();
-      const timer = setInterval(load, REFRESH_MS);
-      return () => clearInterval(timer);
+      let timer = null;
+      let stopped = false;
+      const poll = () => load().finally(() => {
+        if (!stopped) timer = setTimeout(poll, REFRESH_MS);
+      });
+      poll();
+      return () => {
+        stopped = true;
+        clearTimeout(timer);
+      };
     }, [load]);
     const devices = data && data.devices || [];
     const online = devices.filter((d) => d.online).length;

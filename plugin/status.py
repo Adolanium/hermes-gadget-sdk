@@ -95,7 +95,9 @@ def read(directory: Path | str, *, now: float | None = None) -> dict[str, Any]:
     # Fresh means written in the last STALE_AFTER_S. A time in the future (a clock set back, a
     # hand-edited file) or Infinity would otherwise read as fresh for ever; a few seconds of
     # skew between the gateway's and the dashboard's clocks are allowed.
-    age = now - updated_at if updated_at is not None and math.isfinite(updated_at) else None
+    if updated_at is not None and not math.isfinite(updated_at):
+        updated_at = None  # NaN or Infinity would also break the route's JSON response
+    age = now - updated_at if updated_at is not None else None
     fresh = age is not None and -FUTURE_SKEW_S <= age <= STALE_AFTER_S
     running = bool(raw.get("running")) and fresh
     devices = raw.get("devices") if running and isinstance(raw.get("devices"), dict) else {}

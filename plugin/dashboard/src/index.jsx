@@ -111,19 +111,23 @@ function GadgetsPage() {
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(() => {
-    // The timer and the Refresh button can overlap: only the latest request's answer is shown.
+    // Only the latest request's answer is shown, should a Refresh ever overlap a poll.
     const request = ++latestRequest;
     setLoading(true);
-    SDK.fetchJSON(devicesUrl())
+    return SDK.fetchJSON(devicesUrl())
       .then((d) => { if (request === latestRequest) { setData(d); setError(""); } })
       .catch((e) => { if (request === latestRequest) setError(errorText(e)); })
       .finally(() => { if (request === latestRequest) setLoading(false); });
   }, []);
 
   useEffect(() => {
-    load();
-    const timer = setInterval(load, REFRESH_MS);
-    return () => clearInterval(timer);
+    // The next poll starts REFRESH_MS after this one settles, not on a fixed clock: a response
+    // slower than REFRESH_MS is then still shown, rather than replaced by the next request's.
+    let timer = null;
+    let stopped = false;
+    const poll = () => load().finally(() => { if (!stopped) timer = setTimeout(poll, REFRESH_MS); });
+    poll();
+    return () => { stopped = true; clearTimeout(timer); };
   }, [load]);
 
   const devices = (data && data.devices) || [];

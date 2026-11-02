@@ -55,8 +55,9 @@ def test_status_missing_unreadable_stopped_or_stale_reads_as_not_running(tmp_pat
     live_status.write(tmp_path, {DEVICE: {"online": True}}, now=2000.0)
     assert live_status.read(tmp_path, now=2000.0 - 3)["running"] is True
     assert live_status.read(tmp_path, now=2000.0 - 60)["running"] is False
-    (tmp_path / live_status.FILENAME).write_text('{"running": true, "updated_at": Infinity, "devices": {}}')
-    assert live_status.read(tmp_path)["running"] is False
+    for bad in ("Infinity", "NaN"):
+        (tmp_path / live_status.FILENAME).write_text('{"running": true, "updated_at": %s, "devices": {}}' % bad)
+        assert live_status.read(tmp_path) == {"running": False, "updated_at": None, "devices": {}}
     # An updated_at too large for a float is a malformed file, not an error for the route.
     (tmp_path / live_status.FILENAME).write_text('{"running": true, "updated_at": 1' + "0" * 400 + ', "devices": {}}')
     assert live_status.read(tmp_path) == {"running": False, "updated_at": None, "devices": {}}
