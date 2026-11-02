@@ -494,6 +494,7 @@ extern "C" void app_main(void) {
   profile.has_cancel_button = board.buttons.cancel >= 0 || touch;
   profile.has_scroll_buttons = (board.buttons.up >= 0 && board.buttons.down >= 0) || board.encoder.a >= 0;
   profile.wake_key = board.buttons.talk >= 0 || board.axp_power_key || board.pwr_key.enabled;
+  profile.talk_key = board.buttons.talk >= 0;
   profile.talk_label = board.talk_label;
   profile.cancel_label = board.cancel_label;
   if (touch && board.touch.enabled) {

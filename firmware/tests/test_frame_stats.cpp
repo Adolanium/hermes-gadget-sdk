@@ -270,6 +270,31 @@ TEST("frame stats: profile.frame_stats turns timing on from boot") {
   CHECK(p["frames"].as_int() >= 1);  // the boot screen
 }
 
+TEST("frame stats: the settings bench scrolls the settings list without opening the menu") {
+  FakeDevice dev;
+  hg::Hal hal = dev.hal();
+  hg::App app(hal, hg::DeviceProfile{});
+  app.begin();
+  for (int i = 0; i < 20; ++i) {
+    dev.clock_ms += 100;
+    app.tick();
+  }
+  const hg::Screen before = app.screen();
+  CHECK(app.console("perf bench settings").rfind("@ok bench settings: 120 frames", 0) == 0);
+  for (int i = 0; i < 130; ++i) {
+    dev.clock_ms += 10;
+    app.tick();
+    CHECK(app.screen() == before);  // while it runs too: the bench draws its own model, not the live one
+  }
+  const Value p = perf(app);
+  CHECK(!p.has("bench_running"));
+  // The list moves on every frame; a turnaround at either end may repeat one position.
+  CHECK(p["bench"]["settings"]["frames"].as_int() >= 118);
+  CHECK_EQ(p["bench"]["settings"]["bands"]["max"].as_int(), 1);  // only the list's band
+  CHECK(!app.settings_open());
+  CHECK(app.screen() == before);
+}
+
 TEST("frame stats: the bench draws the same fixed workloads, then gives the screen back") {
   FakeDevice dev;
   hg::Hal hal = dev.hal();

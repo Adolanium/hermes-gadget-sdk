@@ -4,15 +4,24 @@
 
 namespace hg {
 
-void TouchGestures::press(Button b) { app_.on_button(b, true); }
-void TouchGestures::release(Button b) { app_.on_button(b, false); }
+namespace {
+// Past this, a lift that is still Pending ends a hold rather than a tap. Generous next to
+// hold_ms, so a slow tap on the name still opens the list when touch_talk is off.
+constexpr uint32_t kTapMaxMs = 400;
+}  // namespace
+
+void TouchGestures::press(Button b) { app_.on_button(b, true, true); }
+void TouchGestures::release(Button b) { app_.on_button(b, false, true); }
 
 void TouchGestures::tick(uint32_t now_ms) {
   if (state_ == State::Settings && now_ms - t0_ >= 1000) {
     state_ = State::Ignored;
     app_.open_settings();
   }
-  if (state_ == State::Pending && static_cast<int32_t>(now_ms - t0_) >= static_cast<int32_t>(cfg_.hold_ms)) {
+  // With touch_talk off a still finger stays Pending where TALK would record: its lift is a tap
+  // that does nothing there, and it can still become a swipe down.
+  if (state_ == State::Pending && static_cast<int32_t>(now_ms - t0_) >= static_cast<int32_t>(cfg_.hold_ms) &&
+      app_.touch_presses_talk()) {
     state_ = State::Talk;
     press(Button::Talk);
   }
@@ -23,15 +32,20 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
     switch (state_) {
       case State::Pending:  // a quick tap
         if (from_clock_) break;  // Ready came back at touch-down; a tap does nothing else
+        // A long press that didn't become TALK (touch_talk off) isn't a tap: it opens nothing on lift.
+        if (!app_.touch_presses_talk() && static_cast<int32_t>(now_ms - t0_) >= static_cast<int32_t>(kTapMaxMs)) break;
         if (app_.show_reply_text()) break;  // the caption under the talking face gives way to the text
         if (on_name_) {  // a quick tap on the name opens the list, or does nothing while it can't
           app_.open_profile_picker();
           break;
         }
+        if (!app_.touch_presses_talk()) break;  // touch_talk off: only TALK records
         press(Button::Talk);
         release(Button::Talk);
         break;
       case State::Picker: app_.profile_tap(x0_, y0_); break;
+      case State::List: app_.settings_tap(x0_, y0_); break;
+      case State::ListDrag: app_.settings_lift(); break;
       case State::Talk: release(Button::Talk); break;
       case State::Swipe: release(Button::Cancel); break;
       default: break;
@@ -49,7 +63,9 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
     app_.close_notices_for_input();  // a low battery alert goes, and the touch acts on what is under it
     state_ = app_.profile_picker_open() ? State::Picker
               : !from_clock_ && app_.settings_title_hit(x, y) ? State::Settings
+              : app_.settings_list_live() ? State::List
               : State::Pending;
+    if (state_ == State::List) app_.settings_press(x, y);
     on_name_ = !from_clock_ && state_ == State::Pending && app_.profile_name_hit(x, y);
     x0_ = x;
     y0_ = y;
@@ -71,6 +87,13 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
         state_ = dy < 0 || std::abs(dx) >= std::abs(dy) ? State::Ignored : State::PickerDrag;
       }
       break;
+    case State::List:  // still a tap until the finger leaves the slop
+      if (std::abs(dx) > cfg_.slop_px || std::abs(dy) > cfg_.slop_px) {
+        state_ = State::ListDrag;
+        app_.settings_drag(x, y);
+      }
+      break;
+    case State::ListDrag: app_.settings_drag(x, y); break;
     case State::Settings:
       if (swiped_down) {
         state_ = State::Swipe;

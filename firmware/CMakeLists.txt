@@ -63,6 +63,9 @@ if(HG_BUILD_TESTS)
     set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
     set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
     set(TF_PSA_CRYPTO_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+    # The test's server runs on a second thread: PSA Crypto needs its locks (see the file).
+    set(TF_PSA_CRYPTO_USER_CONFIG_FILE "${CMAKE_CURRENT_SOURCE_DIR}/tests/tls_test_config.h" CACHE FILEPATH "" FORCE)
+    set(LINK_WITH_PTHREAD ON CACHE BOOL "" FORCE)
     FetchContent_Declare(mbedtls
       URL https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-4.1.0/mbedtls-4.1.0.tar.bz2
       URL_HASH SHA256=377a09cf8eb81b5fb2707045e5522d5489d3309fed5006c9874e60558fc81d10)
