@@ -145,22 +145,24 @@ struct ArcSweep {
 };
 
 // What a round panel's edge ring shows on one frame. Angles are degrees clockwise from
-// 12 o'clock. The renderer derives it from the model (ui.cpp, edge_ring).
+// 12 o'clock, the ticks' turn 1/64 degree. The renderer derives it from the model (ui.cpp,
+// edge_ring).
 struct EdgeRing {
   enum class Kind : uint8_t {
     None,   // no ring: the bands own the band's pixels in the UI square's corners
     Level,  // `colour` from 12 o'clock clockwise over `permille` thousandths of a turn, `dim` after
     Comet,  // a `colour` head at `head` with a tail that fades out over 70 degrees behind it
-    Ticks,  // the resting clock: 60 ticks and a `colour` dot at `second`
+    Ticks,  // the resting clock: 60 ticks and a `colour` dot at `second`, all turned by `turn64`
   };
   Kind kind = Kind::None;
   uint16_t colour = 0, dim = 0;
   int16_t permille = 0;
   uint16_t head = 0;
   uint8_t second = 0;
+  int16_t turn64 = 0;  // Ticks: clockwise, with the face's burn-in shift
   bool operator==(const EdgeRing& o) const {
     return kind == o.kind && colour == o.colour && dim == o.dim && permille == o.permille && head == o.head &&
-           second == o.second;
+           second == o.second && turn64 == o.turn64;
   }
   bool operator!=(const EdgeRing& o) const { return !(*this == o); }
 };
@@ -283,6 +285,7 @@ class Ui {
   // paint_ring paints it over rows; update_ring writes and sends only what changed), and
   // the whole-panel faces (draw_alarm, draw_clock).
   void set_ring(const EdgeRing& ring);
+  void turn_ticks(int32_t turn64);
   uint16_t ring_pixel(int dx, int dy) const;
   void paint_ring(int y0, int y1);
   void update_ring(int y0, int y1);
@@ -315,7 +318,7 @@ class Ui {
   // the band spans; what push() paints the ring with this frame, and what that needs per
   // pixel: the level's sweep, the comet's head (1/64 degree) and its colour and the
   // background as 8-bit channels, the dot's centre (1/16 px) and radius squared, and the 60
-  // ticks' directions (cos, sin times 4096).
+  // ticks' directions (cos, sin times 4096) at their turn (1/64 degree).
   struct BandRow {
     int16_t x0[2] = {0, 0}, x1[2] = {0, 0};
   };
@@ -328,6 +331,7 @@ class Ui {
   uint8_t ring_fg_[3] = {0, 0, 0}, ring_bg_[3] = {0, 0, 0};
   int32_t ring_dot_x16_ = 0, ring_dot_y16_ = 0, ring_dot_r2_ = 0;
   int16_t tick_cos_[60] = {}, tick_sin_[60] = {};
+  int32_t tick_turn64_ = 0;
   // The screen that owns the whole panel right now, and the hash of what it drew.
   // Leaving it repaints everything (draw_frame); each face repaints when the flag
   // is not itself, so Clock -> Alarm -> Clock in one minute still redraws.

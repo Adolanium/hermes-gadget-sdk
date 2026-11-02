@@ -107,6 +107,16 @@ constexpr int32_t kTail64 = 70 * 64;
 // Listening turns amber in the last sixth of the recording limit: its last 5 of 30 s.
 constexpr int16_t kLateListening = 834;
 
+// The resting clock's burn-in shift: each minute the face moves (dx, dy) px, each -4 to 4,
+// through 9 places in a 9-minute cycle (draw_clock). The ring's ticks and seconds dot turn
+// with it by kTickTurn64 per px of dx: half a degree, so up to 2 degrees either way and
+// mostly a degree from one minute to the next (edge_ring).
+struct BurnInShift {
+  int dx, dy;
+};
+BurnInShift burn_in_shift(int minute) { return {(minute * 7) % 9 - 4, (minute * 5) % 9 - 4}; }
+constexpr int32_t kTickTurn64 = 32;
+
 // atan(n / d) for 0 <= n <= d, d > 0, in 1/64 degree: (pi/4) t + 0.273 t (1 - t) radians
 // for t = n / d, within a quarter of a degree.
 int32_t atan64(int32_t n, int32_t d) {
@@ -133,9 +143,9 @@ void channels(uint16_t c, uint8_t out[3]) {
 
 // What a round panel's edge ring shows for this model; the first match wins. A recording or
 // an update takes the ring from a running timer, and the timer keeps it while Hermes thinks
-// or speaks. The alarm and the battery faces have none; the resting clock has its ticks.
-// Comets lap the ring once per 24 frames (2.4 s at the app's 10 frames a second), or 40
-// while Hermes speaks.
+// or speaks. The alarm and the battery faces have none; the resting clock has its ticks,
+// turned with the face's burn-in shift. Comets lap the ring once per 24 frames (2.4 s at the
+// app's 10 frames a second), or 40 while Hermes speaks.
 EdgeRing edge_ring(const UiModel& m) {
   EdgeRing r;
   const auto level = [&r](int permille, uint16_t colour, uint16_t dim) {
@@ -159,6 +169,7 @@ EdgeRing edge_ring(const UiModel& m) {
       r.kind = EdgeRing::Kind::Ticks;
       r.colour = kAccent;
       r.second = static_cast<uint8_t>(m.clock_second % 60);
+      r.turn64 = static_cast<int16_t>(burn_in_shift(m.clock_minute).dx * kTickTurn64);
       return r;
     case Screen::Listening:
       if (m.progress_permille >= 0) {
@@ -386,12 +397,7 @@ Ui::Ui(Display& display)
     runs(clock_rows_, [&](int d2) {
       return 4 * d2 >= (mid2 - reach2) * (mid2 - reach2) && 4 * d2 <= (mid2 + reach2) * (mid2 + reach2);
     });
-    // The resting clock's ticks: every 6 degrees, clockwise from 12 o'clock.
-    for (int k = 0; k < 60; ++k) {
-      const double theta = kTau * k / 60.0;
-      tick_cos_[k] = static_cast<int16_t>(std::lround(std::cos(theta) * kArcScale));
-      tick_sin_[k] = static_cast<int16_t>(std::lround(std::sin(theta) * kArcScale));
-    }
+    turn_ticks(0);  // the resting clock's ticks, until a minute turns them (set_ring)
   }
 }
 
@@ -507,7 +513,9 @@ void Ui::draw_frame(const UiModel& m) {
   if ((ring.kind == EdgeRing::Kind::None) != (ring_.kind == EdgeRing::Kind::None)) valid_ = false;
   if (ring != ring_ && display_.framebuffer_rows() > 0) valid_ = false;
   bool ring_moved = valid_ && ring != ring_;
-  // On the clock only the seconds dot moves from one second to the next: where it was.
+  // On the clock only the seconds dot moves from one second to the next: where it was. A new
+  // minute turns the ticks too, but then draw_clock repaints the whole panel, ring included
+  // (its hash keys on the minute), and the dot's rows hold nothing more to change.
   const bool dot_moved = ring_moved && ring_.kind == EdgeRing::Kind::Ticks && ring.kind == EdgeRing::Kind::Ticks;
   const int32_t dot_was = ring_dot_y16_;
   set_ring(ring);
@@ -1493,7 +1501,8 @@ void Ui::draw_bottom(Canvas& c, const UiModel& m) {
 
 // What this frame's ring needs per pixel, worked out once: the level's sweep, the comet's
 // head and colours, the seconds dot's centre on the band's middle radius and its radius,
-// 4s px: about twice the band's width, so it stands out from the ticks.
+// 4s px: about twice the band's width, so it stands out from the ticks. The dot turns with
+// the ticks, so it stays on the tick of its second.
 void Ui::set_ring(const EdgeRing& ring) {
   ring_ = ring;
   switch (ring.kind) {
@@ -1506,7 +1515,9 @@ void Ui::set_ring(const EdgeRing& ring) {
       channels(bg_, ring_bg_);
       break;
     case EdgeRing::Kind::Ticks: {
-      const double mid = (band_in_ + band_out_ + 1) / 2.0, theta = kTau * ring.second / 60.0;
+      if (ring.turn64 != tick_turn64_) turn_ticks(ring.turn64);  // a new minute's shift
+      const double mid = (band_in_ + band_out_ + 1) / 2.0;
+      const double theta = kTau * (ring.second * 6 * 64 + ring.turn64) / kTurn64;
       ring_dot_x16_ = static_cast<int32_t>(std::lround(mid * std::sin(theta) * 16));
       ring_dot_y16_ = static_cast<int32_t>(std::lround(-mid * std::cos(theta) * 16));
       const int32_t r16 = 64 * layout_.scale;
@@ -1515,6 +1526,16 @@ void Ui::set_ring(const EdgeRing& ring) {
     }
     case EdgeRing::Kind::None:
       break;
+  }
+}
+
+// The 60 ticks' directions: every 6 degrees clockwise from 12 o'clock, turned by turn64.
+void Ui::turn_ticks(int32_t turn64) {
+  tick_turn64_ = turn64;
+  for (int k = 0; k < 60; ++k) {
+    const double theta = kTau * (k * 6 * 64 + turn64) / kTurn64;
+    tick_cos_[k] = static_cast<int16_t>(std::lround(std::cos(theta) * kArcScale));
+    tick_sin_[k] = static_cast<int16_t>(std::lround(std::sin(theta) * kArcScale));
   }
 }
 
@@ -1546,7 +1567,7 @@ uint16_t Ui::ring_pixel(int dx, int dy) const {
       if (d2 <= band_in_ * band_in_ || d2 > band_out_ * band_out_) return bg_;  // the dot's reach: only the dot
       // The nearest tick, and the distance from its centre line (times kArcScale). The ticks
       // are the date's grey, so they show at the clock's dimmed brightness; the dot alone is amber.
-      const int k = static_cast<int>((ring_angle64(dx, dy) + 192) / 384 % 60);
+      const int k = static_cast<int>((ring_angle64(dx, dy) - ring_.turn64 + kTurn64 + 192) / 384 % 60);
       const int32_t d = std::abs(dx * tick_cos_[k] + dy * tick_sin_[k]);
       const int s = layout_.scale;
       if (k % 5 == 0) return d < (s + 1) * kArcScale ? kDim : bg_;  // the hours: 2s + 1 px, across the band
@@ -1861,8 +1882,8 @@ void Ui::draw_battery_face(const UiModel& m) {
 // the per-minute shift can move it. The face changes once a minute: the burn-in
 // shift keys the hash on the minute too.
 void Ui::draw_clock(const UiModel& m) {
-  // The ring's ticks go on with the clock: each push paints them, and a new second moves
-  // only the dot (draw_frame, update_ring).
+  // The ring's ticks go on with the clock: each push paints them, turned with this minute's
+  // shift (edge_ring), and a new second moves only the dot (draw_frame, update_ring).
   const uint32_t key = Hash().add(m.clock_time).add(m.clock_date).val(m.clock_minute).val(m.lang)
                            .add(m.face ? m.face->hash : std::string()).get();
   if (valid_ && full_face_ == FullFace::Clock && key == face_hash_) return;  // invalidate() repaints it too
@@ -1874,7 +1895,8 @@ void Ui::draw_clock(const UiModel& m) {
   const int W = panel_.width, H = panel_.height;
   const int cx = W / 2, cy = H / 2, R = std::min(W, H) / 2;
   // The burn-in shift moves the whole face a few pixels each minute.
-  const int dx = (m.clock_minute * 7) % 9 - 4, dy = (m.clock_minute * 5) % 9 - 4;
+  const BurnInShift shift = burn_in_shift(m.clock_minute);
+  const int dx = shift.dx, dy = shift.dy;
   const int gap = 3 * s;
   const int margin = 4;
   // The profile's face where it has one, like the Ready screen and the alarm:
