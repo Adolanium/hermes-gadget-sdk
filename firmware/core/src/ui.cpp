@@ -1092,7 +1092,7 @@ Ui::ProfileGrid Ui::profile_grid(const UiModel& m) const {
     {  // names keep the screen's text size: a grid that needs smaller letters does not fit
       const int ls = s;
       const int icon = std::min(cw - 4 * s, ch - 2 * Canvas::line_height(ls) - 3 * s);
-      const bool ok = (cw >= touch_px_ && ch >= touch_px_ && icon >= min_icon && cols_for(cw - 2 * s, ls) >= 5) || k == 1;
+      const bool ok = (cw >= touch_px_ && ch >= touch_px_ && icon >= min_icon && cols_for(cw - 4 * s, ls) >= 5) || k == 1;
       if (!ok) continue;
       g.cols = cols, g.rows = rows, g.cw = cw, g.ch = ch, g.label_scale = ls;
       g.icon = std::max(8, icon);
@@ -1139,7 +1139,8 @@ void Ui::draw_profiles(Canvas& c, const UiModel& m) {
     const int item = g.first + i;
     const DashRow& row = m.dash[static_cast<size_t>(item)];
     const bool current = row.tone == DashRow::Tone::Waiting;
-    const std::vector<std::string> lines = name_lines(row.label, cols_for(r.w - 2 * s, ls));
+    // A margin of two dots each side, so the names of cells side by side never touch.
+    const std::vector<std::string> lines = name_lines(row.label, cols_for(r.w - 4 * s, ls));
     const int block = g.icon + 2 * s + static_cast<int>(lines.size()) * lh;
     const int ix = r.x + (r.w - g.icon) / 2, iy = r.y + std::max(s, (r.h - block) / 2);
     const int cx = ix + g.icon / 2, cy = iy + g.icon / 2;
