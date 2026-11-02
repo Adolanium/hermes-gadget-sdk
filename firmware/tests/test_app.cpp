@@ -7335,6 +7335,20 @@ TEST("profile thumbnails: a malformed or interrupted one is ignored, and a colou
   CHECK_EQ(r.app.model().face_row, 0);  // the current profile shows its own face
 }
 
+TEST("profile thumbnails: with room only at 32 px, the last fallback is 32 px") {
+  hg::DeviceProfile p = thumb_profile();  // the colour face fits, and thumbnails only at 32 px
+  p.colour_face_alloc = [](size_t n) -> void* {
+    static int calls = 0;
+    const size_t at32 = hg::App::kMaxProfiles * 32 * 32 * 2;
+    return calls++ == 0 || n <= at32 ? std::malloc(n) : nullptr;
+  };
+  Rig r(p);
+  r.fake.make_panel(410, 486, false);
+  welcome_with_roster(r, 8);
+  CHECK(colour_px(r) > 0);
+  CHECK_EQ(thumb_px(r), hg::App::kMinThumbPx);  // 128, 96, 72, 54, 40, then 32: before, 40 was the last try
+}
+
 TEST("profile thumbnails: none without room, without colour faces or without a touchscreen") {
   Rig plain(Rig::touch_profile());  // no PSRAM to spare
   welcome_with_roster(plain, 8);

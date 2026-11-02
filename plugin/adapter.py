@@ -708,7 +708,14 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 if refusal is None:  # a pairing code can let it in again
                     await self.on_ready(session)
         await self._follow_face(session)
-        session.update_thumbs()  # a profile's new face file or avatar reaches the grid at the next checks
+        if session.thumb_px and session.roster_ids and session.paired:
+            if served is None:  # one look at the served profiles per check, shared by every device
+                served = {p["id"] for p in await asyncio.to_thread(self.profiles)}
+            # A profile's new face file or avatar reaches the grid at the next checks; one parked or taken
+            # off the offer since the welcome is left alone. A list Hermes could not give filters nothing.
+            session.update_thumbs(served or None)
+        else:
+            session.update_thumbs()
         return served
 
     async def _watch_pairing(self) -> None:

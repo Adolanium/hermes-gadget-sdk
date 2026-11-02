@@ -303,6 +303,7 @@ class DeviceSession:
         self._thumb_task: asyncio.Task | None = None  # update_thumbs(): one at a time
         # profile -> the hash of a thumbnail that could not be made: not tried again until the hash changes
         self._thumb_failed: dict[str, str] = {}
+        self._thumbs_offered: set[str] | None = None  # the served profiles at the last pairing check
         self._thumbs_dirty = False
         self._ota_inbox: asyncio.Queue | None = None  # the device's ota.* replies, while an update runs
         self._dashboard_sent: dict | None = None  # the last dashboard this connection delivered
@@ -535,12 +536,16 @@ class DeviceSession:
                 "face", profile=state[0], hash=digest, bits=base64.b64encode(data).decode() if data else None))
         self.face_hash = digest
 
-    def update_thumbs(self) -> asyncio.Task | None:
+    def update_thumbs(self, offered: "set[str] | None" = None) -> asyncio.Task | None:
         """Bring the device's profile thumbnails up to date: each offered profile's, sent only where its
         hash differs from the one the device holds, and a clear where a profile has none any more. One
-        pass at a time; a call during one makes it go over the profiles again."""
+        pass at a time; a call during one makes it go over the profiles again. ``offered``, when given,
+        is the profiles the gateway serves now: a welcome's profile that has since been parked or taken
+        off the offer is skipped until the next welcome drops it."""
         if not self.thumb_px or not self.paired or self.closed:
             return None
+        if offered is not None:
+            self._thumbs_offered = offered
         self._thumbs_dirty = True
         if self._thumb_task is None or self._thumb_task.done():
             self._thumb_task = self.spawn(self._send_thumbs())
@@ -553,6 +558,8 @@ class DeviceSession:
             for profile in list(self.roster_ids):
                 if self._thumbs_dirty or not self.current() or not self.paired:
                     break
+                if self._thumbs_offered is not None and profile not in self._thumbs_offered:
+                    continue  # parked or no longer offered since the welcome
                 digest = None
                 try:
                     thumb = await self.hub.delegate.thumb(self, profile)

@@ -392,7 +392,9 @@ void App::begin() {
   // Thumbnails for the profile grid, with colour faces: the largest icon the grid draws, at most 128 px,
   // else smaller ones while there is no room (1 MB for 32 at 128 px).
   if (ui_ && colour_px_ && profile_.touch_screen && !thumbs_) {
-    for (int px = ui_->profile_thumb_px(kMaxThumbPx); px >= kMinThumbPx && !thumbs_; px = px * 3 / 4) {
+    // Each try is three quarters of the last; the last try is kMinThumbPx itself, never skipped.
+    for (int px = ui_->profile_thumb_px(kMaxThumbPx); px >= kMinThumbPx && !thumbs_;
+         px = px == kMinThumbPx ? 0 : std::max(kMinThumbPx, px * 3 / 4)) {
       thumbs_.reset(static_cast<uint16_t*>(
           profile_.colour_face_alloc(kMaxProfiles * static_cast<size_t>(px) * static_cast<size_t>(px) * 2)));
       thumb_px_ = thumbs_ ? px : 0;

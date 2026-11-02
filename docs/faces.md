@@ -215,7 +215,8 @@ profile's face file and avatars with what it last read, and reads them again onc
 changed and then stayed the same on two checks in a row. Only the thumbnail that changed is sent;
 the device keeps the others, and keeps them all through a reconnect, so nothing unchanged is sent
 again. Removing a profile's face file and avatar brings its initial back. A picture that cannot be read keeps what
-the device shows, and is tried again only once the files change.
+the device shows, and is tried again only once the files change. A profile parked or taken off the offer
+since the device connected is not looked at again.
 
 ## Placing the eye and the mouth
 
