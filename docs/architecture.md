@@ -92,6 +92,7 @@ On boards with PSRAM (`DeviceProfile::recording_alloc`), a recording is kept who
 - **Back online** (welcome, paired), the whole recording goes again on a new stream: `audio.start` with the same `id` plus `resent` and `age_ms`, every frame as fast as the link takes them, then `audio.end`. A connection back before the recording ends sends what was held and streams on.
 - **Ended while offline,** the device shows Thinking with "Reconnecting to send..." and waits up to 45 s (`App::kRecordingWaitMs`, about three connection attempts). Failed attempts don't extend the wait. After that it drops the recording and says "Couldn't send the recording".
 - **CANCEL** discards a held recording, while recording or while waiting. A device that comes back unpaired drops it. The buffer is RAM only, so a restart loses it.
+- **Until all of it has gone,** messages for an earlier turn (a reply the user talked over) don't end the new one, and starting a new session drops it with `audio.cancel`.
 - **A connection lost after `audio.end` went** ends the turn as before. The protocol has no acknowledgement, so sending it again could run the turn twice.
 
 A board without PSRAM keeps the old behaviour: audio streams straight to the link, frames the link refuses are counted and dropped, and a lost connection ends the recording. Raising the utterance limit is a change to `App::kMaxUtteranceMs` alone: the buffer is sized from it.

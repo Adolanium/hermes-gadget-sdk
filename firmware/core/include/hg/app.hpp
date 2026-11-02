@@ -395,6 +395,10 @@ class App {
   void pump_recording();
   void resend_recording();
   void discard_recording();
+  void cancel_upload(std::string_view why);
+  // The user's latest recording hasn't all reached Hermes: recording, or ended and uploading.
+  // Anything Hermes sends for a turn now belongs to an earlier one and must not end this one.
+  bool recording_unsent() const { return mode_ == Mode::Listening || (rec_on_ && mode_ == Mode::Thinking); }
   bool recording_held() const { return rec_on_ && !rec_live_; }
   void stop_playback();
   void cancel_turn();

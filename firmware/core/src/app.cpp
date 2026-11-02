@@ -958,7 +958,7 @@ void App::h_turn_start(const json::Value& m) {
   turn_started_ = true;
   reply_final_ = false;
   last_turn_rx_ = now();
-  if (mode_ != Mode::Listening) {
+  if (!recording_unsent()) {
     if (mode_ != Mode::Thinking) {
       reply_.clear();
       scroll_ = -1;
@@ -978,7 +978,8 @@ void App::h_turn_end(const json::Value& m) {
     notice_ = tr(i18n::Msg::RequestFailed);
     notice_until_ = now() + 8000;
   }
-  if (mode_ == Mode::Thinking) {
+  // A recording still uploading is the next turn: the one that ended is an earlier one.
+  if (mode_ == Mode::Thinking && !rec_on_) {
     mode_ = reply_.empty() ? Mode::Idle : Mode::Responding;
     mode_since_ = now();
   }
@@ -999,7 +1000,7 @@ void App::h_transcript(const json::Value& m) {
 void App::h_reply_delta(const json::Value& m) {
   wake_display();
   if (face_down_) reply_while_face_down_ = true;  // shown from the top on the turn-over
-  if (mode_ == Mode::Listening) return;
+  if (recording_unsent()) return;
   reply_ = m["text"].as_string();
   reply_unread_ = true;
   scroll_ = -1;
@@ -1019,7 +1020,7 @@ void App::h_reply(const json::Value& m) {
     status_ = text;
     return;
   }
-  if (mode_ == Mode::Listening) return;
+  if (recording_unsent()) return;
   reply_ = text;
   reply_final_ = true;
   reply_unread_ = true;
@@ -1036,7 +1037,7 @@ void App::h_audio_start(const json::Value& m) {
   close_setup_screens();
   wake_display();
   if (settings_open()) close_settings();
-  if (!hal_.speaker || mode_ == Mode::Listening) return;
+  if (!hal_.speaker || recording_unsent()) return;
   uint32_t rate = static_cast<uint32_t>(m["rate"].as_int(profile_.speaker_rate));
   const std::string_view format = m["format"].str_or("pcm16");
   const bool decoded = hal_.speaker_decoder && format == hal_.speaker_decoder->format();
@@ -1673,6 +1674,16 @@ void App::resend_recording() {
   pump_recording();
 }
 
+// A recording not all sent: the hub drops what it has of it, and the device the rest.
+void App::cancel_upload(std::string_view why) {
+  if (rec_on_ && rec_live_) {
+    json::Value c = proto::message("audio.cancel");
+    c.set("id", request_id_).set("stream", mic_stream_).set("reason", why);
+    send(c);
+  }
+  discard_recording();
+}
+
 void App::discard_recording() {
   rec_on_ = rec_live_ = rec_done_ = rec_deadline_ = false;
   rec_.clear();
@@ -1684,6 +1695,8 @@ void App::start_new_session() {
     return;
   }
   if (mode_ == Mode::Listening) cancel_listening("new session");
+  // A finished recording still uploading belongs to the old session: it must not follow session.new.
+  if (rec_on_) cancel_upload("new session");
   stop_playback();
   dismiss_overlay();
   clear_prompt();
@@ -1703,12 +1716,7 @@ void App::cancel_turn() {
   stop_playback();
   if (rec_on_) {
     // Not all of the recording went yet, so Hermes has no turn to cancel: drop the upload.
-    if (rec_live_) {
-      json::Value c = proto::message("audio.cancel");
-      c.set("id", request_id_).set("stream", mic_stream_).set("reason", "cancelled");
-      send(c);
-    }
-    discard_recording();
+    cancel_upload("cancelled");
   } else {
     send(proto::message("cancel"));
   }

@@ -8304,3 +8304,63 @@ TEST("recording buffer: set aside only when about 1 MB of PSRAM stays free after
   CHECK(b.app.in_turn());
   CHECK(b.fake.mic_on);
 }
+
+TEST("recording buffer: an earlier turn's reply arriving during the upload leaves the new recording alone") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  const int stream = static_cast<int>((*r.fake.last("audio.start"))["stream"].as_int());
+  sp.talk(r, 3);
+  r.fake.refuse_binary = true;  // a slow link: the end of the recording waits to go
+  sp.talk(r, 5);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  // Hermes, not having the new recording yet, finishes the turn the user talked over.
+  r.server(R"({"type":"turn.start","turn":"old"})");
+  r.server(R"({"type":"reply.delta","turn":"old","text":"The weather is"})");
+  r.server(R"({"type":"reply","turn":"old","text":"The weather is sunny."})");
+  r.server(R"({"type":"audio.start","stream":9,"rate":16000,"format":"pcm16"})");
+  r.server(R"({"type":"turn.end","turn":"old","outcome":"success"})");
+  r.advance(100);
+  CHECK(r.app.in_turn());
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  CHECK(r.fake.last("audio.end") == nullptr);
+  r.fake.refuse_binary = false;
+  r.advance(50);
+  bool in_order = false;
+  CHECK(uploaded(r, stream, 0, &in_order) == sp.all);  // every sample still goes
+  CHECK(in_order);
+  CHECK(r.fake.last("audio.end") != nullptr);
+  // The new turn then goes as usual.
+  r.server(R"({"type":"turn.start","turn":"new"})");
+  r.server(R"({"type":"reply","turn":"new","text":"Done."})");
+  r.server(R"({"type":"turn.end","turn":"new","outcome":"success"})");
+  r.advance(200);
+  CHECK_EQ(r.app.model().body, std::string("Done."));
+}
+
+TEST("recording buffer: a new session drops a recording still uploading") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  const int stream = static_cast<int>((*r.fake.last("audio.start"))["stream"].as_int());
+  sp.talk(r, 3);
+  r.fake.refuse_binary = true;
+  sp.talk(r, 5);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  r.app.on_button(hg::Button::Cancel, true);  // held for a new session
+  r.advance(2200);
+  r.app.on_button(hg::Button::Cancel, false);
+  CHECK(r.fake.last("session.new") != nullptr);
+  const Value* cancel = r.fake.last("audio.cancel");
+  CHECK(cancel && (*cancel)["stream"].as_int() == stream);
+  CHECK(cancel && (*cancel)["reason"].as_string() == "new session");
+  const size_t before = r.fake.sent_binary.size();
+  r.fake.refuse_binary = false;
+  r.advance(500);
+  CHECK_EQ(r.fake.sent_binary.size(), before);  // nothing of it follows session.new
+  CHECK(r.fake.last("audio.end") == nullptr);
+}
