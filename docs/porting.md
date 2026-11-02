@@ -93,6 +93,10 @@ CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 
 The last line puts the Wi-Fi and lwIP buffers in PSRAM, so the larger windows don't take internal RAM, which the audio path and the radio need. When a module turns out to have no PSRAM (most profiles set `CONFIG_SPIRAM_IGNORE_NOTFOUND`), they fall back to internal RAM. A board without PSRAM keeps the defaults.
 
+## Recording buffer
+
+A board with PSRAM sets `DeviceProfile::recording_alloc` to a PSRAM allocator (`main.cpp` does when `esp_psram_is_initialized()`). The app then keeps each recording whole while it uploads, so a slow link delays audio instead of dropping it and a connection lost mid-recording loses nothing ([the recording buffer](architecture.md#the-recording-buffer)). It takes 1 MB at 16 kHz or 1.5 MB at 24 kHz at start-up. Have it return null unless about 1 MB of PSRAM stays free afterwards (`RecordingBuffer::leaves_headroom`), as `main.cpp` does: faces, WebSocket send copies and event payloads prefer PSRAM and would otherwise fall back to internal RAM. Leave it unset without PSRAM.
+
 ## Battery and power
 
 Set `Hal::power` only after the board's power driver starts successfully. `Power::read()` returns current readings or `nullopt` on a failed read. Each measurement is optional; omit a percentage when the hardware has no fuel gauge. `power_off()` requests a local shutdown and reports whether the request succeeded. The settings menu asks for a second selection before calling it.

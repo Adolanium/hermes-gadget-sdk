@@ -7692,18 +7692,367 @@ TEST("settings list: Double press home and Talk from dark screen are toggle rows
   CHECK(row("Double press home")->level == 0);
 }
 
-// --- Diagnostics for lost connections -----------------------------------------
+// --- The recording buffer: a lost connection doesn't lose the recording ------
 
 namespace {
-// Waits for the next connection attempt (the first retry is 1 s after a loss) and lets it through.
-void reconnect(Rig& r) {
+
+hg::DeviceProfile buffered_profile() {
+  hg::DeviceProfile p = Rig::profile("ws://hermes.local:8765/gadget");
+  p.recording_alloc = std::malloc;
+  return p;
+}
+
+// Distinct samples, so the order of what reaches Hermes can be checked: sample i is i.
+struct Speech {
+  int16_t next = 0;
+  std::vector<int16_t> all;
+  void say(Rig& r, size_t samples) {
+    std::vector<int16_t> pcm(samples);
+    for (auto& s : pcm) s = next++;
+    all.insert(all.end(), pcm.begin(), pcm.end());
+    r.app.on_mic_samples(pcm.data(), pcm.size());
+  }
+  // 100 ms of speech, 100 ms of clock, `n` times.
+  void talk(Rig& r, int n) {
+    for (int i = 0; i < n; ++i) {
+      say(r, 1600);
+      r.advance(100);
+    }
+  }
+};
+
+// The audio frames sent for `stream` from sent_binary[from] on, in order: their samples,
+// and whether their sequence numbers ran 0, 1, 2... without a gap.
+std::vector<int16_t> uploaded(const Rig& r, int stream, size_t from, bool* in_order = nullptr) {
+  std::vector<int16_t> pcm;
+  uint16_t want = 0;
+  bool ok = true;
+  for (size_t i = from; i < r.fake.sent_binary.size(); ++i) {
+    const auto& f = r.fake.sent_binary[i];
+    hg::proto::BinaryFrame b;
+    if (!hg::proto::parse_binary(f.data(), f.size(), b) || b.channel != hg::proto::Channel::Audio || b.stream != stream)
+      continue;
+    ok &= b.seq == want++;
+    const size_t n = (f.size() - hg::proto::kBinaryHeader) / 2;
+    const auto* s = reinterpret_cast<const int16_t*>(f.data() + hg::proto::kBinaryHeader);
+    pcm.insert(pcm.end(), s, s + n);
+  }
+  if (in_order) *in_order = ok;
+  return pcm;
+}
+
+// Waits for the next connection attempt (the first retry is 1 s after a loss) and lets it
+// through; `paired` as the welcome says.
+void reconnect(Rig& r, bool paired = true) {
   const int before = r.fake.connects;
   for (int i = 0; i < 400 && r.fake.connects == before; ++i) r.advance(100);
   CHECK_EQ(r.fake.connects, before + 1);
   r.app.on_transport_open();
   r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":false})");
-  r.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":true})");
+  r.server(std::string(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":)") +
+           (paired ? "true" : "false") + "}");
 }
+
+size_t count_type(const Rig& r, const std::string& type) {
+  return static_cast<size_t>(std::count_if(r.fake.sent.begin(), r.fake.sent.end(),
+                                           [&](const Value& v) { return v["type"].as_string() == type; }));
+}
+
+}  // namespace
+
+TEST("recording buffer: sized for the utterance limit, and keeps what fits") {
+  CHECK_EQ(hg::RecordingBuffer::bytes_for(30000, 16000), size_t(31 * 16000 * 2));
+  CHECK_EQ(hg::RecordingBuffer::bytes_for(60000, 16000), size_t(61 * 16000 * 2));  // a 60 s limit: a constant
+  hg::RecordingBuffer b;
+  CHECK(!b.ready());
+  CHECK(!b.reserve([](size_t) -> void* { return nullptr; }, 100));  // no room: off
+  CHECK(!b.ready());
+  CHECK(b.reserve(std::malloc, 10));
+  const int16_t s[] = {1, 2, 3, 4, 5, 6};
+  CHECK_EQ(b.append(s, 6), size_t(5));  // 10 bytes: five samples
+  CHECK_EQ(b.size(), size_t(10));
+  b.advance(4);
+  CHECK_EQ(b.unsent(), size_t(6));
+  CHECK_EQ(reinterpret_cast<const int16_t*>(b.next())[0], int16_t(3));
+  b.rewind();
+  CHECK_EQ(b.unsent(), size_t(10));
+  b.clear();
+  CHECK_EQ(b.size(), size_t(0));
+}
+
+TEST("recording buffer: online, the recording streams in 40 ms frames as before") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  const Value* start = r.fake.last("audio.start");
+  CHECK(start && (*start)["resent"].is_null());
+  const int stream = start ? static_cast<int>((*start)["stream"].as_int()) : -1;
+  sp.talk(r, 10);
+  CHECK_EQ(r.fake.sent_binary.size(), size_t(25));  // 1 s: 25 frames of 640 samples, sent as they fill
+  sp.say(r, 100);                                   // a part frame waits for the end
+  CHECK_EQ(r.fake.sent_binary.size(), size_t(25));
+  r.app.on_button(hg::Button::Talk, false);
+  bool in_order = false;
+  CHECK(uploaded(r, stream, 0, &in_order) == sp.all);
+  CHECK(in_order);
+  CHECK(r.fake.last("audio.end") != nullptr);
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+}
+
+TEST("recording buffer: at 24 kHz the buffered upload goes in 960-sample (40 ms) frames too") {
+  hg::DeviceProfile p = buffered_profile();
+  p.mic_rate = 24000;
+  Rig r(p);
+  r.bring_online(true);
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(320, 7);  // the codec boards' 13 ms deliveries
+  for (int i = 0; i < 31; ++i) {
+    r.app.on_mic_samples(pcm.data(), pcm.size());
+    r.advance(10);
+  }
+  CHECK_EQ(r.fake.sent_binary.size(), size_t(10));
+  for (const auto& f : r.fake.sent_binary) CHECK_EQ(f.size(), hg::proto::kBinaryHeader + 960 * 2);
+  r.advance(400);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK_EQ(r.fake.sent_binary.size(), size_t(11));
+  CHECK_EQ(r.fake.sent_binary.back().size(), hg::proto::kBinaryHeader + 320 * 2);
+}
+
+TEST("recording buffer: a slow link delays frames instead of dropping them, and audio.end waits") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  const int stream = static_cast<int>((*r.fake.last("audio.start"))["stream"].as_int());
+  sp.talk(r, 3);
+  r.fake.refuse_binary = true;  // the send queue is full
+  sp.talk(r, 5);
+  r.fake.logs.clear();
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.last("audio.end") == nullptr);  // not before the audio it ends
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  r.fake.refuse_binary = false;
+  r.advance(20);
+  bool in_order = false;
+  CHECK(uploaded(r, stream, 0, &in_order) == sp.all);
+  CHECK(in_order);
+  CHECK(r.fake.last("audio.end") != nullptr);
+  bool none_lost = false;
+  for (const auto& l : r.fake.logs) none_lost |= l.find(" 0 frames lost") != std::string::npos;
+  CHECK(none_lost);
+}
+
+TEST("recording buffer: a connection lost mid-recording keeps recording, and all of it goes after reconnecting") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  const Value* first = r.fake.last("audio.start");
+  const std::string id = first ? (*first)["id"].as_string() : "";
+  const int old_stream = first ? static_cast<int>((*first)["stream"].as_int()) : -1;
+  sp.talk(r, 5);
+  r.app.on_transport_closed("disconnected");
+  CHECK(r.app.in_turn());
+  CHECK(r.fake.mic_on);
+  CHECK(r.app.screen() == hg::Screen::Listening);  // not the connecting screen
+  CHECK_EQ(r.app.model().detail, std::string("Offline, still recording"));
+  sp.talk(r, 5);  // the connection is still down
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  CHECK_EQ(r.app.model().detail, std::string("Reconnecting to send..."));
+  CHECK(r.fake.last("audio.end") == nullptr);
+
+  const size_t sent_before = r.fake.sent_binary.size();
+  reconnect(r);
+  r.advance(20);
+  const Value* again = r.fake.last("audio.start");
+  CHECK(again && again != first);
+  if (!again) return;
+  CHECK_EQ((*again)["id"].as_string(), id);  // the same request
+  const int stream = static_cast<int>((*again)["stream"].as_int());
+  CHECK(stream != old_stream);  // on a new stream
+  CHECK_EQ((*again)["resent"].as_int(), int64_t(1));
+  CHECK((*again)["age_ms"].as_int() >= 1000);
+  bool in_order = false;
+  CHECK(uploaded(r, stream, sent_before, &in_order) == sp.all);  // every sample, from the first
+  CHECK(in_order);
+  const Value* end = r.fake.last("audio.end");
+  CHECK(end && (*end)["stream"].as_int() == stream);
+  CHECK(end && (*end)["duration_ms"].as_int() >= 1000);
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  CHECK_EQ(r.app.model().detail, std::string("Sending..."));
+  // And the turn goes on as usual.
+  r.server(R"({"type":"turn.start","turn":"a1"})");
+  r.server(R"({"type":"reply","turn":"a1","text":"Got it."})");
+  r.server(R"({"type":"turn.end","turn":"a1","outcome":"success"})");
+  r.advance(200);
+  CHECK(!r.app.in_turn());
+}
+
+TEST("recording buffer: reconnecting during the recording sends what was held, then streams on") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 3);
+  r.app.on_transport_closed("disconnected");
+  sp.talk(r, 3);
+  reconnect(r);  // still talking
+  sp.talk(r, 4);
+  CHECK(r.app.screen() == hg::Screen::Listening);
+  CHECK(r.app.model().detail != std::string("Offline, still recording"));
+  const Value* again = r.fake.last("audio.start");
+  const int stream = again ? static_cast<int>((*again)["stream"].as_int()) : -1;
+  r.app.on_button(hg::Button::Talk, false);
+  bool in_order = false;
+  CHECK(uploaded(r, stream, 0, &in_order) == sp.all);
+  CHECK(in_order);
+  CHECK_EQ(count_type(r, "audio.end"), size_t(1));
+}
+
+TEST("recording buffer: a finished recording waits 45 s for the connection, then is dropped") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 5);
+  r.app.on_transport_closed("disconnected");
+  r.app.on_button(hg::Button::Talk, false);
+  // Every attempt fails (no open): each connect times out after 10 s, without extending the wait.
+  r.advance(hg::App::kRecordingWaitMs - 1000);
+  CHECK(r.fake.connects >= 3);
+  CHECK(r.app.in_turn());
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  r.advance(1100);
+  CHECK(!r.app.in_turn());
+  CHECK_EQ(r.app.model().detail, std::string("Couldn't send the recording"));
+  // Back online later: nothing is sent.
+  r.advance(20000);
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":false})");
+  r.server(R"({"type":"welcome","session":"s3","heartbeat_s":20,"paired":true})");
+  r.advance(100);
+  CHECK_EQ(count_type(r, "audio.start"), size_t(1));
+  CHECK(r.fake.last("audio.end") == nullptr);
+}
+
+TEST("recording buffer: cancel discards a held recording, while recording or waiting") {
+  {
+    Rig r(buffered_profile());
+    r.bring_online(true);
+    Speech sp;
+    r.app.on_button(hg::Button::Talk, true);
+    sp.talk(r, 5);
+    r.app.on_transport_closed("disconnected");
+    r.app.on_button(hg::Button::Cancel, true);
+    r.app.on_button(hg::Button::Cancel, false);
+    CHECK(!r.app.in_turn());
+    CHECK(!r.fake.mic_on);
+    reconnect(r);
+    r.advance(100);
+    CHECK_EQ(count_type(r, "audio.start"), size_t(1));
+  }
+  {
+    Rig r(buffered_profile());
+    r.bring_online(true);
+    Speech sp;
+    r.app.on_button(hg::Button::Talk, true);
+    sp.talk(r, 5);
+    r.app.on_transport_closed("disconnected");
+    r.app.on_button(hg::Button::Talk, false);
+    r.app.on_button(hg::Button::Cancel, true);
+    r.app.on_button(hg::Button::Cancel, false);
+    CHECK(!r.app.in_turn());
+    reconnect(r);
+    r.advance(100);
+    CHECK_EQ(count_type(r, "audio.start"), size_t(1));
+    CHECK(r.fake.last("audio.end") == nullptr);
+    CHECK(r.fake.last("cancel") == nullptr);  // Hermes had no turn to cancel
+  }
+}
+
+TEST("recording buffer: tap mode ends a held recording with a tap, and the limit still ends it") {
+  hg::DeviceProfile p = buffered_profile();
+  Rig r(p);
+  r.bring_online(true);
+  r.app.console("set talk_mode tap");
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.screen() == hg::Screen::Listening);
+  sp.talk(r, 3);
+  r.app.on_transport_closed("disconnected");
+  sp.talk(r, 3);
+  r.app.on_button(hg::Button::Talk, true);  // the tap that ends it, though not connected
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  CHECK_EQ(r.app.model().detail, std::string("Reconnecting to send..."));
+
+  Rig limit(buffered_profile());
+  limit.bring_online(true);
+  Speech all;
+  limit.app.on_button(hg::Button::Talk, true);
+  limit.app.on_transport_closed("disconnected");
+  all.talk(limit, hg::App::kMaxUtteranceMs / 100 + 2);  // 30 s and a bit, offline throughout
+  CHECK(!limit.fake.mic_on);
+  CHECK(limit.app.screen() == hg::Screen::Thinking);
+  reconnect(limit);
+  limit.advance(1000);  // the link takes the 30 s over a few ticks
+  const Value* again = limit.fake.last("audio.start");
+  const int stream = again ? static_cast<int>((*again)["stream"].as_int()) : -1;
+  const auto got = uploaded(limit, stream, 0);
+  CHECK(got.size() >= size_t(hg::App::kMaxUtteranceMs) * 16);  // all 30 s, nothing dropped
+  CHECK(std::equal(got.begin(), got.end(), all.all.begin()));
+  CHECK(limit.fake.last("audio.end") != nullptr);
+}
+
+TEST("recording buffer: a device unpaired on reconnect drops the held recording") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 5);
+  r.app.on_transport_closed("disconnected");
+  r.app.on_button(hg::Button::Talk, false);
+  reconnect(r, false);
+  r.advance(100);
+  CHECK(!r.app.in_turn());
+  CHECK_EQ(count_type(r, "audio.start"), size_t(1));
+  CHECK(r.app.screen() == hg::Screen::Pairing);
+}
+
+TEST("recording buffer: a connection lost after audio.end went ends the turn, as before") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 5);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.last("audio.end") != nullptr);
+  r.app.on_transport_closed("disconnected");
+  CHECK(!r.app.in_turn());
+  reconnect(r);
+  r.advance(100);
+  CHECK_EQ(count_type(r, "audio.start"), size_t(1));  // Hermes has it: no second copy
+}
+
+TEST("recording buffer: a board without one ends the recording on a lost connection, as before") {
+  Rig r;  // no recording_alloc
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 5);
+  r.app.on_transport_closed("disconnected");
+  CHECK(!r.app.in_turn());
+  CHECK(!r.fake.mic_on);
+  CHECK(r.app.screen() == hg::Screen::Connecting);
+}
+
+// --- Diagnostics for lost connections -----------------------------------------
+
+namespace {
 Value diag_of(Rig& r) {
   Value v;
   const std::string out = r.app.console("diag");
@@ -7830,4 +8179,240 @@ TEST("diag: the last recording's length and lost frames") {
   const Value v = diag_of(r);
   CHECK_EQ(v["recordings"]["last"]["frames_lost"].as_int(), int64_t(3));
   CHECK(v["recordings"]["last"]["ms"].as_int() >= 400);
+}
+
+TEST("recording buffer: a turn that ends some other way takes its unsent recording with it") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 5);
+  r.fake.refuse_binary = true;  // the link never takes the rest
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.in_turn());
+  for (int i = 0; i < 10; ++i) {  // past the 180 s Thinking gives Hermes, the server pinging meanwhile
+    r.advance(18100);
+    r.server(R"({"type":"ping","ts":1})");
+  }
+  CHECK(!r.app.in_turn());
+  r.fake.refuse_binary = false;
+  const size_t before = r.fake.sent_binary.size();
+  r.advance(1000);
+  CHECK_EQ(r.fake.sent_binary.size(), before);  // nothing more goes
+  CHECK(r.fake.last("audio.end") == nullptr);
+  const Value* cancel = r.fake.last("audio.cancel");  // and the hub drops what it has
+  CHECK(cancel && (*cancel)["reason"].as_string() == "timeout");
+}
+
+TEST("diag: a buffered recording logs its length, frames lost and the link's backlog, and diag keeps the last") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 2);
+  r.fake.refuse_binary = true;  // the link stalls for 300 ms of audio
+  sp.say(r, 1600);
+  sp.say(r, 1600);
+  sp.say(r, 1600);
+  r.fake.refuse_binary = false;
+  sp.talk(r, 2);
+  r.fake.logs.clear();
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(logged(r, " 0 frames lost (past the buffer), link backlog peaked at "));
+  Value v = diag_of(r);
+  CHECK(v["recordings"]["buffer"].as_int() > 0);
+  const Value& last = v["recordings"]["last"];
+  CHECK_EQ(last["frames_lost"].as_int(), int64_t(0));
+  CHECK(last["backlog_peak_ms"].as_int() >= 300);
+  CHECK_EQ(last["resends"].as_int(), int64_t(0));
+
+  // Held through a lost connection and sent again: the log and diag say so.
+  r.server(R"({"type":"turn.end","turn":"t","outcome":"success"})");
+  r.advance(7000);
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 5);
+  r.app.on_transport_closed("disconnected");
+  CHECK(logged(r, "connection closed: disconnected (recording)"));
+  CHECK(logged(r, "connection lost during a recording; still recording, 500 ms held"));
+  r.app.on_button(hg::Button::Talk, false);
+  r.advance(12000);  // a reconnect that times out
+  CHECK(logged(r, "connection closed: connect timeout (sending a recording)"));
+  r.fake.logs.clear();
+  reconnect(r);
+  r.advance(50);
+  CHECK(logged(r, "sent again 1x after a lost connection"));
+  v = diag_of(r);
+  CHECK_EQ(v["recordings"]["held"].as_int(), int64_t(1));
+  CHECK_EQ(v["recordings"]["resent"].as_int(), int64_t(1));
+  CHECK_EQ(v["recordings"]["last"]["resends"].as_int(), int64_t(1));
+}
+
+TEST("diag: a recording dropped for want of a connection is counted") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 5);
+  r.app.on_transport_closed("disconnected");
+  r.app.on_button(hg::Button::Talk, false);
+  r.advance(hg::App::kRecordingWaitMs + 500);
+  CHECK_EQ(diag_of(r)["recordings"]["dropped"].as_int(), int64_t(1));
+  CHECK(logged(r, "dropped a held recording: no connection within 45 s"));
+}
+
+namespace {
+// PSRAM free for psram_alloc, the allocator main.cpp gives a board with PSRAM: it sets the
+// buffer aside only when RecordingBuffer::kPsramHeadroom stays free after it.
+size_t g_psram_free = 0;
+void* psram_alloc(size_t n) {
+  return hg::RecordingBuffer::leaves_headroom(g_psram_free, n) ? std::malloc(n) : nullptr;
+}
+}  // namespace
+
+TEST("recording buffer: set aside only when about 1 MB of PSRAM stays free after it") {
+  using hg::RecordingBuffer;
+  const size_t n = RecordingBuffer::bytes_for(hg::App::kMaxUtteranceMs, 24000);  // the 2.06's 1.5 MB
+  CHECK(RecordingBuffer::leaves_headroom(n + RecordingBuffer::kPsramHeadroom, n));
+  CHECK(!RecordingBuffer::leaves_headroom(n + RecordingBuffer::kPsramHeadroom - 1, n));
+  CHECK(!RecordingBuffer::leaves_headroom(n - 1, n));  // no wrap-around when PSRAM is short
+
+  // A small PSRAM part (2 MB, 1.5 MB of it free): no buffer, and a lost connection ends the
+  // recording as before. Start-up says so.
+  hg::DeviceProfile small = Rig::profile("ws://hermes.local:8765/gadget");
+  small.mic_rate = 24000;
+  small.recording_alloc = psram_alloc;
+  g_psram_free = 1536 * 1024;
+  Rig r(small);
+  r.bring_online(true);
+  CHECK(logged(r, "no room for the recording buffer: a lost connection ends a recording"));
+  CHECK_EQ(diag_of(r)["recordings"]["buffer"].as_int(), int64_t(0));
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(960, 1);
+  r.app.on_mic_samples(pcm.data(), pcm.size());
+  r.advance(500);
+  r.app.on_transport_closed("disconnected");
+  CHECK(!r.app.in_turn());
+  CHECK(!r.fake.mic_on);
+
+  // An 8 MB part with room to spare: the buffer is on, start-up says so, and a recording
+  // outlives a lost connection.
+  hg::DeviceProfile big = small;
+  g_psram_free = 7 * 1024 * 1024;
+  Rig b(big);
+  b.bring_online(true);
+  CHECK(logged(b, "recording buffer on: " + std::to_string(n / 1024) + " KB, a lost connection keeps the recording"));
+  CHECK_EQ(diag_of(b)["recordings"]["buffer"].as_int(), static_cast<int64_t>(n));
+  b.app.on_button(hg::Button::Talk, true);
+  b.app.on_mic_samples(pcm.data(), pcm.size());
+  b.advance(500);
+  b.app.on_transport_closed("disconnected");
+  CHECK(b.app.in_turn());
+  CHECK(b.fake.mic_on);
+}
+
+TEST("recording buffer: an earlier turn's reply arriving during the upload leaves the new recording alone") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  const int stream = static_cast<int>((*r.fake.last("audio.start"))["stream"].as_int());
+  sp.talk(r, 3);
+  r.fake.refuse_binary = true;  // a slow link: the end of the recording waits to go
+  sp.talk(r, 5);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  // Hermes, not having the new recording yet, finishes the turn the user talked over.
+  r.server(R"({"type":"turn.start","turn":"old"})");
+  r.server(R"({"type":"reply.delta","turn":"old","text":"The weather is"})");
+  r.server(R"({"type":"reply","turn":"old","text":"The weather is sunny."})");
+  r.server(R"({"type":"audio.start","stream":9,"rate":16000,"format":"pcm16"})");
+  r.server(R"({"type":"turn.end","turn":"old","outcome":"success"})");
+  r.advance(100);
+  CHECK(r.app.in_turn());
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  CHECK(r.fake.last("audio.end") == nullptr);
+  r.fake.refuse_binary = false;
+  r.advance(50);
+  bool in_order = false;
+  CHECK(uploaded(r, stream, 0, &in_order) == sp.all);  // every sample still goes
+  CHECK(in_order);
+  CHECK(r.fake.last("audio.end") != nullptr);
+  // The new turn then goes as usual.
+  r.server(R"({"type":"turn.start","turn":"new"})");
+  r.server(R"({"type":"reply","turn":"new","text":"Done."})");
+  r.server(R"({"type":"turn.end","turn":"new","outcome":"success"})");
+  r.advance(200);
+  CHECK_EQ(r.app.model().body, std::string("Done."));
+}
+
+TEST("recording buffer: a new session drops a recording still uploading") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  const int stream = static_cast<int>((*r.fake.last("audio.start"))["stream"].as_int());
+  sp.talk(r, 3);
+  r.fake.refuse_binary = true;
+  sp.talk(r, 5);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  r.app.on_button(hg::Button::Cancel, true);  // held for a new session
+  r.advance(2200);
+  r.app.on_button(hg::Button::Cancel, false);
+  CHECK(r.fake.last("session.new") != nullptr);
+  const Value* cancel = r.fake.last("audio.cancel");
+  CHECK(cancel && (*cancel)["stream"].as_int() == stream);
+  CHECK(cancel && (*cancel)["reason"].as_string() == "new session");
+  const size_t before = r.fake.sent_binary.size();
+  r.fake.refuse_binary = false;
+  r.advance(500);
+  CHECK_EQ(r.fake.sent_binary.size(), before);  // nothing of it follows session.new
+  CHECK(r.fake.last("audio.end") == nullptr);
+}
+
+TEST("recording buffer: talking over a recording still uploading replaces it, and the hub hears so") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  const int first = static_cast<int>((*r.fake.last("audio.start"))["stream"].as_int());
+  sp.talk(r, 3);
+  r.fake.refuse_binary = true;
+  sp.talk(r, 5);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  r.app.on_button(hg::Button::Talk, true);  // talks again before the first one has all gone
+  const Value* cancel = r.fake.last("audio.cancel");
+  CHECK(cancel && (*cancel)["stream"].as_int() == first);
+  CHECK(cancel && (*cancel)["reason"].as_string() == "replaced");
+  const Value* start = r.fake.last("audio.start");
+  CHECK(start && (*start)["stream"].as_int() != first);
+  r.fake.refuse_binary = false;
+  r.advance(50);
+  for (const auto& f : r.fake.sent_binary) {
+    hg::proto::BinaryFrame b;
+    if (hg::proto::parse_binary(f.data(), f.size(), b)) CHECK(b.stream != first || b.seq < 100);
+  }
+  CHECK(uploaded(r, first, 0).size() <= size_t(3 * 1600));  // only what went before the stall
+}
+
+TEST("recording buffer: once its audio.end goes, the Thinking timeout is the short one again") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 3);
+  r.fake.refuse_binary = true;
+  sp.talk(r, 3);
+  r.app.on_button(hg::Button::Talk, false);
+  r.server(R"({"type":"turn.start","turn":"old"})");  // the earlier turn's, during the upload
+  r.fake.refuse_binary = false;
+  r.advance(50);
+  CHECK(r.fake.last("audio.end") != nullptr);
+  for (int i = 0; i < 10; ++i) {  // Hermes never answers this request; the server pings meanwhile
+    r.advance(18100);
+    r.server(R"({"type":"ping","ts":1})");
+  }
+  CHECK(!r.app.in_turn());
+  CHECK_EQ(r.app.model().detail, std::string("No reply from Hermes"));
 }

@@ -185,6 +185,8 @@ const Entry kSpanish[] = {
     {Msg::Cancelled, "Cancelado"},
     {Msg::Sending, "Enviando..."},
     {Msg::CouldntSendRecording, "No se pudo enviar la grabación"},
+    {Msg::OfflineStillRecording, "Sin conexión: grabando"},
+    {Msg::ReconnectingToSend, "Conectando para enviar"},
     {Msg::NotConnected, "Sin conexión a Hermes"},
     {Msg::NewSessionIn, "Charla nueva en {0}s"},
     {Msg::NewSession, "Charla nueva"},

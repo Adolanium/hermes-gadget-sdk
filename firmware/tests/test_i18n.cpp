@@ -267,7 +267,7 @@ constexpr Msg kLines[] = {
     Msg::ProfileRefusedUnknown, Msg::ProfileRefused,
     // hero headlines and one-line captions
     Msg::HiImHermes, Msg::AskMeAnything, Msg::UpShowsLastReply, Msg::SwipeDownForSessions,
-    Msg::ButtonShowsSessions, Msg::LowBattery, Msg::Listening, Msg::SpeakNowPause, Msg::LiftFingerToSend,
+    Msg::ButtonShowsSessions, Msg::LowBattery, Msg::Listening, Msg::SpeakNowPause, Msg::LiftFingerToSend, Msg::OfflineStillRecording, Msg::ReconnectingToSend,
     Msg::ReleaseToSend, Msg::Thinking, Msg::HermesAsks, Msg::Restarting, Msg::Updating, Msg::SetupNeeded,
     Msg::NoNetwork, Msg::Authenticating, Msg::ConnectingToHermes, Msg::PairingCode, Msg::PairThisDevice, Msg::RefusedByRoute,
     Msg::ProfileTapName, Msg::ProfileInSettings,

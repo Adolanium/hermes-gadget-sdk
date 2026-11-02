@@ -138,6 +138,26 @@ def test_voice_is_uploaded_as_wav_and_played_back(devserver, make_sim):
     assert sim.speaker.last_file is not None and sim.speaker.last_file.stat().st_size > 20000
 
 
+def test_a_recording_survives_a_lost_connection_and_is_sent_after_reconnecting(loop_thread, devserver, make_sim):
+    hub, _brain, url = devserver()
+    sim = make_sim(url)
+    assert sim.wait_screen("ready", timeout=10)
+    hub.port = hub.bound_port  # come back on the same port
+    seconds = sim.speak_pcm(_tone(3.0))
+    assert sim.wait_screen("listening", timeout=2)
+    sim.run_for(0.8)
+    loop_thread.run(hub.stop())  # the connection drops mid-recording
+    sim.run_for(0.5)
+    assert sim.device.screen() == "listening"  # still recording, not the connecting screen
+    assert sim.wait_screen("thinking", timeout=5)  # the recording ended while offline
+    loop_thread.run(hub.start())
+    assert sim.wait_for(lambda: sim.last_received("turn.end") is not None, timeout=20)
+    reply = sim.last_received("reply")["text"]
+    heard = float(reply.split("I heard ")[1].split(" seconds")[0])
+    assert abs(heard - seconds - 0.3) < 0.25  # all of it, from before and after the drop
+    assert sim.wait_screen("ready", timeout=10)
+
+
 def test_cancel_interrupts_the_turn(devserver, make_sim):
     hub, brain, url = devserver()
     brain.word_delay = 0.3

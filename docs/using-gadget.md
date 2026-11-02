@@ -19,6 +19,8 @@ While Hermes speaks a reply, the face talks with the reply's latest two lines un
 
 Long replies turn their own pages. Simulated boards with scroll buttons also accept Up and Down.
 
+On boards with PSRAM, a recording survives the connection to Hermes dropping. The screen says "Offline, still recording" and you can finish speaking as usual. The gadget sends the whole recording once it is back online and Hermes answers as usual. If the connection doesn't come back within 45 seconds of the end of the recording, the gadget says "Couldn't send the recording". CANCEL discards it meanwhile ([the recording buffer](architecture.md#the-recording-buffer)).
+
 Try asking Hermes to show a reminder on the screen. The agent can use `gadget_display` to display a card. While the screen is dark, the card waits and appears when the screen lights up ([screen sleep](protocol.md#screen-sleep)). Devices with actions can also respond to requests such as "Turn the LED purple."
 
 On a Waveshare P4 7B with an OV5647 module attached, ask Hermes to take a picture. The plugin saves the photo as a timestamped PNG in `~/.hermes/gadgetpix/` on the Hermes computer and tells Hermes its path. Photos stay there until you delete them.
