@@ -83,6 +83,19 @@ Every screen that isn't showing reply text uses a **hero layout**: the Hermes Ag
 - **Holding CANCEL for 2 s** starts a new session (`session.new` → Hermes `/new`). It fires while still held, after a countdown in the hint bar. The hold is the confirmation, so the plugin answers Hermes's "Confirm /new" itself.
 - **Questions** from Hermes (other confirmations, dangerous-command approvals) take over the screen: TALK answers yes, CANCEL answers no. A question that arrives while you are recording waits until you finish.
 
+### The recording buffer
+
+On boards with PSRAM (`DeviceProfile::recording_alloc`), a recording is kept whole on the device while it uploads (`hg::RecordingBuffer`, 1 MB for the 30 s limit at 16 kHz, 1.5 MB at 24 kHz, set aside at start-up). The microphone writes to the buffer, and the app sends from it in 40 ms frames as the link takes them:
+
+- **A slow link** delays frames instead of dropping them. `audio.end` waits until the link has taken all of the recording.
+- **A lost connection mid-recording** doesn't end it. The screen stays on Listening with "Offline, still recording", and the recording ends as usual: release, a tap, the VAD, or the 30 s limit. The app reconnects in the background, starting at the shortest backoff.
+- **Back online** (welcome, paired), the whole recording goes again on a new stream: `audio.start` with the same `id` plus `resent` and `age_ms`, every frame as fast as the link takes them, then `audio.end`. A connection back before the recording ends sends what was held and streams on.
+- **Ended while offline,** the device shows Thinking with "Reconnecting to send..." and waits up to 45 s (`App::kRecordingWaitMs`, about three connection attempts). Failed attempts don't extend the wait. After that it drops the recording and says "Couldn't send the recording".
+- **CANCEL** discards a held recording, while recording or while waiting. A device that comes back unpaired drops it. The buffer is RAM only, so a restart loses it.
+- **A connection lost after `audio.end` went** ends the turn as before. The protocol has no acknowledgement, so sending it again could run the turn twice.
+
+A board without PSRAM keeps the old behaviour: audio streams straight to the link, frames the link refuses are counted and dropped, and a lost connection ends the recording. Raising the utterance limit is a change to `App::kMaxUtteranceMs` alone: the buffer is sized from it.
+
 ## Hermes side (`plugin/`)
 
 | Module | Responsibility |

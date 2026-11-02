@@ -251,6 +251,7 @@ hgsim* hgsim_create(const hgsim_config* cfg, const hgsim_host* host) {
   }
   profile.motion_sensor = cfg->motion != 0;
   profile.colour_face_alloc = std::malloc;
+  profile.recording_alloc = std::malloc;  // like a board with PSRAM: a lost connection keeps the recording
   sim->app = std::make_unique<hg::App>(sim->hal, profile);
   if (cfg->touch) {
     sim->touch = std::make_unique<hg::TouchGestures>(*sim->app);

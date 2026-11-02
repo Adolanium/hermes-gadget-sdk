@@ -198,6 +198,8 @@ namespace hg::i18n {
   X(Cancelled,              "Cancelled") \
   X(Sending,                "Sending...") \
   X(CouldntSendRecording,   "Couldn't send the recording") \
+  X(OfflineStillRecording,  "Offline, still recording") \
+  X(ReconnectingToSend,     "Reconnecting to send...") \
   X(NotConnected,           "Not connected to Hermes") \
   X(NewSessionIn,           "New session in {0}s") \
   X(NewSession,             "New session") \

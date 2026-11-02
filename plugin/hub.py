@@ -1002,6 +1002,11 @@ class DeviceHub:
             return
         session._upload = _Upload(
             id=str(msg.get("id") or ""), stream=int(msg.get("stream") or 0), rate=rate, started=time.monotonic())
+        resent = msg.get("resent")
+        if isinstance(resent, int) and resent > 0:
+            # Recorded through a lost connection and sent whole now, as fast as the link takes it.
+            log.info("device %s: recording %s sent again after a lost connection (%s ms after it began)",
+                     session.device_id, session._upload.id, msg.get("age_ms"))
 
     def _on_binary(self, session: DeviceSession, data: bytes) -> None:
         frame = protocol.parse_binary(data)
