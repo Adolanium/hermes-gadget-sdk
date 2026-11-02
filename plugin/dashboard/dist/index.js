@@ -16,7 +16,6 @@
   var REFRESH_MS = 1e4;
   var REQUEST_TIMEOUT_MS = 15e3;
   function errorText(err) {
-    if (err && err.name === "AbortError") return "The Hermes dashboard did not answer in time";
     return String(err && err.message || err).replace(/^Error:\s*/, "");
   }
   function when(ts) {
@@ -67,7 +66,8 @@
           setError("");
         }
       }).catch((e) => {
-        if (request === latestRequest) setError(errorText(e));
+        if (request === latestRequest)
+          setError(abort.signal.aborted ? "The Hermes dashboard did not answer in time" : errorText(e));
       }).finally(() => {
         clearTimeout(timeout);
         if (request === latestRequest) setLoading(false);

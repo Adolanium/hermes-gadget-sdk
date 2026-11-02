@@ -26,7 +26,6 @@ const REFRESH_MS = 10000;
 const REQUEST_TIMEOUT_MS = 15000;
 
 function errorText(err) {
-  if (err && err.name === "AbortError") return "The Hermes dashboard did not answer in time";
   return String((err && err.message) || err).replace(/^Error:\s*/, "");
 }
 
@@ -121,7 +120,11 @@ function GadgetsPage() {
     const timeout = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
     return SDK.fetchJSON(devicesUrl(), { signal: abort.signal })
       .then((d) => { if (request === latestRequest) { setData(d); setError(""); } })
-      .catch((e) => { if (request === latestRequest) setError(errorText(e)); })
+      .catch((e) => {
+        // The SDK wraps an abort before the response headers in its own error, so ask the signal.
+        if (request === latestRequest)
+          setError(abort.signal.aborted ? "The Hermes dashboard did not answer in time" : errorText(e));
+      })
       .finally(() => {
         clearTimeout(timeout);
         if (request === latestRequest) setLoading(false);
