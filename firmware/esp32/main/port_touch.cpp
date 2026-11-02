@@ -8,6 +8,7 @@
 
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_sleep.h"
 #include "esp_timer.h"
 #include "cst816.hpp"
 #include "esp_lcd_touch_gt911.h"
@@ -22,6 +23,9 @@ namespace {
 const char* TAG = "hg.touch";
 constexpr uint32_t kPollMs = 20;
 constexpr uint32_t kDozePollMs = 50;
+// Dozing with INT armed as a wake source: the sleep exit hook and nudge() end the wait, so the
+// task needs no poll of its own and the CPU stays in light sleep between Wi-Fi beacons.
+constexpr uint32_t kArmedDozeWaitMs = 1000;
 constexpr uint8_t kTca9554Input = 0x00;
 constexpr uint8_t kCstAck = 0xAB;
 
@@ -370,6 +374,52 @@ void TouchInput::gate_on_int() {
   // task never reads, and the controller stays in BIOS. Sample once. The task
   // does not exist yet, so the flag is enough. An idle FT3168 sits high.
   if (gpio_get_level(static_cast<gpio_num_t>(touch_.int_gpio)) == 0) int_pending_ = true;
+#if CONFIG_PM_LIGHT_SLEEP_CALLBACKS
+  if (touch_.int_wakes) {
+    // The pin keeps its input and pull-up through light sleep, so a low INT can wake the chip.
+    gpio_sleep_sel_dis(static_cast<gpio_num_t>(touch_.int_gpio));
+    esp_pm_sleep_cbs_register_config_t cbs = {};
+    cbs.exit_cb = &TouchInput::on_sleep_exit;
+    cbs.exit_cb_user_arg = this;
+    sleep_wake_ = esp_pm_light_sleep_register_cbs(&cbs) == ESP_OK;
+    if (sleep_wake_) ESP_LOGI(TAG, "touch INT wakes light sleep");
+  }
+#endif
+}
+
+// While dozing, light sleep stops the edge ISR from running, and the FT3168's report is gone
+// ~20 ms after its INT pulse. So INT becomes a low-level wake source instead (sharing the pin's
+// interrupt type register, so the edge ISR is off meanwhile), and the sleep exit hook sends the
+// task to read when INT is low after a wake. Awake again, the edge ISR comes back. With the
+// touch_wake setting off, a doze leaves INT quiet: no wake, no read, only a key lights the screen.
+// A touch_wake change during a doze (set_wakes nudges the task) re-arms with the new setting.
+void TouchInput::arm_sleep_wake(bool dozing) {
+  if (!sleep_wake_) return;
+  if (dozing && sleep_wake_armed_ && quiet_ == wakes_.load()) arm_sleep_wake(false);
+  if (dozing == sleep_wake_armed_) return;
+  const auto pin = static_cast<gpio_num_t>(touch_.int_gpio);
+  sleep_wake_armed_ = dozing;
+  if (dozing) {
+    quiet_ = !wakes_;
+    gpio_intr_disable(pin);
+    if (quiet_) return;
+    gpio_wakeup_enable(pin, GPIO_INTR_LOW_LEVEL);
+    esp_sleep_enable_gpio_wakeup();
+    return;
+  }
+  if (!quiet_) gpio_wakeup_disable(pin);
+  gpio_set_intr_type(pin, GPIO_INTR_NEGEDGE);
+  gpio_intr_enable(pin);
+  if (gpio_get_level(pin) == 0) int_pending_ = true;  // a report may be waiting
+}
+
+esp_err_t IRAM_ATTR TouchInput::on_sleep_exit(int64_t, void* arg) {
+  auto* self = static_cast<TouchInput*>(arg);
+  if (!self->sleep_wake_armed_ || self->quiet_ || gpio_get_level(static_cast<gpio_num_t>(self->touch_.int_gpio)) != 0) return ESP_OK;
+  self->int_pending_ = true;
+  BaseType_t woken = pdFALSE;
+  if (self->task_) vTaskNotifyGiveFromISR(static_cast<TaskHandle_t>(self->task_), &woken);
+  return ESP_OK;
 }
 
 void IRAM_ATTR TouchInput::on_int(void* arg) {
@@ -389,6 +439,10 @@ bool TouchInput::may_read(bool was_touching) {
   if (!int_gated_) return true;
   if (int_pending_.exchange(false) || was_touching) return true;
   return gpio_get_level(static_cast<gpio_num_t>(touch_.int_gpio)) == 0;
+}
+
+void TouchInput::nudge() {
+  if (task_) xTaskNotifyGive(static_cast<TaskHandle_t>(task_));
 }
 
 // Waits out the poll period, or less: an INT edge or an encoder detent ends
@@ -449,8 +503,14 @@ void TouchInput::task(void* arg) {
       self->encoder_pair_deadline_us_ = 0;
     }
     // Dozing (screen off, on battery), poll less often so the chip can light-sleep
-    // between polls; a touch still wakes the screen within about 50 ms.
-    self->wait(EspSystem::dozing_now() ? kDozePollMs : kPollMs);
+    // between polls; a touch still wakes the screen within about 50 ms. With INT armed
+    // as a wake source and nothing else to poll, only a wake or nudge() ends the wait.
+    // While a Wi-Fi join attempt holds the chip awake, the doze has no light sleep to wake
+    // from, so INT stays on its edge interrupt and a tap is read as when awake.
+    const bool dozing = EspSystem::dozing_now();
+    self->arm_sleep_wake(dozing && !EspSystem::sleep_held_now());
+    const bool int_only = self->sleep_wake_armed_ && !self->key_dev_ && self->encoder_a_ == GPIO_NUM_NC;
+    self->wait(!dozing ? kPollMs : int_only ? kArmedDozeWaitMs : kDozePollMs);
   }
 }
 
