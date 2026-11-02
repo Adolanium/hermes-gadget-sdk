@@ -16,8 +16,18 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_HG_BOARD_AMOLED_206=y
 # Battery life: scale the CPU down to 80 MHz when idle (see app_main).
 CONFIG_PM_ENABLE=y
-# Light sleep stays off until FT3168 GPIO wake is implemented and checked on
-# battery. A normal GPIO interrupt cannot wake the CPU to read its short report.
+# Light sleep while dozing (on battery, screen off, idle; see EspSystem::enable_doze).
+# The FT3168's INT wakes the CPU (TouchInput::arm_sleep_wake).
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+# And never while a USB host is connected: the serial console and JTAG stop
+# working under light sleep. The app's on-battery check is the main guard.
+CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
+# Wi-Fi wakes for each beacon from light sleep on the slow clock's timing; the
+# default 150 kHz RC drifts enough to miss beacons, so use the 17.5 MHz / 256 one.
+# CONFIG_RTC_CLK_SRC_INT_RC is not set
+CONFIG_RTC_CLK_SRC_INT_8MD256=y
+# Counts light sleep for the doze log line, and runs the touch wake hook.
+CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y
 
 # TCP windows for links with a long round trip (a phone hotspot): 5,760 B capped
 # a connection near 33 KB/s at 175 ms, below 24 kHz audio's 48 KB/s.
