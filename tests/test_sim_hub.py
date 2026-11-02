@@ -628,6 +628,36 @@ def test_devices_switch_hermes_profile_and_keep_it(loop_thread, tmp_path, make_s
         loop_thread.run(hub.stop())
 
 
+
+def test_a_double_press_of_talk_goes_back_to_the_default_profile(loop_thread, tmp_path, make_sim):
+    from hermes_gadget_plugin.hub import DeviceHub
+    from hermes_gadget_plugin.store import DeviceStore
+
+    hub = DeviceHub(DeviceStore(tmp_path / "server"), _TwoProfiles(), host="127.0.0.1", port=0, heartbeat_s=5)
+    loop_thread.run(hub.start())
+    try:
+        url = f"ws://127.0.0.1:{hub.bound_port}/gadget"
+        sim = make_sim(url)
+        assert sim.wait_screen("ready", timeout=10)
+        sim.console("settings")
+        for _ in range(3):
+            sim.console("cancel")
+        sim.console("talk")
+        sim.console("release")
+        assert sim.wait_for(lambda: sim.status().get("profile") == "ops", timeout=5)
+        sim.console("settings close")
+        assert sim.wait_screen("ready", timeout=5)
+        # Two quick presses of the TALK key: the first starts a recording, the second throws it away.
+        sim.press("talk")
+        sim.release("talk")
+        sim.press("talk")
+        sim.release("talk")
+        assert sim.wait_for(lambda: sim.status().get("profile") == "default", timeout=5)
+        assert hub.get(sim.status()["device_id"]).profile == "default"
+        assert sim.device.screen() == "ready"
+    finally:
+        loop_thread.run(hub.stop())
+
 def _face(ink: int) -> bytes:
     """A face the device takes (docs/protocol.md#faces): every bitmap byte ``ink``, the mascot's anchors."""
     from hermes_gadget_plugin.face import FACE_BYTES
