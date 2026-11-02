@@ -1283,7 +1283,7 @@ void App::on_button(Button button, bool pressed, bool touch) {
   if (talk_key) {
     const bool second = talk_key_armed_ && now() - talk_key_at_ <= kDoublePressMs;
     talk_key_armed_ = false;
-    if (second && double_home_ && !settings_open() && !prompt_showing()) {
+    if (second && double_home_ && !alarm_ && !settings_open() && !prompt_showing()) {  // the alarm takes the press
       wake_buttons_ |= bit;  // its release does nothing
       go_home();
       return;
@@ -1442,6 +1442,7 @@ void App::start_listening(bool hands_free) {
 }
 
 void App::finish_listening() {
+  talk_key_armed_ = false;  // a recording on its way to Hermes is not one a second press can take back
   if (hal_.mic) hal_.mic->stop();
   json::Value end = proto::message("audio.end");
   end.set("id", request_id_).set("stream", mic_stream_).set("duration_ms", now() - mode_since_);

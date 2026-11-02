@@ -6766,3 +6766,30 @@ TEST("double press: a press that answers a question or selects Back in the menu 
   menu.app.on_button(hg::Button::Talk, false);
   CHECK(menu.fake.last("profile.select") == nullptr);
 }
+
+TEST("double press: a first press held long enough to send its recording starts none") {
+  Rig r;
+  r.bring_online_with_profiles(true, "ops");
+  press_talk(r, 370);  // past the 350 ms cutoff: the recording goes to Hermes
+  CHECK(r.fake.last("audio.end") != nullptr);
+  r.advance(20);  // the second press comes 390 ms after the first
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK(r.fake.last("cancel") == nullptr);
+  CHECK(r.fake.last("profile.select") == nullptr);
+  CHECK(r.app.screen() == hg::Screen::Listening);  // a new question, as before
+  r.app.on_button(hg::Button::Talk, false);
+}
+
+TEST("double press: an alarm that rings between the presses takes the second one") {
+  Rig r;
+  r.bring_online_with_profiles(true, "ops");
+  r.server(R"({"type":"action","id":"t1","name":"timer.start","args":{"seconds":1}})");
+  r.advance(800);
+  press_talk(r, 60);  // too short: discarded
+  r.advance(200);     // the timer ends
+  CHECK(r.app.screen() == hg::Screen::Alarm);
+  r.app.on_button(hg::Button::Talk, true);  // within 400 ms of the first press
+  CHECK(r.app.screen() != hg::Screen::Alarm);
+  CHECK(r.fake.last("profile.select") == nullptr);
+  r.app.on_button(hg::Button::Talk, false);
+}
