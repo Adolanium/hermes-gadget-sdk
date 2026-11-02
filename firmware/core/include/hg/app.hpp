@@ -607,7 +607,7 @@ class App {
   static constexpr size_t kCloseHistory = 5;
   uint32_t closes_total_ = 0;
   struct RecordingStats {
-    // The last recording: its length, and the frames the link refused.
+    // The last recording: its length, and its frames not sent (refused by the link, or cut off by a loss).
     uint32_t last_ms = 0, last_unsent = 0;
     bool any = false;
   } rec_stats_;
