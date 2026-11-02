@@ -4,6 +4,7 @@
 
 ### Firmware
 
+- A short stall on the network no longer closes the connection to Hermes. A send that takes too long makes the WebSocket client close the whole connection, and the limit was 2 s: a Wi-Fi hiccup during a recording, the one time the device uploads 32-48 KB/s of audio, closed the connection and lost the recording, and an AMOLED-2.06 on a home LAN kept going offline in the middle of recordings. Sends and the client's reads now wait up to 10 s. A dead link is still found: a stalled send gives up after 10 s, and an idle connection still ends after three missed heartbeats (60 s by default). Host tests only; not yet run on a board. Contributed by @BrOrlandi.
 - `DsiDisplay` can drive an ST7123 panel over MIPI-DSI with Espressif's `esp_lcd_st7123` 1.0.2. `DsiController::St7123` selects it. Init commands are that component's defaults. No board selects it yet. P4-only. Built, not run on a board.
 - `CodecAudio` can drive an ES8388 speaker through the ES8388 driver already in `esp_codec_dev`. `SpeakerCodec::Es8388` selects it. The I2C address is that component's 8-bit `ES8388_CODEC_DEFAULT_ADDR` (0x20), which the I2C driver shifts to 7-bit 0x10. The microphone stays an ES7210. No board selects the ES8388 yet. Built, not run on a board.
 - `SpiDisplay` can drive an SPD2010 panel over QSPI with Espressif's `esp_lcd_spd2010` 2.0.0~1. The bus uses SPI mode 3. The driver refuses axis swap. The width it draws, including any x gap, must be a multiple of 4. The `esp32-s3-touch-lcd-146` profile selects it.

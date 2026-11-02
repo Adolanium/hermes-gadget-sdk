@@ -48,10 +48,20 @@ inline bool may_queue_message(size_t free_slots, uint8_t opcode) {
 
 // Every network wait has a limit. The library's own esp_websocket_client_close()
 // waits for its close frame without one and froze the app on a dead link.
-constexpr uint32_t kSendTimeoutMs = 2000;
+//
+// A send that fails or runs out of time makes esp_websocket_client abort the
+// whole connection (esp_websocket_client.c, send_with_exact_opcode), so this
+// limit is also the longest TCP stall the link survives. At 2 s, a Wi-Fi hiccup
+// in the middle of a recording, the one time the device uploads 32-48 KB/s, closed
+// the connection and lost the recording. 10 s rides out retransmissions and a
+// slow access point, and a link that is really dead is still found: a stalled
+// send gives up after 10 s, and an idle one is caught by the protocol heartbeat
+// (no message for 3 heartbeats, 60 s by default; App::tick, "server silent").
+constexpr uint32_t kSendTimeoutMs = 10000;
 constexpr uint32_t kCloseTimeoutMs = 1000;
-// The client's own reads and connects (esp_websocket_client_config_t::network_timeout_ms).
-constexpr uint32_t kNetworkTimeoutMs = 10000;
+// The client's own reads and connects (esp_websocket_client_config_t::network_timeout_ms);
+// the same limit as a send, so a stall of the same length is survived both ways.
+constexpr uint32_t kNetworkTimeoutMs = kSendTimeoutMs;
 
 // Handing a client to the send task for closing waits at most this long for a
 // queue slot. The reserved slots normally make it immediate.
