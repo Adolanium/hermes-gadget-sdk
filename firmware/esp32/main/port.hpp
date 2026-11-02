@@ -205,6 +205,10 @@ class WsTransport final : public hg::Transport {
   uint8_t rx_opcode_ = 0;
   std::atomic<bool> metering_{false};
   std::atomic<uint32_t> refused_{0};  // messages enqueue() turned away for want of room
+  // The send in flight on the send task (generation 0: none), for the close reason on_event
+  // reports: a failed send closes the connection before it returns.
+  std::atomic<uint32_t> sending_gen_{0}, sending_since_{0};
+  std::atomic<size_t> sending_bytes_{0};
 };
 
 // ESP-IDF RGB timing bus with ST7701 command initialization on 3-wire SPI.

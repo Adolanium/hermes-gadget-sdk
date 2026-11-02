@@ -392,6 +392,8 @@ std::string App::next_id(char prefix) {
 // Connection lifecycle
 
 void App::on_network(bool up, std::string_view detail) {
+  if (!up && network_up_)
+    log(LogLevel::Warn, "network down: " + std::string(detail.empty() ? "no detail" : detail) + " (" + activity() + ")");
   network_up_ = up;
   network_detail_ = std::string(detail);
   if (!up) {
@@ -466,8 +468,21 @@ void App::schedule_reconnect() {
   reconnect_pending_ = network_up_;
 }
 
+// What the device was doing, for the log and `diag` when a connection ends.
+const char* App::activity() const {
+  if (mode_ == Mode::Listening) return "recording";
+  if (mode_ == Mode::Thinking) return "waiting for a reply";
+  if (mode_ == Mode::Responding) return "replying";
+  return "idle";
+}
+
 void App::drop_session(std::string_view reason) {
   last_close_ = std::string(reason);
+  // Every end of a session, whoever noticed it: the transport, a timeout or the network.
+  ++closes_total_;
+  if (closes_.size() >= kCloseHistory) closes_.erase(closes_.begin());
+  closes_.push_back({now(), last_close_, activity()});
+  log(LogLevel::Warn, "connection closed: " + last_close_ + " (" + activity() + ")");
   if (ota_busy()) {
     if (ota_ == Ota::Receiving) hal_.updater->abort();
     ota_reset();
@@ -503,7 +518,6 @@ void App::on_transport_open() {
 void App::on_transport_closed(std::string_view reason) {
   // Closes we initiated (timeouts, reconfiguration) were already handled.
   if (!transport_active_) return;
-  log(LogLevel::Warn, std::string("connection closed: ") + std::string(reason));
   drop_session(reason);
   update_model();
 }
@@ -1437,6 +1451,9 @@ void App::finish_listening() {
   if (mic_unsent_)
     log(LogLevel::Warn, "recording: " + std::to_string(mic_unsent_) + " of " + std::to_string(mic_seq_) +
                             " audio frames not sent, the link couldn't keep up");
+  rec_stats_.any = true;
+  rec_stats_.last_ms = now() - mode_since_;
+  rec_stats_.last_unsent = mic_unsent_;
   if (!send(end)) {
     // Hermes would wait for the rest of the recording and never answer.
     mode_ = Mode::Idle;
@@ -2373,7 +2390,22 @@ std::string App::diag_report() {
   if (tailnet_wanted()) conn.set("tailnet", tunnel_up_ ? std::string("up") : tunnel_detail_.empty() ? std::string("joining") : tunnel_detail_);
   if (!last_close_.empty()) conn.set("last_close", last_close_);
   if (online_since_) conn.set("online_s", (now() - online_since_) / 1000);
+  conn.set("closes_total", closes_total_);
+  json::Value closes = json::Value::array();
+  for (const auto& c : closes_) {
+    json::Value e = json::Value::object();
+    e.set("ago_s", (now() - c.at) / 1000).set("reason", c.reason).set("during", c.during);
+    closes.push(e);
+  }
+  conn.set("closes", closes);  // oldest first
   r.set("connection", conn);
+  json::Value rec = json::Value::object();
+  if (rec_stats_.any) {
+    json::Value last = json::Value::object();
+    last.set("ms", rec_stats_.last_ms).set("frames_lost", rec_stats_.last_unsent);
+    rec.set("last", last);
+  }
+  r.set("recordings", rec);
   r.set("app", status_value());
   if (frame_stats_) r.set("frames", frame_stats_->to_json());
   if (on_diag) on_diag(r);

@@ -6491,3 +6491,90 @@ TEST("screen: the PWR key turns the screen off over a list, a card or the menu, 
   CHECK_EQ(r.fake.brightness, 100);
   CHECK(r.app.screen() == hg::Screen::Ready);
 }
+
+// --- Diagnostics for lost connections -----------------------------------------
+
+namespace {
+// Waits for the next connection attempt (the first retry is 1 s after a loss) and lets it through.
+void reconnect(Rig& r) {
+  const int before = r.fake.connects;
+  for (int i = 0; i < 400 && r.fake.connects == before; ++i) r.advance(100);
+  CHECK_EQ(r.fake.connects, before + 1);
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":false})");
+  r.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":true})");
+}
+Value diag_of(Rig& r) {
+  Value v;
+  const std::string out = r.app.console("diag");
+  CHECK(out.rfind("@diag {", 0) == 0);
+  CHECK(hg::json::parse(out.substr(6), v));
+  return v;
+}
+bool logged(const Rig& r, const std::string& text) {
+  for (const auto& l : r.fake.logs)
+    if (l.find(text) != std::string::npos) return true;
+  return false;
+}
+}  // namespace
+
+TEST("diag: every lost connection is logged and kept with what the device was doing") {
+  Rig r;
+  r.bring_online(true);
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(1600, 1000);
+  r.app.on_mic_samples(pcm.data(), pcm.size());
+  r.app.on_transport_closed("disconnected: a 1286 B send in flight for 10000 ms; transport errno 11; rssi -74");
+  CHECK(logged(r, "connection closed: disconnected: a 1286 B send in flight for 10000 ms; transport errno 11; rssi -74 (recording)"));
+  // A reconnect that times out counts too.
+  r.advance(12000);
+  CHECK(logged(r, "connection closed: connect timeout (idle)"));
+  r.app.on_network(false, "Wi-Fi lost (reason 200 beacon timeout, rssi -80)");
+  CHECK(logged(r, "network down: Wi-Fi lost (reason 200 beacon timeout, rssi -80) (idle)"));
+
+  Value v = diag_of(r);
+  CHECK(v["connection"]["closes_total"].as_int() >= 2);
+  const auto& closes = v["connection"]["closes"].elements();
+  CHECK(closes.size() >= 2);
+  if (closes.size() < 2) return;
+  CHECK_EQ(closes.front()["during"].as_string(), std::string("recording"));
+  CHECK(closes.front()["reason"].as_string().find("rssi -74") != std::string::npos);
+  bool timeout = false;
+  for (const auto& c : closes) timeout |= c["reason"].as_string() == "connect timeout";
+  CHECK(timeout);
+  CHECK_EQ(closes.back()["reason"].as_string(), std::string("network lost"));  // the Wi-Fi loss ends the attempt
+}
+
+TEST("diag: the close history keeps the last five") {
+  Rig r;
+  r.bring_online(true);
+  for (int i = 0; i < 7; ++i) {
+    r.app.on_transport_closed("gone " + std::to_string(i));
+    reconnect(r);
+  }
+  Value v = diag_of(r);
+  CHECK_EQ(v["connection"]["closes_total"].as_int(), int64_t(7));
+  const auto& closes = v["connection"]["closes"].elements();
+  CHECK_EQ(closes.size(), size_t(5));
+  if (closes.size() != 5) return;
+  CHECK_EQ(closes.front()["reason"].as_string(), std::string("gone 2"));
+  CHECK_EQ(closes.back()["reason"].as_string(), std::string("gone 6"));
+  CHECK_EQ(closes.back()["during"].as_string(), std::string("idle"));
+}
+
+TEST("diag: the last recording's length and lost frames") {
+  Rig r;
+  r.bring_online(true);
+  CHECK(diag_of(r)["recordings"]["last"].is_null());
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(640, 1000);
+  for (int i = 0; i < 10; ++i) {
+    r.fake.refuse_binary = i >= 4 && i < 7;
+    r.app.on_mic_samples(pcm.data(), pcm.size());
+    r.advance(40);
+  }
+  r.app.on_button(hg::Button::Talk, false);
+  const Value v = diag_of(r);
+  CHECK_EQ(v["recordings"]["last"]["frames_lost"].as_int(), int64_t(3));
+  CHECK(v["recordings"]["last"]["ms"].as_int() >= 400);
+}

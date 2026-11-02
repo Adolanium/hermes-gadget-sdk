@@ -13,6 +13,7 @@
 #include "esp_private/esp_clk.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#include "link_diag.hpp"
 
 namespace hgp {
 namespace {
@@ -41,6 +42,7 @@ struct EspOps {
 
 uint32_t now_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
 
+// The access point's signal now, 0 when not joined: lost connections log it.
 int rssi_now() {
   wifi_ap_record_t ap = {};
   return esp_wifi_sta_get_ap_info(&ap) == ESP_OK ? ap.rssi : 0;
@@ -145,12 +147,19 @@ void WsTransport::tx_task(void* arg) {
     if (got) {
       m.queue_peak = std::max<uint32_t>(m.queue_peak, uxQueueMessagesWaiting(self->tx_) + 1);
       self->watch_.begin(began);
+      // A send that fails makes the client close the connection from inside the send, so the
+      // close event (on_event) learns of it from here: what is in flight, and since when.
+      self->sending_bytes_ = item.len;
+      self->sending_since_ = began;
+      self->sending_gen_ = item.opcode == hg::ws::kClose ? 0 : item.generation;
       const auto outcome = hg::ws::process(item, self->gens_.current(), ops);
+      self->sending_gen_ = 0;
       self->watch_.end();
       const uint32_t took = now_ms() - began;
       if (outcome == hg::ws::Outcome::Failed) {
         ++m.failed;
-        ESP_LOGW(TAG, "send of %u B failed after %u ms", static_cast<unsigned>(item.len), static_cast<unsigned>(took));
+        ESP_LOGW(TAG, "send of %u B gave up after %u ms (rssi %d)", static_cast<unsigned>(item.len),
+                 static_cast<unsigned>(took), rssi_now());
       } else if (outcome == hg::ws::Outcome::Sent) {
         m.bytes += item.len;
         ++m.msgs;
@@ -185,13 +194,29 @@ void WsTransport::on_event(void* arg, const char*, int32_t id, void* event_data)
       break;
     case WEBSOCKET_EVENT_DISCONNECTED:
     case WEBSOCKET_EVENT_CLOSED:
+    case WEBSOCKET_EVENT_ERROR: {
       self->gens_.lost(gen);
-      events::post(EventType::WsClosed, "disconnected", 12, gen);
+      // Why, as far as anyone knows: a send that gave up, the client's error, the server's
+      // close code, and the signal (hg::link::ws_closed). The app logs it and keeps it for diag.
+      hg::link::WsError e;
+      e.error_type = d->error_handle.error_type;
+      e.sock_errno = d->error_handle.esp_transport_sock_errno;
+      e.tls_err = d->error_handle.esp_tls_last_esp_err;
+      e.http_status = d->error_handle.esp_ws_handshake_status_code;
+      e.close_code = d->close_status_code;
+      // Lost while a send of this connection was in flight: that send is what gave up.
+      hg::link::SendFailure send;
+      const bool sent_failed = gen && self->sending_gen_.load() == gen;
+      if (sent_failed) {
+        send.took_ms = now_ms() - self->sending_since_.load();
+        send.bytes = self->sending_bytes_.load();
+      }
+      const std::string why = hg::link::ws_closed(id == WEBSOCKET_EVENT_ERROR ? "connection error" : "disconnected", e,
+                                                  sent_failed ? &send : nullptr, rssi_now());
+      ESP_LOGW(TAG, "%s", why.c_str());
+      events::post(EventType::WsClosed, why.data(), why.size(), gen);
       break;
-    case WEBSOCKET_EVENT_ERROR:
-      self->gens_.lost(gen);
-      events::post(EventType::WsClosed, "connection error", 16, gen);
-      break;
+    }
     case WEBSOCKET_EVENT_DATA: {
       uint8_t op = d->op_code;
       if (op == 0x8 || op == 0x9 || op == 0xA) break;  // close/ping/pong are handled by the client
