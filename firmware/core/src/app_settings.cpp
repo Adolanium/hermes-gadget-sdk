@@ -76,6 +76,8 @@ void App::settings_input(Button button, bool pressed) {
         case Menu::ChargedNotice: return hal_.power != nullptr && hal_.display != nullptr;
         case Menu::ChargedSound: return hal_.power != nullptr && hal_.speaker != nullptr;
         case Menu::TouchWake: return profile_.touch_screen && profile_.wake_key && hal_.display != nullptr;
+        case Menu::DoubleHome: return profile_.talk_key;
+        case Menu::WakeTalk: return profile_.talk_key && hal_.mic != nullptr && hal_.display != nullptr;
         case Menu::FaceDownSleep: return can_sleep_face_down();
         case Menu::Clock: return hal_.display != nullptr;
         case Menu::PowerOff: return can_power_off;
@@ -177,6 +179,12 @@ void App::settings_input(Button button, bool pressed) {
       break;
     case Menu::TouchWake:
       console(touch_wake_ ? "set touch_wake off" : "set touch_wake on");
+      break;
+    case Menu::DoubleHome:
+      console(double_home_ ? "set double_home off" : "set double_home on");
+      break;
+    case Menu::WakeTalk:
+      console(wake_talk_ ? "set wake_talk off" : "set wake_talk on");
       break;
     case Menu::FaceDownSleep:
       console(face_down_sleep_ ? "set face_down_sleep off" : "set face_down_sleep on");
@@ -355,6 +363,14 @@ void App::settings_model() {
     case Menu::TouchWake:
       m.detail = tr(Msg::TouchWake);
       m.body = tr(touch_wake_ ? Msg::TouchWakeOn : Msg::TouchWakeOff);
+      break;
+    case Menu::DoubleHome:
+      m.detail = tr(Msg::DoubleHome);
+      m.body = tr(double_home_ ? Msg::DoubleHomeOn : Msg::DoubleHomeOff, {control(profile_.talk_label)});
+      break;
+    case Menu::WakeTalk:
+      m.detail = tr(Msg::WakeTalk);
+      m.body = tr(wake_talk_ ? Msg::WakeTalkOn : Msg::WakeTalkOff, {control(profile_.talk_label)});
       break;
     case Menu::FaceDownSleep:
       m.detail = tr(Msg::FaceDownSleep);

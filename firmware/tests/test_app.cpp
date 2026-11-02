@@ -6706,3 +6706,36 @@ TEST("wake talk: touch, a question, the menu and no connection still only wake")
   CHECK(!offline.fake.mic_on);
   offline.app.on_button(hg::Button::Talk, false);
 }
+
+TEST("settings: Double press home and Talk from dark screen toggle their settings; boards without a TALK key hide them") {
+  hg::DeviceProfile p = Rig::touch_profile();
+  p.talk_label = "BOOT";
+  Rig r(p);
+  r.bring_online_with_profiles();
+  CHECK(r.app.open_settings());
+  CHECK(find_setting(r, "Double press home"));
+  CHECK(r.app.model().body.rfind("On\n", 0) == 0);
+  CHECK(r.app.model().body.find("BOOT") != std::string::npos);
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK(!r.app.double_home());
+  CHECK_EQ(r.fake.kv["double_home"], std::string("off"));
+  CHECK(r.app.model().body.rfind("Off\n", 0) == 0);
+  r.app.console("cancel");
+  CHECK_EQ(r.app.model().detail, std::string("Talk from dark screen"));
+  CHECK(r.app.model().body.rfind("Off\n", 0) == 0);
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK(r.app.wake_talk());
+  CHECK_EQ(r.fake.kv["wake_talk"], std::string("on"));
+  CHECK(r.app.model().body.rfind("On\n", 0) == 0);
+  CHECK(r.app.model().body.find("BOOT") != std::string::npos);
+
+  hg::DeviceProfile touch_only = Rig::touch_profile();
+  touch_only.talk_key = false;
+  Rig bare(touch_only);
+  bare.bring_online_with_profiles();
+  CHECK(bare.app.open_settings());
+  CHECK(!find_setting(bare, "Double press home"));
+  CHECK(!find_setting(bare, "Talk from dark screen"));
+}
