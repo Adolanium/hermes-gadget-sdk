@@ -7,6 +7,9 @@
 //                      name under the mascot it opens the profile list instead; on the
 //                      resting clock it does nothing (the touch-down brought Ready back)
 //   tap a list row     asks Hermes for that profile
+//   in settings        a drag scrolls the list (or moves the selected row's slider,
+//                      when it starts on it), a tap changes the row under it; with a
+//                      hardware check running, a tap and a swipe down are TALK and CANCEL
 //   swipe down         a CANCEL press and release (discard, close, stop, "no")
 //
 // With the touch_talk setting off, holds and taps press TALK only where it doesn't
@@ -45,7 +48,7 @@ class TouchGestures {
   void tick(uint32_t now_ms);
 
  private:
-  enum class State : uint8_t { Idle, Pending, Settings, Picker, PickerDrag, Talk, Swipe, Ignored };
+  enum class State : uint8_t { Idle, Pending, Settings, Picker, PickerDrag, List, ListDrag, Talk, Swipe, Ignored };
   void press(Button b);
   void release(Button b);
 

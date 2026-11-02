@@ -11,7 +11,7 @@ extern const size_t kSpanishCount;
 const Entry kSpanish[] = {
     // Settings menu
     {Msg::Settings, "Ajustes"},
-    {Msg::SettingsHintTouch, "Toca cambia, desliza pasa"},
+    {Msg::SettingsHintTouch, "Toca cambia, desliza mueve"},
     {Msg::SettingsHintButtons, "{0}: cambia | {1}: pasa"},
     {Msg::SpeakerVolume, "Volumen"},
     {Msg::ChangesSaved, "Los cambios se guardan."},
@@ -25,6 +25,8 @@ const Entry kSpanish[] = {
     {Msg::TouchTalk, "Tocar para hablar"},
     {Msg::TouchTalkOn, "Activado\nToca la pantalla para hablar."},
     {Msg::TouchTalkOff, "Desactivado\nHabla con {0}; tocar solo navega."},
+    {Msg::TalkHold, "Mantener"},
+    {Msg::TalkTap, "Tocar"},
     {Msg::MicCheck, "Prueba de micrófono"},
     {Msg::MicCheckLive, "Habla ahora. Nivel: {0}%\nSolo local. No se envía nada."},
     {Msg::MicCheckIntro, "Inicia para medir el nivel del micrófono. No se guarda ni se envía nada."},

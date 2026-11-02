@@ -44,6 +44,8 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
         release(Button::Talk);
         break;
       case State::Picker: app_.profile_tap(x0_, y0_); break;
+      case State::List: app_.settings_tap(x0_, y0_); break;
+      case State::ListDrag: app_.settings_lift(); break;
       case State::Talk: release(Button::Talk); break;
       case State::Swipe: release(Button::Cancel); break;
       default: break;
@@ -61,7 +63,9 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
     app_.close_notices_for_input();  // a low battery alert goes, and the touch acts on what is under it
     state_ = app_.profile_picker_open() ? State::Picker
               : !from_clock_ && app_.settings_title_hit(x, y) ? State::Settings
+              : app_.settings_list_live() ? State::List
               : State::Pending;
+    if (state_ == State::List) app_.settings_press(x, y);
     on_name_ = !from_clock_ && state_ == State::Pending && app_.profile_name_hit(x, y);
     x0_ = x;
     y0_ = y;
@@ -83,6 +87,13 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
         state_ = dy < 0 || std::abs(dx) >= std::abs(dy) ? State::Ignored : State::PickerDrag;
       }
       break;
+    case State::List:  // still a tap until the finger leaves the slop
+      if (std::abs(dx) > cfg_.slop_px || std::abs(dy) > cfg_.slop_px) {
+        state_ = State::ListDrag;
+        app_.settings_drag(x, y);
+      }
+      break;
+    case State::ListDrag: app_.settings_drag(x, y); break;
     case State::Settings:
       if (swiped_down) {
         state_ = State::Swipe;

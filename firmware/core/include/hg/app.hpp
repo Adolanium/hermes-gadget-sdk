@@ -144,6 +144,21 @@ class App {
   void close_settings();
   bool settings_open() const { return menu_ != Menu::Closed; }
   bool settings_title_hit(int x, int y) const;
+  // Touch on the settings list (TouchGestures), in panel coordinates. While it is
+  // live (open, no hardware check running), a press starts a touch; a drag scrolls
+  // the list with the finger, or moves the selected row's slider when the press
+  // landed on it; a tap (a press that did not move) selects a row and changes it;
+  // lift ends a drag, setting the slider's level.
+  bool settings_list_live() const;
+  // The list row under a point (-1: none), and the level the selected row's slider picks there (-1: off it).
+  int settings_row_hit(int x, int y) const { return ui_ && settings_open() ? ui_->settings_row_hit(model_, x, y) : -1; }
+  int settings_slider_hit(int x, int y) const {
+    return ui_ && settings_open() ? ui_->settings_slider_at(model_, x, y, false) : -1;
+  }
+  void settings_press(int x, int y);
+  void settings_drag(int x, int y);
+  void settings_tap(int x, int y);
+  void settings_lift();
   // Hermes profiles: which one answers this device. Switching asks the server; the
   // device keeps a profile only once Hermes confirms it, and asks again only after an answer.
   bool next_agent_profile();
@@ -182,7 +197,8 @@ class App {
   std::string agent_profile_name() const;
   // Returns true when this input only wakes a sleeping display.
   bool wake_display();
-  // A short press of the PMIC's power key: turns the screen off, or back on.
+  // A short press of the PMIC's power key: turns the screen off, or back on. In
+  // the settings menu it is Back: the menu closes and the screen stays lit.
   // Wi-Fi and the Hermes connection stay up.
   void on_power_key();
   // Dozing (System::set_dozing): the port's loop may wait this long for events.
@@ -442,6 +458,22 @@ class App {
                               Info, Power, BatteryAlert, BatteryAlertSound, ChargingNotice, ChargingSound, ChargedNotice, ChargedSound, IdleTimer, TouchWake, FaceDownSleep, Clock, PowerOff, WifiSetup, Phone, Language, Back };
   enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };
   Menu menu_ = Menu::Closed;
+  // The settings list's scroll in pixels, and where it eases to. It follows the
+  // selected row until a drag moves it by hand, and again once the selection moves.
+  int settings_scroll_ = 0, settings_target_ = 0;
+  bool settings_follow_ = true;
+  uint32_t settings_step_at_ = 0;
+  int press_y_ = 0, press_scroll_ = 0;
+  bool sliding_ = false;  // the press landed on the selected row's slider
+  int slide_level_ = -1;  // a slider being dragged: its level until the finger lifts
+  Menu slide_item_ = Menu::Closed;  // the item a drag on its slider began on
+  Menu settings_item_at(int row) const;
+  void settings_select(Menu item);
+  void settings_set_level(int level);
+  bool menu_offered(Menu item) const;
+  // An item's name and text, in `m`'s detail and body (the model's own for the selected item), and its row.
+  void settings_item(Menu item, UiModel& m) const;
+  SettingRow settings_row(Menu item, const std::string& label, const std::string& body) const;
   HardwareCheck hardware_check_ = HardwareCheck::None;
   std::string check_result_;
   std::string wifi_setup_text_;
@@ -660,7 +692,7 @@ class App {
   // frame timing: the running statistics while `perf` is on, and the bench
   std::unique_ptr<FrameStats> frame_stats_;
   uint32_t frame_log_at_ = 0, frame_log_frames_ = 0;
-  enum class Bench : uint8_t { None, Scroll, Mascot, Redraw };
+  enum class Bench : uint8_t { None, Scroll, Mascot, Redraw, Settings };
   Bench bench_ = Bench::None, bench_last_ = Bench::None;  // running; the last one to run of `perf bench all`
   int bench_frame_ = 0;
   FrameStats bench_stats_;

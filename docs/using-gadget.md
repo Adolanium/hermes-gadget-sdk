@@ -94,12 +94,18 @@ On ESP32 boards, `set timezone` chooses the clock's timezone as a POSIX TZ strin
 
 Hold TALK and CANCEL together for one second to open or close device settings. On a touchscreen, hold the title bar for one second. Round displays have no title bar; they show a **SETTINGS** target beneath the status dot instead. Hold it for one second. Touches in the target do not start recording. The target is hidden while a question, update or Wi-Fi setup is on screen, because holding it does nothing then. While settings is open, its label reads **BACK TO HERMES**; hold it again for one second to return. Settings also work while the device is offline. Opening settings stops the current recording or reply.
 
-Tap CANCEL to move to the next item, then tap TALK to change it. On a touchscreen, swipe down for the next item and tap to select. Boards with Up and Down buttons can move in either direction. Select **Back to Hermes** to leave.
+Settings is one list. Each row shows a small icon, the item's name, and its state at the right: a value, an on/off switch, a percentage, or `>` for an action. The selected row is highlighted and shows its description underneath; volume and brightness also show a slider there.
+
+Tap CANCEL to move to the next item, then tap TALK to change it. Boards with Up and Down buttons, or a knob, can move in either direction. The list scrolls smoothly to keep the selected row in view.
+
+On a touchscreen, drag the list up or down to scroll it, and tap a row to change it. The first tap on an on/off item flips it. The first tap on volume or brightness opens its slider; tap or drag along the bar to set the level, in steps of 5 percent. A drag only scrolls; it changes nothing. While a hardware check runs, a tap stops it and a swipe down moves to the next item, as before.
+
+Select **Back to Hermes** to leave.
 
 | Item | What it does |
 |---|---|
-| Speaker volume | Change volume in steps of 10 percent |
-| Screen brightness | Choose 10, 25, 50, 75, or 100 percent when the display supports it |
+| Speaker volume | Change volume in steps of 10 percent, or set it with the slider on a touchscreen |
+| Screen brightness | Choose 10, 25, 50, 75, or 100 percent when the display supports it, or set it with the slider on a touchscreen (5 to 100 percent) |
 | Talk mode | Choose hold-to-talk or tap-to-talk with silence detection |
 | Touch to talk | Touchscreens with a TALK button (BOOT on most): choose whether holding or tapping the screen talks; on by default |
 | Hermes profile | Choose the Hermes profile (touchscreens), or switch to the next one; shown only when Hermes offers more than one |
@@ -160,7 +166,7 @@ Screen timeout is off by default. When enabled, a brightness-capable display dim
 
 On a touchscreen with a button that can wake the screen (TALK, BOOT or PWR), the **Touch wakes screen** settings item or `set touch_wake off` leaves the touchscreen out of waking it: while the screen is dark, touches are ignored, and only a button press lights it. That press only wakes the screen, as before. Once it is lit, the touchscreen works as usual. A gadget in a pocket or bag then stays dark however it is touched. Boards without such a button ignore the setting, since the touchscreen is their only way back. It is on by default.
 
-On the AMOLED-1.75C, a short press of PWR puts the screen to sleep the same way, whether or not Screen timeout is on. The same activities keep it awake: a press during recording, playback, Wi-Fi setup or an update does nothing. The press closes the settings menu, the profile list, the dashboard, or a card or image on screen, so the screen wakes to the home screen. Press PWR again, touch the screen or press BOOT to wake it. Replies and prompts wake it as well; Wi-Fi or the connection to Hermes dropping and coming back does not.
+On the AMOLED-1.75C, a short press of PWR puts the screen to sleep the same way, whether or not Screen timeout is on. The same activities keep it awake: a press during recording, playback, Wi-Fi setup or an update does nothing. In the settings menu, the press is Back instead: it closes the menu, and any hardware check running in it, and leaves the screen lit on the home screen; a second press there turns the screen off. Over the profile list, the dashboard, or a card or image, the press closes it and turns the screen off, so the screen wakes to the home screen. Press PWR again, touch the screen or press BOOT to wake it. Replies and prompts wake it as well; Wi-Fi or the connection to Hermes dropping and coming back does not.
 
 Boards with a motion sensor and a backlit display (the AMOLED-1.75) can also sleep face down. This is off by default; turn it on with the **Face-down sleep** settings item or `set face_down_sleep on`. After about a second lying face down the screen goes dark, listening is cancelled and Hermes goes quiet: a reply being spoken stops, and speech that arrives while the gadget lies there is dropped. Hermes keeps working, and the reply's text waits; it shows from the top once the gadget is turned over. A ringing timer alarm goes quiet too, and stays quiet when the gadget is turned back over: laying it face down is a way to hush it. A timer that ends face down still rings, with the screen dark. Nothing lights the screen while it lies there, and turning it over lights it within a second; if the sensor stops reporting, the screen lights on its own.
 
