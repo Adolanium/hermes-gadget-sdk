@@ -1315,7 +1315,9 @@ void App::on_button(Button button, bool pressed, bool touch) {
     talk_held_ = pressed;
     if (pressed) talk_down_at_ = now();
   }
-  if (talk_key && !settings_chord_fired_) {
+  // A press that answers a question or selects in the menu is never the first of a double press:
+  // a quick second one would cancel the turn the answer resumed, or leave the menu it closed.
+  if (talk_key && !settings_chord_fired_ && !settings_open() && !prompt_showing()) {
     talk_key_armed_ = true;  // the first of a double press, perhaps
     talk_key_at_ = now();
   }

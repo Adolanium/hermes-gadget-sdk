@@ -6739,3 +6739,30 @@ TEST("settings: Double press home and Talk from dark screen toggle their setting
   CHECK(!find_setting(bare, "Double press home"));
   CHECK(!find_setting(bare, "Talk from dark screen"));
 }
+
+TEST("double press: a press that answers a question or selects Back in the menu starts none") {
+  Rig r;
+  r.bring_online_with_profiles(true, "ops");
+  r.server(R"({"type":"turn.start","turn":"t1"})");
+  r.server(R"({"type":"prompt","id":"q1","title":"Allow?","text":"ls"})");
+  r.advance(1000);  // the question is armed for an answer
+  press_talk(r, 60);
+  CHECK(r.fake.last("prompt.reply") != nullptr);
+  r.advance(100);
+  r.app.on_button(hg::Button::Talk, true);  // within 400 ms of the answer
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.last("cancel") == nullptr);
+  CHECK(r.fake.last("profile.select") == nullptr);
+
+  Rig menu;
+  menu.bring_online_with_profiles(true, "ops");
+  CHECK(menu.app.open_settings());
+  CHECK(find_setting(menu, "Back to Hermes"));
+  press_talk(menu, 60);
+  CHECK(!menu.app.settings_open());
+  menu.advance(100);
+  menu.app.on_button(hg::Button::Talk, true);
+  CHECK(menu.app.screen() == hg::Screen::Listening);
+  menu.app.on_button(hg::Button::Talk, false);
+  CHECK(menu.fake.last("profile.select") == nullptr);
+}
