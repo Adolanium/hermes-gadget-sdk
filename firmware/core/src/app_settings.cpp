@@ -297,12 +297,12 @@ SettingRow App::settings_row(Menu item, const std::string& label, const std::str
     case Menu::Volume:
       row.icon = Icon::Volume;
       if (hal_.speaker) { row.kind = Kind::Slider; row.level = static_cast<uint8_t>(volume_); }
-      if (row.kind == Kind::Slider && item == menu_ && slide_level_ >= 0) row.level = static_cast<uint8_t>(slide_level_);
+      if (row.kind == Kind::Slider && item == menu_ && item == slide_item_ && slide_level_ >= 0) row.level = static_cast<uint8_t>(slide_level_);
       break;
     case Menu::Brightness:
       row.icon = Icon::Sun;
       if (hal_.display && hal_.display->info().has_backlight) { row.kind = Kind::Slider; row.level = static_cast<uint8_t>(brightness_); }
-      if (row.kind == Kind::Slider && item == menu_ && slide_level_ >= 0) row.level = static_cast<uint8_t>(slide_level_);
+      if (row.kind == Kind::Slider && item == menu_ && item == slide_item_ && slide_level_ >= 0) row.level = static_cast<uint8_t>(slide_level_);
       break;
     case Menu::TalkMode:
       row.icon = Icon::Talk;
@@ -369,15 +369,23 @@ void App::settings_set_level(int level) {
 }
 
 void App::settings_press(int x, int y) {
+  // The list stops where it is: a tap acts on the row under the finger at touch-down.
+  if (settings_scroll_ != settings_target_) {
+    settings_target_ = settings_scroll_;
+    settings_follow_ = false;
+  }
   press_y_ = y;
   press_scroll_ = settings_scroll_;
   slide_level_ = -1;
   sliding_ = settings_list_live() && ui_->settings_slider_at(model_, x, y, false) >= 0;
+  slide_item_ = menu_;
 }
 
 void App::settings_drag(int x, int y) {
   if (!settings_list_live()) return;
-  if (sliding_) {
+  if (sliding_ && menu_ != slide_item_) {  // a knob or a key moved the selection: the slide ends unsaved,
+    slide_level_ = -1;                      // and the rest of this drag does nothing
+  } else if (sliding_) {
     slide_level_ = ui_->settings_slider_at(model_, x, y, true);
   } else {
     // The list follows the finger, within its ends.
@@ -418,7 +426,7 @@ void App::settings_lift() {
   if (slide_level_ >= 0) {
     const int level = slide_level_;
     slide_level_ = -1;
-    settings_set_level(level);
+    if (menu_ == slide_item_) settings_set_level(level);  // a knob moved off the slider meanwhile: no save
   }
   update_model();
 }

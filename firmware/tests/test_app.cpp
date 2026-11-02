@@ -6738,6 +6738,75 @@ TEST("settings list: a slider opens on the first tap, then a tap or a drag on it
   CHECK_EQ(r.app.model().detail, std::string("Screen brightness"));
 }
 
+TEST("settings list: a value cut short on its row keeps its full text in the description") {
+  FakeHal display;
+  display.make_panel(240, 135);
+  hg::Ui ui(display);
+  const auto selected_h = [&](const std::string& value) {
+    hg::UiModel m;
+    m.screen = hg::Screen::Settings;
+    for (int i = 0; i < 12; ++i) {  // enough rows for a scroll bar
+      hg::SettingRow row;
+      row.label = i == 0 ? "Language" : "Item";
+      row.value = i == 0 ? value : "x";
+      m.settings.push_back(row);
+    }
+    m.settings_sel = 0;
+    m.body = value + "\nSelect to change.";
+    return ui.settings_row_h(m, 0);
+  };
+  // "English" fits beside the label, so the description drops the repeat; the long
+  // value is cut on the row, so its full line stays in the description.
+  CHECK(selected_h("Automatic, as Hermes: English") > selected_h("English"));
+}
+
+TEST("settings list: a tap while the list eases changes the row that was under the finger") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  hg::TouchGestures touch(r.app);
+  r.app.on_button(hg::Button::Up, true);  // to the last item: the list starts easing to the end
+  CHECK_EQ(r.app.model().detail, std::string("Back to Hermes"));
+  const int last = r.app.model().settings_sel;
+  // A row in the middle of the screen, as it is now.
+  const int x = r.fake.width / 2, y = r.fake.height / 2;
+  const int under = r.app.settings_row_hit(x, y);
+  CHECK(under >= 0 && under != last);
+  touch.update(true, x, y, r.fake.clock);
+  r.advance(100);  // the list would keep easing under a still finger
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(r.app.settings_open());
+  CHECK_EQ(r.app.model().settings_sel, under);
+}
+
+TEST("settings list: a slide is not saved when a knob moves the selection before the lift") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  CHECK_EQ(r.app.model().detail, std::string("Speaker volume"));
+  hg::TouchGestures touch(r.app);
+  int left = -1, bar_y = -1;
+  for (int y = 0; y < r.fake.height && bar_y < 0; ++y)
+    for (int x = 0; x < r.fake.width; ++x)
+      if (r.app.settings_slider_hit(x, y) == 0 && r.app.settings_slider_hit(x + 1, y) > 0) { left = x; bar_y = y; break; }
+  CHECK(bar_y >= 0);
+  int saves = 0;
+  r.app.on_setting_changed = [&](std::string_view) { ++saves; };
+  touch.update(true, left, bar_y, r.fake.clock);
+  touch.update(true, left + 20, bar_y, r.fake.clock + 10);
+  r.app.on_button(hg::Button::Down, true);  // the knob moves on to brightness mid-slide
+  CHECK_EQ(r.app.model().detail, std::string("Screen brightness"));
+  CHECK_EQ(int(r.app.model().settings[1].level), 100);  // no preview of the volume slide here
+  touch.update(true, left + 40, bar_y, r.fake.clock + 20);
+  touch.update(false, 0, 0, r.fake.clock + 30);
+  CHECK_EQ(saves, 0);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK_EQ(int(r.app.model().settings[1].level), 100);
+  CHECK_EQ(int(r.app.model().settings[0].level), 70);
+}
+
 TEST("settings list: with a check running, a tap stops it and a swipe down moves on, as before") {
   Rig r(Rig::touch_profile());
   r.fake.backlight = true;

@@ -1090,6 +1090,12 @@ void draw_icon(Canvas& c, int x, int y, SettingRow::Icon icon, int scale, uint16
 // holds its description. Coordinates are relative to the list's top.
 int settings_row_base(int s, int touch_px) { return std::max(Canvas::line_height(s) + 6 * s, touch_px * 2 / 3); }
 
+// The columns a Value row's text gets at the right: what the label leaves, at least half the row.
+int settings_value_cols(const SettingRow& row, int row_cols) {
+  const int room = row_cols - static_cast<int>(font::length(row.label)) - 1;
+  return std::max(std::min(room, static_cast<int>(font::length(row.value))), row_cols / 2);
+}
+
 std::vector<std::string> Ui::settings_desc(const UiModel& m) const {
   if (m.settings_sel < 0 || m.settings_sel >= static_cast<int>(m.settings.size())) return {};
   const SettingRow& row = m.settings[static_cast<size_t>(m.settings_sel)];
@@ -1097,8 +1103,12 @@ std::vector<std::string> Ui::settings_desc(const UiModel& m) const {
   std::string_view body = m.body;
   // The value already shows at the right: drop the body's first line when it repeats it.
   const size_t nl = body.find('\n');
-  // A slider's first line is its percentage, which may be a slide's preview.
-  if ((row.kind == SettingRow::Kind::Slider || (!row.value.empty() && body.substr(0, nl) == row.value))) body = nl == std::string_view::npos ? "" : body.substr(nl + 1);
+  // A slider's first line is its percentage, which may be a slide's preview. A value shortened
+  // to fit its row keeps its full line here (the row's width as drawn with a scroll bar).
+  const int row_cols = cols_for(info_.width - 15 * s - 7 * s, s);
+  const bool whole = static_cast<int>(font::length(row.value)) <= settings_value_cols(row, row_cols);
+  if (row.kind == SettingRow::Kind::Slider || (!row.value.empty() && whole && body.substr(0, nl) == row.value))
+    body = nl == std::string_view::npos ? "" : body.substr(nl + 1);
   return wrap_text(std::string(body), cols_for(info_.width - 22 * s, s));  // the text column, beside a scroll bar
 }
 
@@ -1222,9 +1232,7 @@ void Ui::draw_settings(Canvas& c, const UiModel& m, int y0, int y1) {
         c.text(ctrl_x, ty, row.value, s, sel ? kAccent : kDim);
         break;
       case SettingRow::Kind::Value: {
-        const int room = cols_for(right - text_x, s) - static_cast<int>(font::length(row.label)) - 1;
-        const std::string v = fit(row.value, std::max(std::min(room, static_cast<int>(font::length(row.value))),
-                                                      cols_for(right - text_x, s) / 2));
+        const std::string v = fit(row.value, settings_value_cols(row, cols_for(right - text_x, s)));
         ctrl_x = right - Canvas::text_width(v, s);
         c.text(ctrl_x, ty, v, s, sel ? kAccent : kDim);
         break;

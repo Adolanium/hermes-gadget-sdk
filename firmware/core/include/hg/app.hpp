@@ -458,6 +458,7 @@ class App {
   int press_y_ = 0, press_scroll_ = 0;
   bool sliding_ = false;  // the press landed on the selected row's slider
   int slide_level_ = -1;  // a slider being dragged: its level until the finger lifts
+  Menu slide_item_ = Menu::Closed;  // the item a drag on its slider began on
   Menu settings_item_at(int row) const;
   void settings_select(Menu item);
   void settings_set_level(int level);
