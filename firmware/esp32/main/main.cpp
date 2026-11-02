@@ -565,6 +565,7 @@ extern "C" void app_main(void) {
   if (board.light_sleep) keep_pins_through_sleep(board);
 #if !CONFIG_HG_BOARD_ESP32_CYD
   g_system.on_doze_start = [] { g_codec_speaker.power_down(); };
+  hgp::EspSystem::on_sleep_held_change = [] { g_touch.nudge(); };
   g_system.on_doze_end = [] {
     g_touch.nudge();
     g_codec_speaker.power_up();

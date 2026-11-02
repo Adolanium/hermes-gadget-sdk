@@ -83,6 +83,17 @@ bool EspSystem::enable_doze() {
 
 bool EspSystem::dozing_now() { return g_dozing.load(std::memory_order_relaxed); }
 
+namespace {
+std::atomic<bool> g_sleep_held{false};
+}
+
+void EspSystem::set_sleep_held(bool held) {
+  if (g_sleep_held.exchange(held) == held) return;
+  if (on_sleep_held_change) on_sleep_held_change();
+}
+
+bool EspSystem::sleep_held_now() { return g_sleep_held.load(std::memory_order_relaxed); }
+
 void EspSystem::set_dozing(bool dozing) {
   if (!awake_ || dozing == dozing_) return;
   dozing_ = dozing;

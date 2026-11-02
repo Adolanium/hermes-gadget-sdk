@@ -148,6 +148,11 @@ class EspSystem final : public hg::System {
   bool enable_doze();
   void set_dozing(bool dozing) override;
   static bool dozing_now();  // for tasks that poll: poll less while dozing
+  // A lock holds the chip out of light sleep even while dozing (a Wi-Fi join attempt).
+  // A task that relies on light-sleep wakes then keeps its awake path instead.
+  static void set_sleep_held(bool held);
+  static bool sleep_held_now();
+  static inline void (*on_sleep_held_change)() = nullptr;  // e.g. end the touch task's wait
   std::function<void()> on_doze_start;  // e.g. power the speaker down
   std::function<void()> on_doze_end;    // e.g. power it up, retry Wi-Fi now: the user is back
 

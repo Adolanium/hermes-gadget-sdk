@@ -44,8 +44,14 @@ void Wifi::hold_while_attempting() {
   const bool want = retry_.attempting();
   if (!attempt_lock_ || want == attempt_held_) return;
   attempt_held_ = want;
-  if (want) esp_pm_lock_acquire(attempt_lock_);
-  else esp_pm_lock_release(attempt_lock_);
+  // Tell the touch task first, so it is back on its INT edge before the chip stays awake.
+  if (want) {
+    EspSystem::set_sleep_held(true);
+    esp_pm_lock_acquire(attempt_lock_);
+  } else {
+    esp_pm_lock_release(attempt_lock_);
+    EspSystem::set_sleep_held(false);
+  }
 }
 
 void Wifi::retry_now() {

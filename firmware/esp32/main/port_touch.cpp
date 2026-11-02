@@ -502,8 +502,10 @@ void TouchInput::task(void* arg) {
     // Dozing (screen off, on battery), poll less often so the chip can light-sleep
     // between polls; a touch still wakes the screen within about 50 ms. With INT armed
     // as a wake source and nothing else to poll, only a wake or nudge() ends the wait.
+    // While a Wi-Fi join attempt holds the chip awake, the doze has no light sleep to wake
+    // from, so INT stays on its edge interrupt and a tap is read as when awake.
     const bool dozing = EspSystem::dozing_now();
-    self->arm_sleep_wake(dozing);
+    self->arm_sleep_wake(dozing && !EspSystem::sleep_held_now());
     const bool int_only = self->sleep_wake_armed_ && !self->key_dev_ && self->encoder_a_ == GPIO_NUM_NC;
     self->wait(!dozing ? kPollMs : int_only ? kArmedDozeWaitMs : kDozePollMs);
   }
