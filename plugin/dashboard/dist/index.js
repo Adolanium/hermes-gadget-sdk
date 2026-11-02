@@ -14,7 +14,9 @@
     return profile ? `${API}/devices?profile=${encodeURIComponent(profile)}` : `${API}/devices`;
   }
   var REFRESH_MS = 1e4;
+  var REQUEST_TIMEOUT_MS = 15e3;
   function errorText(err) {
+    if (err && err.name === "AbortError") return "The Hermes dashboard did not answer in time";
     return String(err && err.message || err).replace(/^Error:\s*/, "");
   }
   function when(ts) {
@@ -57,7 +59,9 @@
     const load = useCallback(() => {
       const request = ++latestRequest;
       setLoading(true);
-      return SDK.fetchJSON(devicesUrl()).then((d) => {
+      const abort = new AbortController();
+      const timeout = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
+      return SDK.fetchJSON(devicesUrl(), { signal: abort.signal }).then((d) => {
         if (request === latestRequest) {
           setData(d);
           setError("");
@@ -65,6 +69,7 @@
       }).catch((e) => {
         if (request === latestRequest) setError(errorText(e));
       }).finally(() => {
+        clearTimeout(timeout);
         if (request === latestRequest) setLoading(false);
       });
     }, []);
