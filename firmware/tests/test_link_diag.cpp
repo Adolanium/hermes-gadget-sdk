@@ -39,3 +39,12 @@ TEST("link diag: a close names the client's error, a refused upgrade and the ser
            std::string("disconnected: server close; close code 1008; rssi -50"));
   CHECK_EQ(hg::link::ws_closed("disconnected", hg::link::WsError{}, nullptr, 0), std::string("disconnected"));
 }
+
+TEST("link diag: a refused upgrade keeps its HTTP status though the client reports a transport error") {
+  // esp_websocket_client 1.8.0 aborts a refused upgrade as WEBSOCKET_ERROR_TYPE_TCP_TRANSPORT.
+  hg::link::WsError e;
+  e.error_type = 1;
+  e.http_status = 401;
+  CHECK_EQ(hg::link::ws_closed("connection error", e, nullptr, -58),
+           std::string("connection error: transport http 401; rssi -58"));
+}

@@ -198,15 +198,17 @@ void WsTransport::on_event(void* arg, const char*, int32_t id, void* event_data)
       self->gens_.lost(gen);
       // Why, as far as anyone knows: a send that gave up, the client's error, the server's
       // close code, and the signal (hg::link::ws_closed). The app logs it and keeps it for diag.
-      // The client fills the socket and TLS fields only for a transport error, and the upgrade
-      // status only matters for a refused handshake; the rest may be left over or uninitialised.
+      // The client fills the socket and TLS fields only for a transport error; the rest may be
+      // left over or uninitialised. The upgrade's HTTP status is always copied, and a refused
+      // upgrade is reported as a transport error, so any status but 101 (switching) is kept.
       hg::link::WsError e;
       e.error_type = d->error_handle.error_type;
       if (e.error_type == WEBSOCKET_ERROR_TYPE_TCP_TRANSPORT) {
         e.sock_errno = d->error_handle.esp_transport_sock_errno;
         e.tls_err = d->error_handle.esp_tls_last_esp_err;
       }
-      if (e.error_type == WEBSOCKET_ERROR_TYPE_HANDSHAKE) e.http_status = d->error_handle.esp_ws_handshake_status_code;
+      const int status = d->error_handle.esp_ws_handshake_status_code;
+      if (status > 0 && status != 101) e.http_status = status;
       e.close_code = d->close_status_code;  // esp_websocket_client 1.8.0 and later
       // Lost while a send of this connection was in flight: that send is what gave up.
       hg::link::SendFailure send;

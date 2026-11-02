@@ -6561,9 +6561,19 @@ TEST("diag: a recording a lost connection cut short is the last recording") {
     r.advance(40);
   }
   r.app.on_transport_closed("disconnected");
-  const Value v = diag_of(r);
+  Value v = diag_of(r);
   CHECK(v["recordings"]["last"]["ms"].as_int() >= 600);
-  CHECK_EQ(v["recordings"]["last"]["frames_lost"].as_int(), int64_t(0));
+  CHECK_EQ(v["recordings"]["last"]["frames_lost"].as_int(), int64_t(0));  // every frame went
+
+  // Cut short with part of a frame built: that part never went.
+  reconnect(r);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_mic_samples(pcm.data(), pcm.size());
+  r.app.on_mic_samples(pcm.data(), 320);
+  r.advance(500);
+  r.app.on_transport_closed("disconnected");
+  v = diag_of(r);
+  CHECK_EQ(v["recordings"]["last"]["frames_lost"].as_int(), int64_t(1));
 }
 
 TEST("diag: the close history keeps the last five") {

@@ -492,7 +492,10 @@ void App::drop_session(std::string_view reason) {
   }
   if (mode_ == Mode::Listening) {
     if (hal_.mic) hal_.mic->stop();
-    // A recording the loss cut short is the last recording diag reports.
+    // A recording the loss cut short is the last recording diag reports; the part frame
+    // still being built never went, so it counts as lost.
+    if (!mic_pending_.empty()) ++mic_unsent_;
+    mic_pending_.clear();
     rec_stats_.any = true;
     rec_stats_.last_ms = now() - mode_since_;
     rec_stats_.last_unsent = mic_unsent_;
