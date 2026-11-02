@@ -8190,13 +8190,18 @@ TEST("recording buffer: a turn that ends some other way takes its unsent recordi
   r.fake.refuse_binary = true;  // the link never takes the rest
   r.app.on_button(hg::Button::Talk, false);
   CHECK(r.app.in_turn());
-  r.advance(181000);  // past the 180 s Thinking gives Hermes
+  for (int i = 0; i < 10; ++i) {  // past the 180 s Thinking gives Hermes, the server pinging meanwhile
+    r.advance(18100);
+    r.server(R"({"type":"ping","ts":1})");
+  }
   CHECK(!r.app.in_turn());
   r.fake.refuse_binary = false;
   const size_t before = r.fake.sent_binary.size();
   r.advance(1000);
   CHECK_EQ(r.fake.sent_binary.size(), before);  // nothing more goes
   CHECK(r.fake.last("audio.end") == nullptr);
+  const Value* cancel = r.fake.last("audio.cancel");  // and the hub drops what it has
+  CHECK(cancel && (*cancel)["reason"].as_string() == "timeout");
 }
 
 TEST("diag: a buffered recording logs its length, frames lost and the link's backlog, and diag keeps the last") {
@@ -8363,4 +8368,51 @@ TEST("recording buffer: a new session drops a recording still uploading") {
   r.advance(500);
   CHECK_EQ(r.fake.sent_binary.size(), before);  // nothing of it follows session.new
   CHECK(r.fake.last("audio.end") == nullptr);
+}
+
+TEST("recording buffer: talking over a recording still uploading replaces it, and the hub hears so") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  const int first = static_cast<int>((*r.fake.last("audio.start"))["stream"].as_int());
+  sp.talk(r, 3);
+  r.fake.refuse_binary = true;
+  sp.talk(r, 5);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  r.app.on_button(hg::Button::Talk, true);  // talks again before the first one has all gone
+  const Value* cancel = r.fake.last("audio.cancel");
+  CHECK(cancel && (*cancel)["stream"].as_int() == first);
+  CHECK(cancel && (*cancel)["reason"].as_string() == "replaced");
+  const Value* start = r.fake.last("audio.start");
+  CHECK(start && (*start)["stream"].as_int() != first);
+  r.fake.refuse_binary = false;
+  r.advance(50);
+  for (const auto& f : r.fake.sent_binary) {
+    hg::proto::BinaryFrame b;
+    if (hg::proto::parse_binary(f.data(), f.size(), b)) CHECK(b.stream != first || b.seq < 100);
+  }
+  CHECK(uploaded(r, first, 0).size() <= size_t(3 * 1600));  // only what went before the stall
+}
+
+TEST("recording buffer: once its audio.end goes, the Thinking timeout is the short one again") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 3);
+  r.fake.refuse_binary = true;
+  sp.talk(r, 3);
+  r.app.on_button(hg::Button::Talk, false);
+  r.server(R"({"type":"turn.start","turn":"old"})");  // the earlier turn's, during the upload
+  r.fake.refuse_binary = false;
+  r.advance(50);
+  CHECK(r.fake.last("audio.end") != nullptr);
+  for (int i = 0; i < 10; ++i) {  // Hermes never answers this request; the server pings meanwhile
+    r.advance(18100);
+    r.server(R"({"type":"ping","ts":1})");
+  }
+  CHECK(!r.app.in_turn());
+  CHECK_EQ(r.app.model().detail, std::string("No reply from Hermes"));
 }

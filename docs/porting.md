@@ -93,6 +93,10 @@ CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 
 The last line puts the Wi-Fi and lwIP buffers in PSRAM, so the larger windows don't take internal RAM, which the audio path and the radio need. When a module turns out to have no PSRAM (most profiles set `CONFIG_SPIRAM_IGNORE_NOTFOUND`), they fall back to internal RAM. A board without PSRAM keeps the defaults.
 
+## Recording buffer
+
+A board with PSRAM sets `DeviceProfile::recording_alloc` to a PSRAM allocator (`main.cpp` does when `esp_psram_is_initialized()`). The app then keeps each recording whole while it uploads, so a slow link delays audio instead of dropping it and a connection lost mid-recording loses nothing ([the recording buffer](architecture.md#the-recording-buffer)). It takes 1 MB at 16 kHz or 1.5 MB at 24 kHz at start-up. Have it return null unless about 1 MB of PSRAM stays free afterwards (`RecordingBuffer::leaves_headroom`), as `main.cpp` does: faces, WebSocket send copies and event payloads prefer PSRAM and would otherwise fall back to internal RAM. Leave it unset without PSRAM.
+
 ## Battery and power
 
 Set `Hal::power` only after the board's power driver starts successfully. `Power::read()` returns current readings or `nullopt` on a failed read. Each measurement is optional; omit a percentage when the hardware has no fuel gauge. `power_off()` requests a local shutdown and reports whether the request succeeded. The settings menu asks for a second selection before calling it.
@@ -110,8 +114,6 @@ CoreS3 has a separate `CoreS3Control` in `firmware/drivers/cores3.cpp`. It enabl
 A display that advertises `has_backlight` must accept zero percent to turn dark. An OLED or AMOLED driver sets `emissive`, so the UI draws its background true black and leaves those pixels unlit. `screen_timeout` dims and then darkens an idle display while keeping the device connected. Raw touch drivers should use `TouchGestures`, which consumes the first touch when waking. Button input through `App::on_button` does the same.
 
 ## Motion
-
-A board with PSRAM sets `DeviceProfile::recording_alloc` to a PSRAM allocator (`main.cpp` does when `esp_psram_is_initialized()`). The app then keeps each recording whole while it uploads, so a slow link delays audio instead of dropping it and a connection lost mid-recording loses nothing ([the recording buffer](architecture.md#the-recording-buffer)). It takes 1 MB at 16 kHz or 1.5 MB at 24 kHz at start-up. Have it return null unless about 1 MB of PSRAM stays free afterwards (`RecordingBuffer::leaves_headroom`), as `main.cpp` does: faces, WebSocket send copies and event payloads prefer PSRAM and would otherwise fall back to internal RAM. Leave it unset without PSRAM.
 
 Boards with an accelerometer can offer face-down sleep. Set `DeviceProfile::motion_sensor` when the sensor starts, and call `App::on_motion(x_mg, y_mg, z_mg)` from the app task 5-25 times a second with lightly smoothed milli-g values in the device frame: `+x` towards the right of the picture, `+y` towards its top, `+z` out of the screen towards the viewer. A board lying flat with the screen up reads about `(0, 0, +1000)`. Samples older than two seconds are ignored, so a stalled sensor cannot keep the screen dark.
 

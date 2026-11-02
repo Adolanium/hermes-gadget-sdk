@@ -1492,6 +1492,8 @@ void App::start_listening(bool hands_free) {
     set_hint_flash(tr(i18n::Msg::MicUnavailable));
     return;
   }
+  // Talking over a recording still uploading replaces it: the hub drops its part first.
+  if (rec_on_) cancel_upload("replaced");
   hands_free_ = hands_free;
   mic_stream_ = static_cast<uint8_t>(mic_stream_ % 250 + 1);
   mic_seq_ = 0;
@@ -1590,6 +1592,7 @@ void App::cancel_listening(std::string_view why) {
 void App::go_home() {
   wake_display();
   if (mode_ == Mode::Listening) cancel_listening("cancelled");
+  if (rec_on_) cancel_upload("cancelled");  // a finished recording still uploading goes with the turn
   // Leaving the bot stops it: a reply on its way, or one the first press talked over.
   if (mode_ != Mode::Idle || (!active_turn_.empty() && !turn_done_)) {
     stop_playback();
@@ -1644,6 +1647,7 @@ void App::pump_recording() {
   json::Value end = proto::message("audio.end");
   end.set("id", request_id_).set("stream", mic_stream_).set("duration_ms", rec_duration_ms_);
   if (!send(end)) return;  // tried again next tick; a lost connection holds the recording
+  turn_started_ = false;  // as finish_listening(): Hermes's answer to this request is a new turn
   rec_stats_.any = true;
   rec_stats_.last_ms = rec_duration_ms_;
   rec_stats_.last_unsent = mic_unsent_;
@@ -2178,6 +2182,7 @@ void App::tick() {
   // Hermes ends every turn it starts (turn.end), and a lost connection ends it here: once
   // it has started, the device waits on (the screen lit) through a long task.
   if (mode_ == Mode::Thinking && t - last_turn_rx_ > (turn_started_ ? kTurnTimeoutMs : kThinkingTimeoutMs)) {
+    if (rec_on_) cancel_upload("timeout");  // a recording the link never finished taking
     mode_ = Mode::Idle;
     notice_ = tr(i18n::Msg::NoReplyFromHermes);
     notice_until_ = t + 8000;
