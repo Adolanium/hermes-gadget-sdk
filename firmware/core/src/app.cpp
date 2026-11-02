@@ -64,7 +64,7 @@ constexpr uint32_t kBackoffMs[] = {1000, 2000, 4000, 8000, 15000, 30000};
 constexpr size_t kBackoffSteps = sizeof(kBackoffMs) / sizeof(kBackoffMs[0]);
 
 const char* const kSettingKeys[] = {"name", "server", "token", "talk_mode", "volume", "brightness", "screen_timeout", "battery_display", "battery_estimate", "language", "wifi_ssid", "wifi_pass",
-                                    "face_down_sleep", "clock", "time_format", "touch_wake", "battery_alert", "battery_alert_sound", "charging_notice", "charging_sound", "charged_notice", "charged_sound", "double_home", "wake_talk"};
+                                    "face_down_sleep", "clock", "time_format", "touch_wake", "battery_alert", "battery_alert_sound", "charging_notice", "charging_sound", "charged_notice", "charged_sound", "double_home", "wake_talk", "touch_talk"};
 
 // NVS limits storage keys to 15 characters; keep the public setting name unchanged.
 std::string_view setting_storage_key(std::string_view key) {
@@ -236,6 +236,7 @@ void App::load_settings() {
   touch_wake_ = !profile_.wake_key || setting("touch_wake", "on") != "off";
   double_home_ = setting("double_home", "on") != "off";
   wake_talk_ = setting("wake_talk", "off") == "on";
+  touch_talk_ = !profile_.talk_key || setting("touch_talk", "on") != "off";
   clock_after_ms_ = static_cast<uint32_t>(std::max(0, std::min(3600, std::atoi(setting("clock", "0").c_str())))) * 1000;
   clock_24h_ = setting("time_format", "24h") != "12h";
   tailnet_on_ = profile_.tailnet && setting("tailnet", "off") == "on";
@@ -1192,6 +1193,11 @@ void App::h_prompt_close(const json::Value& m) {
 
 bool App::prompt_showing() const { return !prompt_id_.empty() && mode_ != Mode::Listening; }
 
+bool App::touch_presses_talk() const {
+  // Everywhere else TALK records, sends a tap-mode recording or flashes why it can't.
+  return touch_talk_ || settings_open() || prompt_showing() || (alarm_ && model_.screen == Screen::Alarm);
+}
+
 bool App::prompt_armed(uint32_t pressed_at) const {
   // Guards against a press meant for something else landing on a question that just appeared.
   return static_cast<int32_t>(pressed_at - prompt_since_) >= static_cast<int32_t>(kPromptArmMs);
@@ -1355,7 +1361,7 @@ void App::on_button(Button button, bool pressed, bool touch) {
       } else if (mode_ == Mode::Listening && !hands_free_) {
         if (now() - mode_since_ < kMinUtteranceMs) {
           cancel_listening("too short");
-          set_hint_flash(profile_.touch_screen ? std::string(tr(i18n::Msg::HoldScreenWhileSpeaking))
+          set_hint_flash(profile_.touch_screen && touch_talk_ ? std::string(tr(i18n::Msg::HoldScreenWhileSpeaking))
                                                : tr(i18n::Msg::HoldButtonWhileSpeaking, {control(profile_.talk_label)}));
         } else {
           finish_listening();
@@ -2213,7 +2219,7 @@ void App::update_model() {
     m.hero = true;
     m.headline = tr(Msg::Listening);
     m.detail = hands_free_              ? std::string(tr(Msg::SpeakNowPause))
-               : profile_.touch_screen ? std::string(tr(Msg::LiftFingerToSend))
+               : profile_.touch_screen && touch_talk_ ? std::string(tr(Msg::LiftFingerToSend))
                                        : tr(Msg::ReleaseToSend, {talk});
     m.hint = tr(Msg::ButtonToDiscard, {cancel});
     // The part of the recording limit used so far (the edge ring).
@@ -2277,7 +2283,7 @@ void App::update_model() {
     m.headline = m.speaking ? tr(Msg::Speaking) : "Hermes";
     m.detail = status_;
     m.body = reply_;
-    m.hint = profile_.touch_screen ? std::string(tr(Msg::HoldToReply)) : tr(Msg::ButtonToReply, {talk});
+    m.hint = profile_.touch_screen && touch_talk_ ? std::string(tr(Msg::HoldToReply)) : tr(Msg::ButtonToReply, {talk});
     // Spoken audio can start before the text arrives: let the mascot talk meanwhile.
     m.hero = reply_.empty();
     // While it is spoken, the face talks over the reply's latest two lines, where they fit.
@@ -2298,7 +2304,7 @@ void App::update_model() {
     m.headline = tr(Msg::Ready);
     m.body = reply_;
     const bool tap = talk_mode_ == TalkMode::Tap;
-    m.hint = profile_.touch_screen ? std::string(tr(tap ? Msg::TapScreenToTalk : Msg::HoldScreenToTalk))
+    m.hint = profile_.touch_screen && touch_talk_ ? std::string(tr(tap ? Msg::TapScreenToTalk : Msg::HoldScreenToTalk))
                                    : tr(tap ? Msg::TapButtonToTalk : Msg::HoldButtonToTalk, {talk});
     bool showing_reply = !reply_.empty() && static_cast<int32_t>(reply_until_ - now()) > 0;
     m.hero = !showing_reply;
@@ -2314,8 +2320,8 @@ void App::update_model() {
       const bool timing = timer_running_;
       if (timing) m.detail = tr(Msg::TimerLeft, {timer_left_text()});
       if (switching) {
-        // In tap-to-talk mode a tap records, so the name is no target there.
-        m.name_target = profile_.touch_screen && talk_mode_ == TalkMode::Hold;
+        // In tap-to-talk mode a tap records, so the name is no target there, unless the touchscreen doesn't talk.
+        m.name_target = profile_.touch_screen && (talk_mode_ == TalkMode::Hold || !touch_talk_);
         m.detail = tr(m.name_target ? Msg::ProfileTapName : Msg::ProfileInSettings) +
                    ((sessions || timing) ? "\n" + m.detail : "");
         m.caption_lines = 2;
@@ -2518,6 +2524,8 @@ std::string App::console(std::string_view raw) {
       return "@error double_home must be on or off";
     if (key == "wake_talk" && !value.empty() && value != "on" && value != "off")
       return "@error wake_talk must be on or off";
+    if (key == "touch_talk" && !value.empty() && value != "on" && value != "off")
+      return "@error touch_talk must be on or off";
     if (key == "clock" && !value.empty() &&
         (value.size() > 4 || value.find_first_not_of("0123456789") != std::string::npos ||
          (std::atoi(value.c_str()) != 0 && (std::atoi(value.c_str()) < 5 || std::atoi(value.c_str()) > 3600))))
