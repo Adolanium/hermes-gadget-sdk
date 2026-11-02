@@ -16,6 +16,7 @@ const API = "/api/plugins/gadget";
 // routes (/api/plugins/ is not among them). The route resolves the plugin's data directory from
 // `?profile=`, so pass along the one the dashboard page was opened with, when there is one.
 let latestRequest = 0;  // the number of the last /devices request the tab made
+let activeRequest = null;  // the AbortController of the request in flight, cancelled on leaving the tab
 
 function devicesUrl() {
   const profile = new URLSearchParams(window.location.search).get("profile");
@@ -117,6 +118,7 @@ function GadgetsPage() {
     const request = ++latestRequest;
     setLoading(true);
     const abort = new AbortController();
+    activeRequest = abort;
     const timeout = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
     return SDK.fetchJSON(devicesUrl(), { signal: abort.signal })
       .then((d) => { if (request === latestRequest) { setData(d); setError(""); } })
@@ -138,7 +140,13 @@ function GadgetsPage() {
     let stopped = false;
     const poll = () => load().finally(() => { if (!stopped) timer = setTimeout(poll, REFRESH_MS); });
     poll();
-    return () => { stopped = true; clearTimeout(timer); };
+    return () => {
+      // Leaving the tab: no next poll, and the request in flight is cancelled and its answer ignored.
+      stopped = true;
+      clearTimeout(timer);
+      ++latestRequest;
+      if (activeRequest) activeRequest.abort();
+    };
   }, [load]);
 
   const devices = (data && data.devices) || [];

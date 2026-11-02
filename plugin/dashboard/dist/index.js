@@ -9,6 +9,7 @@
   var { timeAgo } = SDK.utils;
   var API = "/api/plugins/gadget";
   var latestRequest = 0;
+  var activeRequest = null;
   function devicesUrl() {
     const profile = new URLSearchParams(window.location.search).get("profile");
     return profile ? `${API}/devices?profile=${encodeURIComponent(profile)}` : `${API}/devices`;
@@ -59,6 +60,7 @@
       const request = ++latestRequest;
       setLoading(true);
       const abort = new AbortController();
+      activeRequest = abort;
       const timeout = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
       return SDK.fetchJSON(devicesUrl(), { signal: abort.signal }).then((d) => {
         if (request === latestRequest) {
@@ -83,6 +85,8 @@
       return () => {
         stopped = true;
         clearTimeout(timer);
+        ++latestRequest;
+        if (activeRequest) activeRequest.abort();
       };
     }, [load]);
     const devices = data && data.devices || [];
