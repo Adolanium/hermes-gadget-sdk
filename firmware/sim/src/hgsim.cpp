@@ -243,6 +243,7 @@ hgsim* hgsim_create(const hgsim_config* cfg, const hgsim_host* host) {
   profile.talk_label = cfg->talk_label ? cfg->talk_label : "SPACE";
   profile.cancel_label = cfg->cancel_label ? cfg->cancel_label : "ESC";
   profile.wake_key = true;  // the keyboard's TALK always reaches App::on_button, and lights a dark screen
+  profile.talk_key = true;  // and talks, so the touchscreen may be left out of talking
   if (cfg->touch) {
     profile.touch_screen = true;
     if (!cfg->cancel_label) profile.cancel_label = "Swipe down";

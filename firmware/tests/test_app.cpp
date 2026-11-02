@@ -1573,6 +1573,197 @@ TEST("touch: the Touch wakes screen item is never offered without a wake key or 
   }
 }
 
+namespace {
+// A touchscreen with a TALK key (BOOT), like the AMOLED watches.
+hg::DeviceProfile touch_talk_key_profile() {
+  hg::DeviceProfile p = Rig::touch_profile();
+  p.talk_key = true;
+  p.talk_label = "BOOT";
+  return p;
+}
+}  // namespace
+
+TEST("touch: with touch_talk off, holds and taps on the screen never record in hold mode; BOOT does") {
+  Rig r(touch_talk_key_profile());
+  r.bring_online(true);
+  CHECK_EQ(r.app.model().hint, std::string("Hold the screen to talk"));
+  CHECK_EQ(r.app.console("set touch_talk off"), std::string("@ok touch_talk"));
+  CHECK(!r.app.touch_talk());
+  CHECK_EQ(r.app.model().hint, std::string("hold BOOT to talk"));
+  hg::TouchGestures touch(r.app);
+  touch.update(true, 200, 150, r.fake.clock);  // a hold
+  r.advance(800);
+  touch.tick(r.fake.clock);
+  CHECK(!r.fake.mic_on);
+  touch.update(false, 0, 0, r.fake.clock);
+  touch.update(true, 200, 150, r.fake.clock);  // a quick tap
+  r.advance(40);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.fake.last("audio.start") == nullptr);
+  CHECK_EQ(r.app.model().hint, std::string("hold BOOT to talk"));  // no "Not connected" or other flash
+
+  r.app.on_button(hg::Button::Talk, true);  // BOOT records as before
+  CHECK(r.fake.mic_on);
+  CHECK_EQ(r.app.model().detail, std::string("Release BOOT to send"));
+  touch.update(true, 200, 120, r.fake.clock);  // and a swipe down still discards it
+  r.advance(30);
+  touch.update(true, 202, 220, r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.fake.last("audio.cancel") != nullptr);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.last("audio.end") == nullptr);
+
+  r.app.on_button(hg::Button::Talk, true);
+  r.advance(600);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.last("audio.end") != nullptr);
+  r.server(R"({"type":"turn.start","turn":"a1"})");
+  r.server(R"({"type":"reply.delta","turn":"a1","text":"It is"})");
+  CHECK(r.app.screen() == hg::Screen::Responding);
+  CHECK_EQ(r.app.model().hint, std::string("BOOT to reply"));
+  touch.update(true, 200, 150, r.fake.clock);  // a hold on the reply doesn't talk over it
+  r.advance(500);
+  touch.tick(r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.app.screen() == hg::Screen::Responding);
+}
+
+TEST("touch: with touch_talk off in tap mode, a screen tap neither starts nor sends a recording") {
+  Rig r(touch_talk_key_profile());
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set talk_mode tap"), std::string("@ok talk_mode"));
+  CHECK_EQ(r.app.console("set touch_talk off"), std::string("@ok touch_talk"));
+  CHECK_EQ(r.app.model().hint, std::string("tap BOOT to talk"));
+  hg::TouchGestures touch(r.app);
+  touch.update(true, 200, 150, r.fake.clock);
+  r.advance(40);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(!r.fake.mic_on);
+  r.app.on_button(hg::Button::Talk, true);  // BOOT starts it
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.mic_on);
+  r.advance(600);
+  touch.update(true, 200, 150, r.fake.clock);  // a tap on the screen doesn't send it
+  r.advance(40);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(r.fake.mic_on);
+  CHECK(r.fake.last("audio.end") == nullptr);
+  r.app.on_button(hg::Button::Talk, true);  // BOOT does
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.fake.last("audio.end") != nullptr);
+}
+
+TEST("touch: with touch_talk off, the screen still answers questions, works settings and stops an alarm") {
+  Rig r(touch_talk_key_profile());
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set touch_talk off"), std::string("@ok touch_talk"));
+  hg::TouchGestures touch(r.app);
+  r.server(R"({"type":"prompt","id":"q1","title":"Allow?","text":"rm -rf build"})");
+  CHECK_EQ(r.app.model().yes, std::string("Tap: Yes"));
+  r.advance(700);
+  touch.update(true, 200, 200, r.fake.clock);  // a tap answers yes and records nothing
+  r.advance(40);
+  touch.update(false, 0, 0, r.fake.clock);
+  const Value* yes = r.fake.last("prompt.reply");
+  CHECK(yes && (*yes)["answer"].as_string() == "yes");
+  CHECK(!r.fake.mic_on);
+
+  CHECK(r.app.open_settings());  // a tap changes the item: Volume goes up 10
+  const std::string before = r.app.model().body;
+  touch.update(true, 200, 200, r.fake.clock);
+  r.advance(40);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(r.app.settings_open());
+  CHECK(r.app.model().body != before);
+  CHECK(!r.fake.mic_on);
+  r.app.close_settings();
+
+  r.server(R"({"type":"action","id":"t1","name":"timer.start","args":{"seconds":1}})");
+  r.advance(1500);
+  CHECK(r.app.screen() == hg::Screen::Alarm);
+  CHECK_EQ(r.app.model().hint, std::string("Tap the screen to stop"));
+  touch.update(true, 200, 200, r.fake.clock);
+  r.advance(40);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(r.app.screen() != hg::Screen::Alarm);
+  CHECK(!r.fake.mic_on);
+}
+
+TEST("touch: touch_talk takes only on or off, survives a restart, and stays on without a TALK key") {
+  {
+    Rig r(touch_talk_key_profile());
+    r.bring_online(true);
+    CHECK_EQ(r.app.console("set touch_talk maybe"), std::string("@error touch_talk must be on or off"));
+    CHECK(r.app.touch_talk());
+    CHECK_EQ(r.app.console("set touch_talk off"), std::string("@ok touch_talk"));
+    CHECK_EQ(r.fake.kv["touch_talk"], std::string("off"));
+    CHECK(r.app.console("get touch_talk").find("\"value\":\"off\"") != std::string::npos);
+    Rig again(touch_talk_key_profile());
+    again.fake.kv = r.fake.kv;
+    again.bring_online(true);
+    CHECK(!again.app.touch_talk());
+    CHECK_EQ(r.app.console("set touch_talk"), std::string("@ok touch_talk"));  // clearing it is on
+    CHECK(r.app.touch_talk());
+  }
+  {
+    Rig r(Rig::touch_profile());  // no TALK key: the touchscreen is the only way to talk
+    r.bring_online(true);
+    CHECK_EQ(r.app.console("set touch_talk off"), std::string("@ok touch_talk"));
+    CHECK(r.app.touch_talk());
+    CHECK_EQ(r.app.model().hint, std::string("Hold the screen to talk"));
+    hg::TouchGestures touch(r.app);
+    touch.update(true, 200, 150, r.fake.clock);
+    r.advance(500);
+    touch.tick(r.fake.clock);
+    CHECK(r.fake.mic_on);
+    touch.update(false, 0, 0, r.fake.clock);
+  }
+}
+
+TEST("touch: the Touch to talk item follows Talk mode on a touchscreen with a TALK key, and toggles") {
+  Rig r(touch_talk_key_profile());
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 20 && r.app.model().detail != "Talk mode"; ++i) r.app.on_button(hg::Button::Down, true);
+  CHECK_EQ(r.app.model().detail, std::string("Talk mode"));
+  r.app.on_button(hg::Button::Down, true);
+  CHECK_EQ(r.app.model().detail, std::string("Touch to talk"));
+  CHECK_EQ(r.app.model().body, std::string("On\nTouch the screen to talk."));
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK_EQ(r.app.model().body, std::string("Off\nTalk with BOOT; touch only navigates."));
+  CHECK(!r.app.touch_talk());
+  CHECK_EQ(r.fake.kv["touch_talk"], std::string("off"));
+  r.app.close_settings();  // a tap on its row: "settings list: Touch to talk is a switch..."
+}
+
+TEST("touch: the Touch to talk item is never offered without a TALK key or a touchscreen") {
+  const auto never_offered = [](Rig& r) {
+    CHECK(r.app.open_settings());
+    for (int i = 0; i < 20; ++i) {
+      r.app.on_button(hg::Button::Down, true);
+      CHECK(r.app.model().detail != std::string("Touch to talk"));
+    }
+    r.app.close_settings();
+  };
+  {
+    Rig r(Rig::touch_profile());  // a touchscreen, but no TALK key
+    r.bring_online(true);
+    never_offered(r);
+  }
+  {
+    hg::DeviceProfile p = Rig::profile("ws://hermes.local:8765/gadget");  // a TALK key, but no touchscreen
+    p.talk_key = true;
+    Rig r(p);
+    r.bring_online(true);
+    never_offered(r);
+  }
+}
+
 TEST("touch: swipe down while holding discards the recording") {
   Rig r(Rig::touch_profile());
   r.bring_online(true);
@@ -5003,6 +5194,46 @@ TEST("profiles: buttons and tap-to-talk show Change in Settings; one profile sho
   CHECK_EQ(name_point(single).first, -1);
 }
 
+TEST("profiles: with touch_talk off, the name is a tap target in tap-to-talk mode too; a hold on it records nothing") {
+  hg::DeviceProfile p = Rig::touch_profile();
+  p.talk_key = true;
+  p.talk_label = "BOOT";
+  Rig r(p);
+  r.bring_online_with_profiles();
+  r.app.console("set talk_mode tap");
+  CHECK_EQ(name_point(r).first, -1);
+  CHECK_EQ(r.app.console("set touch_talk off"), std::string("@ok touch_talk"));
+  CHECK_EQ(r.app.model().detail.rfind("Tap name to change", 0), size_t(0));
+  auto [x, y] = name_point(r);
+  CHECK(x >= 0);
+  hg::TouchGestures touch(r.app);
+  touch.update(true, x, y, r.fake.clock);
+  r.advance(40);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(r.app.profile_picker_open());
+  CHECK(!r.fake.mic_on);
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Cancel, false);
+  CHECK(!r.app.profile_picker_open());
+  CHECK_EQ(r.app.console("set talk_mode hold"), std::string("@ok talk_mode"));
+  const auto held = name_point(r);
+  CHECK(held.first >= 0);
+  touch.update(true, held.first, held.second, r.fake.clock);  // a hold on the name in hold mode: no recording
+  r.advance(500);
+  touch.tick(r.fake.clock);
+  CHECK(!r.fake.mic_on);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(r.fake.last("audio.start") == nullptr);
+  CHECK(!r.app.profile_picker_open());  // the hold's lift is no tap: the list stays shut
+  CHECK_EQ(r.app.console("set talk_mode tap"), std::string("@ok talk_mode"));
+  touch.update(true, held.first, held.second, r.fake.clock);  // the same hold in tap mode
+  r.advance(500);
+  touch.tick(r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(!r.app.profile_picker_open());
+  CHECK(!r.fake.mic_on);
+}
+
 TEST("profiles: one switch at a time; a later pick waits for Hermes's answer") {
   Rig r(Rig::touch_profile());
   r.bring_online_with_profiles();
@@ -6692,6 +6923,33 @@ TEST("settings list: a tap selects a row and changes it; toggles flip on the fir
   tap_at(r, touch, bx, by);
   CHECK(!r.app.settings_open());
   CHECK(r.app.screen() == hg::Screen::Ready);
+}
+
+TEST("settings list: Touch to talk is a switch, and with it off a tap on its row still flips it") {
+  Rig r(touch_talk_key_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  const int row = settings_row(r, "Touch to talk");
+  CHECK(row >= 0);
+  const auto& item = r.app.model().settings[static_cast<size_t>(row)];
+  CHECK(item.kind == hg::SettingRow::Kind::Toggle);
+  CHECK_EQ(int(item.level), 1);  // on by default
+  CHECK_EQ(settings_row(r, "Talk mode") + 1, row);  // right after Talk mode
+  while (r.app.model().settings_sel < row - 1) r.app.on_button(hg::Button::Down, true);  // into view
+  r.advance(500);
+  hg::TouchGestures touch(r.app);
+  auto [x, y] = find_point(r, [&](int px, int py) { return r.app.settings_row_hit(px, py) == row; });
+  CHECK(x >= 0);
+  tap_at(r, touch, x, y);  // a toggle flips on the first tap
+  CHECK(!r.app.touch_talk());
+  CHECK_EQ(int(r.app.model().settings[static_cast<size_t>(row)].level), 0);
+  CHECK(!r.fake.mic_on);
+  r.advance(500);
+  auto [x2, y2] = find_point(r, [&](int px, int py) { return r.app.settings_row_hit(px, py) == row; });
+  tap_at(r, touch, x2, y2);  // off, the touchscreen still works the menu
+  CHECK(r.app.touch_talk());
+  CHECK_EQ(r.fake.kv["touch_talk"], std::string("on"));
 }
 
 TEST("settings list: a slider opens on the first tap, then a tap or a drag on its bar sets the level") {

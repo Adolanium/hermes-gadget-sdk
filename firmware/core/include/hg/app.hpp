@@ -60,6 +60,9 @@ struct DeviceProfile {
   // A key can light a dark screen (TALK, or a power key read by the port), so the
   // touchscreen may be left out of waking it (the touch_wake setting).
   bool wake_key = false;
+  // A TALK key besides the touchscreen, so the touchscreen may be left out of
+  // talking (the touch_talk setting).
+  bool talk_key = false;
   // Board-specific settings the console accepts besides the core ones. Changes
   // reach the port through App::on_setting_changed.
   std::vector<std::string> extra_settings;
@@ -186,6 +189,11 @@ class App {
   bool charging_notice() const { return power_notice_ == PowerNotice::Charging; }
   // The full battery notice is on screen.
   bool charged_notice() const { return power_notice_ == PowerNotice::Charged; }
+  // touch_talk off: the touchscreen never records; TALK does. touch_presses_talk() says whether a
+  // touch may still press TALK now: in settings, at a question and on a ringing alarm it navigates,
+  // answers or dismisses, and nothing there opens the microphone.
+  bool touch_talk() const { return touch_talk_; }
+  bool touch_presses_talk() const;
   std::string agent_profile_name() const;
   // Returns true when this input only wakes a sleeping display.
   bool wake_display();
@@ -446,7 +454,7 @@ class App {
   // `language` is auto: follow the language Hermes sends in `welcome` (English until it does).
   bool lang_auto_ = false;
   std::optional<i18n::Lang> hermes_lang_;  // from the last `welcome` that named one this firmware has
-  enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, Profile, Microphone, Speaker, Display, Inputs,
+  enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, TouchTalk, Profile, Microphone, Speaker, Display, Inputs,
                               Info, Power, BatteryAlert, BatteryAlertSound, ChargingNotice, ChargingSound, ChargedNotice, ChargedSound, IdleTimer, TouchWake, FaceDownSleep, Clock, PowerOff, WifiSetup, Phone, Language, Back };
   enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };
   Menu menu_ = Menu::Closed;
@@ -549,6 +557,7 @@ class App {
   bool motion_seen_ = false, face_down_ = false;
   bool face_down_sleep_ = false;      // the `face_down_sleep` setting
   bool touch_wake_ = true;            // the `touch_wake` setting
+  bool touch_talk_ = true;            // the `touch_talk` setting
   bool reply_while_face_down_ = false;  // a reply arrived while dark; show it on the turn-over
   uint8_t wake_buttons_ = 0;
 
