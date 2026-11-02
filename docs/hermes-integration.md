@@ -42,6 +42,7 @@ platforms:
       # profile_faces: true    # each profile's face or avatar on gadgets (docs/faces.md)
       # battery_log: true      # keep each device's battery readings in a CSV (see below)
       # language: es           # the language devices on `auto` show; default: Hermes's own
+      # stt_language: pt       # the language gadget speech is transcribed in; default: auto (see below)
       # tls_cert: /path/cert.pem   # serve wss://
       # tls_key: /path/key.pem
 ```
@@ -57,6 +58,18 @@ Secrets go in `~/.hermes/.env`, following Hermes's rule that `.env` is only for 
 - `GADGET_ALLOW_ALL_USERS=true`: admit any device (development only).
 
 > If you set `GADGET_ALLOWED_USERS` (or `GATEWAY_ALLOWED_USERS`), Hermes switches unknown senders from "pair" to "ignore". Keep `unauthorized_dm_behavior: pair` in the platform's `extra` so new devices still receive pairing codes.
+
+### Fix the language of gadget speech
+
+Hermes transcribes a gadget's voice with the `stt` settings of the profile that answers it. A profile without a language for its STT provider, such as `stt.local.language`, leaves the language to the provider's auto-detection, and a short clip in another language can come back transcribed as English. `stt_language` sets the language for gadget recordings only, whichever profile answers:
+
+```bash
+hermes config set platforms.gadget.extra.stt_language pt
+```
+
+Use the language code your STT provider takes, such as `pt`, `es` or `de`. A value that isn't a language code (for example `Portuguese`) is ignored with a warning in the gateway log, and each profile's own STT settings apply. The default, `auto`, leaves every profile's STT settings as they are. Voice notes from other platforms keep their profile's settings either way. The plugin sets the language through Hermes's `pre_transcription` plugin hook, which wins over `stt.<provider>.language`. Restart the gateway after changing it.
+
+On a multiplexed gateway, set it in the profile that runs the gadget platform, usually `default`. Hermes fires the hooks of the profile that answers, so the language applies to a profile only when that profile has the gadget plugin enabled and its copy of the plugin is this version or newer ([cloned profiles keep their own copy](#running-against-a-profile-or-a-multiplexed-gateway)). When the configured provider fails and Hermes falls back to local whisper on its own, that fallback doesn't fire the hook, so it uses the profile's own `stt.local` settings.
 
 ### Change the gadget port
 
