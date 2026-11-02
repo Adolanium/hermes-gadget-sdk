@@ -1235,6 +1235,165 @@ TEST("app: a finished reply stays readable, then the mascot returns; UP brings i
   CHECK_EQ(r.app.model().body, std::string("Here is the answer."));
 }
 
+namespace {
+// A held TALK with speech in it, sent: the device waits for Hermes (Thinking).
+void ask_by_voice(Rig& r) {
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(1600, 1000);
+  for (int i = 0; i < 6; ++i) {
+    r.app.on_mic_samples(pcm.data(), pcm.size());
+    r.advance(100);
+  }
+  r.app.on_button(hg::Button::Talk, false);
+}
+
+// Time passes with the connection alive (pings) and no word about the turn.
+void wait_quietly(Rig& r, uint32_t ms) {
+  for (uint32_t t = 0; t < ms; t += 10000) {
+    r.server(R"({"type":"ping"})");
+    r.advance(10000);
+  }
+}
+}  // namespace
+
+TEST("app: once Hermes starts the turn, Thinking waits with the screen lit through a long task") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  ask_by_voice(r);
+  r.server(R"({"type":"turn.start","turn":"a1"})");
+  wait_quietly(r, 10 * 60000);  // ten minutes without a status phrase
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  CHECK_EQ(r.fake.brightness, 100);
+  r.server(R"({"type":"reply","turn":"a1","text":"Done at last."})");
+  r.server(R"({"type":"turn.end","turn":"a1","outcome":"success"})");
+  r.advance(200);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.app.model().body, std::string("Done at last."));
+
+  // A request Hermes never took up still gives up after three minutes.
+  Rig lost(Rig::touch_profile());
+  lost.bring_online(true);
+  ask_by_voice(lost);
+  wait_quietly(lost, 170000);
+  CHECK(lost.app.screen() == hg::Screen::Thinking);
+  lost.server(R"({"type":"ping"})");
+  lost.advance(11000);
+  CHECK(lost.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(lost.app.model().detail, std::string("No reply from Hermes"));
+}
+
+TEST("app: a reply the screen went dark on comes back with the wake until an input meets it") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  ask_by_voice(r);
+  r.server(R"({"type":"turn.start","turn":"a1"})");
+  wait_quietly(r, 240000);
+  r.server(R"({"type":"reply","turn":"a1","text":"It is sunny."})");
+  r.server(R"({"type":"turn.end","turn":"a1","outcome":"success"})");
+  wait_quietly(r, 60000);  // nobody looked: the text gave way to the mascot, then the screen went dark
+  CHECK_EQ(r.fake.brightness, 0);
+  CHECK(r.app.model().hero);
+
+  hg::TouchGestures touch(r.app);
+  touch.update(true, 200, 200, r.fake.clock);  // the touch that lights the screen is only a wake
+  touch.update(false, 0, 0, r.fake.clock);
+  r.advance(200);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK(!r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string("It is sunny."));
+  CHECK_EQ(r.app.model().scroll, 0);
+
+  // Still unread when the screen goes dark again: the next wake, by key, shows it again.
+  wait_quietly(r, 40000);
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  r.advance(200);
+  CHECK(!r.fake.mic_on);
+  CHECK(!r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string("It is sunny."));
+
+  // An input over the text reads it: the text leaves on its timer, and the next wake shows the mascot.
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Cancel, false);
+  wait_quietly(r, 40000);
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  r.advance(200);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.model().hero);
+}
+
+TEST("app: an input over the mascot leaves the reply unread") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(R"({"type":"reply","turn":"t","text":"Here is the answer."})");
+  r.server(R"({"type":"turn.end","turn":"t","outcome":"success"})");
+  wait_quietly(r, 22000);  // the text has gone; the screen is dimmed, not dark
+  CHECK(r.app.model().hero);
+  CHECK(r.fake.brightness > 0);
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Cancel, false);
+  wait_quietly(r, 40000);
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_button(hg::Button::Cancel, true);  // a wake
+  r.app.on_button(hg::Button::Cancel, false);
+  r.advance(200);
+  CHECK(!r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string("Here is the answer."));
+}
+
+TEST("app: a press over the speaking mascot leaves the reply unread") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(R"({"type":"audio.start","stream":2,"rate":16000,"format":"pcm16"})");
+  r.server(R"({"type":"reply","turn":"t","text":"Here is the answer."})");
+  CHECK(r.app.screen() == hg::Screen::Responding && r.app.model().hero);
+  r.app.on_button(hg::Button::Down, true);  // over the talking face, not the text
+  r.app.on_button(hg::Button::Down, false);
+  r.server(R"({"type":"audio.end","stream":2})");
+  r.server(R"({"type":"turn.end","turn":"t","outcome":"success"})");
+  wait_quietly(r, 80000);
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_button(hg::Button::Cancel, true);  // a wake
+  r.app.on_button(hg::Button::Cancel, false);
+  r.advance(200);
+  CHECK(!r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string("Here is the answer."));
+}
+
+TEST("app: PWR over a card leaves the reply under it unread") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(R"({"type":"reply","turn":"t","text":"Here is the answer."})");
+  r.server(R"({"type":"turn.end","turn":"t","outcome":"success"})");
+  wait_quietly(r, 10000);  // the turn settles; the reply's text still shows under what comes next
+  r.server(R"({"type":"display","title":"Note","body":"Stays until closed","ttl_s":0})");
+  CHECK(r.app.screen() == hg::Screen::Card);
+  r.app.on_power_key();  // closes the card and turns the screen off
+  CHECK_EQ(r.fake.brightness, 0);
+  wait_quietly(r, 30000);  // dark past the reply's 20 s
+  r.app.on_power_key();  // the wake shows the reply the card covered
+  r.advance(200);
+  CHECK(!r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string("Here is the answer."));
+}
+
 TEST("app: hero animation redraws only a slice of the screen") {
   Rig r;
   r.bring_online(true);
@@ -2928,6 +3087,31 @@ TEST("battery alert: the indicator turns red at 15%, or at the highest alert lev
   battery.on_usb(5);
   r.advance(5000);
   CHECK(!r.app.model().battery_low);  // never red on USB
+}
+
+TEST("charging notice: PWR that closes it leaves the reply it covered unread") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  battery.on_battery(42);
+  r.bring_online(true);
+  wait_quietly(r, 10000);
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(R"({"type":"reply","turn":"t","text":"Here is the answer."})");
+  r.server(R"({"type":"turn.end","turn":"t","outcome":"success"})");
+  wait_quietly(r, 10000);  // the turn settles; the reply's text still shows
+  CHECK(!r.app.model().hero);
+  battery.on_usb(42);
+  r.advance(5000);  // a lit screen reads the supply every few seconds
+  CHECK(r.app.charging_notice());  // over the reply's text, which has 5 s left
+  r.app.on_power_key();  // closes the notice and turns the screen off
+  CHECK_EQ(r.fake.brightness, 0);
+  wait_quietly(r, 30000);  // dark past the reply's 20 s
+  r.app.on_power_key();  // the wake shows the reply the notice covered
+  r.advance(200);
+  CHECK(!r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string("Here is the answer."));
 }
 
 TEST("charging notice: plugging in lights the dark screen with the level, which then times out as usual") {

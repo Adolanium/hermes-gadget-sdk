@@ -42,7 +42,8 @@ constexpr uint32_t kHandshakeTimeoutMs = 10000;
 constexpr uint32_t kStableSessionMs = 30000;
 constexpr uint32_t kMinUtteranceMs = 350;
 constexpr uint32_t kMaxUtteranceMs = 30000;
-constexpr uint32_t kThinkingTimeoutMs = 180000;
+constexpr uint32_t kThinkingTimeoutMs = 180000;  // no word from Hermes after a request
+constexpr uint32_t kTurnTimeoutMs = 30 * 60000;   // ...once its turn.start says it is working
 constexpr uint32_t kSettleAfterReplyMs = 6000;
 constexpr uint32_t kNewSessionHoldMs = 2000;  // hold CANCEL this long to start a new session
 constexpr uint32_t kNewSessionHintMs = 600;   // ...and show the countdown after this long
@@ -893,6 +894,7 @@ void App::h_turn_start(const json::Value& m) {
   wake_display();
   active_turn_ = m["turn"].as_string();
   turn_done_ = false;
+  turn_started_ = true;
   reply_final_ = false;
   last_turn_rx_ = now();
   if (mode_ != Mode::Listening) {
@@ -938,6 +940,7 @@ void App::h_reply_delta(const json::Value& m) {
   if (face_down_) reply_while_face_down_ = true;  // shown from the top on the turn-over
   if (mode_ == Mode::Listening) return;
   reply_ = m["text"].as_string();
+  reply_unread_ = true;
   scroll_ = -1;
   last_turn_rx_ = now();
   if (mode_ != Mode::Responding) {
@@ -958,6 +961,7 @@ void App::h_reply(const json::Value& m) {
   if (mode_ == Mode::Listening) return;
   reply_ = text;
   reply_final_ = true;
+  reply_unread_ = true;
   scroll_ = 0;  // a finished reply is read from the top
   page_at_ = now() + page_dwell_ms();
   status_.clear();
@@ -1310,7 +1314,10 @@ void App::on_button(Button button, bool pressed, bool touch) {
     return;
   }
   // A press closes the low battery alert and then does what it always does.
-  if (pressed) close_notices_for_input();
+  if (pressed) {
+    mark_reply_read();  // what was on screen, before a notice over the reply closes
+    close_notices_for_input();
+  }
   // The alarm: a press dismisses it, and its release is swallowed above, so nothing records.
   if (alarm_ && model_.screen == Screen::Alarm && pressed) {
     dismiss_alarm();
@@ -1466,6 +1473,7 @@ void App::finish_listening() {
   mode_ = Mode::Thinking;
   mode_since_ = now();
   last_turn_rx_ = now();
+  turn_started_ = false;
   status_ = tr(i18n::Msg::Sending);
 }
 
@@ -1519,6 +1527,7 @@ void App::start_new_session() {
   mode_ = Mode::Thinking;
   mode_since_ = now();
   last_turn_rx_ = now();
+  turn_started_ = false;
   set_hint_flash(tr(i18n::Msg::NewSession));
 }
 
@@ -1584,6 +1593,7 @@ void App::submit_text(std::string_view text) {
   mode_ = Mode::Thinking;
   mode_since_ = now();
   last_turn_rx_ = now();
+  turn_started_ = false;
   update_model();
 }
 
@@ -1942,7 +1952,9 @@ void App::tick() {
     update_model();
   }
   if (!prompt_id_.empty()) last_turn_rx_ = t;  // Hermes is waiting for the user, not stuck
-  if (mode_ == Mode::Thinking && t - last_turn_rx_ > kThinkingTimeoutMs) {
+  // Hermes ends every turn it starts (turn.end), and a lost connection ends it here: once
+  // it has started, the device waits on (the screen lit) through a long task.
+  if (mode_ == Mode::Thinking && t - last_turn_rx_ > (turn_started_ ? kTurnTimeoutMs : kThinkingTimeoutMs)) {
     mode_ = Mode::Idle;
     notice_ = tr(i18n::Msg::NoReplyFromHermes);
     notice_until_ = t + 8000;

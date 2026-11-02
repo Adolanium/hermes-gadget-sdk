@@ -195,6 +195,9 @@ class App {
   // An input on a lit screen closes the alert first, then goes on as usual (a touch
   // calls this at touch-down, so its hit tests see the screen underneath).
   void close_notices_for_input();
+  // An input on a lit screen showing the last reply: it has been seen, and a wake no
+  // longer brings it back.
+  void mark_reply_read();
   // The charging notice is on screen: USB was just plugged in.
   bool charging_notice() const { return power_notice_ == PowerNotice::Charging; }
   // The full battery notice is on screen.
@@ -618,6 +621,7 @@ class App {
   std::string request_id_;
   std::string active_turn_;
   bool turn_done_ = false;
+  bool turn_started_ = false;  // Hermes sent turn.start for the request: it is working on it
   bool reply_final_ = false;
   uint32_t last_turn_rx_ = 0;
   std::string reply_;
@@ -627,6 +631,9 @@ class App {
   int caption_cols_ = 0;
   static constexpr uint32_t kReplyLingerMs = 20000;  // reply text stays up this long before the mascot returns
   uint32_t reply_until_ = 0;  // reply text shown on the Ready screen until then
+  // No input since the reply arrived: each wake from a dark screen shows it again,
+  // until the user does something (mark_reply_read).
+  bool reply_unread_ = false;
   bool cancel_held_ = false;
   bool cancel_long_fired_ = false;
   uint32_t cancel_down_at_ = 0;
