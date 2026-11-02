@@ -5228,6 +5228,14 @@ TEST("profiles: with touch_talk off, the name is a tap target in tap-to-talk mod
   CHECK(!r.fake.mic_on);
   touch.update(false, 0, 0, r.fake.clock);
   CHECK(r.fake.last("audio.start") == nullptr);
+  CHECK(!r.app.profile_picker_open());  // the hold's lift is no tap: the list stays shut
+  CHECK_EQ(r.app.console("set talk_mode tap"), std::string("@ok talk_mode"));
+  touch.update(true, held.first, held.second, r.fake.clock);  // the same hold in tap mode
+  r.advance(500);
+  touch.tick(r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(!r.app.profile_picker_open());
+  CHECK(!r.fake.mic_on);
 }
 
 TEST("profiles: one switch at a time; a later pick waits for Hermes's answer") {

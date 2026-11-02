@@ -4,6 +4,12 @@
 
 namespace hg {
 
+namespace {
+// Past this, a lift that is still Pending ends a hold rather than a tap. Generous next to
+// hold_ms, so a slow tap on the name still opens the list when touch_talk is off.
+constexpr uint32_t kTapMaxMs = 400;
+}  // namespace
+
 void TouchGestures::press(Button b) { app_.on_button(b, true); }
 void TouchGestures::release(Button b) { app_.on_button(b, false); }
 
@@ -26,6 +32,8 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
     switch (state_) {
       case State::Pending:  // a quick tap
         if (from_clock_) break;  // Ready came back at touch-down; a tap does nothing else
+        // A long press that didn't become TALK (touch_talk off) isn't a tap: it opens nothing on lift.
+        if (!app_.touch_presses_talk() && static_cast<int32_t>(now_ms - t0_) >= static_cast<int32_t>(kTapMaxMs)) break;
         if (app_.show_reply_text()) break;  // the caption under the talking face gives way to the text
         if (on_name_) {  // a quick tap on the name opens the list, or does nothing while it can't
           app_.open_profile_picker();
