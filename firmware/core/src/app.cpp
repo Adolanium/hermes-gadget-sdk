@@ -700,6 +700,7 @@ void App::on_transport_text(std::string_view text) {
     return;
   }
   const std::string& type = msg["type"].as_string();
+  if (type != "ping") traffic_at_ = now();
   for (const auto& r : kRoutes) {
     if (type == r.type) {
       (this->*r.handler)(msg);
@@ -1223,6 +1224,7 @@ bool App::speaking() const { return hal_.speaker && (in_stream_ >= 0 || hal_.spe
 
 void App::on_transport_binary(const uint8_t* data, size_t len) {
   last_rx_ = now();
+  traffic_at_ = now();
   proto::BinaryFrame f;
   if (!proto::parse_binary(data, len, f)) return;
   if (f.channel == proto::Channel::Face) {

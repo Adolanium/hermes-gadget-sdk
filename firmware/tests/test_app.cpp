@@ -815,6 +815,23 @@ TEST("app: a silent server is detected by the heartbeat timeout") {
   CHECK(r.app.screen() == hg::Screen::Connecting);
 }
 
+TEST("app: traffic_at counts every frame from Hermes but its heartbeat ping") {
+  Rig r;
+  r.bring_online(true);
+  r.advance(1000);
+  const uint32_t before = r.app.traffic_at();
+  CHECK(before != 0);  // the welcome
+  r.server(R"({"type":"ping","ts":1})");
+  CHECK_EQ(r.app.traffic_at(), before);
+  r.advance(1000);
+  r.server(R"({"type":"display","title":"Hi","body":"there","ttl_s":5})");
+  CHECK_EQ(r.app.traffic_at(), r.fake.clock);
+  r.advance(1000);
+  const uint8_t frame[] = {0, 0, 0, 0};  // too short to parse: still traffic on the radio
+  r.app.on_transport_binary(frame, sizeof(frame));
+  CHECK_EQ(r.app.traffic_at(), r.fake.clock);
+}
+
 TEST("app: console reconfigures the server and reconnects") {
   Rig r("");
   r.app.begin();

@@ -867,7 +867,7 @@ class Wifi {
   bool attempt_held_ = false;
   void hold_while_attempting();
   hg::WifiPowerSave power_save_;
-  void apply_power_save(uint32_t now, bool in_turn);
+  void apply_power_save(uint32_t now, const hg::App& app);
   hg::WifiCredentials candidate_{};
   httpd_handle_t http_ = nullptr;
   std::mutex setup_mutex_;

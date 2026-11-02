@@ -247,6 +247,9 @@ class App {
   // A turn is under way: listening, waiting for a reply, or responding, which lasts until the
   // reply has finished playing. The port keeps Wi-Fi at full power until it ends.
   bool in_turn() const { return mode_ != Mode::Idle; }
+  // The last time Hermes sent a frame other than its heartbeat ping (0: none yet). The
+  // port lets Wi-Fi sleep deeper only after a quiet while (wifi_power.hpp).
+  uint32_t traffic_at() const { return traffic_at_; }
   // These run on the app task. Start returns private, on-screen instructions.
   std::function<std::string()> on_wifi_setup;
   std::function<void()> on_wifi_setup_close;
@@ -651,6 +654,7 @@ class App {
   uint32_t phase_since_ = 0;
   uint32_t online_since_ = 0;
   uint32_t last_rx_ = 0;
+  uint32_t traffic_at_ = 0;
   uint32_t heartbeat_ms_ = 20000;
   int backoff_ = 0;
   int attempts_ = 0;
