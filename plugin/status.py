@@ -87,7 +87,10 @@ def read(directory: Path | str, *, now: float | None = None) -> dict[str, Any]:
     if not isinstance(raw, dict):
         return {"running": False, "updated_at": None, "devices": {}}
     updated_at = raw.get("updated_at")
-    updated_at = float(updated_at) if isinstance(updated_at, (int, float)) else None
+    try:  # float() of a huge integer raises OverflowError: a file like that is malformed
+        updated_at = float(updated_at) if isinstance(updated_at, (int, float)) else None
+    except OverflowError:
+        return {"running": False, "updated_at": None, "devices": {}}
     fresh = updated_at is not None and now - updated_at <= STALE_AFTER_S
     running = bool(raw.get("running")) and fresh
     devices = raw.get("devices") if running and isinstance(raw.get("devices"), dict) else {}

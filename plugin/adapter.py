@@ -953,7 +953,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             logger.warning("[%s] could not write the battery log for %s: %s", self.name, session.device_id, exc)
 
     async def on_disconnect(self, session: DeviceSession) -> None:
-        if self._hub and session.device_id not in self._hub.sessions:
+        # A hub already cleared by disconnect() holds no session: the device left all the same.
+        if self._hub is None or session.device_id not in self._hub.sessions:
             self._turns.pop(session.device_id, None)
             self._pushed_seq.pop(session.device_id, None)
             if self._store is not None:

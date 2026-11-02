@@ -50,6 +50,9 @@ def test_status_missing_unreadable_stopped_or_stale_reads_as_not_running(tmp_pat
     assert live_status.read(tmp_path, now=1000.0 + live_status.STALE_AFTER_S)["running"] is True
     stale = live_status.read(tmp_path, now=1000.0 + live_status.STALE_AFTER_S + 1)
     assert stale == {"running": False, "updated_at": 1000.0, "devices": {}}
+    # An updated_at too large for a float is a malformed file, not an error for the route.
+    (tmp_path / live_status.FILENAME).write_text('{"running": true, "updated_at": 1' + "0" * 400 + ', "devices": {}}')
+    assert live_status.read(tmp_path) == {"running": False, "updated_at": None, "devices": {}}
 
 
 def test_battery_keeps_power_readings_only():
