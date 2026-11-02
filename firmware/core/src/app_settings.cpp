@@ -29,6 +29,8 @@ bool App::menu_offered(Menu item) const {
     case Menu::ChargedSound: return hal_.power != nullptr && hal_.speaker != nullptr;
     case Menu::TouchTalk: return profile_.touch_screen && profile_.talk_key;
     case Menu::TouchWake: return profile_.touch_screen && profile_.wake_key && hal_.display != nullptr;
+    case Menu::DoubleHome: return profile_.talk_key;
+    case Menu::WakeTalk: return profile_.talk_key && hal_.mic != nullptr && hal_.display != nullptr;
     case Menu::FaceDownSleep: return can_sleep_face_down();
     case Menu::Clock: return hal_.display != nullptr;
     case Menu::PowerOff: return hal_.power && hal_.power->can_power_off();
@@ -189,6 +191,12 @@ void App::settings_input(Button button, bool pressed) {
     case Menu::TouchWake:
       console(touch_wake_ ? "set touch_wake off" : "set touch_wake on");
       break;
+    case Menu::DoubleHome:
+      console(double_home_ ? "set double_home off" : "set double_home on");
+      break;
+    case Menu::WakeTalk:
+      console(wake_talk_ ? "set wake_talk off" : "set wake_talk on");
+      break;
     case Menu::FaceDownSleep:
       console(face_down_sleep_ ? "set face_down_sleep off" : "set face_down_sleep on");
       break;
@@ -338,6 +346,8 @@ SettingRow App::settings_row(Menu item, const std::string& label, const std::str
     case Menu::WifiSetup: row.icon = Icon::Wifi; row.kind = Kind::Action; break;
     case Menu::Phone: row.icon = Icon::Phone; row.kind = Kind::Action; break;
     case Menu::Language: row.icon = Icon::Globe; break;
+    case Menu::DoubleHome: row.icon = Icon::Back; row.kind = Kind::Toggle; row.level = double_home_; break;
+    case Menu::WakeTalk: row.icon = Icon::Talk; row.kind = Kind::Toggle; row.level = wake_talk_; break;
     case Menu::Back: row.icon = Icon::Back; row.kind = Kind::Action; break;
     case Menu::Closed: break;
   }
@@ -551,6 +561,14 @@ void App::settings_item(Menu item, UiModel& m) const {
     case Menu::TouchWake:
       m.detail = tr(Msg::TouchWake);
       m.body = tr(touch_wake_ ? Msg::TouchWakeOn : Msg::TouchWakeOff);
+      break;
+    case Menu::DoubleHome:
+      m.detail = tr(Msg::DoubleHome);
+      m.body = tr(double_home_ ? Msg::DoubleHomeOn : Msg::DoubleHomeOff, {control(profile_.talk_label)});
+      break;
+    case Menu::WakeTalk:
+      m.detail = tr(Msg::WakeTalk);
+      m.body = tr(wake_talk_ ? Msg::WakeTalkOn : Msg::WakeTalkOff, {control(profile_.talk_label)});
       break;
     case Menu::FaceDownSleep:
       m.detail = tr(Msg::FaceDownSleep);

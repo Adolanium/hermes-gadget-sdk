@@ -10,8 +10,8 @@ namespace {
 constexpr uint32_t kTapMaxMs = 400;
 }  // namespace
 
-void TouchGestures::press(Button b) { app_.on_button(b, true); }
-void TouchGestures::release(Button b) { app_.on_button(b, false); }
+void TouchGestures::press(Button b) { app_.on_button(b, true, true); }
+void TouchGestures::release(Button b) { app_.on_button(b, false, true); }
 
 void TouchGestures::tick(uint32_t now_ms) {
   if (state_ == State::Settings && now_ms - t0_ >= 1000) {

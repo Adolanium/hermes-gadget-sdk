@@ -64,7 +64,7 @@ constexpr uint32_t kBackoffMs[] = {1000, 2000, 4000, 8000, 15000, 30000};
 constexpr size_t kBackoffSteps = sizeof(kBackoffMs) / sizeof(kBackoffMs[0]);
 
 const char* const kSettingKeys[] = {"name", "server", "token", "talk_mode", "volume", "brightness", "screen_timeout", "battery_display", "battery_estimate", "language", "wifi_ssid", "wifi_pass",
-                                    "face_down_sleep", "clock", "time_format", "touch_wake", "battery_alert", "battery_alert_sound", "charging_notice", "charging_sound", "charged_notice", "charged_sound", "touch_talk"};
+                                    "face_down_sleep", "clock", "time_format", "touch_wake", "battery_alert", "battery_alert_sound", "charging_notice", "charging_sound", "charged_notice", "charged_sound", "double_home", "wake_talk", "touch_talk"};
 
 // NVS limits storage keys to 15 characters; keep the public setting name unchanged.
 std::string_view setting_storage_key(std::string_view key) {
@@ -234,6 +234,8 @@ void App::load_settings() {
   lang_ = lang_auto_ ? hermes_lang_.value_or(i18n::Lang::En) : i18n::parse(language).value_or(i18n::Lang::En);
   face_down_sleep_ = setting("face_down_sleep", "off") == "on";
   touch_wake_ = !profile_.wake_key || setting("touch_wake", "on") != "off";
+  double_home_ = setting("double_home", "on") != "off";
+  wake_talk_ = setting("wake_talk", "off") == "on";
   touch_talk_ = !profile_.talk_key || setting("touch_talk", "on") != "off";
   clock_after_ms_ = static_cast<uint32_t>(std::max(0, std::min(3600, std::atoi(setting("clock", "0").c_str())))) * 1000;
   clock_24h_ = setting("time_format", "24h") != "12h";
@@ -1268,7 +1270,7 @@ void App::h_error(const json::Value& m) {
 // --------------------------------------------------------------------------
 // Input
 
-void App::on_button(Button button, bool pressed) {
+void App::on_button(Button button, bool pressed, bool touch) {
   if (ui_ && bench_ == Bench::None) ui_->mark_input();
   if (!wifi_setup_text_.empty()) {
     if (button == Button::Cancel && !pressed) close_wifi_setup();
@@ -1279,7 +1281,30 @@ void App::on_button(Button button, bool pressed) {
     return;
   }
   const auto bit = static_cast<uint8_t>(1u << static_cast<unsigned>(button));
-  if (pressed && wake_display()) { wake_buttons_ |= bit; return; }
+  // A double press of the TALK key goes home. Nothing waits for it: the first press does what it
+  // always does, and the second, if it comes in time, undoes that and leaves. A press that only
+  // wakes the screen or dismisses the alarm starts none, so a quick press-and-hold after it still
+  // talks. The menu keeps TALK as its select key, and a question on screen keeps its answers.
+  const bool talk_key = button == Button::Talk && pressed && !touch;
+  if (talk_key) {
+    const bool second = talk_key_armed_ && now() - talk_key_at_ <= kDoublePressMs;
+    talk_key_armed_ = false;
+    if (second && double_home_ && !alarm_ && !settings_open() && !prompt_showing()) {  // the alarm takes the press
+      wake_buttons_ |= bit;  // its release does nothing
+      go_home();
+      return;
+    }
+  }
+  if (pressed && wake_display()) {
+    // With wake_talk, the TALK key that lights the screen goes on to talk, as on a lit screen. A
+    // face-down gadget, the alarm, a question, the menu, or no Hermes to talk to: it only wakes.
+    const bool talk_now = talk_key && wake_talk_ && !face_down_ && !alarm_ && can_talk() && !prompt_showing() &&
+                          !settings_open() && !cancel_held_;
+    if (!talk_now) {
+      wake_buttons_ |= bit;
+      return;
+    }
+  }
   if (wake_buttons_ & bit) {
     if (!pressed) wake_buttons_ &= static_cast<uint8_t>(~bit);
     return;
@@ -1295,6 +1320,12 @@ void App::on_button(Button button, bool pressed) {
   if (button == Button::Talk) {
     talk_held_ = pressed;
     if (pressed) talk_down_at_ = now();
+  }
+  // A press that answers a question or selects in the menu is never the first of a double press:
+  // a quick second one would cancel the turn the answer resumed, or leave the menu it closed.
+  if (talk_key && !settings_chord_fired_ && !settings_open() && !prompt_showing()) {
+    talk_key_armed_ = true;  // the first of a double press, perhaps
+    talk_key_at_ = now();
   }
   if (settings_chord_fired_) {
     if (button == Button::Cancel) cancel_held_ = pressed;
@@ -1417,6 +1448,7 @@ void App::start_listening(bool hands_free) {
 }
 
 void App::finish_listening() {
+  talk_key_armed_ = false;  // a recording on its way to Hermes is not one a second press can take back
   if (hal_.mic) hal_.mic->stop();
   json::Value end = proto::message("audio.end");
   end.set("id", request_id_).set("stream", mic_stream_).set("duration_ms", now() - mode_since_);
@@ -1444,6 +1476,30 @@ void App::cancel_listening(std::string_view why) {
   send(c);
   mode_ = Mode::Idle;
   mode_since_ = now();
+}
+
+void App::go_home() {
+  wake_display();
+  if (mode_ == Mode::Listening) cancel_listening("cancelled");
+  // Leaving the bot stops it: a reply on its way, or one the first press talked over.
+  if (mode_ != Mode::Idle || (!active_turn_.empty() && !turn_done_)) {
+    stop_playback();
+    send(proto::message("cancel"));
+    turn_done_ = true;
+    mode_ = Mode::Idle;
+    mode_since_ = now();
+  }
+  dismiss_overlay();
+  hint_flash_.clear();  // "Hold TALK while speaking" from the first press
+  reply_until_ = now();  // Ready, not the last reply
+  reply_shown_ = false;
+  scroll_ = -1;
+  for (size_t i = 0; i < agent_profiles_.size(); ++i) {
+    if (agent_profiles_[i].id != "default") continue;
+    if (agent_profile_ != "default") select_agent_profile(i);
+    break;
+  }
+  update_model();
 }
 
 void App::start_new_session() {
@@ -2464,6 +2520,10 @@ std::string App::console(std::string_view raw) {
       return "@error charged_notice must be on or off";
     if (key == "charged_sound" && !value.empty() && value != "on" && value != "off")
       return "@error charged_sound must be on or off";
+    if (key == "double_home" && !value.empty() && value != "on" && value != "off")
+      return "@error double_home must be on or off";
+    if (key == "wake_talk" && !value.empty() && value != "on" && value != "off")
+      return "@error wake_talk must be on or off";
     if (key == "touch_talk" && !value.empty() && value != "on" && value != "off")
       return "@error touch_talk must be on or off";
     if (key == "clock" && !value.empty() &&
