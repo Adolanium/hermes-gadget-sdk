@@ -73,6 +73,13 @@ bool App::wake_display() {
   const bool was_clock = clock_showing_;
   clock_showing_ = false;  // the clock ends at once, with the dim and sleep states
   if (display_dimmed_ || sleeping || was_clock) {
+    if (sleeping && reply_unread_ && mode_ == Mode::Idle && !reply_.empty()) {
+      // A reply no input has met since it arrived: the screen may have gone dark
+      // before anyone read it. The wake shows it again from the top, for the usual time.
+      reply_until_ = now() + kReplyLingerMs;
+      scroll_ = 0;
+      page_at_ = now() + page_dwell_ms();
+    }
     display_dimmed_ = display_sleeping_ = false;
     on_battery_ = false;  // checked afresh before the next doze
     set_dozing(false);  // before drawing: the port wakes its peripherals
@@ -91,6 +98,9 @@ void App::set_dozing(bool dozing) {
 
 void App::on_power_key() {
   if (!hal_.display || !hal_.display->info().has_backlight) return;
+  // Turning the screen off is an answer to what was on it, before anything closes: a reply
+  // under a notice or a card the press closes stays unread. A press that only wakes reads nothing.
+  if (!display_sleeping_ && !display_dimmed_) mark_reply_read();
   close_notices_for_input();  // like any other press: it closes the alert and does its own thing
   if (display_sleeping_ || display_dimmed_) {
     wake_display();
@@ -102,9 +112,16 @@ void App::on_power_key() {
     update_model();
     return;
   }
-  // Off means off: the menu, a list or a card the user was on closes, so the
-  // next press wakes to the home screen and nothing open turns the screen back on.
-  if (settings_open()) close_settings();
+  // In the settings menu the press is Back: it closes the menu (and any check
+  // running in it) and leaves the screen lit on the home screen. The next press
+  // there turns the screen off.
+  if (settings_open()) {
+    close_settings();
+    activity_at_ = now();  // the screen timeout starts again from the press
+    return;
+  }
+  // Off means off: a list or a card the user was on closes, so the next press
+  // wakes to the home screen and nothing open turns the screen back on.
   if (overlay_ != Overlay::None) {
     dismiss_overlay();
     update_model();
@@ -180,6 +197,12 @@ bool App::play_tones(const Tone* tones, size_t count) {
   hal_.speaker->write(pcm.data(), pcm.size());
   hal_.speaker->end();
   return true;
+}
+
+void App::mark_reply_read() {
+  // Only an input over the reply's text counts: one over the mascot, idle or speaking,
+  // leaves it unread.
+  if (!model_.hero && (model_.screen == Screen::Responding || model_.screen == Screen::Ready)) reply_unread_ = false;
 }
 
 void App::close_notices_for_input() {

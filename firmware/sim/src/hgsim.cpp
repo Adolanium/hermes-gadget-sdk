@@ -243,6 +243,7 @@ hgsim* hgsim_create(const hgsim_config* cfg, const hgsim_host* host) {
   profile.talk_label = cfg->talk_label ? cfg->talk_label : "SPACE";
   profile.cancel_label = cfg->cancel_label ? cfg->cancel_label : "ESC";
   profile.wake_key = true;  // the keyboard's TALK always reaches App::on_button, and lights a dark screen
+  profile.talk_key = true;  // and talks, so the touchscreen may be left out of talking
   if (cfg->touch) {
     profile.touch_screen = true;
     if (!cfg->cancel_label) profile.cancel_label = "Swipe down";
@@ -250,6 +251,7 @@ hgsim* hgsim_create(const hgsim_config* cfg, const hgsim_host* host) {
   }
   profile.motion_sensor = cfg->motion != 0;
   profile.colour_face_alloc = std::malloc;
+  profile.recording_alloc = std::malloc;  // like a board with PSRAM: a lost connection keeps the recording
   sim->app = std::make_unique<hg::App>(sim->hal, profile);
   if (cfg->touch) {
     sim->touch = std::make_unique<hg::TouchGestures>(*sim->app);

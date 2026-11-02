@@ -486,6 +486,23 @@ extern "C" void app_main(void) {
   // From PSRAM only, after the framebuffer: without room there, one-colour faces.
   if (profile.faces)
     profile.colour_face_alloc = [](size_t n) { return heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); };
+  // The recording buffer (1 MB for 30 s at 16 kHz, 1.5 MB at 24 kHz), PSRAM only, and only when
+  // about 1 MB of PSRAM stays free after it (RecordingBuffer::leaves_headroom). Otherwise the board
+  // streams as before, and a connection lost mid-recording ends the recording.
+  if (esp_psram_is_initialized())
+    profile.recording_alloc = [](size_t n) -> void* {
+      const size_t free_bytes = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+      if (!hg::RecordingBuffer::leaves_headroom(free_bytes, n)) {
+        ESP_LOGW(TAG, "recording buffer off: %u KB of PSRAM free, it needs %u KB and %u KB to spare",
+                 static_cast<unsigned>(free_bytes / 1024), static_cast<unsigned>(n / 1024),
+                 static_cast<unsigned>(hg::RecordingBuffer::kPsramHeadroom / 1024));
+        return nullptr;
+      }
+      void* p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      ESP_LOGI(TAG, "recording buffer %s: %u KB of PSRAM, %u KB free before", p ? "on" : "off (allocation failed)",
+               static_cast<unsigned>(n / 1024), static_cast<unsigned>(free_bytes / 1024));
+      return p;
+    };
 #else
   profile.faces = false;
 #endif
@@ -494,6 +511,7 @@ extern "C" void app_main(void) {
   profile.has_cancel_button = board.buttons.cancel >= 0 || touch;
   profile.has_scroll_buttons = (board.buttons.up >= 0 && board.buttons.down >= 0) || board.encoder.a >= 0;
   profile.wake_key = board.buttons.talk >= 0 || board.axp_power_key || board.pwr_key.enabled;
+  profile.talk_key = board.buttons.talk >= 0;
   profile.talk_label = board.talk_label;
   profile.cancel_label = board.cancel_label;
   if (touch && board.touch.enabled) {
@@ -533,6 +551,7 @@ extern "C" void app_main(void) {
     if (key == "clock") g_time.set_wanted(app.clock_enabled());
     if (key == "timezone") g_time.apply_timezone(g_storage);
 #if !CONFIG_HG_BOARD_ESP32_CYD
+    if (key == "touch_wake") g_touch.set_wakes(app.touch_wake());
     if (key == "name" && hgp::board_config().bluetooth) g_phone.set_name(device_name());
     if (key == "tailnet" || key == "ts_key") g_tailnet.settings_changed();
 #endif
@@ -564,12 +583,17 @@ extern "C" void app_main(void) {
   if (board.light_sleep) keep_pins_through_sleep(board);
 #if !CONFIG_HG_BOARD_ESP32_CYD
   g_system.on_doze_start = [] { g_codec_speaker.power_down(); };
+  hgp::EspSystem::on_sleep_held_change = [] { g_touch.nudge(); };
   g_system.on_doze_end = [] {
+    g_touch.nudge();
     g_codec_speaker.power_up();
     g_wifi.retry_now();
   };
 #endif
   app.begin();
+#if !CONFIG_HG_BOARD_ESP32_CYD
+  g_touch.set_wakes(app.touch_wake());
+#endif
   g_time.set_wanted(app.clock_enabled());  // SNTP only while the clock face is on
   hgp::console::begin();
 
@@ -591,6 +615,7 @@ extern "C" void app_main(void) {
     }
     // A loss whose WsClosed event was dropped; harmless if it was delivered too.
     if (g_transport.take_lost()) app.on_transport_closed("disconnected");
+    g_transport.set_metering(app.in_turn());  // the uplink line, while recording, waiting or replying
     // Waiting would leave the device answering nothing until someone resets it.
     if (g_transport.stuck()) {
       ESP_LOGE(TAG, "the WebSocket send task is stuck; restarting");

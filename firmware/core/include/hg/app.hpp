@@ -20,6 +20,7 @@
 #include "hg/hal.hpp"
 #include "hg/i18n.hpp"
 #include "hg/json.hpp"
+#include "hg/recording.hpp"
 #include "hg/tones.hpp"
 #include "hg/ui.hpp"
 #include "hg/vad.hpp"
@@ -60,6 +61,10 @@ struct DeviceProfile {
   // A key can light a dark screen (TALK, or a power key read by the port), so the
   // touchscreen may be left out of waking it (the touch_wake setting).
   bool wake_key = false;
+  // A physical TALK key (BOOT on many boards) reaches App::on_button. Next to a touchscreen it lets
+  // the touchscreen be left out of talking (`touch_talk`); it can double-press home (`double_home`)
+  // and talk from a dark screen (`wake_talk`). Boards without one hide all three.
+  bool talk_key = true;
   // Board-specific settings the console accepts besides the core ones. Changes
   // reach the port through App::on_setting_changed.
   std::vector<std::string> extra_settings;
@@ -78,6 +83,12 @@ struct DeviceProfile {
   // Faces in colour too: begin() takes px*px*2 bytes for one (72 KB at 192 px) from this, and free()
   // releases them. Without it, or when it returns null, the board offers one-colour faces.
   void* (*colour_face_alloc)(size_t) = nullptr;
+  // Keeps each recording whole while it uploads: begin() takes RecordingBuffer::bytes_for(the
+  // utterance limit, mic_rate) bytes (1 MB for 30 s at 16 kHz, 1.5 MB at 24 kHz) from this, released with
+  // std::free. A connection lost mid-recording then loses nothing: recording goes on, and the
+  // whole of it is sent again once the device is back online. Without it, or when it returns
+  // null, audio streams straight to the link and a lost connection ends the recording.
+  void* (*recording_alloc)(size_t) = nullptr;
 };
 
 // A device-side capability the agent may invoke. `params` is a JSON-schema
@@ -119,7 +130,16 @@ class App {
   void on_transport_text(std::string_view text);
   void on_transport_binary(const uint8_t* data, size_t len);
   void on_transport_closed(std::string_view reason);
-  void on_button(Button button, bool pressed);
+  // `touch`: the press comes from the touchscreen (TouchGestures), not a key.
+  void on_button(Button button, bool pressed, bool touch = false);
+  // Two presses of the TALK key (BOOT on most boards) this close together, start to start,
+  // go home: the second press cancels what the first started, closes what is open and asks
+  // Hermes for the default profile (the `double_home` setting). The first press acts at once.
+  static constexpr uint32_t kDoublePressMs = 400;
+  bool double_home() const { return double_home_; }
+  // The `wake_talk` setting: a press of the TALK key on a dark screen lights it and talks at once
+  // (holds to talk, or starts a tap-mode recording), instead of only waking it.
+  bool wake_talk() const { return wake_talk_; }
   // Accelerometer sample in the device frame, in milli-g: +x towards the
   // picture's right, +y towards its top, +z out of the screen. Called 5-25
   // times a second from the thread that calls tick().
@@ -141,6 +161,21 @@ class App {
   void close_settings();
   bool settings_open() const { return menu_ != Menu::Closed; }
   bool settings_title_hit(int x, int y) const;
+  // Touch on the settings list (TouchGestures), in panel coordinates. While it is
+  // live (open, no hardware check running), a press starts a touch; a drag scrolls
+  // the list with the finger, or moves the selected row's slider when the press
+  // landed on it; a tap (a press that did not move) selects a row and changes it;
+  // lift ends a drag, setting the slider's level.
+  bool settings_list_live() const;
+  // The list row under a point (-1: none), and the level the selected row's slider picks there (-1: off it).
+  int settings_row_hit(int x, int y) const { return ui_ && settings_open() ? ui_->settings_row_hit(model_, x, y) : -1; }
+  int settings_slider_hit(int x, int y) const {
+    return ui_ && settings_open() ? ui_->settings_slider_at(model_, x, y, false) : -1;
+  }
+  void settings_press(int x, int y);
+  void settings_drag(int x, int y);
+  void settings_tap(int x, int y);
+  void settings_lift();
   // Hermes profiles: which one answers this device. Switching asks the server; the
   // device keeps a profile only once Hermes confirms it, and asks again only after an answer.
   bool next_agent_profile();
@@ -179,18 +214,32 @@ class App {
   // An input on a lit screen closes the alert first, then goes on as usual (a touch
   // calls this at touch-down, so its hit tests see the screen underneath).
   void close_notices_for_input();
+  // An input on a lit screen showing the last reply: it has been seen, and a wake no
+  // longer brings it back.
+  void mark_reply_read();
   // The charging notice is on screen: USB was just plugged in.
   bool charging_notice() const { return power_notice_ == PowerNotice::Charging; }
   // The full battery notice is on screen.
   bool charged_notice() const { return power_notice_ == PowerNotice::Charged; }
+  // touch_talk off: the touchscreen never records; TALK does. touch_presses_talk() says whether a
+  // touch may still press TALK now: in settings, at a question and on a ringing alarm it navigates,
+  // answers or dismisses, and nothing there opens the microphone.
+  bool touch_talk() const { return touch_talk_; }
+  bool touch_presses_talk() const;
   std::string agent_profile_name() const;
   // Returns true when this input only wakes a sleeping display.
   bool wake_display();
-  // A short press of the PMIC's power key: turns the screen off, or back on.
+  // A short press of the PMIC's power key: turns the screen off, or back on. In
+  // the settings menu it is Back: the menu closes and the screen stays lit.
   // Wi-Fi and the Hermes connection stay up.
   void on_power_key();
   // Dozing (System::set_dozing): the port's loop may wait this long for events.
   static constexpr uint32_t kDozeWaitMs = 100;
+  // The longest recording; the recording buffer holds this much (RecordingBuffer::bytes_for).
+  static constexpr uint32_t kMaxUtteranceMs = 30000;
+  // A recording that ended with the connection lost waits this long for it to come back
+  // (about three connection attempts), then is dropped.
+  static constexpr uint32_t kRecordingWaitMs = 45000;
   bool dozing() const { return dozing_; }
   bool start_wifi_setup();
   void close_wifi_setup();
@@ -360,11 +409,23 @@ class App {
   void start_listening(bool hands_free);
   void finish_listening();
   void cancel_listening(std::string_view why);
+  // The recording buffer (profile_.recording_alloc): see rec_ below.
+  bool send_audio_start();
+  void pump_recording();
+  void resend_recording();
+  void discard_recording();
+  void cancel_upload(std::string_view why);
+  // The user's latest recording hasn't all reached Hermes: recording, or ended and uploading.
+  // Anything Hermes sends for a turn now belongs to an earlier one and must not end this one.
+  bool recording_unsent() const { return mode_ == Mode::Listening || (rec_on_ && mode_ == Mode::Thinking); }
+  bool recording_held() const { return rec_on_ && !rec_live_; }
   void stop_playback();
   void cancel_turn();
   bool known_setting(std::string_view key) const;
   std::string wifi_command(std::string_view args);
   void start_new_session();
+  // The double press of TALK: back to Ready with the default profile.
+  void go_home();
   void scroll_body(int delta);
   // Long text pages itself, so boards without scroll buttons can read it all.
   bool turn_page();
@@ -468,10 +529,26 @@ class App {
   // `language` is auto: follow the language Hermes sends in `welcome` (English until it does).
   bool lang_auto_ = false;
   std::optional<i18n::Lang> hermes_lang_;  // from the last `welcome` that named one this firmware has
-  enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, Profile, ProfileGrid, Microphone, Speaker, Display, Inputs,
-                              Info, Power, BatteryAlert, BatteryAlertSound, ChargingNotice, ChargingSound, ChargedNotice, ChargedSound, IdleTimer, TouchWake, FaceDownSleep, Clock, PowerOff, WifiSetup, Phone, Language, Back };
+  enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, TouchTalk, Profile, ProfileGrid, Microphone, Speaker, Display, Inputs,
+                              Info, Power, BatteryAlert, BatteryAlertSound, ChargingNotice, ChargingSound, ChargedNotice, ChargedSound, IdleTimer, TouchWake, FaceDownSleep, Clock, PowerOff, WifiSetup, Phone, Language, DoubleHome, WakeTalk, Back };
   enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };
   Menu menu_ = Menu::Closed;
+  // The settings list's scroll in pixels, and where it eases to. It follows the
+  // selected row until a drag moves it by hand, and again once the selection moves.
+  int settings_scroll_ = 0, settings_target_ = 0;
+  bool settings_follow_ = true;
+  uint32_t settings_step_at_ = 0;
+  int press_y_ = 0, press_scroll_ = 0;
+  bool sliding_ = false;  // the press landed on the selected row's slider
+  int slide_level_ = -1;  // a slider being dragged: its level until the finger lifts
+  Menu slide_item_ = Menu::Closed;  // the item a drag on its slider began on
+  Menu settings_item_at(int row) const;
+  void settings_select(Menu item);
+  void settings_set_level(int level);
+  bool menu_offered(Menu item) const;
+  // An item's name and text, in `m`'s detail and body (the model's own for the selected item), and its row.
+  void settings_item(Menu item, UiModel& m) const;
+  SettingRow settings_row(Menu item, const std::string& label, const std::string& body) const;
   HardwareCheck hardware_check_ = HardwareCheck::None;
   std::string check_result_;
   std::string wifi_setup_text_;
@@ -490,6 +567,8 @@ class App {
   bool talk_held_ = false;
   bool settings_chord_fired_ = false;
   uint32_t talk_down_at_ = 0;
+  uint32_t talk_key_at_ = 0;      // the last press of the TALK key, for a double press
+  bool talk_key_armed_ = false;   // ...and whether the next press may complete one
   std::optional<PowerStatus> power_status_;
   uint32_t power_read_at_ = 0, activity_at_ = 0, power_key_polled_at_ = 0;
   uint32_t screen_timeout_ms_ = 0;
@@ -555,6 +634,9 @@ class App {
   bool motion_seen_ = false, face_down_ = false;
   bool face_down_sleep_ = false;      // the `face_down_sleep` setting
   bool touch_wake_ = true;            // the `touch_wake` setting
+  bool double_home_ = true;           // the `double_home` setting
+  bool wake_talk_ = false;            // the `wake_talk` setting
+  bool touch_talk_ = true;            // the `touch_talk` setting
   bool reply_while_face_down_ = false;  // a reply arrived while dark; show it on the turn-over
   uint8_t wake_buttons_ = 0;
 
@@ -574,6 +656,26 @@ class App {
   int attempts_ = 0;
   std::string fatal_;   // unrecoverable until reconfigured
   std::string last_close_;
+  // What `diag` says about lost connections and recordings: the last few closes, with what
+  // the device was doing, and how the last recording's upload went.
+  struct Close {
+    uint32_t at = 0;
+    std::string reason;
+    const char* during = "";
+  };
+  std::vector<Close> closes_;  // newest last, at most kCloseHistory
+  static constexpr size_t kCloseHistory = 5;
+  uint32_t closes_total_ = 0;
+  struct RecordingStats {
+    uint32_t held = 0, resent = 0, dropped = 0;  // buffered recordings since start-up
+    // The last recording: its length, its frames not sent (refused by the link, cut off by a loss,
+    // or past the buffer), the most audio waiting for the link at once, and how often it went
+    // again (buffered).
+    uint32_t last_ms = 0, last_unsent = 0, last_backlog_ms = 0, last_resends = 0;
+    bool any = false;
+  } rec_stats_;
+  uint32_t rec_backlog_ms_ = 0;  // this recording's peak backlog
+  const char* activity() const;
   // tailnet (DeviceProfile::tailnet): the settings, and the port's tunnel as last reported
   bool tailnet_on_ = false;
   std::string tailnet_key_;
@@ -594,11 +696,24 @@ class App {
   uint32_t mode_since_ = 0;
   bool hands_free_ = false;
   uint8_t mic_stream_ = 0;
-  uint32_t mic_unsent_ = 0;  // frames of this recording the transport refused
+  uint32_t mic_unsent_ = 0;  // frames of this recording the transport refused (or, buffered, that didn't fit)
+  // This recording goes through rec_. rec_live_: the current connection carries its upload
+  // (audio.start went on it). rec_done_: the microphone stopped, and audio.end goes once all of
+  // it is sent. Held (on, not live): the connection was lost; recording goes on, and once the
+  // device is online again the whole of it goes on a new stream. Finished and still held at
+  // rec_wait_until_, it is dropped. Off again once audio.end is sent, or on cancel.
+  RecordingBuffer rec_;
+  bool rec_on_ = false, rec_live_ = false, rec_done_ = false, rec_deadline_ = false;
+  uint32_t rec_duration_ms_ = 0, rec_wait_until_ = 0, rec_started_at_ = 0;
+  uint16_t rec_resends_ = 0;
+  std::vector<int16_t> mic_pending_;  // the frame being built (mic_frame_samples())
+  size_t mic_frame_samples() const;
+  void send_mic_frame();
   uint16_t mic_seq_ = 0;
   std::string request_id_;
   std::string active_turn_;
   bool turn_done_ = false;
+  bool turn_started_ = false;  // Hermes sent turn.start for the request: it is working on it
   bool reply_final_ = false;
   uint32_t last_turn_rx_ = 0;
   std::string reply_;
@@ -608,6 +723,9 @@ class App {
   int caption_cols_ = 0;
   static constexpr uint32_t kReplyLingerMs = 20000;  // reply text stays up this long before the mascot returns
   uint32_t reply_until_ = 0;  // reply text shown on the Ready screen until then
+  // No input since the reply arrived: each wake from a dark screen shows it again,
+  // until the user does something (mark_reply_read).
+  bool reply_unread_ = false;
   bool cancel_held_ = false;
   bool cancel_long_fired_ = false;
   uint32_t cancel_down_at_ = 0;
@@ -689,7 +807,7 @@ class App {
   // frame timing: the running statistics while `perf` is on, and the bench
   std::unique_ptr<FrameStats> frame_stats_;
   uint32_t frame_log_at_ = 0, frame_log_frames_ = 0;
-  enum class Bench : uint8_t { None, Scroll, Mascot, Redraw };
+  enum class Bench : uint8_t { None, Scroll, Mascot, Redraw, Settings };
   Bench bench_ = Bench::None, bench_last_ = Bench::None;  // running; the last one to run of `perf bench all`
   int bench_frame_ = 0;
   FrameStats bench_stats_;

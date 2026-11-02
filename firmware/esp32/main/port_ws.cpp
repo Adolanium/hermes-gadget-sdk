@@ -3,13 +3,17 @@
 // task as events.
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_private/esp_clk.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
+#include "link_diag.hpp"
 
 namespace hgp {
 namespace {
@@ -37,6 +41,13 @@ struct EspOps {
 };
 
 uint32_t now_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
+
+// The access point's signal now, 0 when not joined: lost connections log it.
+int rssi_now() {
+  wifi_ap_record_t ap = {};
+  return esp_wifi_sta_get_ap_info(&ap) == ESP_OK ? ap.rssi : 0;
+}
+
 
 uint32_t generation_of(const esp_websocket_event_data_t* d) {
   return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(d->user_context));
@@ -100,7 +111,10 @@ bool WsTransport::stuck() const { return handoff_failed_ || watch_.stuck(now_ms(
 
 bool WsTransport::enqueue(uint8_t opcode, const void* data, size_t len) {
   if (!client_ || !esp_websocket_client_is_connected(client_)) return false;
-  if (!hg::ws::may_queue_message(uxQueueSpacesAvailable(tx_), opcode)) return false;  // the link isn't keeping up
+  if (!hg::ws::may_queue_message(uxQueueSpacesAvailable(tx_), opcode)) {  // the link isn't keeping up
+    ++refused_;
+    return false;
+  }
   auto* copy = static_cast<uint8_t*>(heap_caps_malloc(len ? len : 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (!copy) copy = static_cast<uint8_t*>(malloc(len ? len : 1));
   if (!copy) return false;
@@ -121,12 +135,42 @@ void WsTransport::tx_task(void* arg) {
   auto* self = static_cast<WsTransport*>(arg);
   EspOps ops;
   TxItem item;
+  hg::ws::UplinkMeter meter;
   for (;;) {
-    if (xQueueReceive(self->tx_, &item, portMAX_DELAY) != pdTRUE) continue;
-    self->watch_.begin(now_ms());
-    if (hg::ws::process(item, self->gens_.current(), ops) == hg::ws::Outcome::Failed) ESP_LOGW(TAG, "send failed");
-    self->watch_.end();
-    free(const_cast<uint8_t*>(item.data));
+    // Wakes at least once a second while metering, so a stalled link still gets its line.
+    const bool got = xQueueReceive(self->tx_, &item, self->metering_ ? pdMS_TO_TICKS(1000) : portMAX_DELAY) == pdTRUE;
+    const uint32_t began = now_ms();
+    // A turn starting begins a fresh window, before its first message counts (refusals too).
+    const bool on = self->metering_;
+    if (on && !meter.on()) self->refused_ = 0;
+    meter.set_on(on, began);
+    if (got) {
+      const uint32_t depth = uxQueueMessagesWaiting(self->tx_) + 1;
+      self->watch_.begin(began);
+      // A send that fails makes the client close the connection from inside the send, so the
+      // close event (on_event) learns of it from here: what is in flight, and since when.
+      self->sending_bytes_ = item.len;
+      self->sending_since_ = began;
+      self->sending_gen_ = item.opcode == hg::ws::kClose ? 0 : item.generation;
+      const auto outcome = hg::ws::process(item, self->gens_.current(), ops);
+      self->sending_gen_ = 0;
+      self->watch_.end();
+      const uint32_t took = now_ms() - began;
+      if (outcome == hg::ws::Outcome::Failed)
+        ESP_LOGW(TAG, "send of %u B gave up after %u ms (rssi %d)", static_cast<unsigned>(item.len),
+                 static_cast<unsigned>(took), rssi_now());
+      meter.item(depth, took, item.len, outcome == hg::ws::Outcome::Sent, outcome == hg::ws::Outcome::Failed);
+      free(const_cast<uint8_t*>(item.data));
+    }
+    hg::ws::UplinkMeter::Report r;
+    if (meter.on() && meter.take(now_ms(), r)) {
+      const uint32_t refused = self->refused_.exchange(0);
+      if (r.msgs || r.failed || refused)
+        ESP_LOGI(TAG, "uplink: %u B/s in %u msgs, longest send %u ms, queue peak %u/%u, refused %u, failed %u, cpu %d MHz, rssi %d",
+                 static_cast<unsigned>(r.bytes_per_s), static_cast<unsigned>(r.msgs), static_cast<unsigned>(r.longest_ms),
+                 static_cast<unsigned>(r.queue_peak), static_cast<unsigned>(hg::ws::kTxMessages + hg::ws::kTxReserved),
+                 static_cast<unsigned>(refused), static_cast<unsigned>(r.failed), esp_clk_cpu_freq() / 1000000, rssi_now());
+    }
   }
 }
 
@@ -137,17 +181,40 @@ void WsTransport::on_event(void* arg, const char*, int32_t id, void* event_data)
   if (!self->gens_.is_current(gen)) return;  // a client being torn down
   switch (id) {
     case WEBSOCKET_EVENT_CONNECTED:
+      self->connected_gen_ = gen;  // this client's connect attempt is over
       events::post(EventType::WsOpen, nullptr, 0, gen);
       break;
     case WEBSOCKET_EVENT_DISCONNECTED:
     case WEBSOCKET_EVENT_CLOSED:
+    case WEBSOCKET_EVENT_ERROR: {
       self->gens_.lost(gen);
-      events::post(EventType::WsClosed, "disconnected", 12, gen);
+      // Why, as far as anyone knows: a send that gave up, the client's error, the server's
+      // close code, and the signal (hg::link::ws_closed). The app logs it and keeps it for diag.
+      // The client fills the socket and TLS fields only for a transport error; the rest may be
+      // left over or uninitialised. The upgrade's HTTP status explains only a failed connect
+      // attempt (hg::link::upgrade_status): this client never reached CONNECTED.
+      hg::link::WsError e;
+      e.error_type = d->error_handle.error_type;
+      if (e.error_type == WEBSOCKET_ERROR_TYPE_TCP_TRANSPORT) {
+        e.sock_errno = d->error_handle.esp_transport_sock_errno;
+        e.tls_err = d->error_handle.esp_tls_last_esp_err;
+      }
+      e.http_status = hg::link::upgrade_status(d->error_handle.esp_ws_handshake_status_code,
+                                               self->connected_gen_.load() != gen);
+      e.close_code = d->close_status_code;  // esp_websocket_client 1.8.0 and later
+      // Lost while a send of this connection was in flight: that send is what gave up.
+      hg::link::SendFailure send;
+      const bool sent_failed = gen && self->sending_gen_.load() == gen;
+      if (sent_failed) {
+        send.took_ms = now_ms() - self->sending_since_.load();
+        send.bytes = self->sending_bytes_.load();
+      }
+      const std::string why = hg::link::ws_closed(id == WEBSOCKET_EVENT_ERROR ? "connection error" : "disconnected", e,
+                                                  sent_failed ? &send : nullptr, rssi_now());
+      ESP_LOGW(TAG, "%s", why.c_str());
+      events::post(EventType::WsClosed, why.data(), why.size(), gen);
       break;
-    case WEBSOCKET_EVENT_ERROR:
-      self->gens_.lost(gen);
-      events::post(EventType::WsClosed, "connection error", 16, gen);
-      break;
+    }
     case WEBSOCKET_EVENT_DATA: {
       uint8_t op = d->op_code;
       if (op == 0x8 || op == 0x9 || op == 0xA) break;  // close/ping/pong are handled by the client

@@ -41,8 +41,8 @@ constexpr uint32_t kConnectTimeoutMs = 10000;
 constexpr uint32_t kHandshakeTimeoutMs = 10000;
 constexpr uint32_t kStableSessionMs = 30000;
 constexpr uint32_t kMinUtteranceMs = 350;
-constexpr uint32_t kMaxUtteranceMs = 30000;
-constexpr uint32_t kThinkingTimeoutMs = 180000;
+constexpr uint32_t kThinkingTimeoutMs = 180000;  // no word from Hermes after a request
+constexpr uint32_t kTurnTimeoutMs = 30 * 60000;   // ...once its turn.start says it is working
 constexpr uint32_t kSettleAfterReplyMs = 6000;
 constexpr uint32_t kNewSessionHoldMs = 2000;  // hold CANCEL this long to start a new session
 constexpr uint32_t kNewSessionHintMs = 600;   // ...and show the countdown after this long
@@ -56,7 +56,10 @@ constexpr uint32_t kSensorIntervalMs = 2000;
 constexpr uint32_t kDefaultCardMs = 15000;
 constexpr int kDashboardVersion = 1;    // the dashboard message this firmware draws
 constexpr size_t kDashMaxEach = 12;     // sessions, and tiles, kept from one dashboard message
-constexpr size_t kMicChunkSamples = 640;  // 40 ms at 16 kHz per binary frame
+// Microphone audio goes in 40 ms frames whatever the port delivers (the codec boards hand
+// over 13 ms at a time): each frame is a WebSocket message, a TLS record and a queue slot, so
+// three times as many small ones cost the uplink, and fill the send queue three times sooner.
+constexpr uint32_t kMicFrameMs = 40;
 constexpr size_t kOtaAckBytes = 16 * 1024;  // a firmware update acknowledges every 16 KB written
 constexpr uint32_t kOtaIdleMs = 30000;      // ...and is abandoned when no data comes for this long
 constexpr uint32_t kOtaRestartMs = 1000;    // time for ota.done to leave before the restart
@@ -64,7 +67,7 @@ constexpr uint32_t kBackoffMs[] = {1000, 2000, 4000, 8000, 15000, 30000};
 constexpr size_t kBackoffSteps = sizeof(kBackoffMs) / sizeof(kBackoffMs[0]);
 
 const char* const kSettingKeys[] = {"name", "server", "token", "talk_mode", "volume", "brightness", "screen_timeout", "battery_display", "battery_estimate", "language", "wifi_ssid", "wifi_pass",
-                                    "face_down_sleep", "clock", "time_format", "touch_wake", "battery_alert", "battery_alert_sound", "charging_notice", "charging_sound", "charged_notice", "charged_sound", "profile_grid"};
+                                    "face_down_sleep", "clock", "time_format", "touch_wake", "battery_alert", "battery_alert_sound", "charging_notice", "charging_sound", "charged_notice", "charged_sound", "double_home", "wake_talk", "touch_talk", "profile_grid"};
 
 // NVS limits storage keys to 15 characters; keep the public setting name unchanged.
 std::string_view setting_storage_key(std::string_view key) {
@@ -236,6 +239,9 @@ void App::load_settings() {
   lang_ = lang_auto_ ? hermes_lang_.value_or(i18n::Lang::En) : i18n::parse(language).value_or(i18n::Lang::En);
   face_down_sleep_ = setting("face_down_sleep", "off") == "on";
   touch_wake_ = !profile_.wake_key || setting("touch_wake", "on") != "off";
+  double_home_ = setting("double_home", "on") != "off";
+  wake_talk_ = setting("wake_talk", "off") == "on";
+  touch_talk_ = !profile_.talk_key || setting("touch_talk", "on") != "off";
   {
     const int grid = std::atoi(setting("profile_grid", "9").c_str());
     profile_grid_ = static_cast<uint8_t>(grid == 4 || grid == 6 || grid == 16 ? grid : 9);
@@ -372,6 +378,15 @@ void App::begin() {
     colour_px_ = colour_ ? px : 0;
     if (!colour_) log(LogLevel::Warn, "no room for a colour face: one-colour faces only");
   }
+  if (profile_.recording_alloc && !rec_.ready()) {
+    // Which way it went, at start-up: a report shows whether a lost connection keeps a recording.
+    const size_t bytes = RecordingBuffer::bytes_for(kMaxUtteranceMs, profile_.mic_rate);
+    if (rec_.reserve(profile_.recording_alloc, bytes))
+      log(LogLevel::Info, "recording buffer on: " + std::to_string(bytes / 1024) +
+                              " KB, a lost connection keeps the recording");
+    else
+      log(LogLevel::Warn, "no room for the recording buffer: a lost connection ends a recording");
+  }
   if (ui_ && profile_.touch_screen)  // about 7 mm: 7 * ppi / 25.4, rounded up
     ui_->set_touch_px((70 * (profile_.touch_ppi ? profile_.touch_ppi : DeviceProfile::kDefaultTouchPpi) + 253) / 254);
   // Thumbnails for the profile grid, with colour faces: the largest icon the grid draws, at most 128 px,
@@ -406,12 +421,19 @@ std::string App::next_id(char prefix) {
 // Connection lifecycle
 
 void App::on_network(bool up, std::string_view detail) {
+  if (!up && network_up_)
+    log(LogLevel::Warn, "network down: " + std::string(detail.empty() ? "no detail" : detail) + " (" + activity() + ")");
   network_up_ = up;
   network_detail_ = std::string(detail);
   if (!up) {
-    if (phase_ == Phase::Connecting || phase_ == Phase::Handshake || phase_ == Phase::Online) {
+    // Only a connection (or a connect in flight) the network took with it: after the WebSocket
+    // reported its loss, the session already ended, and a second close would count it twice.
+    if (transport_active_ &&
+        (phase_ == Phase::Connecting || phase_ == Phase::Handshake || phase_ == Phase::Online)) {
       hal_.transport->close();
-      drop_session("network lost");
+      // The port's words ("Wi-Fi lost (reason 200 beacon timeout, rssi -78)") stay in the close
+      // history: network_detail_ is replaced once the network is back.
+      drop_session(detail.empty() ? std::string_view("network lost") : detail);
     }
     if (phase_ != Phase::Boot) {
       phase_ = Phase::NoNetwork;
@@ -480,16 +502,58 @@ void App::schedule_reconnect() {
   reconnect_pending_ = network_up_;
 }
 
+// What the device was doing, for the log and `diag` when a connection ends.
+const char* App::activity() const {
+  if (mode_ == Mode::Listening) return "recording";
+  if (rec_on_) return "sending a recording";
+  if (mode_ == Mode::Thinking) return "waiting for a reply";
+  if (mode_ == Mode::Responding) return "replying";
+  return "idle";
+}
+
 void App::drop_session(std::string_view reason) {
   last_close_ = std::string(reason);
+  // Every end of a session, whoever noticed it: the transport, a timeout or the network.
+  ++closes_total_;
+  if (closes_.size() >= kCloseHistory) closes_.erase(closes_.begin());
+  closes_.push_back({now(), last_close_, activity()});
+  log(LogLevel::Warn, "connection closed: " + last_close_ + " (" + activity() + ")");
   if (ota_busy()) {
     if (ota_ == Ota::Receiving) hal_.updater->abort();
     ota_reset();
     log(LogLevel::Warn, "firmware update abandoned: the connection dropped");
   }
-  if (mode_ == Mode::Listening && hal_.mic) hal_.mic->stop();
+  // A buffered recording outlives the connection: recording goes on (or, finished, waits),
+  // and all of it goes again once the device is back online (resend_recording).
+  const bool keep = rec_on_ && (mode_ == Mode::Listening || mode_ == Mode::Thinking);
+  if (keep) {
+    if (rec_live_) ++rec_stats_.held;  // once per loss, not per failed reconnect
+    rec_live_ = false;
+    rec_.rewind();
+    // The wait starts once, when a finished recording is first held; a reconnect that fails
+    // again doesn't extend it.
+    if (rec_done_ && !rec_deadline_) {
+      rec_deadline_ = true;
+      rec_wait_until_ = now() + kRecordingWaitMs;
+    }
+    log(LogLevel::Warn, std::string("connection lost during a recording; ") +
+                            (rec_done_ ? "it waits to be sent again" : "still recording") + ", " +
+                            std::to_string(rec_.size() / 2 * 1000 / profile_.mic_rate) + " ms held");
+  } else {
+    if (rec_on_) discard_recording();
+  if (mode_ == Mode::Listening) {
+    if (hal_.mic) hal_.mic->stop();
+    // A recording the loss cut short is the last recording diag reports; the part frame
+    // still being built never went, so it counts as lost.
+    if (!mic_pending_.empty()) ++mic_unsent_;
+    mic_pending_.clear();
+    rec_stats_.any = true;
+    rec_stats_.last_ms = now() - mode_since_;
+    rec_stats_.last_unsent = mic_unsent_;
+    }
+  }
   stop_playback();
-  mode_ = Mode::Idle;
+  if (!keep) mode_ = Mode::Idle;
   overlay_ = Overlay::None;
   image_stream_ = -1;
   face_in_.reset();  // a colour face cut short; a whole one stays for the welcome to keep
@@ -499,6 +563,7 @@ void App::drop_session(std::string_view reason) {
   profile_pending_.clear();
   clear_prompt();
   transport_active_ = false;
+  if (keep) backoff_ = 0;  // a recording is waiting: the first retry is the soonest
   schedule_reconnect();
   online_since_ = 0;
   phase_ = network_up_ ? Phase::Connecting : Phase::NoNetwork;
@@ -517,7 +582,6 @@ void App::on_transport_open() {
 void App::on_transport_closed(std::string_view reason) {
   // Closes we initiated (timeouts, reconfiguration) were already handled.
   if (!transport_active_) return;
-  log(LogLevel::Warn, std::string("connection closed: ") + std::string(reason));
   drop_session(reason);
   update_model();
 }
@@ -1013,6 +1077,7 @@ void App::h_unpaired(const json::Value& m) {
     pairing_command_.clear();
   }
   drop_face();
+  discard_recording();
   drop_thumbs();
   mode_ = Mode::Idle;
   stop_playback();
@@ -1027,9 +1092,10 @@ void App::h_turn_start(const json::Value& m) {
   wake_display();
   active_turn_ = m["turn"].as_string();
   turn_done_ = false;
+  turn_started_ = true;
   reply_final_ = false;
   last_turn_rx_ = now();
-  if (mode_ != Mode::Listening) {
+  if (!recording_unsent()) {
     if (mode_ != Mode::Thinking) {
       reply_.clear();
       scroll_ = -1;
@@ -1049,7 +1115,8 @@ void App::h_turn_end(const json::Value& m) {
     notice_ = tr(i18n::Msg::RequestFailed);
     notice_until_ = now() + 8000;
   }
-  if (mode_ == Mode::Thinking) {
+  // A recording still uploading is the next turn: the one that ended is an earlier one.
+  if (mode_ == Mode::Thinking && !rec_on_) {
     mode_ = reply_.empty() ? Mode::Idle : Mode::Responding;
     mode_since_ = now();
   }
@@ -1070,8 +1137,9 @@ void App::h_transcript(const json::Value& m) {
 void App::h_reply_delta(const json::Value& m) {
   wake_display();
   if (face_down_) reply_while_face_down_ = true;  // shown from the top on the turn-over
-  if (mode_ == Mode::Listening) return;
+  if (recording_unsent()) return;
   reply_ = m["text"].as_string();
+  reply_unread_ = true;
   scroll_ = -1;
   last_turn_rx_ = now();
   if (mode_ != Mode::Responding) {
@@ -1089,9 +1157,10 @@ void App::h_reply(const json::Value& m) {
     status_ = text;
     return;
   }
-  if (mode_ == Mode::Listening) return;
+  if (recording_unsent()) return;
   reply_ = text;
   reply_final_ = true;
+  reply_unread_ = true;
   scroll_ = 0;  // a finished reply is read from the top
   page_at_ = now() + page_dwell_ms();
   status_.clear();
@@ -1105,7 +1174,7 @@ void App::h_audio_start(const json::Value& m) {
   close_setup_screens();
   wake_display();
   if (settings_open()) close_settings();
-  if (!hal_.speaker || mode_ == Mode::Listening) return;
+  if (!hal_.speaker || recording_unsent()) return;
   uint32_t rate = static_cast<uint32_t>(m["rate"].as_int(profile_.speaker_rate));
   const std::string_view format = m["format"].str_or("pcm16");
   const bool decoded = hal_.speaker_decoder && format == hal_.speaker_decoder->format();
@@ -1327,6 +1396,11 @@ void App::h_prompt_close(const json::Value& m) {
 
 bool App::prompt_showing() const { return !prompt_id_.empty() && mode_ != Mode::Listening; }
 
+bool App::touch_presses_talk() const {
+  // Everywhere else TALK records, sends a tap-mode recording or flashes why it can't.
+  return touch_talk_ || settings_open() || prompt_showing() || (alarm_ && model_.screen == Screen::Alarm);
+}
+
 bool App::prompt_armed(uint32_t pressed_at) const {
   // Guards against a press meant for something else landing on a question that just appeared.
   return static_cast<int32_t>(pressed_at - prompt_since_) >= static_cast<int32_t>(kPromptArmMs);
@@ -1399,7 +1473,7 @@ void App::h_error(const json::Value& m) {
 // --------------------------------------------------------------------------
 // Input
 
-void App::on_button(Button button, bool pressed) {
+void App::on_button(Button button, bool pressed, bool touch) {
   if (ui_ && bench_ == Bench::None) ui_->mark_input();
   if (!wifi_setup_text_.empty()) {
     if (button == Button::Cancel && !pressed) close_wifi_setup();
@@ -1410,13 +1484,39 @@ void App::on_button(Button button, bool pressed) {
     return;
   }
   const auto bit = static_cast<uint8_t>(1u << static_cast<unsigned>(button));
-  if (pressed && wake_display()) { wake_buttons_ |= bit; return; }
+  // A double press of the TALK key goes home. Nothing waits for it: the first press does what it
+  // always does, and the second, if it comes in time, undoes that and leaves. A press that only
+  // wakes the screen or dismisses the alarm starts none, so a quick press-and-hold after it still
+  // talks. The menu keeps TALK as its select key, and a question on screen keeps its answers.
+  const bool talk_key = button == Button::Talk && pressed && !touch;
+  if (talk_key) {
+    const bool second = talk_key_armed_ && now() - talk_key_at_ <= kDoublePressMs;
+    talk_key_armed_ = false;
+    if (second && double_home_ && !alarm_ && !settings_open() && !prompt_showing()) {  // the alarm takes the press
+      wake_buttons_ |= bit;  // its release does nothing
+      go_home();
+      return;
+    }
+  }
+  if (pressed && wake_display()) {
+    // With wake_talk, the TALK key that lights the screen goes on to talk, as on a lit screen. A
+    // face-down gadget, the alarm, a question, the menu, or no Hermes to talk to: it only wakes.
+    const bool talk_now = talk_key && wake_talk_ && !face_down_ && !alarm_ && can_talk() && !prompt_showing() &&
+                          !settings_open() && !cancel_held_;
+    if (!talk_now) {
+      wake_buttons_ |= bit;
+      return;
+    }
+  }
   if (wake_buttons_ & bit) {
     if (!pressed) wake_buttons_ &= static_cast<uint8_t>(~bit);
     return;
   }
   // A press closes the low battery alert and then does what it always does.
-  if (pressed) close_notices_for_input();
+  if (pressed) {
+    mark_reply_read();  // what was on screen, before a notice over the reply closes
+    close_notices_for_input();
+  }
   // The alarm: a press dismisses it, and its release is swallowed above, so nothing records.
   if (alarm_ && model_.screen == Screen::Alarm && pressed) {
     dismiss_alarm();
@@ -1426,6 +1526,12 @@ void App::on_button(Button button, bool pressed) {
   if (button == Button::Talk) {
     talk_held_ = pressed;
     if (pressed) talk_down_at_ = now();
+  }
+  // A press that answers a question or selects in the menu is never the first of a double press:
+  // a quick second one would cancel the turn the answer resumed, or leave the menu it closed.
+  if (talk_key && !settings_chord_fired_ && !settings_open() && !prompt_showing()) {
+    talk_key_armed_ = true;  // the first of a double press, perhaps
+    talk_key_at_ = now();
   }
   if (settings_chord_fired_) {
     if (button == Button::Cancel) cancel_held_ = pressed;
@@ -1445,12 +1551,13 @@ void App::on_button(Button button, bool pressed) {
     case Button::Talk:
       if (pressed) {
         if (cancel_held_) return;  // wait for the local settings chord
-        if (!can_talk()) {
-          set_hint_flash(tr(phase_ == Phase::Online ? i18n::Msg::ApprovePairingFirst : i18n::Msg::NotConnected));
-          return;
-        }
+        // Before the connection check: a recording held through a lost connection still ends.
         if (mode_ == Mode::Listening) {
           if (hands_free_) finish_listening();
+          return;
+        }
+        if (!can_talk()) {
+          set_hint_flash(tr(phase_ == Phase::Online ? i18n::Msg::ApprovePairingFirst : i18n::Msg::NotConnected));
           return;
         }
         if (prompt_showing()) {
@@ -1461,7 +1568,7 @@ void App::on_button(Button button, bool pressed) {
       } else if (mode_ == Mode::Listening && !hands_free_) {
         if (now() - mode_since_ < kMinUtteranceMs) {
           cancel_listening("too short");
-          set_hint_flash(profile_.touch_screen ? std::string(tr(i18n::Msg::HoldScreenWhileSpeaking))
+          set_hint_flash(profile_.touch_screen && touch_talk_ ? std::string(tr(i18n::Msg::HoldScreenWhileSpeaking))
                                                : tr(i18n::Msg::HoldButtonWhileSpeaking, {control(profile_.talk_label)}));
         } else {
           finish_listening();
@@ -1522,23 +1629,28 @@ void App::start_listening(bool hands_free) {
     set_hint_flash(tr(i18n::Msg::MicUnavailable));
     return;
   }
+  // Talking over a recording still uploading replaces it: the hub drops its part first.
+  if (rec_on_) cancel_upload("replaced");
   hands_free_ = hands_free;
   mic_stream_ = static_cast<uint8_t>(mic_stream_ % 250 + 1);
   mic_seq_ = 0;
   mic_unsent_ = 0;
+  mic_pending_.clear();
+  mic_pending_.reserve(mic_frame_samples());
   request_id_ = next_id('a');
   level_ = 0;
   Vad::Config vc;
   vc.sample_rate = profile_.mic_rate;
   vc.min_threshold = profile_.vad_min_rms;  // the board's microphone level
   vad_.reset(vc);
-  json::Value start = proto::message("audio.start");
-  start.set("id", request_id_)
-      .set("stream", mic_stream_)
-      .set("rate", profile_.mic_rate)
-      .set("format", "pcm16")
-      .set("mode", hands_free ? "tap" : "hold");
-  send(start);
+  rec_on_ = rec_.ready();
+  rec_.clear();
+  rec_done_ = rec_deadline_ = false;
+  rec_resends_ = 0;
+  rec_backlog_ms_ = 0;
+  rec_started_at_ = now();
+  // Buffered, a start that didn't go leaves the recording held: tick() sends it all on a new stream.
+  rec_live_ = send_audio_start();
   mode_ = Mode::Listening;
   mode_since_ = now();
   reply_.clear();
@@ -1547,13 +1659,48 @@ void App::start_listening(bool hands_free) {
   scroll_ = -1;
 }
 
+size_t App::mic_frame_samples() const {
+  return std::max<size_t>(1, static_cast<size_t>(profile_.mic_rate) * kMicFrameMs / 1000);
+}
+
+// The frame built so far (all of it, or the part left at the end) as one binary message.
+void App::send_mic_frame() {
+  if (mic_pending_.empty()) return;
+  frame_buf_.resize(proto::kBinaryHeader + mic_pending_.size() * 2);
+  proto::write_binary_header(frame_buf_.data(), proto::Channel::Audio, mic_stream_, mic_seq_++);
+  std::memcpy(frame_buf_.data() + proto::kBinaryHeader, mic_pending_.data(), mic_pending_.size() * 2);
+  if (!hal_.transport->send_binary(frame_buf_.data(), frame_buf_.size())) ++mic_unsent_;
+  mic_pending_.clear();
+}
+
 void App::finish_listening() {
+  talk_key_armed_ = false;  // a recording on its way to Hermes is not one a second press can take back
   if (hal_.mic) hal_.mic->stop();
+  if (rec_on_) {
+    // audio.end goes once the link has taken all of the recording (pump_recording).
+    rec_done_ = true;
+    rec_duration_ms_ = now() - mode_since_;
+    mode_ = Mode::Thinking;
+    mode_since_ = now();
+    last_turn_rx_ = now();
+    status_ = tr(i18n::Msg::Sending);
+    if (!rec_live_) {
+      rec_deadline_ = true;
+      rec_wait_until_ = now() + kRecordingWaitMs;
+    }
+    pump_recording();
+    return;
+  }
+  send_mic_frame();  // the last part frame, before audio.end
   json::Value end = proto::message("audio.end");
   end.set("id", request_id_).set("stream", mic_stream_).set("duration_ms", now() - mode_since_);
   if (mic_unsent_)
     log(LogLevel::Warn, "recording: " + std::to_string(mic_unsent_) + " of " + std::to_string(mic_seq_) +
                             " audio frames not sent, the link couldn't keep up");
+  rec_stats_.any = true;
+  rec_stats_.last_ms = now() - mode_since_;
+  rec_stats_.last_unsent = mic_unsent_;
+  rec_stats_.last_backlog_ms = rec_stats_.last_resends = 0;
   if (!send(end)) {
     // Hermes would wait for the rest of the recording and never answer.
     mode_ = Mode::Idle;
@@ -1565,16 +1712,122 @@ void App::finish_listening() {
   mode_ = Mode::Thinking;
   mode_since_ = now();
   last_turn_rx_ = now();
+  turn_started_ = false;
   status_ = tr(i18n::Msg::Sending);
 }
 
 void App::cancel_listening(std::string_view why) {
   if (hal_.mic) hal_.mic->stop();
+  discard_recording();
   json::Value c = proto::message("audio.cancel");
   c.set("id", request_id_).set("stream", mic_stream_).set("reason", why);
   send(c);
   mode_ = Mode::Idle;
   mode_since_ = now();
+}
+
+void App::go_home() {
+  wake_display();
+  if (mode_ == Mode::Listening) cancel_listening("cancelled");
+  if (rec_on_) cancel_upload("cancelled");  // a finished recording still uploading goes with the turn
+  // Leaving the bot stops it: a reply on its way, or one the first press talked over.
+  if (mode_ != Mode::Idle || (!active_turn_.empty() && !turn_done_)) {
+    stop_playback();
+    send(proto::message("cancel"));
+    turn_done_ = true;
+    mode_ = Mode::Idle;
+    mode_since_ = now();
+  }
+  dismiss_overlay();
+  hint_flash_.clear();  // "Hold TALK while speaking" from the first press
+  reply_until_ = now();  // Ready, not the last reply
+  reply_shown_ = false;
+  scroll_ = -1;
+  for (size_t i = 0; i < agent_profiles_.size(); ++i) {
+    if (agent_profiles_[i].id != "default") continue;
+    if (agent_profile_ != "default") select_agent_profile(i);
+    break;
+  }
+  update_model();
+}
+
+// --------------------------------------------------------------------------
+// The recording buffer (docs/architecture.md#the-recording-buffer)
+
+bool App::send_audio_start() {
+  json::Value start = proto::message("audio.start");
+  start.set("id", request_id_)
+      .set("stream", mic_stream_)
+      .set("rate", profile_.mic_rate)
+      .set("format", "pcm16")
+      .set("mode", hands_free_ ? "tap" : "hold");
+  // Sent again after a lost connection: how long ago it began. Hermes may ignore it.
+  if (rec_resends_) start.set("resent", rec_resends_).set("age_ms", now() - rec_started_at_);
+  return send(start);
+}
+
+// Sends what the link takes now, in 40 ms frames; a part frame only once the recording ended.
+// Then audio.end, which hands the recording to Hermes.
+void App::pump_recording() {
+  if (!rec_on_ || !rec_live_ || !transport_active_) return;
+  const size_t chunk = mic_frame_samples() * 2;
+  while (rec_.unsent() >= chunk || (rec_done_ && rec_.unsent())) {
+    const size_t n = std::min(chunk, rec_.unsent());
+    frame_buf_.resize(proto::kBinaryHeader + n);
+    proto::write_binary_header(frame_buf_.data(), proto::Channel::Audio, mic_stream_, mic_seq_);
+    std::memcpy(frame_buf_.data() + proto::kBinaryHeader, rec_.next(), n);
+    if (!hal_.transport->send_binary(frame_buf_.data(), frame_buf_.size())) return;  // full: next tick
+    ++mic_seq_;
+    rec_.advance(n);
+  }
+  if (!rec_done_ || rec_.unsent()) return;
+  json::Value end = proto::message("audio.end");
+  end.set("id", request_id_).set("stream", mic_stream_).set("duration_ms", rec_duration_ms_);
+  if (!send(end)) return;  // tried again next tick; a lost connection holds the recording
+  turn_started_ = false;  // as finish_listening(): Hermes's answer to this request is a new turn
+  rec_stats_.any = true;
+  rec_stats_.last_ms = rec_duration_ms_;
+  rec_stats_.last_unsent = mic_unsent_;
+  rec_stats_.last_backlog_ms = rec_backlog_ms_;
+  rec_stats_.last_resends = rec_resends_;
+  if (rec_resends_) ++rec_stats_.resent;
+  // One line per recording: enough to tell a slow link (backlog) from a lost one (sent again).
+  log(mic_unsent_ ? LogLevel::Warn : LogLevel::Info,
+      "recording: " + std::to_string(rec_duration_ms_) + " ms, " + std::to_string(mic_unsent_) +
+          " frames lost (past the buffer), link backlog peaked at " + std::to_string(rec_backlog_ms_) + " ms" +
+          (rec_resends_ ? ", sent again " + std::to_string(rec_resends_) + "x after a lost connection" : ""));
+  rec_on_ = false;
+  rec_.clear();
+  last_turn_rx_ = now();  // Hermes's time to answer starts now
+}
+
+// Online again with a held recording: all of it on a new stream, then on as before.
+void App::resend_recording() {
+  mic_stream_ = static_cast<uint8_t>(mic_stream_ % 250 + 1);
+  mic_seq_ = 0;
+  rec_.rewind();
+  ++rec_resends_;
+  if (!send_audio_start()) return;
+  rec_live_ = true;
+  log(LogLevel::Info, "online again: sending the held recording (" + std::to_string(rec_.size() / 2 * 1000 /
+                                                                                   profile_.mic_rate) + " ms)");
+  if (rec_done_) status_ = tr(i18n::Msg::Sending);
+  pump_recording();
+}
+
+// A recording not all sent: the hub drops what it has of it, and the device the rest.
+void App::cancel_upload(std::string_view why) {
+  if (rec_on_ && rec_live_) {
+    json::Value c = proto::message("audio.cancel");
+    c.set("id", request_id_).set("stream", mic_stream_).set("reason", why);
+    send(c);
+  }
+  discard_recording();
+}
+
+void App::discard_recording() {
+  rec_on_ = rec_live_ = rec_done_ = rec_deadline_ = false;
+  rec_.clear();
 }
 
 void App::start_new_session() {
@@ -1583,6 +1836,8 @@ void App::start_new_session() {
     return;
   }
   if (mode_ == Mode::Listening) cancel_listening("new session");
+  // A finished recording still uploading belongs to the old session: it must not follow session.new.
+  if (rec_on_) cancel_upload("new session");
   stop_playback();
   dismiss_overlay();
   clear_prompt();
@@ -1594,12 +1849,18 @@ void App::start_new_session() {
   mode_ = Mode::Thinking;
   mode_since_ = now();
   last_turn_rx_ = now();
+  turn_started_ = false;
   set_hint_flash(tr(i18n::Msg::NewSession));
 }
 
 void App::cancel_turn() {
   stop_playback();
-  send(proto::message("cancel"));
+  if (rec_on_) {
+    // Not all of the recording went yet, so Hermes has no turn to cancel: drop the upload.
+    cancel_upload("cancelled");
+  } else {
+    send(proto::message("cancel"));
+  }
   mode_ = Mode::Idle;
   mode_since_ = now();
   set_hint_flash(tr(i18n::Msg::Cancelled));
@@ -1613,14 +1874,22 @@ void App::on_mic_samples(const int16_t* samples, size_t count) {
   }
   if (mode_ != Mode::Listening || count == 0) return;
   level_ = level_percent(rms(samples, count));
-  size_t off = 0;
+  if (rec_on_) {
+    const size_t dropped = count - rec_.append(samples, count);
+    if (dropped) mic_unsent_ += static_cast<uint32_t>((dropped + mic_frame_samples() - 1) / mic_frame_samples());
+    pump_recording();
+    // How far the link fell behind (on a live connection: a held recording waits by design).
+    if (rec_live_)
+      rec_backlog_ms_ = std::max(rec_backlog_ms_, static_cast<uint32_t>(rec_.unsent() / 2 * 1000 / profile_.mic_rate));
+  }
+  size_t off = rec_on_ ? count : 0;
+  const size_t frame = mic_frame_samples();
   while (off < count) {
-    size_t n = std::min(kMicChunkSamples, count - off);
-    frame_buf_.resize(proto::kBinaryHeader + n * 2);
-    proto::write_binary_header(frame_buf_.data(), proto::Channel::Audio, mic_stream_, mic_seq_++);
-    std::memcpy(frame_buf_.data() + proto::kBinaryHeader, samples + off, n * 2);
-    if (!hal_.transport->send_binary(frame_buf_.data(), frame_buf_.size())) ++mic_unsent_;
+    // Fills the frame being built; a full one goes.
+    const size_t n = std::min(frame - mic_pending_.size(), count - off);
+    mic_pending_.insert(mic_pending_.end(), samples + off, samples + off + n);
     off += n;
+    if (mic_pending_.size() == frame) send_mic_frame();
   }
   if (hands_free_) {
     Vad::Result r = vad_.feed(samples, count);
@@ -1659,6 +1928,7 @@ void App::submit_text(std::string_view text) {
   mode_ = Mode::Thinking;
   mode_since_ = now();
   last_turn_rx_ = now();
+  turn_started_ = false;
   update_model();
 }
 
@@ -2012,12 +2282,44 @@ void App::tick() {
     update_model();
   }
 
+  // Whatever ended the turn some other way (a timeout, a new screen) ends the recording too.
+  if (rec_on_ && mode_ != Mode::Listening && mode_ != Mode::Thinking) discard_recording();
+  if (rec_on_) {
+    if (rec_live_) {
+      pump_recording();  // what the link refused before
+    } else if (can_talk()) {
+      resend_recording();
+      update_model();
+    } else if (phase_ == Phase::Online && !paired_) {
+      // No longer paired: Hermes won't take it.
+      log(LogLevel::Warn, "dropped a held recording: the device isn't paired");
+      ++rec_stats_.dropped;
+      if (mode_ == Mode::Listening && hal_.mic) hal_.mic->stop();
+      discard_recording();
+      mode_ = Mode::Idle;
+      update_model();
+    }
+    if (recording_held() && rec_done_ && static_cast<int32_t>(t - rec_wait_until_) >= 0) {
+      log(LogLevel::Warn, "dropped a held recording: no connection within " +
+                              std::to_string(kRecordingWaitMs / 1000) + " s");
+      ++rec_stats_.dropped;
+      discard_recording();
+      mode_ = Mode::Idle;
+      mode_since_ = t;
+      notice_ = tr(i18n::Msg::CouldntSendRecording);
+      notice_until_ = t + 8000;
+      update_model();
+    }
+  }
   if (mode_ == Mode::Listening && t - mode_since_ > kMaxUtteranceMs) {
     finish_listening();
     update_model();
   }
   if (!prompt_id_.empty()) last_turn_rx_ = t;  // Hermes is waiting for the user, not stuck
-  if (mode_ == Mode::Thinking && t - last_turn_rx_ > kThinkingTimeoutMs) {
+  // Hermes ends every turn it starts (turn.end), and a lost connection ends it here: once
+  // it has started, the device waits on (the screen lit) through a long task.
+  if (mode_ == Mode::Thinking && t - last_turn_rx_ > (turn_started_ ? kTurnTimeoutMs : kThinkingTimeoutMs)) {
+    if (rec_on_) cancel_upload("timeout");  // a recording the link never finished taking
     mode_ = Mode::Idle;
     notice_ = tr(i18n::Msg::NoReplyFromHermes);
     notice_until_ = t + 8000;
@@ -2090,6 +2392,8 @@ void App::tick() {
 
 void App::update_model() {
   UiModel& m = model_;
+  // A recording held through a lost connection keeps its screen over the connecting ones.
+  const bool held = recording_held() && (mode_ == Mode::Listening || mode_ == Mode::Thinking);
   if (mode_ != Mode::Responding) reply_shown_ = false;
   m.title = name_;
   m.lang = lang_;
@@ -2249,14 +2553,14 @@ void App::update_model() {
     const std::string reason = fatal_ == i18n::english(Msg::NoServerConfigured) ? tr(Msg::NoServerConfigured) : fatal_;
     m.detail = reason + "\n" + (server_url_.empty() ? std::string(tr(Msg::SerialSetServer)) : tr(Msg::ServerUrl, {server_url_}));
     m.hint = tr(Msg::SeeDocs);
-  } else if (phase_ == Phase::NoNetwork) {
+  } else if (phase_ == Phase::NoNetwork && !held) {
     m.screen = Screen::Offline;
     m.hero = true;
     m.caption_lines = 2;
     m.headline = tr(Msg::NoNetwork);
     m.detail = network_detail_.empty() ? std::string(tr(Msg::WaitingForWifi)) : network_detail_;
     m.hint = tr(Msg::ConfigureWifiSerial);
-  } else if (phase_ == Phase::Connecting || phase_ == Phase::Handshake) {
+  } else if ((phase_ == Phase::Connecting || phase_ == Phase::Handshake) && !held) {
     m.screen = Screen::Connecting;
     m.hero = true;
     m.caption_lines = kCaptionLines;
@@ -2272,7 +2576,7 @@ void App::update_model() {
     } else {
       m.hint = tr(Msg::Attempt, {std::to_string(attempts_)});
     }
-  } else if (!paired_) {
+  } else if (!paired_ && !held) {
     m.screen = Screen::Pairing;
     m.hero = true;
     m.caption_lines = kCaptionLines;
@@ -2294,8 +2598,10 @@ void App::update_model() {
     m.hero = true;
     m.headline = tr(Msg::Listening);
     m.detail = hands_free_              ? std::string(tr(Msg::SpeakNowPause))
-               : profile_.touch_screen ? std::string(tr(Msg::LiftFingerToSend))
+               : profile_.touch_screen && touch_talk_ ? std::string(tr(Msg::LiftFingerToSend))
                                        : tr(Msg::ReleaseToSend, {talk});
+    // The connection was lost: recording goes on, and all of it is sent once it is back.
+    if (held) m.detail = tr(Msg::OfflineStillRecording);
     m.hint = tr(Msg::ButtonToDiscard, {cancel});
     // The part of the recording limit used so far (the edge ring).
     m.progress_permille = static_cast<int16_t>(
@@ -2367,7 +2673,7 @@ void App::update_model() {
     m.hero = true;
     m.headline = tr(Msg::Thinking);
     // The live status phrase when Hermes sends one, else what speech-to-text heard.
-    m.detail = status_;
+    m.detail = held ? std::string(tr(Msg::ReconnectingToSend)) : status_;
     if (!user_echo_.empty()) {
       m.body = "\"" + user_echo_ + "\"";
       if (m.detail.empty()) m.detail = m.body;
@@ -2378,7 +2684,7 @@ void App::update_model() {
     m.headline = m.speaking ? tr(Msg::Speaking) : "Hermes";
     m.detail = status_;
     m.body = reply_;
-    m.hint = profile_.touch_screen ? std::string(tr(Msg::HoldToReply)) : tr(Msg::ButtonToReply, {talk});
+    m.hint = profile_.touch_screen && touch_talk_ ? std::string(tr(Msg::HoldToReply)) : tr(Msg::ButtonToReply, {talk});
     // Spoken audio can start before the text arrives: let the mascot talk meanwhile.
     m.hero = reply_.empty();
     // While it is spoken, the face talks over the reply's latest two lines, where they fit.
@@ -2399,7 +2705,7 @@ void App::update_model() {
     m.headline = tr(Msg::Ready);
     m.body = reply_;
     const bool tap = talk_mode_ == TalkMode::Tap;
-    m.hint = profile_.touch_screen ? std::string(tr(tap ? Msg::TapScreenToTalk : Msg::HoldScreenToTalk))
+    m.hint = profile_.touch_screen && touch_talk_ ? std::string(tr(tap ? Msg::TapScreenToTalk : Msg::HoldScreenToTalk))
                                    : tr(tap ? Msg::TapButtonToTalk : Msg::HoldButtonToTalk, {talk});
     bool showing_reply = !reply_.empty() && static_cast<int32_t>(reply_until_ - now()) > 0;
     m.hero = !showing_reply;
@@ -2415,8 +2721,8 @@ void App::update_model() {
       const bool timing = timer_running_;
       if (timing) m.detail = tr(Msg::TimerLeft, {timer_left_text()});
       if (switching) {
-        // In tap-to-talk mode a tap records, so the name is no target there.
-        m.name_target = profile_.touch_screen && talk_mode_ == TalkMode::Hold;
+        // In tap-to-talk mode a tap records, so the name is no target there, unless the touchscreen doesn't talk.
+        m.name_target = profile_.touch_screen && (talk_mode_ == TalkMode::Hold || !touch_talk_);
         m.detail = tr(profile_.touch_screen ? Msg::ProfileSwipe : Msg::ProfileInSettings) +
                    ((sessions || timing) ? "\n" + m.detail : "");
         m.caption_lines = 2;
@@ -2510,7 +2816,27 @@ std::string App::diag_report() {
   if (tailnet_wanted()) conn.set("tailnet", tunnel_up_ ? std::string("up") : tunnel_detail_.empty() ? std::string("joining") : tunnel_detail_);
   if (!last_close_.empty()) conn.set("last_close", last_close_);
   if (online_since_) conn.set("online_s", (now() - online_since_) / 1000);
+  conn.set("closes_total", closes_total_);
+  json::Value closes = json::Value::array();
+  for (const auto& c : closes_) {
+    json::Value e = json::Value::object();
+    e.set("ago_s", (now() - c.at) / 1000).set("reason", c.reason).set("during", c.during);
+    closes.push(e);
+  }
+  conn.set("closes", closes);  // oldest first
   r.set("connection", conn);
+  json::Value rec = json::Value::object();
+  rec.set("buffer", rec_.ready() ? static_cast<int64_t>(rec_.capacity()) : int64_t(0))
+      .set("held", rec_stats_.held)
+      .set("resent", rec_stats_.resent)
+      .set("dropped", rec_stats_.dropped);
+  if (rec_stats_.any) {
+    json::Value last = json::Value::object();
+    last.set("ms", rec_stats_.last_ms).set("frames_lost", rec_stats_.last_unsent);
+    if (rec_.ready()) last.set("backlog_peak_ms", rec_stats_.last_backlog_ms).set("resends", rec_stats_.last_resends);
+    rec.set("last", last);
+  }
+  r.set("recordings", rec);
   r.set("app", status_value());
   if (frame_stats_) r.set("frames", frame_stats_->to_json());
   if (on_diag) on_diag(r);
@@ -2615,6 +2941,12 @@ std::string App::console(std::string_view raw) {
       return "@error charged_notice must be on or off";
     if (key == "charged_sound" && !value.empty() && value != "on" && value != "off")
       return "@error charged_sound must be on or off";
+    if (key == "double_home" && !value.empty() && value != "on" && value != "off")
+      return "@error double_home must be on or off";
+    if (key == "wake_talk" && !value.empty() && value != "on" && value != "off")
+      return "@error wake_talk must be on or off";
+    if (key == "touch_talk" && !value.empty() && value != "on" && value != "off")
+      return "@error touch_talk must be on or off";
     if (key == "profile_grid" && !value.empty() && value != "4" && value != "6" && value != "9" && value != "16")
       return "@error profile_grid must be 4, 6, 9 or 16";
     if (key == "clock" && !value.empty() &&

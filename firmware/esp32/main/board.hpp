@@ -197,6 +197,9 @@ struct TouchConfig {
   uint8_t addr = 0x5A;
   int rst = -1;
   int int_gpio = -1;  // touch INT line; -1 when not wired (driver polls instead)
+  // INT low wakes the chip from light sleep while dozing (FT5x06 with INT only): for a
+  // controller whose report expires before the next doze poll would read it.
+  bool int_wakes = false;
   uint16_t width = 0, height = 0;
   bool mirror_x = false, mirror_y = false;
   bool swap_xy = false;  // CST9217 report: exchange x and y after mirroring (esp_lcd_touch order)

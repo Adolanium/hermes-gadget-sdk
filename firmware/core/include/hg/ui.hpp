@@ -59,6 +59,18 @@ struct DashRow {
   bool heading = false;
 };
 
+// One row of the settings list: a small icon, the item's name, and its state at the
+// right edge (text, an on/off switch, or a level bar with its percentage).
+struct SettingRow {
+  enum class Kind : uint8_t { Value, Toggle, Slider, Action };
+  enum class Icon : uint8_t { Volume, Sun, Talk, Person, Mic, Note, Screen, Keys, Info, Battery, Timer, Touch,
+                              FaceDown, Clock, Power, Wifi, Phone, Globe, Back, Bell, Bolt, Check, Grid };
+  std::string label, value;  // Value: the text at the right; Slider: its percentage
+  Icon icon = Icon::Info;
+  Kind kind = Kind::Value;
+  uint8_t level = 0;  // Toggle: 0 off, 1 on; Slider: 0..100
+};
+
 // The letter a profile without a face shows in the grid: the name's first character, in capitals
 // (ASCII and Latin-1), whatever case the name arrives in; "?" for an empty name.
 std::string profile_initial(std::string_view name);
@@ -108,6 +120,11 @@ struct UiModel {
   // the content band. Null on every other screen. Borrowed, not owned: the app
   // keeps the matrix so it is encoded once, not on every model update.
   const qr::Code* qr = nullptr;
+  // Settings screen: every item, the selected one (whose `detail`/`body` the model also carries),
+  // and how far the list is scrolled, in pixels from its top.
+  std::vector<SettingRow> settings;
+  int settings_sel = 0;
+  int settings_scroll = 0;
   // Dashboard screen: its rows, drawn from `scroll` (0 = the top).
   std::vector<DashRow> dash;
   // A running timer: thousandths of its length still to go, or -1 for none. The round
@@ -143,22 +160,24 @@ struct ArcSweep {
 };
 
 // What a round panel's edge ring shows on one frame. Angles are degrees clockwise from
-// 12 o'clock. The renderer derives it from the model (ui.cpp, edge_ring).
+// 12 o'clock, the ticks' turn 1/64 degree. The renderer derives it from the model (ui.cpp,
+// edge_ring).
 struct EdgeRing {
   enum class Kind : uint8_t {
     None,   // no ring: the bands own the band's pixels in the UI square's corners
     Level,  // `colour` from 12 o'clock clockwise over `permille` thousandths of a turn, `dim` after
     Comet,  // a `colour` head at `head` with a tail that fades out over 70 degrees behind it
-    Ticks,  // the resting clock: 60 ticks and a `colour` dot at `second`
+    Ticks,  // the resting clock: 60 ticks and a `colour` dot at `second`, all turned by `turn64`
   };
   Kind kind = Kind::None;
   uint16_t colour = 0, dim = 0;
   int16_t permille = 0;
   uint16_t head = 0;
   uint8_t second = 0;
+  int16_t turn64 = 0;  // Ticks: clockwise, with the face's burn-in shift
   bool operator==(const EdgeRing& o) const {
     return kind == o.kind && colour == o.colour && dim == o.dim && permille == o.permille && head == o.head &&
-           second == o.second;
+           second == o.second && turn64 == o.turn64;
   }
   bool operator!=(const EdgeRing& o) const { return !(*this == o); }
 };
@@ -199,6 +218,19 @@ class Ui {
   // there (-1: none).
   bool name_hit(const UiModel& m, int x, int y) const;
   int profile_row_hit(const UiModel& m, int x, int y) const;
+  // Settings list geometry, in panel coordinates for the hit test: the list's
+  // visible height, a row's top and height (the selected row grows by its
+  // description) measured from the list's top, the scroll that keeps the
+  // selected row in view from `scroll`, and the row under a point (-1: none).
+  int settings_view_h() const;
+  int settings_row_top(const UiModel& m, int i) const;
+  int settings_row_h(const UiModel& m, int i) const;
+  int settings_scroll_for(const UiModel& m, int scroll) const;
+  int settings_max_scroll(const UiModel& m) const;
+  int settings_row_hit(const UiModel& m, int x, int y) const;
+  // The level (0..100) a touch at (x, y) picks on the selected row's slider, or -1 off
+  // it. `anywhere`: a slide already under way follows the finger at any height.
+  int settings_slider_at(const UiModel& m, int x, int y, bool anywhere) const;
   // Profiles a page of the grid holds on this panel: the model's `grid`, or the largest smaller
   // grid whose cells stay touch targets with a readable icon and two lines of name. 0 off that screen.
   int profile_per_page(const UiModel& m) const;
@@ -234,6 +266,8 @@ class Ui {
   bool draw_qr(Canvas& c, const UiModel& m, int y0, int y1);
   void draw_dashboard(Canvas& c, const UiModel& m, int y0, int y1);
   void draw_profiles(Canvas& c, const UiModel& m);
+  void draw_settings(Canvas& c, const UiModel& m, int y0, int y1);
+  std::vector<std::string> settings_desc(const UiModel& m) const;  // the selected row's description lines
   struct Rect {
     int x = 0, y = 0, w = 0, h = 0;
     bool has(int px, int py) const { return px >= x && px < x + w && py >= y && py < y + h; }
@@ -249,6 +283,7 @@ class Ui {
     int first = 0, count = 0, pages = 0, icon = 0, label_scale = 1, dots_y = 0;
     Rect cell(int i) const { return {x0 + (i % cols) * cw, y0 + (i / cols) * ch, cw, ch}; }
   };
+  Rect settings_bar(const UiModel& m) const;
   ProfileGrid profile_grid(const UiModel& m) const;
   int touch_px_ = 0;
   void draw_bottom(Canvas& c, const UiModel& m);
@@ -271,6 +306,7 @@ class Ui {
   // paint_ring paints it over rows; update_ring writes and sends only what changed), and
   // the whole-panel faces (draw_alarm, draw_clock).
   void set_ring(const EdgeRing& ring);
+  void turn_ticks(int32_t turn64);
   uint16_t ring_pixel(int dx, int dy) const;
   void paint_ring(int y0, int y1);
   void update_ring(int y0, int y1);
@@ -303,7 +339,7 @@ class Ui {
   // the band spans; what push() paints the ring with this frame, and what that needs per
   // pixel: the level's sweep, the comet's head (1/64 degree) and its colour and the
   // background as 8-bit channels, the dot's centre (1/16 px) and radius squared, and the 60
-  // ticks' directions (cos, sin times 4096).
+  // ticks' directions (cos, sin times 4096) at their turn (1/64 degree).
   struct BandRow {
     int16_t x0[2] = {0, 0}, x1[2] = {0, 0};
   };
@@ -316,6 +352,7 @@ class Ui {
   uint8_t ring_fg_[3] = {0, 0, 0}, ring_bg_[3] = {0, 0, 0};
   int32_t ring_dot_x16_ = 0, ring_dot_y16_ = 0, ring_dot_r2_ = 0;
   int16_t tick_cos_[60] = {}, tick_sin_[60] = {};
+  int32_t tick_turn64_ = 0;
   // The screen that owns the whole panel right now, and the hash of what it drew.
   // Leaving it repaints everything (draw_frame); each face repaints when the flag
   // is not itself, so Clock -> Alarm -> Clock in one minute still redraws.

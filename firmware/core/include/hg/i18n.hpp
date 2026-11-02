@@ -24,7 +24,7 @@ namespace hg::i18n {
 #define HG_I18N_MESSAGES(X) \
   /* Settings menu */ \
   X(Settings,               "Settings") \
-  X(SettingsHintTouch,      "Tap: change | Swipe: next") \
+  X(SettingsHintTouch,      "Tap: change | Drag: scroll") \
   X(SettingsHintButtons,    "{0}: change | {1}: next") \
   X(SpeakerVolume,          "Speaker volume") \
   X(ChangesSaved,           "Changes are saved.") \
@@ -35,6 +35,11 @@ namespace hg::i18n {
   X(NoMicDriver,            "No microphone driver is active.") \
   X(TalkModeHold,           "Hold to record; release to send.") \
   X(TalkModeTap,            "Tap to record; pause or tap to send.") \
+  X(TouchTalk,              "Touch to talk") \
+  X(TouchTalkOn,            "On\nTouch the screen to talk.") \
+  X(TouchTalkOff,           "Off\nTalk with {0}; touch only navigates.") \
+  X(TalkHold,               "Hold") \
+  X(TalkTap,                "Tap") \
   X(MicCheck,               "Microphone check") \
   X(MicCheckLive,           "Speak now. Level: {0}%\nLocal only. Nothing is sent.") \
   X(MicCheckIntro,          "Start to check the microphone level. No recording is saved or sent.") \
@@ -93,6 +98,12 @@ namespace hg::i18n {
   X(TouchWake,              "Touch wakes screen") \
   X(TouchWakeOn,            "On\nA touch lights the dark screen.") \
   X(TouchWakeOff,           "Off\nOnly a button lights the dark screen.") \
+  X(DoubleHome,             "Double press home") \
+  X(DoubleHomeOn,           "On\nPress {0} twice for Ready and the default profile.") \
+  X(DoubleHomeOff,          "Off\nTwo quick presses of {0} talk.") \
+  X(WakeTalk,               "Talk from dark screen") \
+  X(WakeTalkOn,             "On\n{0} lights the dark screen and records.") \
+  X(WakeTalkOff,            "Off\n{0} only lights the dark screen.") \
   X(FaceDownSleep,          "Face-down sleep") \
   X(FaceDownSleepOn,        "On\nFace down, the screen sleeps and Hermes stays quiet.") \
   X(FaceDownSleepOff,       "Off\nSelect to sleep when the gadget lies face down.") \
@@ -187,6 +198,8 @@ namespace hg::i18n {
   X(Cancelled,              "Cancelled") \
   X(Sending,                "Sending...") \
   X(CouldntSendRecording,   "Couldn't send the recording") \
+  X(OfflineStillRecording,  "Offline, still recording") \
+  X(ReconnectingToSend,     "Reconnecting to send...") \
   X(NotConnected,           "Not connected to Hermes") \
   X(NewSessionIn,           "New session in {0}s") \
   X(NewSession,             "New session") \

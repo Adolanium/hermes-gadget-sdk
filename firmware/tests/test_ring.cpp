@@ -1,6 +1,8 @@
 // The edge ring on round panels (Ui::edge_ring, ring_pixel, update_ring): what each
-// state shows, the pixels of the level arcs, the comets and the clock's ticks, that a
-// ring-only change touches only the band, and that the battery strip keeps clear of it.
+// state shows, the pixels of the level arcs, the comets and the clock's ticks, how the
+// ticks turn with the clock's burn-in shift, that a ring-only change touches only the band,
+// and that the battery strip keeps clear of it.
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <string>
@@ -322,10 +324,10 @@ TEST("ring: the clock's grey ticks cross the band, the hours 2s+1 px wide, and t
   Panel p(466, 466);
   hg::UiModel m;
   m.screen = Screen::Clock;
-  m.clock_time = "09:41";
+  m.clock_time = "09:43";
   m.clock_date = "SAT OCT 24";
-  m.clock_minute = 41;
-  m.clock_second = 7;  // the dot at 42 degrees, clear of the ticks checked below
+  m.clock_minute = 43;  // the burn-in shift's dx is 0: the ticks sit on whole 6 degrees
+  m.clock_second = 7;   // the dot at 42 degrees, clear of the ticks checked below
 
   p.ui.render(m);
   for (int deg : {0, 30}) {  // the hours: the date's grey, across the whole band
@@ -379,9 +381,9 @@ TEST("ring: the clock's next second moves only the dot, sends few rows, and touc
   Panel p(466, 466);
   hg::UiModel m;
   m.screen = Screen::Clock;
-  m.clock_time = "09:41";
+  m.clock_time = "09:43";
   m.clock_date = "SAT OCT 24";
-  m.clock_minute = 41;
+  m.clock_minute = 43;  // no turn: the dot at whole 6 degrees
   m.clock_second = 7;
   p.ui.render(m);
   const std::vector<uint16_t> before = p.display.fb;
@@ -405,19 +407,21 @@ TEST("ring: the clock's next second moves only the dot, sends few rows, and touc
   }
 }
 
-TEST("ring: second by second, the clock's update leaves exactly what a full paint of that second draws") {
-  // The update rewrites only the rows of the dot's old and new places (draw_frame): every place
-  // round the dial, at both dot sizes, must end as a fresh paint of the same second does.
+TEST("ring: second by second and across minutes, the clock's update leaves exactly what a full paint draws") {
+  // Within a minute the update rewrites only the rows of the dot's old and new places
+  // (draw_frame); a new minute turns the ticks and repaints the face. Every place round the
+  // dial, at both dot sizes, must end as a fresh paint of the same second does.
   for (const int size : {240, 466}) {
     Panel p(size, size, 1, false, true);  // byte-swapped, as the AMOLED panels are
     hg::UiModel m;
     m.screen = Screen::Clock;
-    m.clock_time = "09:41";
     m.clock_date = "SAT OCT 24";
-    m.clock_minute = 41;
     int wrong = 0;
-    for (int second = 0; second <= 60; ++second) {  // all the way round, and on to 0 again
-      m.clock_second = static_cast<uint8_t>(second % 60);
+    for (int t = 0; t <= 120; ++t) {  // 09:41:00 to 09:43:00
+      const int minute = 41 + t / 60;
+      m.clock_minute = static_cast<uint8_t>(minute);
+      m.clock_time = "09:" + std::to_string(minute);
+      m.clock_second = static_cast<uint8_t>(t % 60);
       p.ui.render(m);
       Panel fresh(size, size, 1, false, true);
       fresh.ui.render(m);
@@ -425,6 +429,80 @@ TEST("ring: second by second, the clock's update leaves exactly what a full pain
     }
     CHECK_EQ(wrong, 0);
   }
+}
+
+TEST("ring: each minute the clock's dot turns with the face's burn-in shift, and no tick pixel stays lit") {
+  // The face moves dx = (minute * 7) % 9 - 4 px each minute (draw_clock); the ticks and the
+  // dot turn half a degree per pixel of it. On the 466 (an AMOLED, byte-swapped), each tick pixel
+  // is lit in at most 4 of the cycle's 9 minutes; without the turn, in all 9.
+  hg::UiModel m;
+  m.screen = Screen::Clock;
+  m.clock_date = "SAT OCT 24";
+  m.clock_second = 30;  // the dot at 6 o'clock
+  std::vector<int> lit(static_cast<size_t>(466 * 466), 0);
+  int most = 0;
+  for (int minute = 0; minute < 9; ++minute) {
+    Panel p(466, 466, 1, true, true);
+    m.clock_minute = static_cast<uint8_t>(minute);
+    m.clock_time = "09:0" + std::to_string(minute);
+    p.ui.render(m);
+    double dot = 0;
+    int dot_n = 0;
+    for (int y = 0; y < p.h; ++y)
+      for (int x = 0; x < p.w; ++x) {
+        const uint16_t c = p.at(x, y);
+        if (c == kAccent) {
+          dot += angle_deg(x, y, p.cx, p.cy);
+          ++dot_n;
+        }
+        if (p.in_band(x, y) && c == kDim) most = std::max(most, ++lit[static_cast<size_t>(y * p.w + x)]);
+      }
+    CHECK(dot_n > 0);
+    CHECK(std::fabs(dot / dot_n - 180.0 - ((minute * 7) % 9 - 4) * 0.5) < 0.1);  // on its turned tick
+  }
+  CHECK(most <= 4);
+}
+
+TEST("ring: on every round size and at every turn, the clock's ticks follow their rule around the turned lines") {
+  // An exact model of the ticks: lines every 6 degrees, turned dx / 2 degrees with the burn-in
+  // shift; the hours lit within s + 1 px of their line, across the band, the minutes within s / 2
+  // px, in its outer half. Pixels within rounding of a tick's edge, or of the line halfway to the
+  // next tick, are left out; every other band pixel of the top half (the dot is at 6 o'clock) must
+  // match. At the full turn a wide tick reaches more than 3 degrees from its unturned place, so
+  // this also shows each pixel goes to the turned tick nearest it.
+  struct Size {
+    int size, font_scale;
+  };
+  const Size sizes[] = {{240, 1}, {360, 1}, {360, 2}, {412, 1}, {466, 1}, {466, 2}, {480, 1}, {800, 1}, {800, 3}};
+  for (const Size& z : sizes)
+    for (int minute = 0; minute < 9; ++minute) {
+      Panel p(z.size, z.size, z.font_scale);
+      hg::UiModel m;
+      m.screen = Screen::Clock;
+      m.clock_time = "09:0" + std::to_string(minute);
+      m.clock_date = "SAT OCT 24";
+      m.clock_minute = static_cast<uint8_t>(minute);
+      m.clock_second = 30;
+      p.ui.render(m);
+      const double turn = ((minute * 7) % 9 - 4) * 0.5;
+      const int s = p.scale, mid2 = p.in + p.out + 1;
+      int wrong = 0;
+      for (int y = 0; y < p.cy; ++y)
+        for (int x = 0; x < p.w; ++x) {
+          if (!p.in_band(x, y)) continue;
+          const int dx = x - p.cx, dy = y - p.cy;
+          const double a = std::atan2(dx, -dy) * 180.0 / kPi;
+          const long k = std::lround((a - turn) / 6.0);
+          const double rel = a - turn - 6.0 * static_cast<double>(k);  // degrees from that tick's line
+          const double line = (6.0 * static_cast<double>(k) + turn) * kPi / 180.0;
+          const double dist = std::fabs(dx * std::cos(line) + dy * std::sin(line));
+          const bool hour = (k % 60 + 60) % 60 % 5 == 0;
+          if (std::fabs(dist - (hour ? s + 1.0 : s / 2.0)) < 0.1 || std::fabs(std::fabs(rel) - 3.0) < 0.3) continue;
+          const bool tick = hour ? dist < s + 1 : (4 * (dx * dx + dy * dy) > mid2 * mid2 && 2 * dist <= s);
+          wrong += (p.at(x, y) == kDim) != tick;
+        }
+      CHECK_EQ(wrong, 0);
+    }
 }
 
 TEST("ring: leaving the clock clears the dot's reach past the band, to Ready and to the alarm") {

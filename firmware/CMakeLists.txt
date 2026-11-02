@@ -25,7 +25,7 @@ endif()
 option(HG_BUILD_TESTS "Build the core unit tests" ON)
 if(HG_BUILD_TESTS)
   enable_testing()
-  add_executable(hg_core_tests tests/main.cpp tests/test_basics.cpp tests/test_app.cpp tests/test_timer.cpp tests/test_ring.cpp tests/test_clock_face.cpp tests/test_qr.cpp tests/test_i18n.cpp tests/test_power.cpp tests/test_ws185.cpp tests/test_speaker_pa.cpp tests/test_speaker_queue.cpp tests/test_speaker_underruns.cpp tests/test_band_flush.cpp tests/test_frame_stats.cpp tests/test_shared_reply.cpp tests/test_tag_scanner.cpp tests/test_battery_curve.cpp tests/test_mic_power.cpp tests/test_wifi_retry.cpp tests/test_wifi_power.cpp tests/test_wifi_pick.cpp tests/test_wifi_fast.cpp tests/test_wifi_networks.cpp tests/test_ws_link.cpp tests/test_tailnet_watch.cpp tests/test_i2c_scan.cpp tests/test_qmi8658.cpp tests/test_bmi270.cpp tests/test_pcf85063.cpp tests/test_camera_rgb565.cpp drivers/axp2101.cpp drivers/cores3.cpp drivers/sticks3.cpp drivers/stc8_battery.cpp drivers/qmi8658.cpp drivers/bmi270.cpp drivers/pcf85063.cpp)
+  add_executable(hg_core_tests tests/main.cpp tests/test_basics.cpp tests/test_app.cpp tests/test_timer.cpp tests/test_ring.cpp tests/test_clock_face.cpp tests/test_qr.cpp tests/test_i18n.cpp tests/test_power.cpp tests/test_ws185.cpp tests/test_speaker_pa.cpp tests/test_speaker_queue.cpp tests/test_speaker_underruns.cpp tests/test_band_flush.cpp tests/test_frame_stats.cpp tests/test_shared_reply.cpp tests/test_tag_scanner.cpp tests/test_battery_curve.cpp tests/test_mic_power.cpp tests/test_wifi_retry.cpp tests/test_wifi_power.cpp tests/test_wifi_pick.cpp tests/test_wifi_fast.cpp tests/test_wifi_networks.cpp tests/test_ws_link.cpp tests/test_link_diag.cpp tests/test_tailnet_watch.cpp tests/test_i2c_scan.cpp tests/test_qmi8658.cpp tests/test_bmi270.cpp tests/test_pcf85063.cpp tests/test_camera_rgb565.cpp drivers/axp2101.cpp drivers/cores3.cpp drivers/sticks3.cpp drivers/stc8_battery.cpp drivers/qmi8658.cpp drivers/bmi270.cpp drivers/pcf85063.cpp)
   target_include_directories(hg_core_tests PRIVATE drivers)
   target_link_libraries(hg_core_tests PRIVATE hg_core)
   if(MSVC)
@@ -63,6 +63,9 @@ if(HG_BUILD_TESTS)
     set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
     set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
     set(TF_PSA_CRYPTO_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+    # The test's server runs on a second thread: PSA Crypto needs its locks (see the file).
+    set(TF_PSA_CRYPTO_USER_CONFIG_FILE "${CMAKE_CURRENT_SOURCE_DIR}/tests/tls_test_config.h" CACHE FILEPATH "" FORCE)
+    set(LINK_WITH_PTHREAD ON CACHE BOOL "" FORCE)
     FetchContent_Declare(mbedtls
       URL https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-4.1.0/mbedtls-4.1.0.tar.bz2
       URL_HASH SHA256=377a09cf8eb81b5fb2707045e5522d5489d3309fed5006c9874e60558fc81d10)

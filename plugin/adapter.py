@@ -25,6 +25,7 @@ config.yaml::
           dashboard: true        # sessions and status tiles on devices that draw them
           profiles: [work, home] # optional: the profiles devices may switch to (default always)
           profile_faces: true    # each profile's face (gadget-face.bin or its avatar) on devices
+          stt_language: auto     # or a language code such as pt: the language gadget speech is transcribed in
 
 Secrets (``~/.hermes/.env``): ``GADGET_ACCESS_TOKEN`` (optional shared token).
 """
@@ -60,7 +61,7 @@ from gateway.platforms.base import (
 from gateway.platforms.event import MessageEvent, MessageType
 
 from . import audio as gaudio
-from . import compat, dashboard, imaging, ota, runtime, textfmt
+from . import compat, dashboard, imaging, ota, runtime, stt, textfmt
 from . import status as live_status
 from . import face as faces
 from .battery_log import BatteryLog
@@ -232,6 +233,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             str(p).strip() for p in (offered if isinstance(offered, list) else []) if str(p).strip()}
         # The language `welcome` names for devices left on auto: Hermes's own unless set here.
         self._language = str(extra.get("language") or "auto").strip().lower() or "auto"
+        # The language gadget recordings are transcribed in, whichever profile answers; None = its STT settings.
+        self._stt_language = stt.normalize(extra.get("stt_language"))
         self._tiles: Optional[dashboard.TileStore] = None
         self._dashboard_task: Optional[asyncio.Task] = None
         self._dashboard_wake: Optional[asyncio.Event] = None
@@ -962,7 +965,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         await self._forward(session, self._event(session, msg_id, text, message_type=MessageType.TEXT))
 
     async def on_utterance(self, session: DeviceSession, msg_id: str, wav: bytes, seconds: float) -> None:
+        """Cache a finished recording and hand it to Hermes as a voice message, noting its STT language."""
         path = await cache_audio_from_bytes_async(wav, ".wav")
+        if self._stt_language:
+            runtime.note_clip(path, self._stt_language)
         logger.debug("[%s] %.1fs utterance from %s -> %s", self.name, seconds, session.device_id, path)
         await self._forward(session, self._event(
             session, msg_id, "", message_type=MessageType.VOICE, media_urls=[path], media_types=["audio/wav"]))

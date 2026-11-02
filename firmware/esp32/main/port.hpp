@@ -148,6 +148,11 @@ class EspSystem final : public hg::System {
   bool enable_doze();
   void set_dozing(bool dozing) override;
   static bool dozing_now();  // for tasks that poll: poll less while dozing
+  // A lock holds the chip out of light sleep even while dozing (a Wi-Fi join attempt).
+  // A task that relies on light-sleep wakes then keeps its awake path instead.
+  static void set_sleep_held(bool held);
+  static bool sleep_held_now();
+  static inline void (*on_sleep_held_change)() = nullptr;  // e.g. end the touch task's wait
   std::function<void()> on_doze_start;  // e.g. power the speaker down
   std::function<void()> on_doze_end;    // e.g. power it up, retry Wi-Fi now: the user is back
 
@@ -182,6 +187,9 @@ class WsTransport final : public hg::Transport {
   // True when the send task has been stuck on one item for hg::ws::kStuckMs, or
   // couldn't take a client to close: the transport can't recover without a restart.
   bool stuck() const;
+  // While on (a turn), the send task logs once a second what it sent: bytes, messages, the
+  // longest send, the queue's peak, refusals, the CPU clock and the signal ("uplink: ...").
+  void set_metering(bool on) { metering_ = on; }
 
  private:
   static void on_event(void* arg, const char* base, int32_t id, void* data);
@@ -200,6 +208,13 @@ class WsTransport final : public hg::Transport {
   // message's first frame clears it.
   std::string rx_;
   uint8_t rx_opcode_ = 0;
+  std::atomic<bool> metering_{false};
+  std::atomic<uint32_t> refused_{0};  // messages enqueue() turned away for want of room
+  // The send in flight on the send task (generation 0: none), for the close reason on_event
+  // reports: a failed send closes the connection before it returns.
+  std::atomic<uint32_t> sending_gen_{0}, sending_since_{0};
+  std::atomic<uint32_t> connected_gen_{0};  // the last client generation that reached CONNECTED
+  std::atomic<size_t> sending_bytes_{0};
 };
 
 // ESP-IDF RGB timing bus with ST7701 command initialization on 3-wire SPI.
@@ -554,6 +569,9 @@ class TouchInput {
              i2c_master_bus_handle_t bus);
   bool has_touch() const { return touch_dev_ != nullptr || managed_touch_ != nullptr; }
   bool has_key() const { return key_dev_ != nullptr; }
+  void nudge();  // ends the task's wait now, e.g. so a doze's end re-arms the INT edge at once
+  // The touch_wake setting: off, a doze leaves INT quiet instead of arming it as a wake source.
+  void set_wakes(bool on) { wakes_ = on; nudge(); }
 
  private:
   static void task(void* arg);
@@ -567,6 +585,8 @@ class TouchInput {
   static void on_encoder_b_edge(void* arg);  // IRAM: pulse-per-detent channel B
   void IRAM_ATTR encoder_pulse(int8_t channel);  // +1 = channel A, -1 = channel B; direction maps at post
   bool may_read(bool was_touching);
+  void arm_sleep_wake(bool dozing);
+  static esp_err_t on_sleep_exit(int64_t slept_us, void* arg);  // IRAM: a low INT after light sleep
   void wait(uint32_t ms);
   bool read_key(bool& pressed);
   TouchConfig touch_{};
@@ -576,6 +596,10 @@ class TouchInput {
   esp_lcd_touch_handle_t managed_touch_ = nullptr;
   bool int_gated_ = false;                // FT5x06 with INT: read after an edge or with a finger down
   std::atomic<bool> int_pending_{false};  // an edge since the last read
+  bool sleep_wake_ = false;               // touch_.int_wakes, and the INT gate and sleep hook are in place
+  bool sleep_wake_armed_ = false;         // dozing: INT's edge ISR is off (and INT wakes light sleep if wakes_)
+  std::atomic<bool> wakes_{true};         // the touch_wake setting
+  bool quiet_ = false;                    // this doze leaves INT quiet (wakes_ was off when it began)
   void* task_ = nullptr;                  // the touch task, woken by an edge
   gpio_num_t encoder_a_ = GPIO_NUM_NC;
   gpio_num_t encoder_b_ = GPIO_NUM_NC;

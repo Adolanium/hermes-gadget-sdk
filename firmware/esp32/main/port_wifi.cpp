@@ -13,6 +13,7 @@
 #include "esp_wifi.h"
 #include "sdkconfig.h"
 #include "lwip/inet.h"
+#include "link_diag.hpp"
 
 namespace hgp {
 namespace {
@@ -44,8 +45,14 @@ void Wifi::hold_while_attempting() {
   const bool want = retry_.attempting();
   if (!attempt_lock_ || want == attempt_held_) return;
   attempt_held_ = want;
-  if (want) esp_pm_lock_acquire(attempt_lock_);
-  else esp_pm_lock_release(attempt_lock_);
+  // Tell the touch task first, so it is back on its INT edge before the chip stays awake.
+  if (want) {
+    EspSystem::set_sleep_held(true);
+    esp_pm_lock_acquire(attempt_lock_);
+  } else {
+    esp_pm_lock_release(attempt_lock_);
+    EspSystem::set_sleep_held(false);
+  }
 }
 
 void Wifi::retry_now() {
@@ -309,9 +316,10 @@ void Wifi::on_event(void*, const char* base, int32_t id, void* data) {
     events::post(EventType::WifiScanDone);
   } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
     auto* info = static_cast<wifi_event_sta_disconnected_t*>(data);
-    char detail[48];
-    std::snprintf(detail, sizeof(detail), "Wi-Fi lost (reason %d)", info ? info->reason : 0);
-    events::post(EventType::WifiDisconnected, detail, std::strlen(detail));
+    // "Wi-Fi lost (reason 200 beacon timeout, rssi -78)": the reason and the signal when it went.
+    const std::string detail = hg::link::wifi_lost(info ? info->reason : 0, info ? info->rssi : 0);
+    ESP_LOGW("hg.wifi", "%s", detail.c_str());
+    events::post(EventType::WifiDisconnected, detail.data(), detail.size());
   } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
     const auto* got = static_cast<ip_event_got_ip_t*>(data);
     char detail[32];

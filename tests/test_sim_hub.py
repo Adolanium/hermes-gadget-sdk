@@ -138,6 +138,26 @@ def test_voice_is_uploaded_as_wav_and_played_back(devserver, make_sim):
     assert sim.speaker.last_file is not None and sim.speaker.last_file.stat().st_size > 20000
 
 
+def test_a_recording_survives_a_lost_connection_and_is_sent_after_reconnecting(loop_thread, devserver, make_sim):
+    hub, _brain, url = devserver()
+    sim = make_sim(url)
+    assert sim.wait_screen("ready", timeout=10)
+    hub.port = hub.bound_port  # come back on the same port
+    seconds = sim.speak_pcm(_tone(3.0))
+    assert sim.wait_screen("listening", timeout=2)
+    sim.run_for(0.8)
+    loop_thread.run(hub.stop())  # the connection drops mid-recording
+    sim.run_for(0.5)
+    assert sim.device.screen() == "listening"  # still recording, not the connecting screen
+    assert sim.wait_screen("thinking", timeout=5)  # the recording ended while offline
+    loop_thread.run(hub.start())
+    assert sim.wait_for(lambda: sim.last_received("turn.end") is not None, timeout=20)
+    reply = sim.last_received("reply")["text"]
+    heard = float(reply.split("I heard ")[1].split(" seconds")[0])
+    assert abs(heard - seconds - 0.3) < 0.25  # all of it, from before and after the drop
+    assert sim.wait_screen("ready", timeout=10)
+
+
 def test_cancel_interrupts_the_turn(devserver, make_sim):
     hub, brain, url = devserver()
     brain.word_delay = 0.3
@@ -627,6 +647,36 @@ def test_devices_switch_hermes_profile_and_keep_it(loop_thread, tmp_path, make_s
     finally:
         loop_thread.run(hub.stop())
 
+
+
+def test_a_double_press_of_talk_goes_back_to_the_default_profile(loop_thread, tmp_path, make_sim):
+    from hermes_gadget_plugin.hub import DeviceHub
+    from hermes_gadget_plugin.store import DeviceStore
+
+    hub = DeviceHub(DeviceStore(tmp_path / "server"), _TwoProfiles(), host="127.0.0.1", port=0, heartbeat_s=5)
+    loop_thread.run(hub.start())
+    try:
+        url = f"ws://127.0.0.1:{hub.bound_port}/gadget"
+        sim = make_sim(url)
+        assert sim.wait_screen("ready", timeout=10)
+        sim.console("settings")
+        for _ in range(3):
+            sim.console("cancel")
+        sim.console("talk")
+        sim.console("release")
+        assert sim.wait_for(lambda: sim.status().get("profile") == "ops", timeout=5)
+        sim.console("settings close")
+        assert sim.wait_screen("ready", timeout=5)
+        # Two quick presses of the TALK key: the first starts a recording, the second throws it away.
+        sim.press("talk")
+        sim.release("talk")
+        sim.press("talk")
+        sim.release("talk")
+        assert sim.wait_for(lambda: sim.status().get("profile") == "default", timeout=5)
+        assert hub.get(sim.status()["device_id"]).profile == "default"
+        assert sim.device.screen() == "ready"
+    finally:
+        loop_thread.run(hub.stop())
 
 def _face(ink: int) -> bytes:
     """A face the device takes (docs/protocol.md#faces): every bitmap byte ``ink``, the mascot's anchors."""

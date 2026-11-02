@@ -107,6 +107,16 @@ constexpr int32_t kTail64 = 70 * 64;
 // Listening turns amber in the last sixth of the recording limit: its last 5 of 30 s.
 constexpr int16_t kLateListening = 834;
 
+// The resting clock's burn-in shift: each minute the face moves (dx, dy) px, each -4 to 4,
+// through 9 places in a 9-minute cycle (draw_clock). The ring's ticks and seconds dot turn
+// with it by kTickTurn64 per px of dx: half a degree, so up to 2 degrees either way and
+// mostly a degree from one minute to the next (edge_ring).
+struct BurnInShift {
+  int dx, dy;
+};
+BurnInShift burn_in_shift(int minute) { return {(minute * 7) % 9 - 4, (minute * 5) % 9 - 4}; }
+constexpr int32_t kTickTurn64 = 32;
+
 // atan(n / d) for 0 <= n <= d, d > 0, in 1/64 degree: (pi/4) t + 0.273 t (1 - t) radians
 // for t = n / d, within a quarter of a degree.
 int32_t atan64(int32_t n, int32_t d) {
@@ -133,9 +143,9 @@ void channels(uint16_t c, uint8_t out[3]) {
 
 // What a round panel's edge ring shows for this model; the first match wins. A recording or
 // an update takes the ring from a running timer, and the timer keeps it while Hermes thinks
-// or speaks. The alarm and the battery faces have none; the resting clock has its ticks.
-// Comets lap the ring once per 24 frames (2.4 s at the app's 10 frames a second), or 40
-// while Hermes speaks.
+// or speaks. The alarm and the battery faces have none; the resting clock has its ticks,
+// turned with the face's burn-in shift. Comets lap the ring once per 24 frames (2.4 s at the
+// app's 10 frames a second), or 40 while Hermes speaks.
 EdgeRing edge_ring(const UiModel& m) {
   EdgeRing r;
   const auto level = [&r](int permille, uint16_t colour, uint16_t dim) {
@@ -159,6 +169,7 @@ EdgeRing edge_ring(const UiModel& m) {
       r.kind = EdgeRing::Kind::Ticks;
       r.colour = kAccent;
       r.second = static_cast<uint8_t>(m.clock_second % 60);
+      r.turn64 = static_cast<int16_t>(burn_in_shift(m.clock_minute).dx * kTickTurn64);
       return r;
     case Screen::Listening:
       if (m.progress_permille >= 0) {
@@ -386,12 +397,7 @@ Ui::Ui(Display& display)
     runs(clock_rows_, [&](int d2) {
       return 4 * d2 >= (mid2 - reach2) * (mid2 - reach2) && 4 * d2 <= (mid2 + reach2) * (mid2 + reach2);
     });
-    // The resting clock's ticks: every 6 degrees, clockwise from 12 o'clock.
-    for (int k = 0; k < 60; ++k) {
-      const double theta = kTau * k / 60.0;
-      tick_cos_[k] = static_cast<int16_t>(std::lround(std::cos(theta) * kArcScale));
-      tick_sin_[k] = static_cast<int16_t>(std::lround(std::sin(theta) * kArcScale));
-    }
+    turn_ticks(0);  // the resting clock's ticks, until a minute turns them (set_ring)
   }
 }
 
@@ -507,7 +513,9 @@ void Ui::draw_frame(const UiModel& m) {
   if ((ring.kind == EdgeRing::Kind::None) != (ring_.kind == EdgeRing::Kind::None)) valid_ = false;
   if (ring != ring_ && display_.framebuffer_rows() > 0) valid_ = false;
   bool ring_moved = valid_ && ring != ring_;
-  // On the clock only the seconds dot moves from one second to the next: where it was.
+  // On the clock only the seconds dot moves from one second to the next: where it was. A new
+  // minute turns the ticks too, but then draw_clock repaints the whole panel, ring included
+  // (its hash keys on the minute), and the dot's rows hold nothing more to change.
   const bool dot_moved = ring_moved && ring_.kind == EdgeRing::Kind::Ticks && ring.kind == EdgeRing::Kind::Ticks;
   const int32_t dot_was = ring_dot_y16_;
   set_ring(ring);
@@ -566,6 +574,10 @@ void Ui::draw_frame(const UiModel& m) {
   content.val(m.screen).add(m.detail).add(m.body).add(m.code).val(m.scroll).val(m.color_test)
       .val(m.qr ? m.qr->size : 0);
   for (const DashRow& row : m.dash) content.add(row.label).add(row.value).val(row.tone).val(row.heading);
+  if (m.screen == Screen::Settings) {
+    content.val(m.settings_sel).val(m.settings_scroll);
+    for (const SettingRow& row : m.settings) content.add(row.label).add(row.value).val(row.icon).val(row.kind).val(row.level);
+  }
   if (m.screen == Screen::Profiles)
     content.val(m.grid).val(m.face_row).val(m.mascot_row).val(m.settings_row).add(m.face ? m.face->hash : std::string())
         .val(m.thumbs_rev).val(m.thumbs.size());
@@ -890,6 +902,10 @@ void Ui::draw_content(Canvas& c, const UiModel& m) {
     draw_dashboard(c, m, y0, y1);
     return;
   }
+  if (m.screen == Screen::Settings && !m.settings.empty()) {
+    draw_settings(c, m, y0, y1);
+    return;
+  }
 
   if (m.screen == Screen::Boot) {
     int big = s + 2;
@@ -1175,6 +1191,228 @@ void Ui::draw_profiles(Canvas& c, const UiModel& m) {
   }
 }
 
+// Settings icons: 8x8, one byte per row, most significant bit on the left, in
+// SettingRow::Icon order. Drawn at the text scale, so they match the font's pixels.
+constexpr uint8_t kSettingIcons[][8] = {
+    {0x08, 0x1A, 0xF1, 0xF5, 0xF5, 0xF1, 0x1A, 0x08},  // Volume
+    {0x10, 0x44, 0x38, 0xBA, 0x38, 0x44, 0x10, 0x00},  // Sun
+    {0x7E, 0x81, 0xA9, 0x81, 0x7E, 0x20, 0x40, 0x00},  // Talk
+    {0x18, 0x3C, 0x3C, 0x18, 0x00, 0x7E, 0xFF, 0xFF},  // Person
+    {0x18, 0x3C, 0x3C, 0x3C, 0xBD, 0x42, 0x3C, 0x18},  // Mic
+    {0x1E, 0x12, 0x12, 0x12, 0x76, 0xFF, 0x66, 0x00},  // Note
+    {0xFF, 0x81, 0x81, 0x81, 0xFF, 0x18, 0x7E, 0x00},  // Screen
+    {0x7E, 0x81, 0xA5, 0x81, 0x99, 0x81, 0x7E, 0x00},  // Keys
+    {0x3C, 0x42, 0x99, 0x81, 0x99, 0x99, 0x42, 0x3C},  // Info
+    {0x3C, 0x7E, 0x42, 0x42, 0x7E, 0x7E, 0x7E, 0x7E},  // Battery
+    {0xFF, 0x42, 0x24, 0x18, 0x18, 0x3C, 0x7E, 0xFF},  // Timer
+    {0x10, 0x28, 0x28, 0x2E, 0xEB, 0x80, 0x81, 0x7E},  // Touch
+    {0x3C, 0x46, 0x8C, 0x8C, 0x86, 0x42, 0x3C, 0x00},  // FaceDown
+    {0x3C, 0x52, 0x91, 0x9D, 0x81, 0x42, 0x3C, 0x00},  // Clock
+    {0x10, 0x54, 0x92, 0x92, 0x82, 0x44, 0x38, 0x00},  // Power
+    {0x00, 0x7E, 0x81, 0x3C, 0x42, 0x18, 0x18, 0x00},  // Wifi
+    {0x7C, 0x44, 0x44, 0x44, 0x44, 0x6C, 0x7C, 0x00},  // Phone
+    {0x3C, 0x5A, 0x99, 0xFF, 0x99, 0x5A, 0x3C, 0x00},  // Globe
+    {0x10, 0x20, 0x40, 0xFF, 0x40, 0x20, 0x10, 0x00},  // Back
+    {0x18, 0x3C, 0x7E, 0x7E, 0x7E, 0xFF, 0x00, 0x18},  // Bell
+    {0x0C, 0x18, 0x30, 0x7E, 0x0C, 0x18, 0x30, 0x00},  // Bolt
+    {0x00, 0x01, 0x03, 0x86, 0xCC, 0x78, 0x30, 0x00},  // Check
+    {0xDB, 0xDB, 0x00, 0xDB, 0xDB, 0x00, 0xDB, 0xDB},  // Grid
+};
+
+void draw_icon(Canvas& c, int x, int y, SettingRow::Icon icon, int scale, uint16_t color) {
+  const size_t i = static_cast<size_t>(icon);
+  if (i >= sizeof(kSettingIcons) / sizeof(kSettingIcons[0])) return;
+  for (int row = 0; row < 8; ++row) {
+    const uint8_t bits = kSettingIcons[i][row];
+    for (int col = 0; col < 8; ++col)
+      if ((bits >> (7 - col)) & 1) c.fill_rect(x + col * scale, y + row * scale, scale, scale, color);
+  }
+}
+
+// The settings list: rows of a fixed height, except the selected one, which also
+// holds its description. Coordinates are relative to the list's top.
+int settings_row_base(int s, int touch_px) { return std::max(Canvas::line_height(s) + 6 * s, touch_px * 2 / 3); }
+
+// The columns a Value row's text gets at the right: what the label leaves, at least half the row.
+int settings_value_cols(const SettingRow& row, int row_cols) {
+  const int room = row_cols - static_cast<int>(font::length(row.label)) - 1;
+  return std::max(std::min(room, static_cast<int>(font::length(row.value))), row_cols / 2);
+}
+
+std::vector<std::string> Ui::settings_desc(const UiModel& m) const {
+  if (m.settings_sel < 0 || m.settings_sel >= static_cast<int>(m.settings.size())) return {};
+  const SettingRow& row = m.settings[static_cast<size_t>(m.settings_sel)];
+  const int s = layout_.scale;
+  std::string_view body = m.body;
+  // The value already shows at the right: drop the body's first line when it repeats it.
+  const size_t nl = body.find('\n');
+  // A slider's first line is its percentage, which may be a slide's preview. A value shortened
+  // to fit its row keeps its full line here (the row's width as drawn with a scroll bar).
+  const int row_cols = cols_for(info_.width - 15 * s - 7 * s, s);
+  const bool whole = static_cast<int>(font::length(row.value)) <= settings_value_cols(row, row_cols);
+  if (row.kind == SettingRow::Kind::Slider || (!row.value.empty() && whole && body.substr(0, nl) == row.value))
+    body = nl == std::string_view::npos ? "" : body.substr(nl + 1);
+  return wrap_text(std::string(body), cols_for(info_.width - 22 * s, s));  // the text column, beside a scroll bar
+}
+
+int Ui::settings_view_h() const { return info_.height - layout_.bottom_h - layout_.top_h - layout_.header_h; }
+
+int Ui::settings_row_h(const UiModel& m, int i) const {
+  const int s = layout_.scale, base = settings_row_base(s, touch_px_);
+  if (i != m.settings_sel) return base;
+  const int lines = static_cast<int>(settings_desc(m).size()) +
+                    (m.settings[static_cast<size_t>(i)].kind == SettingRow::Kind::Slider);
+  return base + (lines ? lines * Canvas::line_height(s) + 2 * s : 0);
+}
+
+int Ui::settings_row_top(const UiModel& m, int i) const {
+  const int s = layout_.scale, base = settings_row_base(s, touch_px_);
+  // Rows above the selected one are all the base height.
+  int top = 2 * s + i * (base + s);
+  if (i > m.settings_sel && m.settings_sel >= 0) top += settings_row_h(m, m.settings_sel) - base;
+  return top;
+}
+
+int Ui::settings_max_scroll(const UiModel& m) const {
+  const int n = static_cast<int>(m.settings.size());
+  if (n == 0) return 0;
+  return std::max(0, settings_row_top(m, n - 1) + settings_row_h(m, n - 1) + 2 * layout_.scale - settings_view_h());
+}
+
+int Ui::settings_scroll_for(const UiModel& m, int scroll) const {
+  if (m.settings_sel < 0 || m.settings_sel >= static_cast<int>(m.settings.size())) return 0;
+  const int s = layout_.scale, view = settings_view_h();
+  const int base = settings_row_base(s, touch_px_);
+  // The row and one more row of context each way, when there is room.
+  const int top = settings_row_top(m, m.settings_sel) - 2 * s - (m.settings_sel > 0 ? base / 2 : 0);
+  const int bottom = settings_row_top(m, m.settings_sel) + settings_row_h(m, m.settings_sel) + 2 * s +
+                     (m.settings_sel + 1 < static_cast<int>(m.settings.size()) ? base / 2 : 0);
+  if (bottom - scroll > view) scroll = bottom - view;
+  if (top < scroll) scroll = top;
+  const int max_scroll = settings_max_scroll(m);
+  if (scroll <= 0 || scroll >= max_scroll) return std::max(0, std::min(scroll, max_scroll));
+  // At rest the top row shows whole: round down the list to the next row's top.
+  // The selected row's own top is one, so it stays in view.
+  for (int i = 0; i < static_cast<int>(m.settings.size()); ++i) {
+    const int edge = settings_row_top(m, i) - 2 * s;
+    if (edge >= scroll) return std::min(edge, max_scroll);
+  }
+  return max_scroll;
+}
+
+int Ui::settings_row_hit(const UiModel& m, int x, int y) const {
+  x -= ox_;
+  y -= oy_ + layout_.top_h + layout_.header_h;
+  if (m.screen != Screen::Settings || x < 0 || x >= info_.width || y < 0 || y >= settings_view_h()) return -1;
+  y += m.settings_scroll;
+  for (int i = 0; i < static_cast<int>(m.settings.size()); ++i) {
+    const int top = settings_row_top(m, i);
+    if (y >= top && y < top + settings_row_h(m, i)) return i;
+  }
+  return -1;
+}
+
+// The selected slider row's bar, in area coordinates: x and w span it, y is its centre line.
+Ui::Rect Ui::settings_bar(const UiModel& m) const {
+  if (m.screen != Screen::Settings || m.settings_sel < 0 || m.settings_sel >= static_cast<int>(m.settings.size()) ||
+      m.settings[static_cast<size_t>(m.settings_sel)].kind != SettingRow::Kind::Slider)
+    return {};
+  const int s = layout_.scale, lh = Canvas::line_height(s), base = settings_row_base(s, touch_px_);
+  const int bar_w = settings_max_scroll(m) > 0 ? 3 * s : 0;
+  const int bx = 18 * s, right = info_.width - 7 * s - bar_w;  // inset 3s from the text columns (draw_settings)
+  const int top = layout_.top_h + layout_.header_h + settings_row_top(m, m.settings_sel) -
+                  std::max(0, std::min(m.settings_scroll, settings_max_scroll(m)));
+  return {bx, top + base - 2 * s + lh / 2, right - bx, 0};
+}
+
+int Ui::settings_slider_at(const UiModel& m, int x, int y, bool anywhere) const {
+  const Rect bar = settings_bar(m);
+  if (bar.w <= 0) return -1;
+  x -= ox_;
+  y -= oy_;
+  // A line's height around the bar, within the list's band; once a slide has begun, any height.
+  const int reach = Canvas::line_height(layout_.scale);
+  const int top = layout_.top_h + layout_.header_h, bottom = top + settings_view_h();
+  if (!anywhere && (bar.y < top || bar.y >= bottom || y < std::max(top, bar.y - reach) ||
+                    y > std::min(bottom - 1, bar.y + reach) || x < bar.x - reach || x >= bar.x + bar.w + reach))
+    return -1;
+  return std::max(0, std::min(100, (x - bar.x) * 100 / std::max(1, bar.w)));
+}
+
+void Ui::draw_settings(Canvas& c, const UiModel& m, int y0, int y1) {
+  const int s = layout_.scale, w = info_.width, lh = Canvas::line_height(s);
+  const int glyph_h = font::kGlyphHeight * s, base = settings_row_base(s, touch_px_);
+  const int max_scroll = settings_max_scroll(m);
+  const int scroll = std::max(0, std::min(m.settings_scroll, max_scroll));
+  const int bar_w = max_scroll > 0 ? 3 * s : 0;  // room for the scroll indicator
+  const int icon_x = 4 * s, text_x = icon_x + 11 * s, right = w - 4 * s - bar_w;
+  // Rows scrolled part way out of the band must not touch the bars around it.
+  const int clip0 = c.clip_y0(), clip1 = c.clip_y1();
+  c.set_clip_rows(std::max(clip0, y0), std::min(clip1, y1));
+  // Only the rows that cross the band; the rest cost nothing.
+  for (int i = 0; i < static_cast<int>(m.settings.size()); ++i) {
+    const int top = y0 + settings_row_top(m, i) - scroll, h = settings_row_h(m, i);
+    if (top >= y1) break;
+    if (top + h <= y0) continue;
+    const SettingRow& row = m.settings[static_cast<size_t>(i)];
+    const bool sel = i == m.settings_sel;
+    if (sel) c.fill_round_rect(2 * s, top, w - 4 * s - bar_w, h, 3 * s, kBar);
+    const int cy = top + base / 2;
+    draw_icon(c, icon_x, cy - 4 * s, row.icon, s, sel ? kAccent : kDim);
+    const int ty = cy - glyph_h / 2;
+    // The control at the right edge, then the label in what is left.
+    int ctrl_x = right;
+    switch (row.kind) {
+      case SettingRow::Kind::Toggle: {
+        const int ph = 8 * s, pw = 15 * s, on = row.level != 0;
+        ctrl_x = right - pw;
+        c.fill_round_rect(ctrl_x, cy - ph / 2, pw, ph, ph / 2, on ? kGreen : kFaint);
+        c.fill_circle(on ? right - ph / 2 : ctrl_x + ph / 2, cy, ph / 2 - s, on ? kText : kDim);
+        break;
+      }
+      case SettingRow::Kind::Slider:  // the percentage; the selected row draws its bar underneath
+        ctrl_x = right - Canvas::text_width(row.value, s);
+        c.text(ctrl_x, ty, row.value, s, sel ? kAccent : kDim);
+        break;
+      case SettingRow::Kind::Value: {
+        const std::string v = fit(row.value, settings_value_cols(row, cols_for(right - text_x, s)));
+        ctrl_x = right - Canvas::text_width(v, s);
+        c.text(ctrl_x, ty, v, s, sel ? kAccent : kDim);
+        break;
+      }
+      case SettingRow::Kind::Action:
+        ctrl_x = right - Canvas::text_width(">", s);
+        c.text(ctrl_x, ty, ">", s, sel ? kAccent : kFaint);
+        break;
+    }
+    c.text(text_x, ty, fit(row.label, cols_for(ctrl_x - 3 * s - text_x, s)), s, kText);
+    if (sel) {
+      int dy = top + base - 2 * s;
+      if (row.kind == SettingRow::Kind::Slider) {
+        const Rect bar = settings_bar(m);
+        const int bx = bar.x, bw = bar.w, by = bar.y;
+        const int fill = bw * std::min<int>(100, row.level) / 100;
+        c.fill_round_rect(bx, by - s, bw, 2 * s, s, kFaint);
+        if (fill > 0) c.fill_round_rect(bx, by - s, fill, 2 * s, s, kAccent);
+        c.fill_circle(bx + fill, by, 3 * s, kText);
+        dy += lh + s;
+      }
+      for (const std::string& line : settings_desc(m)) {
+        c.text(text_x, dy, line, s, kDim);
+        dy += lh;
+      }
+    }
+  }
+  if (max_scroll > 0) {
+    const int view = y1 - y0, total = view + max_scroll;
+    const int thumb_h = std::max(4 * s, view * view / total);
+    const int thumb_y = y0 + (view - thumb_h) * scroll / max_scroll;
+    c.fill_rect(w - 2 * s, y0, s, view, kFaint);
+    c.fill_rect(w - 2 * s, thumb_y, s, thumb_h, kDim);
+  }
+  c.set_clip_rows(clip0, clip1);
+}
+
 // A Wi-Fi setup code: a white panel with a four-module quiet zone, one square
 // per module, at the largest integer scale that fits the content band. A phone
 // camera needs the quiet zone and dark-on-light contrast, so neither is optional.
@@ -1398,7 +1636,8 @@ void Ui::draw_bottom(Canvas& c, const UiModel& m) {
 
 // What this frame's ring needs per pixel, worked out once: the level's sweep, the comet's
 // head and colours, the seconds dot's centre on the band's middle radius and its radius,
-// 4s px: about twice the band's width, so it stands out from the ticks.
+// 4s px: about twice the band's width, so it stands out from the ticks. The dot turns with
+// the ticks, so it stays on the tick of its second.
 void Ui::set_ring(const EdgeRing& ring) {
   ring_ = ring;
   switch (ring.kind) {
@@ -1411,7 +1650,9 @@ void Ui::set_ring(const EdgeRing& ring) {
       channels(bg_, ring_bg_);
       break;
     case EdgeRing::Kind::Ticks: {
-      const double mid = (band_in_ + band_out_ + 1) / 2.0, theta = kTau * ring.second / 60.0;
+      if (ring.turn64 != tick_turn64_) turn_ticks(ring.turn64);  // a new minute's shift
+      const double mid = (band_in_ + band_out_ + 1) / 2.0;
+      const double theta = kTau * (ring.second * 6 * 64 + ring.turn64) / kTurn64;
       ring_dot_x16_ = static_cast<int32_t>(std::lround(mid * std::sin(theta) * 16));
       ring_dot_y16_ = static_cast<int32_t>(std::lround(-mid * std::cos(theta) * 16));
       const int32_t r16 = 64 * layout_.scale;
@@ -1420,6 +1661,16 @@ void Ui::set_ring(const EdgeRing& ring) {
     }
     case EdgeRing::Kind::None:
       break;
+  }
+}
+
+// The 60 ticks' directions: every 6 degrees clockwise from 12 o'clock, turned by turn64.
+void Ui::turn_ticks(int32_t turn64) {
+  tick_turn64_ = turn64;
+  for (int k = 0; k < 60; ++k) {
+    const double theta = kTau * (k * 6 * 64 + turn64) / kTurn64;
+    tick_cos_[k] = static_cast<int16_t>(std::lround(std::cos(theta) * kArcScale));
+    tick_sin_[k] = static_cast<int16_t>(std::lround(std::sin(theta) * kArcScale));
   }
 }
 
@@ -1451,7 +1702,7 @@ uint16_t Ui::ring_pixel(int dx, int dy) const {
       if (d2 <= band_in_ * band_in_ || d2 > band_out_ * band_out_) return bg_;  // the dot's reach: only the dot
       // The nearest tick, and the distance from its centre line (times kArcScale). The ticks
       // are the date's grey, so they show at the clock's dimmed brightness; the dot alone is amber.
-      const int k = static_cast<int>((ring_angle64(dx, dy) + 192) / 384 % 60);
+      const int k = static_cast<int>((ring_angle64(dx, dy) - ring_.turn64 + kTurn64 + 192) / 384 % 60);
       const int32_t d = std::abs(dx * tick_cos_[k] + dy * tick_sin_[k]);
       const int s = layout_.scale;
       if (k % 5 == 0) return d < (s + 1) * kArcScale ? kDim : bg_;  // the hours: 2s + 1 px, across the band
@@ -1766,8 +2017,8 @@ void Ui::draw_battery_face(const UiModel& m) {
 // the per-minute shift can move it. The face changes once a minute: the burn-in
 // shift keys the hash on the minute too.
 void Ui::draw_clock(const UiModel& m) {
-  // The ring's ticks go on with the clock: each push paints them, and a new second moves
-  // only the dot (draw_frame, update_ring).
+  // The ring's ticks go on with the clock: each push paints them, turned with this minute's
+  // shift (edge_ring), and a new second moves only the dot (draw_frame, update_ring).
   const uint32_t key = Hash().add(m.clock_time).add(m.clock_date).val(m.clock_minute).val(m.lang)
                            .add(m.face ? m.face->hash : std::string()).get();
   if (valid_ && full_face_ == FullFace::Clock && key == face_hash_) return;  // invalidate() repaints it too
@@ -1779,7 +2030,8 @@ void Ui::draw_clock(const UiModel& m) {
   const int W = panel_.width, H = panel_.height;
   const int cx = W / 2, cy = H / 2, R = std::min(W, H) / 2;
   // The burn-in shift moves the whole face a few pixels each minute.
-  const int dx = (m.clock_minute * 7) % 9 - 4, dy = (m.clock_minute * 5) % 9 - 4;
+  const BurnInShift shift = burn_in_shift(m.clock_minute);
+  const int dx = shift.dx, dy = shift.dy;
   const int gap = 3 * s;
   const int margin = 4;
   // The profile's face where it has one, like the Ready screen and the alarm:

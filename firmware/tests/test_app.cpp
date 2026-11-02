@@ -227,6 +227,7 @@ struct Rig {
   static hg::DeviceProfile touch_profile() {
     hg::DeviceProfile p = profile("ws://hermes.local:8765/gadget");
     p.touch_screen = true;
+    p.talk_key = false;  // a touchscreen only: the boards whose screen is their only way to talk
     p.cancel_label = "Swipe down";
     p.extra_settings = {"touch_cancel"};
     return p;
@@ -566,6 +567,51 @@ TEST("app: microphone frames the link refused are counted when the recording end
   r.fake.logs.clear();
   r.app.on_button(hg::Button::Talk, false);
   for (const auto& l : r.fake.logs) CHECK(l.find("recording:") == std::string::npos);
+}
+
+TEST("app: microphone audio goes in 40 ms frames whatever size the port delivers") {
+  // The codec boards record at 24 kHz and deliver 320 samples (13 ms) at a time: before, each
+  // went as its own message, 75 a second, and the send queue held under a second of audio.
+  hg::DeviceProfile p = Rig::profile("ws://hermes.local:8765/gadget");
+  p.mic_rate = 24000;
+  Rig r(p);
+  r.bring_online(true);
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> all;
+  int16_t next = 0;
+  for (int i = 0; i < 31; ++i) {  // 9,920 samples: ten 960-sample frames and 320 over
+    std::vector<int16_t> pcm(320);
+    for (auto& v : pcm) v = next++;
+    all.insert(all.end(), pcm.begin(), pcm.end());
+    r.app.on_mic_samples(pcm.data(), pcm.size());
+    r.advance(10);
+  }
+  CHECK_EQ(r.fake.sent_binary.size(), size_t(10));
+  for (const auto& f : r.fake.sent_binary) CHECK_EQ(f.size(), hg::proto::kBinaryHeader + 960 * 2);
+  r.advance(400);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK_EQ(r.fake.sent_binary.size(), size_t(11));  // the part frame goes before audio.end
+  CHECK_EQ(r.fake.sent_binary.back().size(), hg::proto::kBinaryHeader + 320 * 2);
+  std::vector<int16_t> got;
+  uint16_t seq = 0;
+  for (const auto& f : r.fake.sent_binary) {
+    hg::proto::BinaryFrame b;
+    CHECK(hg::proto::parse_binary(f.data(), f.size(), b));
+    CHECK_EQ(b.seq, seq++);
+    const auto* sm = reinterpret_cast<const int16_t*>(f.data() + hg::proto::kBinaryHeader);
+    got.insert(got.end(), sm, sm + (f.size() - hg::proto::kBinaryHeader) / 2);
+  }
+  CHECK(got == all);
+  CHECK(r.fake.last("audio.end") != nullptr);
+
+  // At 16 kHz, 640 samples, as before.
+  Rig sixteen;
+  sixteen.bring_online(true);
+  sixteen.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(1600, 1);
+  sixteen.app.on_mic_samples(pcm.data(), pcm.size());
+  CHECK_EQ(sixteen.fake.sent_binary.size(), size_t(2));
+  CHECK_EQ(sixteen.fake.sent_binary[0].size(), hg::proto::kBinaryHeader + 640 * 2);
 }
 
 TEST("app: a recording whose end can't be sent says so instead of waiting for a reply") {
@@ -1234,6 +1280,165 @@ TEST("app: a finished reply stays readable, then the mascot returns; UP brings i
   CHECK_EQ(r.app.model().body, std::string("Here is the answer."));
 }
 
+namespace {
+// A held TALK with speech in it, sent: the device waits for Hermes (Thinking).
+void ask_by_voice(Rig& r) {
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(1600, 1000);
+  for (int i = 0; i < 6; ++i) {
+    r.app.on_mic_samples(pcm.data(), pcm.size());
+    r.advance(100);
+  }
+  r.app.on_button(hg::Button::Talk, false);
+}
+
+// Time passes with the connection alive (pings) and no word about the turn.
+void wait_quietly(Rig& r, uint32_t ms) {
+  for (uint32_t t = 0; t < ms; t += 10000) {
+    r.server(R"({"type":"ping"})");
+    r.advance(10000);
+  }
+}
+}  // namespace
+
+TEST("app: once Hermes starts the turn, Thinking waits with the screen lit through a long task") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  ask_by_voice(r);
+  r.server(R"({"type":"turn.start","turn":"a1"})");
+  wait_quietly(r, 10 * 60000);  // ten minutes without a status phrase
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  CHECK_EQ(r.fake.brightness, 100);
+  r.server(R"({"type":"reply","turn":"a1","text":"Done at last."})");
+  r.server(R"({"type":"turn.end","turn":"a1","outcome":"success"})");
+  r.advance(200);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.app.model().body, std::string("Done at last."));
+
+  // A request Hermes never took up still gives up after three minutes.
+  Rig lost(Rig::touch_profile());
+  lost.bring_online(true);
+  ask_by_voice(lost);
+  wait_quietly(lost, 170000);
+  CHECK(lost.app.screen() == hg::Screen::Thinking);
+  lost.server(R"({"type":"ping"})");
+  lost.advance(11000);
+  CHECK(lost.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(lost.app.model().detail, std::string("No reply from Hermes"));
+}
+
+TEST("app: a reply the screen went dark on comes back with the wake until an input meets it") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  ask_by_voice(r);
+  r.server(R"({"type":"turn.start","turn":"a1"})");
+  wait_quietly(r, 240000);
+  r.server(R"({"type":"reply","turn":"a1","text":"It is sunny."})");
+  r.server(R"({"type":"turn.end","turn":"a1","outcome":"success"})");
+  wait_quietly(r, 60000);  // nobody looked: the text gave way to the mascot, then the screen went dark
+  CHECK_EQ(r.fake.brightness, 0);
+  CHECK(r.app.model().hero);
+
+  hg::TouchGestures touch(r.app);
+  touch.update(true, 200, 200, r.fake.clock);  // the touch that lights the screen is only a wake
+  touch.update(false, 0, 0, r.fake.clock);
+  r.advance(200);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK(!r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string("It is sunny."));
+  CHECK_EQ(r.app.model().scroll, 0);
+
+  // Still unread when the screen goes dark again: the next wake, by key, shows it again.
+  wait_quietly(r, 40000);
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  r.advance(200);
+  CHECK(!r.fake.mic_on);
+  CHECK(!r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string("It is sunny."));
+
+  // An input over the text reads it: the text leaves on its timer, and the next wake shows the mascot.
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Cancel, false);
+  wait_quietly(r, 40000);
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  r.advance(200);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.model().hero);
+}
+
+TEST("app: an input over the mascot leaves the reply unread") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(R"({"type":"reply","turn":"t","text":"Here is the answer."})");
+  r.server(R"({"type":"turn.end","turn":"t","outcome":"success"})");
+  wait_quietly(r, 22000);  // the text has gone; the screen is dimmed, not dark
+  CHECK(r.app.model().hero);
+  CHECK(r.fake.brightness > 0);
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Cancel, false);
+  wait_quietly(r, 40000);
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_button(hg::Button::Cancel, true);  // a wake
+  r.app.on_button(hg::Button::Cancel, false);
+  r.advance(200);
+  CHECK(!r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string("Here is the answer."));
+}
+
+TEST("app: a press over the speaking mascot leaves the reply unread") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(R"({"type":"audio.start","stream":2,"rate":16000,"format":"pcm16"})");
+  r.server(R"({"type":"reply","turn":"t","text":"Here is the answer."})");
+  CHECK(r.app.screen() == hg::Screen::Responding && r.app.model().hero);
+  r.app.on_button(hg::Button::Down, true);  // over the talking face, not the text
+  r.app.on_button(hg::Button::Down, false);
+  r.server(R"({"type":"audio.end","stream":2})");
+  r.server(R"({"type":"turn.end","turn":"t","outcome":"success"})");
+  wait_quietly(r, 80000);
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_button(hg::Button::Cancel, true);  // a wake
+  r.app.on_button(hg::Button::Cancel, false);
+  r.advance(200);
+  CHECK(!r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string("Here is the answer."));
+}
+
+TEST("app: PWR over a card leaves the reply under it unread") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(R"({"type":"reply","turn":"t","text":"Here is the answer."})");
+  r.server(R"({"type":"turn.end","turn":"t","outcome":"success"})");
+  wait_quietly(r, 10000);  // the turn settles; the reply's text still shows under what comes next
+  r.server(R"({"type":"display","title":"Note","body":"Stays until closed","ttl_s":0})");
+  CHECK(r.app.screen() == hg::Screen::Card);
+  r.app.on_power_key();  // closes the card and turns the screen off
+  CHECK_EQ(r.fake.brightness, 0);
+  wait_quietly(r, 30000);  // dark past the reply's 20 s
+  r.app.on_power_key();  // the wake shows the reply the card covered
+  r.advance(200);
+  CHECK(!r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string("Here is the answer."));
+}
+
 TEST("app: hero animation redraws only a slice of the screen") {
   Rig r;
   r.bring_online(true);
@@ -1573,6 +1778,198 @@ TEST("touch: the Touch wakes screen item is never offered without a wake key or 
   }
 }
 
+namespace {
+// A touchscreen with a TALK key (BOOT), like the AMOLED watches.
+hg::DeviceProfile touch_talk_key_profile() {
+  hg::DeviceProfile p = Rig::touch_profile();
+  p.talk_key = true;
+  p.talk_label = "BOOT";
+  return p;
+}
+}  // namespace
+
+TEST("touch: with touch_talk off, holds and taps on the screen never record in hold mode; BOOT does") {
+  Rig r(touch_talk_key_profile());
+  r.bring_online(true);
+  CHECK_EQ(r.app.model().hint, std::string("Hold the screen to talk"));
+  CHECK_EQ(r.app.console("set touch_talk off"), std::string("@ok touch_talk"));
+  CHECK(!r.app.touch_talk());
+  CHECK_EQ(r.app.model().hint, std::string("hold BOOT to talk"));
+  hg::TouchGestures touch(r.app);
+  touch.update(true, 200, 150, r.fake.clock);  // a hold
+  r.advance(800);
+  touch.tick(r.fake.clock);
+  CHECK(!r.fake.mic_on);
+  touch.update(false, 0, 0, r.fake.clock);
+  touch.update(true, 200, 150, r.fake.clock);  // a quick tap
+  r.advance(40);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.fake.last("audio.start") == nullptr);
+  CHECK_EQ(r.app.model().hint, std::string("hold BOOT to talk"));  // no "Not connected" or other flash
+
+  r.app.on_button(hg::Button::Talk, true);  // BOOT records as before
+  CHECK(r.fake.mic_on);
+  CHECK_EQ(r.app.model().detail, std::string("Release BOOT to send"));
+  touch.update(true, 200, 120, r.fake.clock);  // and a swipe down still discards it
+  r.advance(30);
+  touch.update(true, 202, 220, r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.fake.last("audio.cancel") != nullptr);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.last("audio.end") == nullptr);
+
+  r.advance(500);  // past the double-press window: this press talks again
+  r.app.on_button(hg::Button::Talk, true);
+  r.advance(600);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.last("audio.end") != nullptr);
+  r.server(R"({"type":"turn.start","turn":"a1"})");
+  r.server(R"({"type":"reply.delta","turn":"a1","text":"It is"})");
+  CHECK(r.app.screen() == hg::Screen::Responding);
+  CHECK_EQ(r.app.model().hint, std::string("BOOT to reply"));
+  touch.update(true, 200, 150, r.fake.clock);  // a hold on the reply doesn't talk over it
+  r.advance(500);
+  touch.tick(r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.app.screen() == hg::Screen::Responding);
+}
+
+TEST("touch: with touch_talk off in tap mode, a screen tap neither starts nor sends a recording") {
+  Rig r(touch_talk_key_profile());
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set talk_mode tap"), std::string("@ok talk_mode"));
+  CHECK_EQ(r.app.console("set touch_talk off"), std::string("@ok touch_talk"));
+  CHECK_EQ(r.app.model().hint, std::string("tap BOOT to talk"));
+  hg::TouchGestures touch(r.app);
+  touch.update(true, 200, 150, r.fake.clock);
+  r.advance(40);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(!r.fake.mic_on);
+  r.app.on_button(hg::Button::Talk, true);  // BOOT starts it
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.mic_on);
+  r.advance(600);
+  touch.update(true, 200, 150, r.fake.clock);  // a tap on the screen doesn't send it
+  r.advance(40);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(r.fake.mic_on);
+  CHECK(r.fake.last("audio.end") == nullptr);
+  r.app.on_button(hg::Button::Talk, true);  // BOOT does
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.fake.last("audio.end") != nullptr);
+}
+
+TEST("touch: with touch_talk off, the screen still answers questions, works settings and stops an alarm") {
+  Rig r(touch_talk_key_profile());
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set touch_talk off"), std::string("@ok touch_talk"));
+  hg::TouchGestures touch(r.app);
+  r.server(R"({"type":"prompt","id":"q1","title":"Allow?","text":"rm -rf build"})");
+  CHECK_EQ(r.app.model().yes, std::string("Tap: Yes"));
+  r.advance(700);
+  touch.update(true, 200, 200, r.fake.clock);  // a tap answers yes and records nothing
+  r.advance(40);
+  touch.update(false, 0, 0, r.fake.clock);
+  const Value* yes = r.fake.last("prompt.reply");
+  CHECK(yes && (*yes)["answer"].as_string() == "yes");
+  CHECK(!r.fake.mic_on);
+
+  CHECK(r.app.open_settings());  // a tap changes the item: Volume goes up 10
+  const std::string before = r.app.model().body;
+  touch.update(true, 200, 200, r.fake.clock);
+  r.advance(40);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(r.app.settings_open());
+  CHECK(r.app.model().body != before);
+  CHECK(!r.fake.mic_on);
+  r.app.close_settings();
+
+  r.server(R"({"type":"action","id":"t1","name":"timer.start","args":{"seconds":1}})");
+  r.advance(1500);
+  CHECK(r.app.screen() == hg::Screen::Alarm);
+  CHECK_EQ(r.app.model().hint, std::string("Tap the screen to stop"));
+  touch.update(true, 200, 200, r.fake.clock);
+  r.advance(40);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(r.app.screen() != hg::Screen::Alarm);
+  CHECK(!r.fake.mic_on);
+}
+
+TEST("touch: touch_talk takes only on or off, survives a restart, and stays on without a TALK key") {
+  {
+    Rig r(touch_talk_key_profile());
+    r.bring_online(true);
+    CHECK_EQ(r.app.console("set touch_talk maybe"), std::string("@error touch_talk must be on or off"));
+    CHECK(r.app.touch_talk());
+    CHECK_EQ(r.app.console("set touch_talk off"), std::string("@ok touch_talk"));
+    CHECK_EQ(r.fake.kv["touch_talk"], std::string("off"));
+    CHECK(r.app.console("get touch_talk").find("\"value\":\"off\"") != std::string::npos);
+    Rig again(touch_talk_key_profile());
+    again.fake.kv = r.fake.kv;
+    again.bring_online(true);
+    CHECK(!again.app.touch_talk());
+    CHECK_EQ(r.app.console("set touch_talk"), std::string("@ok touch_talk"));  // clearing it is on
+    CHECK(r.app.touch_talk());
+  }
+  {
+    Rig r(Rig::touch_profile());  // no TALK key: the touchscreen is the only way to talk
+    r.bring_online(true);
+    CHECK_EQ(r.app.console("set touch_talk off"), std::string("@ok touch_talk"));
+    CHECK(r.app.touch_talk());
+    CHECK_EQ(r.app.model().hint, std::string("Hold the screen to talk"));
+    hg::TouchGestures touch(r.app);
+    touch.update(true, 200, 150, r.fake.clock);
+    r.advance(500);
+    touch.tick(r.fake.clock);
+    CHECK(r.fake.mic_on);
+    touch.update(false, 0, 0, r.fake.clock);
+  }
+}
+
+TEST("touch: the Touch to talk item follows Talk mode on a touchscreen with a TALK key, and toggles") {
+  Rig r(touch_talk_key_profile());
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 20 && r.app.model().detail != "Talk mode"; ++i) r.app.on_button(hg::Button::Down, true);
+  CHECK_EQ(r.app.model().detail, std::string("Talk mode"));
+  r.app.on_button(hg::Button::Down, true);
+  CHECK_EQ(r.app.model().detail, std::string("Touch to talk"));
+  CHECK_EQ(r.app.model().body, std::string("On\nTouch the screen to talk."));
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK_EQ(r.app.model().body, std::string("Off\nTalk with BOOT; touch only navigates."));
+  CHECK(!r.app.touch_talk());
+  CHECK_EQ(r.fake.kv["touch_talk"], std::string("off"));
+  r.app.close_settings();  // a tap on its row: "settings list: Touch to talk is a switch..."
+}
+
+TEST("touch: the Touch to talk item is never offered without a TALK key or a touchscreen") {
+  const auto never_offered = [](Rig& r) {
+    CHECK(r.app.open_settings());
+    for (int i = 0; i < 20; ++i) {
+      r.app.on_button(hg::Button::Down, true);
+      CHECK(r.app.model().detail != std::string("Touch to talk"));
+    }
+    r.app.close_settings();
+  };
+  {
+    Rig r(Rig::touch_profile());  // a touchscreen, but no TALK key
+    r.bring_online(true);
+    never_offered(r);
+  }
+  {
+    hg::DeviceProfile p = Rig::profile("ws://hermes.local:8765/gadget");  // a TALK key, but no touchscreen
+    p.talk_key = true;
+    Rig r(p);
+    r.bring_online(true);
+    never_offered(r);
+  }
+}
+
 TEST("touch: swipe down while holding discards the recording") {
   Rig r(Rig::touch_profile());
   r.bring_online(true);
@@ -1721,7 +2118,7 @@ TEST("settings: hardware checks are local and prompts release the microphone") {
   CHECK(!r.app.open_settings());
 }
 
-TEST("settings: title hold and menu swipe work without starting a recording") {
+TEST("settings: title hold and a drag on the list work without starting a recording") {
   Rig r(Rig::touch_profile());
   r.bring_online(true);
   hg::TouchGestures touch(r.app);
@@ -1733,10 +2130,12 @@ TEST("settings: title hold and menu swipe work without starting a recording") {
   CHECK(r.app.screen() == hg::Screen::Settings);
   CHECK(!r.fake.mic_on);
   CHECK_EQ(r.app.model().detail, std::string("Speaker volume"));
-  touch.update(true, 100, 80, r.fake.clock);
-  touch.update(true, 100, 150, r.fake.clock + 30);
+  touch.update(true, 100, 200, r.fake.clock);  // a drag up scrolls; the selection stays
+  touch.update(true, 100, 120, r.fake.clock + 30);
   touch.update(false, 0, 0, r.fake.clock + 40);
-  CHECK_EQ(r.app.model().detail, std::string("Screen brightness"));
+  CHECK_EQ(r.app.model().detail, std::string("Speaker volume"));
+  CHECK(r.app.model().settings_scroll > 0);
+  CHECK(!r.fake.mic_on);
   touch.update(true, 100, 4, r.fake.clock);
   r.advance(1100);
   touch.tick(r.fake.clock);
@@ -2733,6 +3132,31 @@ TEST("battery alert: the indicator turns red at 15%, or at the highest alert lev
   battery.on_usb(5);
   r.advance(5000);
   CHECK(!r.app.model().battery_low);  // never red on USB
+}
+
+TEST("charging notice: PWR that closes it leaves the reply it covered unread") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  battery.on_battery(42);
+  r.bring_online(true);
+  wait_quietly(r, 10000);
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(R"({"type":"reply","turn":"t","text":"Here is the answer."})");
+  r.server(R"({"type":"turn.end","turn":"t","outcome":"success"})");
+  wait_quietly(r, 10000);  // the turn settles; the reply's text still shows
+  CHECK(!r.app.model().hero);
+  battery.on_usb(42);
+  r.advance(5000);  // a lit screen reads the supply every few seconds
+  CHECK(r.app.charging_notice());  // over the reply's text, which has 5 s left
+  r.app.on_power_key();  // closes the notice and turns the screen off
+  CHECK_EQ(r.fake.brightness, 0);
+  wait_quietly(r, 30000);  // dark past the reply's 20 s
+  r.app.on_power_key();  // the wake shows the reply the notice covered
+  r.advance(200);
+  CHECK(!r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string("Here is the answer."));
 }
 
 TEST("charging notice: plugging in lights the dark screen with the level, which then times out as usual") {
@@ -5006,6 +5430,47 @@ TEST("profiles: buttons show Change in Settings, tap-to-talk the swipe; one prof
   CHECK_EQ(name_point(single).first, -1);
 }
 
+TEST("profiles: with touch_talk off, the name is a tap target in tap-to-talk mode too; a hold on it records nothing") {
+  hg::DeviceProfile p = Rig::touch_profile();
+  p.talk_key = true;
+  p.talk_label = "BOOT";
+  Rig r(p);
+  r.bring_online_with_profiles();
+  r.app.console("set talk_mode tap");
+  CHECK_EQ(name_point(r).first, -1);
+  CHECK_EQ(r.app.console("set touch_talk off"), std::string("@ok touch_talk"));
+  // The hint names the swipe, which opens the grid in every mode; a tap on the name does too.
+  CHECK_EQ(r.app.model().detail.rfind("Swipe to change", 0), size_t(0));
+  auto [x, y] = name_point(r);
+  CHECK(x >= 0);
+  hg::TouchGestures touch(r.app);
+  touch.update(true, x, y, r.fake.clock);
+  r.advance(40);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(r.app.profile_picker_open());
+  CHECK(!r.fake.mic_on);
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Cancel, false);
+  CHECK(!r.app.profile_picker_open());
+  CHECK_EQ(r.app.console("set talk_mode hold"), std::string("@ok talk_mode"));
+  const auto held = name_point(r);
+  CHECK(held.first >= 0);
+  touch.update(true, held.first, held.second, r.fake.clock);  // a hold on the name in hold mode: no recording
+  r.advance(500);
+  touch.tick(r.fake.clock);
+  CHECK(!r.fake.mic_on);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(r.fake.last("audio.start") == nullptr);
+  CHECK(!r.app.profile_picker_open());  // the hold's lift is no tap: the list stays shut
+  CHECK_EQ(r.app.console("set talk_mode tap"), std::string("@ok talk_mode"));
+  touch.update(true, held.first, held.second, r.fake.clock);  // the same hold in tap mode
+  r.advance(500);
+  touch.tick(r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(!r.app.profile_picker_open());
+  CHECK(!r.fake.mic_on);
+}
+
 TEST("profiles: one switch at a time; a later pick waits for Hermes's answer") {
   Rig r(Rig::touch_profile());
   r.bring_online_with_profiles();
@@ -6927,7 +7392,7 @@ TEST("screen: an open profile list or dashboard times out, closes in the dark an
   CHECK(r.app.screen() == hg::Screen::Ready);
 }
 
-TEST("screen: the PWR key turns the screen off over a list, a card or the menu, and wakes to Ready") {
+TEST("screen: the PWR key turns the screen off over a list or a card, and wakes to Ready") {
   Rig r(Rig::touch_profile());
   r.fake.backlight = true;
   r.bring_online_with_profiles();
@@ -6951,12 +7416,1518 @@ TEST("screen: the PWR key turns the screen off over a list, a card or the menu, 
   CHECK_EQ(r.fake.brightness, 0);
   r.app.on_power_key();
   CHECK(r.app.screen() == hg::Screen::Ready);
+}
 
+TEST("screen: in settings the PWR key is Back: the menu closes, the screen stays lit, the next press darkens it") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
   CHECK(r.app.open_settings());
+  r.app.console("cancel");  // a later item: Back leaves from anywhere in the list
   r.app.on_power_key();
-  CHECK_EQ(r.fake.brightness, 0);
   CHECK(!r.app.settings_open());
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.fake.brightness, 100);
+  r.advance(1000);  // nothing reopens the menu or darkens the screen
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.fake.brightness, 100);
+  r.app.on_power_key();  // on the home screen, PWR turns the screen off as before
+  CHECK_EQ(r.fake.brightness, 0);
   r.app.on_power_key();
   CHECK_EQ(r.fake.brightness, 100);
   CHECK(r.app.screen() == hg::Screen::Ready);
+}
+
+namespace {
+size_t sent_count(const Rig& r, const std::string& type) {
+  size_t n = 0;
+  for (const Value& v : r.fake.sent) n += v["type"].as_string() == type;
+  return n;
+}
+
+// One press of the TALK key, held for `held_ms`.
+void press_talk(Rig& r, uint32_t held_ms) {
+  r.app.on_button(hg::Button::Talk, true);
+  r.advance(held_ms);
+  r.app.on_button(hg::Button::Talk, false);
+}
+}  // namespace
+
+TEST("double press: TALK twice goes home, closes the dashboard and asks for the default profile") {
+  Rig r;
+  r.bring_online_with_profiles(true, "ops");
+  r.server(kDashboard);
+  tap_cancel(r);
+  CHECK(r.app.screen() == hg::Screen::Dashboard);
+  // The first press talks at once: nothing waits to see whether a second follows.
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK(r.app.screen() == hg::Screen::Listening);
+  CHECK(r.fake.mic_on);
+  CHECK_EQ(sent_count(r, "audio.start"), size_t(1));
+  r.advance(100);
+  r.app.on_button(hg::Button::Talk, false);  // too short: discarded, as always
+  r.advance(150);
+  r.app.on_button(hg::Button::Talk, true);  // 250 ms after the first press
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK(!r.fake.mic_on);
+  CHECK_EQ(sent_count(r, "audio.start"), size_t(1));
+  const Value* select = r.fake.last("profile.select");
+  CHECK(select != nullptr);
+  if (select) CHECK_EQ((*select)["profile"].as_string(), std::string("default"));
+  CHECK(r.app.model().hint.find("while speaking") == std::string::npos);  // the first press's hint is gone
+  r.app.on_button(hg::Button::Talk, false);  // the release does nothing
+  CHECK_EQ(sent_count(r, "audio.start"), size_t(1));
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  r.server(R"({"type":"profile","profile":"default"})");
+  CHECK_EQ(r.app.agent_profile(), std::string("default"));
+  // A third press is a press of its own.
+  r.advance(100);
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK(r.app.screen() == hg::Screen::Listening);
+  r.app.on_button(hg::Button::Talk, false);
+}
+
+TEST("double press: on the default profile it only goes home; slow presses each talk") {
+  Rig r;
+  r.bring_online_with_profiles();
+  press_talk(r, 100);
+  r.advance(100);
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK(r.fake.last("profile.select") == nullptr);
+  r.app.on_button(hg::Button::Talk, false);
+
+  Rig slow;
+  slow.bring_online_with_profiles(true, "ops");
+  press_talk(slow, 100);
+  slow.advance(hg::App::kDoublePressMs);  // 500 ms between the presses
+  slow.app.on_button(hg::Button::Talk, true);
+  CHECK(slow.app.screen() == hg::Screen::Listening);
+  CHECK_EQ(sent_count(slow, "audio.start"), size_t(2));
+  CHECK(slow.fake.last("profile.select") == nullptr);
+  slow.app.on_button(hg::Button::Talk, false);
+}
+
+TEST("double press: in tap mode the second press throws the recording away instead of sending it") {
+  Rig r;
+  r.bring_online_with_profiles(true, "ops");
+  CHECK_EQ(r.app.console("set talk_mode tap"), std::string("@ok talk_mode"));
+  press_talk(r, 80);
+  CHECK(r.app.screen() == hg::Screen::Listening);
+  r.advance(150);
+  press_talk(r, 80);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.fake.last("audio.end") == nullptr);
+  const Value* cancel = r.fake.last("audio.cancel");
+  CHECK(cancel != nullptr);
+  CHECK(r.fake.last("profile.select") != nullptr);
+}
+
+TEST("double press: it stops a reply the first press talked over") {
+  Rig r;
+  r.bring_online_with_profiles(true, "ops");
+  r.app.submit_text("hello");
+  r.server(R"({"type":"turn.start","turn":"t1"})");
+  r.server(R"({"type":"reply.delta","turn":"t1","text":"Working on it"})");
+  CHECK(r.fake.last("cancel") == nullptr);
+  press_talk(r, 60);
+  r.advance(100);
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK(r.fake.last("cancel") != nullptr);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  r.app.on_button(hg::Button::Talk, false);
+}
+
+TEST("double press: touch, the settings menu, a question and double_home off keep TALK as it was") {
+  Rig touch(Rig::touch_profile());
+  touch.bring_online_with_profiles(true, "ops");
+  touch.app.on_button(hg::Button::Talk, true, true);
+  touch.advance(60);
+  touch.app.on_button(hg::Button::Talk, false, true);
+  touch.advance(100);
+  touch.app.on_button(hg::Button::Talk, true, true);
+  CHECK(touch.app.screen() == hg::Screen::Listening);
+  touch.app.on_button(hg::Button::Talk, false, true);
+  CHECK(touch.fake.last("profile.select") == nullptr);
+
+  Rig menu;
+  menu.bring_online_with_profiles(true, "ops");
+  CHECK(menu.app.open_settings());
+  press_talk(menu, 60);
+  menu.advance(100);
+  press_talk(menu, 60);
+  CHECK(menu.app.settings_open());
+
+  Rig asked;
+  asked.bring_online_with_profiles(true, "ops");
+  press_talk(asked, 60);
+  asked.server(R"({"type":"prompt","id":"q1","title":"Allow?","text":"ls"})");
+  asked.advance(100);
+  asked.app.on_button(hg::Button::Talk, true);
+  CHECK(asked.app.screen() == hg::Screen::Prompt);
+  asked.app.on_button(hg::Button::Talk, false);
+  CHECK(asked.fake.last("profile.select") == nullptr);
+
+  Rig off;
+  off.bring_online_with_profiles(true, "ops");
+  CHECK(off.app.double_home());
+  CHECK_EQ(off.app.console("set double_home maybe"), std::string("@error double_home must be on or off"));
+  CHECK_EQ(off.app.console("set double_home off"), std::string("@ok double_home"));
+  CHECK(!off.app.double_home());
+  press_talk(off, 60);
+  off.advance(100);
+  off.app.on_button(hg::Button::Talk, true);
+  CHECK(off.app.screen() == hg::Screen::Listening);
+  off.app.on_button(hg::Button::Talk, false);
+  CHECK(off.fake.last("profile.select") == nullptr);
+}
+
+TEST("double press: a press that only wakes the screen starts none") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online_with_profiles(true, "ops");
+  r.app.on_power_key();
+  CHECK_EQ(r.fake.brightness, 0);
+  press_talk(r, 60);  // wakes
+  CHECK_EQ(r.fake.brightness, 100);
+  r.advance(100);
+  r.app.on_button(hg::Button::Talk, true);  // a quick press-and-hold after the wake still talks
+  CHECK(r.app.screen() == hg::Screen::Listening);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.last("profile.select") == nullptr);
+}
+
+TEST("wake talk: off by default, a press on a dark screen only wakes; on, it wakes and talks at once") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online_with_profiles();
+  CHECK(!r.app.wake_talk());
+  CHECK_EQ(r.app.console("set wake_talk maybe"), std::string("@error wake_talk must be on or off"));
+  CHECK_EQ(r.app.console("set wake_talk on"), std::string("@ok wake_talk"));
+  CHECK(r.app.wake_talk());
+  CHECK_EQ(r.fake.kv["wake_talk"], std::string("on"));
+  r.app.on_power_key();
+  CHECK_EQ(r.fake.brightness, 0);
+  r.app.on_button(hg::Button::Talk, true);  // hold to talk: lit and listening in the same press
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Listening);
+  CHECK(r.fake.mic_on);
+  r.advance(1000);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.last("audio.end") != nullptr);
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+
+  // Tap mode: the press starts a recording that a second tap (later than a double press) sends.
+  Rig tap;
+  tap.fake.backlight = true;
+  tap.bring_online_with_profiles();
+  tap.app.console("set wake_talk on");
+  tap.app.console("set talk_mode tap");
+  tap.app.on_power_key();
+  press_talk(tap, 80);
+  CHECK_EQ(tap.fake.brightness, 100);
+  CHECK(tap.app.screen() == hg::Screen::Listening);
+  tap.advance(1500);
+  press_talk(tap, 80);
+  CHECK(tap.fake.last("audio.end") != nullptr);
+}
+
+TEST("wake talk: a double press on a dark screen lights it and goes home to the default profile") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online_with_profiles(true, "ops");
+  r.app.console("set wake_talk on");
+  r.app.on_power_key();
+  press_talk(r, 80);
+  r.advance(100);
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.fake.last("audio.end") == nullptr);
+  const Value* select = r.fake.last("profile.select");
+  CHECK(select != nullptr);
+  if (select) CHECK_EQ((*select)["profile"].as_string(), std::string("default"));
+  r.app.on_button(hg::Button::Talk, false);
+}
+
+TEST("wake talk: touch, a question, the menu and no connection still only wake") {
+  Rig touch(Rig::touch_profile());
+  touch.fake.backlight = true;
+  touch.bring_online_with_profiles();
+  touch.app.console("set wake_talk on");
+  touch.app.on_power_key();
+  touch.app.on_button(hg::Button::Talk, true, true);
+  CHECK_EQ(touch.fake.brightness, 100);
+  CHECK(!touch.fake.mic_on);
+  touch.app.on_button(hg::Button::Talk, false, true);
+
+  Rig asked;
+  asked.fake.backlight = true;
+  asked.bring_online_with_profiles();
+  asked.app.console("set wake_talk on");
+  asked.server(R"({"type":"prompt","id":"q1","title":"Allow?","text":"ls"})");
+  asked.app.on_power_key();
+  CHECK_EQ(asked.fake.brightness, 0);
+  press_talk(asked, 60);
+  CHECK_EQ(asked.fake.brightness, 100);
+  CHECK(asked.app.screen() == hg::Screen::Prompt);  // not answered
+  CHECK(asked.fake.last("prompt.reply") == nullptr);
+
+  Rig menu;
+  menu.fake.backlight = true;
+  menu.bring_online_with_profiles();
+  menu.app.console("set wake_talk on");
+  CHECK_EQ(menu.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  CHECK(menu.app.open_settings());
+  menu.advance(31000);
+  CHECK_EQ(menu.fake.brightness, 0);
+  press_talk(menu, 60);
+  CHECK(menu.app.settings_open());
+  CHECK(!menu.fake.mic_on);
+
+  Rig offline;
+  offline.fake.backlight = true;
+  offline.bring_online_with_profiles(false);  // waiting for pairing
+  offline.app.console("set wake_talk on");
+  offline.app.on_power_key();
+  offline.app.on_button(hg::Button::Talk, true);
+  CHECK_EQ(offline.fake.brightness, 100);
+  CHECK(!offline.fake.mic_on);
+  offline.app.on_button(hg::Button::Talk, false);
+}
+
+TEST("settings: Double press home and Talk from dark screen toggle their settings; boards without a TALK key hide them") {
+  hg::DeviceProfile p = Rig::touch_profile();
+  p.talk_key = true;
+  p.talk_label = "BOOT";
+  Rig r(p);
+  r.bring_online_with_profiles();
+  CHECK(r.app.open_settings());
+  CHECK(find_setting(r, "Double press home"));
+  CHECK(r.app.model().body.rfind("On\n", 0) == 0);
+  CHECK(r.app.model().body.find("BOOT") != std::string::npos);
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK(!r.app.double_home());
+  CHECK_EQ(r.fake.kv["double_home"], std::string("off"));
+  CHECK(r.app.model().body.rfind("Off\n", 0) == 0);
+  r.app.console("cancel");
+  CHECK_EQ(r.app.model().detail, std::string("Talk from dark screen"));
+  CHECK(r.app.model().body.rfind("Off\n", 0) == 0);
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK(r.app.wake_talk());
+  CHECK_EQ(r.fake.kv["wake_talk"], std::string("on"));
+  CHECK(r.app.model().body.rfind("On\n", 0) == 0);
+  CHECK(r.app.model().body.find("BOOT") != std::string::npos);
+
+  hg::DeviceProfile touch_only = Rig::touch_profile();
+  touch_only.talk_key = false;
+  Rig bare(touch_only);
+  bare.bring_online_with_profiles();
+  CHECK(bare.app.open_settings());
+  CHECK(!find_setting(bare, "Double press home"));
+  CHECK(!find_setting(bare, "Talk from dark screen"));
+}
+
+TEST("double press: a press that answers a question or selects Back in the menu starts none") {
+  Rig r;
+  r.bring_online_with_profiles(true, "ops");
+  r.server(R"({"type":"turn.start","turn":"t1"})");
+  r.server(R"({"type":"prompt","id":"q1","title":"Allow?","text":"ls"})");
+  r.advance(1000);  // the question is armed for an answer
+  press_talk(r, 60);
+  CHECK(r.fake.last("prompt.reply") != nullptr);
+  r.advance(100);
+  r.app.on_button(hg::Button::Talk, true);  // within 400 ms of the answer
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.last("cancel") == nullptr);
+  CHECK(r.fake.last("profile.select") == nullptr);
+
+  Rig menu;
+  menu.bring_online_with_profiles(true, "ops");
+  CHECK(menu.app.open_settings());
+  CHECK(find_setting(menu, "Back to Hermes"));
+  press_talk(menu, 60);
+  CHECK(!menu.app.settings_open());
+  menu.advance(100);
+  menu.app.on_button(hg::Button::Talk, true);
+  CHECK(menu.app.screen() == hg::Screen::Listening);
+  menu.app.on_button(hg::Button::Talk, false);
+  CHECK(menu.fake.last("profile.select") == nullptr);
+}
+
+TEST("double press: a first press held long enough to send its recording starts none") {
+  Rig r;
+  r.bring_online_with_profiles(true, "ops");
+  press_talk(r, 370);  // past the 350 ms cutoff: the recording goes to Hermes
+  CHECK(r.fake.last("audio.end") != nullptr);
+  r.advance(20);  // the second press comes 390 ms after the first
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK(r.fake.last("cancel") == nullptr);
+  CHECK(r.fake.last("profile.select") == nullptr);
+  CHECK(r.app.screen() == hg::Screen::Listening);  // a new question, as before
+  r.app.on_button(hg::Button::Talk, false);
+}
+
+TEST("double press: an alarm that rings between the presses takes the second one") {
+  Rig r;
+  r.bring_online_with_profiles(true, "ops");
+  r.server(R"({"type":"action","id":"t1","name":"timer.start","args":{"seconds":1}})");
+  r.advance(800);
+  press_talk(r, 60);  // too short: discarded
+  r.advance(200);     // the timer ends
+  CHECK(r.app.screen() == hg::Screen::Alarm);
+  r.app.on_button(hg::Button::Talk, true);  // within 400 ms of the first press
+  CHECK(r.app.screen() != hg::Screen::Alarm);
+  CHECK(r.fake.last("profile.select") == nullptr);
+  r.app.on_button(hg::Button::Talk, false);
+}
+
+TEST("screen: the PWR key leaves a running hardware check straight to the home screen") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 3; ++i) r.app.console("cancel");
+  CHECK_EQ(r.app.model().detail, std::string("Microphone check"));
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK(r.fake.mic_on);
+  r.app.on_power_key();
+  CHECK(!r.fake.mic_on);  // the check stops with the menu
+  CHECK(!r.app.settings_open());
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.fake.brightness, 100);
+
+  // The display check's colour bands go too.
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 5; ++i) r.app.console("cancel");
+  CHECK_EQ(r.app.model().detail, std::string("Display check"));
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK(r.app.model().color_test);
+  r.app.on_power_key();
+  CHECK(!r.app.settings_open());
+  CHECK(!r.app.model().color_test);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.fake.brightness, 100);
+}
+
+// ---- The settings list: rows, touch and scrolling ----
+
+namespace {
+// Taps (x, y): a press and a lift with no movement.
+void tap_at(Rig& r, hg::TouchGestures& touch, int x, int y) {
+  touch.update(true, x, y, r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock + 50);
+}
+
+int settings_row(const Rig& r, const std::string& label) {
+  const auto& rows = r.app.model().settings;
+  for (size_t i = 0; i < rows.size(); ++i)
+    if (rows[i].label == label) return static_cast<int>(i);
+  return -1;
+}
+}  // namespace
+
+TEST("settings list: every offered item is a row with its icon and state, and the selected one is marked") {
+  hg::DeviceProfile p = Rig::touch_profile();
+  p.motion_sensor = true;
+  Rig r(p);
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  const auto& rows = r.app.model().settings;
+  CHECK(rows.size() > 10);
+  CHECK_EQ(r.app.model().settings_sel, 0);
+  CHECK_EQ(rows[0].label, std::string("Speaker volume"));
+  CHECK(rows[0].kind == hg::SettingRow::Kind::Slider);
+  CHECK(rows[0].icon == hg::SettingRow::Icon::Volume);
+  CHECK_EQ(int(rows[0].level), 70);
+  CHECK_EQ(rows[0].value, std::string("70%"));
+  const int bright = settings_row(r, "Screen brightness");
+  CHECK(bright == 1 && rows[1].kind == hg::SettingRow::Kind::Slider && rows[1].level == 100);
+  const int talk = settings_row(r, "Talk mode");
+  CHECK(talk > 0 && rows[static_cast<size_t>(talk)].value == "Hold");
+  const int face = settings_row(r, "Face-down sleep");
+  CHECK(face > 0 && rows[static_cast<size_t>(face)].kind == hg::SettingRow::Kind::Toggle);
+  CHECK_EQ(int(rows[static_cast<size_t>(face)].level), 0);
+  const int mic = settings_row(r, "Microphone check");
+  CHECK(mic > 0 && rows[static_cast<size_t>(mic)].kind == hg::SettingRow::Kind::Action);
+  CHECK(rows[static_cast<size_t>(mic)].value.empty());
+  CHECK_EQ(rows.back().label, std::string("Back to Hermes"));
+  CHECK(settings_row(r, "Power off") < 0);  // not offered on this board: no row
+  // Buttons move the selection; the model's detail and body follow it.
+  r.app.on_button(hg::Button::Down, true);
+  CHECK_EQ(r.app.model().settings_sel, 1);
+  CHECK_EQ(r.app.model().detail, std::string("Screen brightness"));
+  // Spanish: the short talk mode value is translated too.
+  r.app.console("set language es");
+  CHECK_EQ(r.app.model().settings[static_cast<size_t>(talk)].value, std::string("Mantener"));
+}
+
+TEST("settings list: the battery alert and charging items have their icons and switches") {
+  KeyPower key;
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.hal.power = &key;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  using Icon = hg::SettingRow::Icon;
+  using Kind = hg::SettingRow::Kind;
+  const auto row = [&](const char* label) -> const hg::SettingRow& {
+    const int i = settings_row(r, label);
+    CHECK(i >= 0);
+    return r.app.model().settings[static_cast<size_t>(i < 0 ? 0 : i)];
+  };
+  const auto is = [&](const char* label, Icon icon, Kind kind) {
+    const hg::SettingRow& x = row(label);
+    CHECK(x.icon == icon);
+    CHECK(x.kind == kind);
+  };
+  is("Low battery alert", Icon::Bell, Kind::Value);
+  is("Low battery sound", Icon::Volume, Kind::Toggle);
+  is("Charging screen", Icon::Bolt, Kind::Toggle);
+  is("Charging sound", Icon::Volume, Kind::Toggle);
+  is("Full battery screen", Icon::Check, Kind::Toggle);
+  is("Full battery sound", Icon::Volume, Kind::Toggle);
+  // A switch follows its setting.
+  const int before = row("Charging sound").level;
+  r.app.console(before ? "set charging_sound off" : "set charging_sound on");
+  CHECK_EQ(int(row("Charging sound").level), before ? 0 : 1);
+}
+
+TEST("settings list: buttons scroll the list smoothly to the selection, and back to the top on the next visit") {
+  Rig r;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  CHECK_EQ(r.app.model().settings_scroll, 0);
+  r.app.on_button(hg::Button::Up, true);  // wraps to the last row, Back
+  CHECK_EQ(r.app.model().detail, std::string("Back to Hermes"));
+  CHECK_EQ(r.app.model().settings_scroll, 0);  // nothing jumps: the list eases there
+  std::vector<int> path;
+  for (int i = 0; i < 30; ++i) {
+    r.advance(10);
+    if (path.empty() || path.back() != r.app.model().settings_scroll) path.push_back(r.app.model().settings_scroll);
+  }
+  CHECK(path.size() >= 4);  // several frames in between
+  for (size_t i = 1; i < path.size(); ++i) CHECK(path[i] > path[i - 1]);
+  const int end = path.back();
+  CHECK(end > 0);
+  r.advance(500);
+  CHECK_EQ(r.app.model().settings_scroll, end);  // and it stays there
+  r.app.on_button(hg::Button::Down, true);  // wraps to the top: it eases back to 0
+  r.advance(500);
+  CHECK_EQ(r.app.model().settings_scroll, 0);
+  r.app.on_button(hg::Button::Up, true);
+  r.advance(500);
+  r.app.close_settings();
+  CHECK(r.app.open_settings());
+  CHECK_EQ(r.app.model().settings_scroll, 0);
+}
+
+TEST("settings list: a drag scrolls with the finger, stops at the ends, and changes nothing") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  hg::TouchGestures touch(r.app);
+  const std::string volume = r.fake.kv["volume"];
+  touch.update(true, 150, 200, r.fake.clock);
+  touch.update(true, 150, 190, r.fake.clock + 10);  // within the slop: still a tap
+  CHECK_EQ(r.app.model().settings_scroll, 0);
+  touch.update(true, 150, 160, r.fake.clock + 20);
+  CHECK_EQ(r.app.model().settings_scroll, 40);  // from the press, not the slop
+  touch.update(true, 150, 120, r.fake.clock + 30);
+  CHECK_EQ(r.app.model().settings_scroll, 80);
+  touch.update(true, 150, 140, r.fake.clock + 40);
+  CHECK_EQ(r.app.model().settings_scroll, 60);
+  touch.update(false, 0, 0, r.fake.clock + 50);
+  r.advance(300);  // a drag leaves the list where the finger put it
+  CHECK_EQ(r.app.model().settings_scroll, 60);
+  CHECK_EQ(r.app.model().detail, std::string("Speaker volume"));
+  CHECK_EQ(r.fake.kv["volume"], volume);
+  // Past the top it stops at 0; past the end, at the last row.
+  touch.update(true, 150, 60, r.fake.clock);
+  touch.update(true, 150, 230, r.fake.clock + 10);
+  touch.update(false, 0, 0, r.fake.clock + 20);
+  CHECK_EQ(r.app.model().settings_scroll, 0);
+  int last = -1;
+  for (int i = 0; i < 6; ++i) {
+    touch.update(true, 150, 230, r.fake.clock);
+    touch.update(true, 150, 60, r.fake.clock + 10);
+    touch.update(false, 0, 0, r.fake.clock + 20);
+    last = r.app.model().settings_scroll;
+  }
+  CHECK(last > 0);
+  touch.update(true, 150, 230, r.fake.clock);
+  touch.update(true, 150, 60, r.fake.clock + 10);
+  touch.update(false, 0, 0, r.fake.clock + 20);
+  CHECK_EQ(r.app.model().settings_scroll, last);
+  // Buttons bring the list back to the selection.
+  r.app.on_button(hg::Button::Down, true);
+  r.advance(500);
+  CHECK(r.app.model().settings_scroll < last);
+}
+
+TEST("settings list: a tap selects a row and changes it; toggles flip on the first tap") {
+  hg::DeviceProfile p = Rig::touch_profile();
+  p.motion_sensor = true;
+  Rig r(p);
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  hg::TouchGestures touch(r.app);
+  const int talk = settings_row(r, "Talk mode");
+  auto [tx, ty] = find_point(r, [&](int x, int y) { return r.app.settings_row_hit(x, y) == talk; });
+  CHECK(tx >= 0);
+  tap_at(r, touch, tx, ty);
+  CHECK_EQ(r.app.model().detail, std::string("Talk mode"));
+  CHECK_EQ(r.fake.kv["talk_mode"], std::string("tap"));
+  CHECK(!r.fake.mic_on);  // a tap in the list never talks
+  CHECK(r.fake.last("audio.start") == nullptr);
+  tap_at(r, touch, tx, ty);
+  CHECK_EQ(r.fake.kv["talk_mode"], std::string("hold"));
+
+  // A toggle further down: buttons bring it into view, then a tap on it flips it.
+  const int face = settings_row(r, "Face-down sleep");
+  while (r.app.model().settings_sel < face - 1) r.app.on_button(hg::Button::Down, true);
+  r.advance(500);
+  auto [fx, fy] = find_point(r, [&](int x, int y) { return r.app.settings_row_hit(x, y) == face; });
+  CHECK(fx >= 0);
+  tap_at(r, touch, fx, fy);
+  CHECK_EQ(r.app.model().detail, std::string("Face-down sleep"));
+  CHECK_EQ(r.fake.kv["face_down_sleep"], std::string("on"));
+  CHECK_EQ(int(r.app.model().settings[static_cast<size_t>(face)].level), 1);
+  r.advance(500);
+  auto [gx, gy] = find_point(r, [&](int x, int y) { return r.app.settings_row_hit(x, y) == face; });
+  tap_at(r, touch, gx, gy);
+  CHECK_EQ(r.fake.kv["face_down_sleep"], std::string("off"));
+
+  // Back closes the menu.
+  const int back = static_cast<int>(r.app.model().settings.size()) - 1;
+  while (r.app.model().settings_sel != back) r.app.on_button(hg::Button::Down, true);
+  r.advance(500);
+  auto [bx, by] = find_point(r, [&](int x, int y) { return r.app.settings_row_hit(x, y) == back; });
+  CHECK(bx >= 0);
+  tap_at(r, touch, bx, by);
+  CHECK(!r.app.settings_open());
+  CHECK(r.app.screen() == hg::Screen::Ready);
+}
+
+TEST("settings list: Touch to talk is a switch, and with it off a tap on its row still flips it") {
+  Rig r(touch_talk_key_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  const int row = settings_row(r, "Touch to talk");
+  CHECK(row >= 0);
+  const auto& item = r.app.model().settings[static_cast<size_t>(row)];
+  CHECK(item.kind == hg::SettingRow::Kind::Toggle);
+  CHECK_EQ(int(item.level), 1);  // on by default
+  CHECK_EQ(settings_row(r, "Talk mode") + 1, row);  // right after Talk mode
+  while (r.app.model().settings_sel < row - 1) r.app.on_button(hg::Button::Down, true);  // into view
+  r.advance(500);
+  hg::TouchGestures touch(r.app);
+  auto [x, y] = find_point(r, [&](int px, int py) { return r.app.settings_row_hit(px, py) == row; });
+  CHECK(x >= 0);
+  tap_at(r, touch, x, y);  // a toggle flips on the first tap
+  CHECK(!r.app.touch_talk());
+  CHECK_EQ(int(r.app.model().settings[static_cast<size_t>(row)].level), 0);
+  CHECK(!r.fake.mic_on);
+  r.advance(500);
+  auto [x2, y2] = find_point(r, [&](int px, int py) { return r.app.settings_row_hit(px, py) == row; });
+  tap_at(r, touch, x2, y2);  // off, the touchscreen still works the menu
+  CHECK(r.app.touch_talk());
+  CHECK_EQ(r.fake.kv["touch_talk"], std::string("on"));
+}
+
+TEST("settings list: a slider opens on the first tap, then a tap or a drag on its bar sets the level") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  hg::TouchGestures touch(r.app);
+  // Brightness is closed: a tap on its row selects it and changes nothing.
+  auto [rx, ry] = find_point(r, [&](int x, int y) { return r.app.settings_row_hit(x, y) == 1; });
+  tap_at(r, touch, rx, ry);
+  CHECK_EQ(r.app.model().detail, std::string("Screen brightness"));
+  CHECK_EQ(r.fake.brightness, 100);
+  r.advance(500);
+  // Its bar: the left end, the middle and the right end.
+  int left = -1, right = -1, bar_y = -1;
+  for (int y = 0; y < r.fake.height && bar_y < 0; ++y)
+    for (int x = 0; x < r.fake.width; ++x)
+      if (r.app.settings_slider_hit(x, y) == 0 && r.app.settings_slider_hit(x + 1, y) > 0) { left = x; bar_y = y; break; }
+  CHECK(bar_y >= 0);
+  for (int x = r.fake.width - 1; x > left; --x)
+    if (r.app.settings_slider_hit(x, bar_y) == 100 && r.app.settings_slider_hit(x - 1, bar_y) < 100) { right = x; break; }
+  CHECK(right > left);
+  CHECK(r.app.settings_row_hit(rx, ry) == 1);
+  tap_at(r, touch, (left + right) / 2, bar_y);
+  CHECK_EQ(r.fake.kv["brightness"], std::string("50"));
+  CHECK_EQ(r.fake.brightness, 50);
+  CHECK_EQ(r.app.model().settings[1].value, std::string("50%"));
+  tap_at(r, touch, left, bar_y);  // the far left is the floor, 5%
+  CHECK_EQ(r.fake.kv["brightness"], std::string("5"));
+  // A drag follows the finger on screen and saves once, on the lift, in steps of 5.
+  int saves = 0;
+  r.app.on_setting_changed = [&](std::string_view key) { saves += key == "brightness"; };
+  touch.update(true, left, bar_y, r.fake.clock);
+  touch.update(true, left + (right - left) / 4, bar_y + 30, r.fake.clock + 10);  // height doesn't matter once sliding
+  CHECK(r.app.model().settings[1].level >= 24 && r.app.model().settings[1].level <= 26);
+  CHECK_EQ(saves, 0);
+  CHECK_EQ(r.fake.kv["brightness"], std::string("5"));
+  touch.update(true, left + (right - left) * 3 / 4 + 1, bar_y, r.fake.clock + 20);
+  touch.update(false, 0, 0, r.fake.clock + 30);
+  CHECK_EQ(saves, 1);
+  CHECK_EQ(r.fake.kv["brightness"], std::string("75"));
+  CHECK_EQ(int(r.app.model().settings[1].level), 75);
+  CHECK_EQ(r.app.model().detail, std::string("Screen brightness"));
+}
+
+TEST("settings list: a value cut short on its row keeps its full text in the description") {
+  FakeHal display;
+  display.make_panel(240, 135);
+  hg::Ui ui(display);
+  const auto selected_h = [&](const std::string& value) {
+    hg::UiModel m;
+    m.screen = hg::Screen::Settings;
+    for (int i = 0; i < 12; ++i) {  // enough rows for a scroll bar
+      hg::SettingRow row;
+      row.label = i == 0 ? "Language" : "Item";
+      row.value = i == 0 ? value : "x";
+      m.settings.push_back(row);
+    }
+    m.settings_sel = 0;
+    m.body = value + "\nSelect to change.";
+    return ui.settings_row_h(m, 0);
+  };
+  // "English" fits beside the label, so the description drops the repeat; the long
+  // value is cut on the row, so its full line stays in the description.
+  CHECK(selected_h("Automatic, as Hermes: English") > selected_h("English"));
+}
+
+TEST("settings list: a tap while the list eases changes the row that was under the finger") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  hg::TouchGestures touch(r.app);
+  r.app.on_button(hg::Button::Up, true);  // to the last item: the list starts easing to the end
+  CHECK_EQ(r.app.model().detail, std::string("Back to Hermes"));
+  const int last = r.app.model().settings_sel;
+  // A row in the middle of the screen, as it is now.
+  const int x = r.fake.width / 2, y = r.fake.height / 2;
+  const int under = r.app.settings_row_hit(x, y);
+  CHECK(under >= 0 && under != last);
+  touch.update(true, x, y, r.fake.clock);
+  r.advance(100);  // the list would keep easing under a still finger
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(r.app.settings_open());
+  CHECK_EQ(r.app.model().settings_sel, under);
+}
+
+TEST("settings list: a slide is not saved when a knob moves the selection before the lift") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  CHECK_EQ(r.app.model().detail, std::string("Speaker volume"));
+  hg::TouchGestures touch(r.app);
+  int left = -1, bar_y = -1;
+  for (int y = 0; y < r.fake.height && bar_y < 0; ++y)
+    for (int x = 0; x < r.fake.width; ++x)
+      if (r.app.settings_slider_hit(x, y) == 0 && r.app.settings_slider_hit(x + 1, y) > 0) { left = x; bar_y = y; break; }
+  CHECK(bar_y >= 0);
+  int saves = 0;
+  r.app.on_setting_changed = [&](std::string_view) { ++saves; };
+  touch.update(true, left, bar_y, r.fake.clock);
+  touch.update(true, left + 20, bar_y, r.fake.clock + 10);
+  r.app.on_button(hg::Button::Down, true);  // the knob moves on to brightness mid-slide
+  CHECK_EQ(r.app.model().detail, std::string("Screen brightness"));
+  CHECK_EQ(int(r.app.model().settings[1].level), 100);  // no preview of the volume slide here
+  touch.update(true, left + 40, bar_y, r.fake.clock + 20);
+  touch.update(false, 0, 0, r.fake.clock + 30);
+  CHECK_EQ(saves, 0);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK_EQ(int(r.app.model().settings[1].level), 100);
+  CHECK_EQ(int(r.app.model().settings[0].level), 70);
+}
+
+TEST("settings list: with a check running, a tap stops it and a swipe down moves on, as before") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 3; ++i) r.app.console("cancel");
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK(r.fake.mic_on);
+  CHECK(!r.app.settings_list_live());
+  hg::TouchGestures touch(r.app);
+  tap_at(r, touch, 150, 150);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.app.model().body.find("Check stopped") != std::string::npos);
+  CHECK(r.app.settings_list_live());
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK(r.fake.mic_on);
+  touch.update(true, 150, 80, r.fake.clock);
+  touch.update(true, 150, 160, r.fake.clock + 30);
+  touch.update(false, 0, 0, r.fake.clock + 40);
+  CHECK(!r.fake.mic_on);
+  CHECK_EQ(r.app.model().detail, std::string("Speaker check"));
+}
+
+TEST("settings list: Double press home and Talk from dark screen are toggle rows with their state") {
+  Rig r;
+  r.bring_online_with_profiles();
+  CHECK(r.app.open_settings());
+  const auto row = [&](const std::string& label) -> const hg::SettingRow* {
+    for (const auto& s : r.app.model().settings)
+      if (s.label == label) return &s;
+    return nullptr;
+  };
+  const hg::SettingRow* home = row("Double press home");
+  const hg::SettingRow* wake = row("Talk from dark screen");
+  CHECK(home && wake);
+  if (!home || !wake) return;
+  CHECK(home->kind == hg::SettingRow::Kind::Toggle && home->level == 1);
+  CHECK(home->icon == hg::SettingRow::Icon::Back);
+  CHECK(wake->kind == hg::SettingRow::Kind::Toggle && wake->level == 0);
+  CHECK(wake->icon == hg::SettingRow::Icon::Talk);
+  r.app.console("set wake_talk on");
+  r.app.console("set double_home off");
+  CHECK(row("Talk from dark screen")->level == 1);
+  CHECK(row("Double press home")->level == 0);
+}
+
+// --- The recording buffer: a lost connection doesn't lose the recording ------
+
+namespace {
+
+hg::DeviceProfile buffered_profile() {
+  hg::DeviceProfile p = Rig::profile("ws://hermes.local:8765/gadget");
+  p.recording_alloc = std::malloc;
+  return p;
+}
+
+// Distinct samples, so the order of what reaches Hermes can be checked: sample i is i.
+struct Speech {
+  int16_t next = 0;
+  std::vector<int16_t> all;
+  void say(Rig& r, size_t samples) {
+    std::vector<int16_t> pcm(samples);
+    for (auto& s : pcm) s = next++;
+    all.insert(all.end(), pcm.begin(), pcm.end());
+    r.app.on_mic_samples(pcm.data(), pcm.size());
+  }
+  // 100 ms of speech, 100 ms of clock, `n` times.
+  void talk(Rig& r, int n) {
+    for (int i = 0; i < n; ++i) {
+      say(r, 1600);
+      r.advance(100);
+    }
+  }
+};
+
+// The audio frames sent for `stream` from sent_binary[from] on, in order: their samples,
+// and whether their sequence numbers ran 0, 1, 2... without a gap.
+std::vector<int16_t> uploaded(const Rig& r, int stream, size_t from, bool* in_order = nullptr) {
+  std::vector<int16_t> pcm;
+  uint16_t want = 0;
+  bool ok = true;
+  for (size_t i = from; i < r.fake.sent_binary.size(); ++i) {
+    const auto& f = r.fake.sent_binary[i];
+    hg::proto::BinaryFrame b;
+    if (!hg::proto::parse_binary(f.data(), f.size(), b) || b.channel != hg::proto::Channel::Audio || b.stream != stream)
+      continue;
+    ok &= b.seq == want++;
+    const size_t n = (f.size() - hg::proto::kBinaryHeader) / 2;
+    const auto* s = reinterpret_cast<const int16_t*>(f.data() + hg::proto::kBinaryHeader);
+    pcm.insert(pcm.end(), s, s + n);
+  }
+  if (in_order) *in_order = ok;
+  return pcm;
+}
+
+// Waits for the next connection attempt (the first retry is 1 s after a loss) and lets it
+// through; `paired` as the welcome says.
+void reconnect(Rig& r, bool paired = true) {
+  const int before = r.fake.connects;
+  for (int i = 0; i < 400 && r.fake.connects == before; ++i) r.advance(100);
+  CHECK_EQ(r.fake.connects, before + 1);
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":false})");
+  r.server(std::string(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":)") +
+           (paired ? "true" : "false") + "}");
+}
+
+size_t count_type(const Rig& r, const std::string& type) {
+  return static_cast<size_t>(std::count_if(r.fake.sent.begin(), r.fake.sent.end(),
+                                           [&](const Value& v) { return v["type"].as_string() == type; }));
+}
+
+}  // namespace
+
+TEST("recording buffer: sized for the utterance limit, and keeps what fits") {
+  CHECK_EQ(hg::RecordingBuffer::bytes_for(30000, 16000), size_t(31 * 16000 * 2));
+  CHECK_EQ(hg::RecordingBuffer::bytes_for(60000, 16000), size_t(61 * 16000 * 2));  // a 60 s limit: a constant
+  hg::RecordingBuffer b;
+  CHECK(!b.ready());
+  CHECK(!b.reserve([](size_t) -> void* { return nullptr; }, 100));  // no room: off
+  CHECK(!b.ready());
+  CHECK(b.reserve(std::malloc, 10));
+  const int16_t s[] = {1, 2, 3, 4, 5, 6};
+  CHECK_EQ(b.append(s, 6), size_t(5));  // 10 bytes: five samples
+  CHECK_EQ(b.size(), size_t(10));
+  b.advance(4);
+  CHECK_EQ(b.unsent(), size_t(6));
+  CHECK_EQ(reinterpret_cast<const int16_t*>(b.next())[0], int16_t(3));
+  b.rewind();
+  CHECK_EQ(b.unsent(), size_t(10));
+  b.clear();
+  CHECK_EQ(b.size(), size_t(0));
+}
+
+TEST("recording buffer: online, the recording streams in 40 ms frames as before") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  const Value* start = r.fake.last("audio.start");
+  CHECK(start && (*start)["resent"].is_null());
+  const int stream = start ? static_cast<int>((*start)["stream"].as_int()) : -1;
+  sp.talk(r, 10);
+  CHECK_EQ(r.fake.sent_binary.size(), size_t(25));  // 1 s: 25 frames of 640 samples, sent as they fill
+  sp.say(r, 100);                                   // a part frame waits for the end
+  CHECK_EQ(r.fake.sent_binary.size(), size_t(25));
+  r.app.on_button(hg::Button::Talk, false);
+  bool in_order = false;
+  CHECK(uploaded(r, stream, 0, &in_order) == sp.all);
+  CHECK(in_order);
+  CHECK(r.fake.last("audio.end") != nullptr);
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+}
+
+TEST("recording buffer: at 24 kHz the buffered upload goes in 960-sample (40 ms) frames too") {
+  hg::DeviceProfile p = buffered_profile();
+  p.mic_rate = 24000;
+  Rig r(p);
+  r.bring_online(true);
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(320, 7);  // the codec boards' 13 ms deliveries
+  for (int i = 0; i < 31; ++i) {
+    r.app.on_mic_samples(pcm.data(), pcm.size());
+    r.advance(10);
+  }
+  CHECK_EQ(r.fake.sent_binary.size(), size_t(10));
+  for (const auto& f : r.fake.sent_binary) CHECK_EQ(f.size(), hg::proto::kBinaryHeader + 960 * 2);
+  r.advance(400);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK_EQ(r.fake.sent_binary.size(), size_t(11));
+  CHECK_EQ(r.fake.sent_binary.back().size(), hg::proto::kBinaryHeader + 320 * 2);
+}
+
+TEST("recording buffer: a slow link delays frames instead of dropping them, and audio.end waits") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  const int stream = static_cast<int>((*r.fake.last("audio.start"))["stream"].as_int());
+  sp.talk(r, 3);
+  r.fake.refuse_binary = true;  // the send queue is full
+  sp.talk(r, 5);
+  r.fake.logs.clear();
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.last("audio.end") == nullptr);  // not before the audio it ends
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  r.fake.refuse_binary = false;
+  r.advance(20);
+  bool in_order = false;
+  CHECK(uploaded(r, stream, 0, &in_order) == sp.all);
+  CHECK(in_order);
+  CHECK(r.fake.last("audio.end") != nullptr);
+  bool none_lost = false;
+  for (const auto& l : r.fake.logs) none_lost |= l.find(" 0 frames lost") != std::string::npos;
+  CHECK(none_lost);
+}
+
+TEST("recording buffer: a connection lost mid-recording keeps recording, and all of it goes after reconnecting") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  const Value* first = r.fake.last("audio.start");
+  const std::string id = first ? (*first)["id"].as_string() : "";
+  const int old_stream = first ? static_cast<int>((*first)["stream"].as_int()) : -1;
+  sp.talk(r, 5);
+  r.app.on_transport_closed("disconnected");
+  CHECK(r.app.in_turn());
+  CHECK(r.fake.mic_on);
+  CHECK(r.app.screen() == hg::Screen::Listening);  // not the connecting screen
+  CHECK_EQ(r.app.model().detail, std::string("Offline, still recording"));
+  sp.talk(r, 5);  // the connection is still down
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  CHECK_EQ(r.app.model().detail, std::string("Reconnecting to send..."));
+  CHECK(r.fake.last("audio.end") == nullptr);
+
+  const size_t sent_before = r.fake.sent_binary.size();
+  reconnect(r);
+  r.advance(20);
+  const Value* again = r.fake.last("audio.start");
+  CHECK(again && again != first);
+  if (!again) return;
+  CHECK_EQ((*again)["id"].as_string(), id);  // the same request
+  const int stream = static_cast<int>((*again)["stream"].as_int());
+  CHECK(stream != old_stream);  // on a new stream
+  CHECK_EQ((*again)["resent"].as_int(), int64_t(1));
+  CHECK((*again)["age_ms"].as_int() >= 1000);
+  bool in_order = false;
+  CHECK(uploaded(r, stream, sent_before, &in_order) == sp.all);  // every sample, from the first
+  CHECK(in_order);
+  const Value* end = r.fake.last("audio.end");
+  CHECK(end && (*end)["stream"].as_int() == stream);
+  CHECK(end && (*end)["duration_ms"].as_int() >= 1000);
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  CHECK_EQ(r.app.model().detail, std::string("Sending..."));
+  // And the turn goes on as usual.
+  r.server(R"({"type":"turn.start","turn":"a1"})");
+  r.server(R"({"type":"reply","turn":"a1","text":"Got it."})");
+  r.server(R"({"type":"turn.end","turn":"a1","outcome":"success"})");
+  r.advance(200);
+  CHECK(!r.app.in_turn());
+}
+
+TEST("recording buffer: reconnecting during the recording sends what was held, then streams on") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 3);
+  r.app.on_transport_closed("disconnected");
+  sp.talk(r, 3);
+  reconnect(r);  // still talking
+  sp.talk(r, 4);
+  CHECK(r.app.screen() == hg::Screen::Listening);
+  CHECK(r.app.model().detail != std::string("Offline, still recording"));
+  const Value* again = r.fake.last("audio.start");
+  const int stream = again ? static_cast<int>((*again)["stream"].as_int()) : -1;
+  r.app.on_button(hg::Button::Talk, false);
+  bool in_order = false;
+  CHECK(uploaded(r, stream, 0, &in_order) == sp.all);
+  CHECK(in_order);
+  CHECK_EQ(count_type(r, "audio.end"), size_t(1));
+}
+
+TEST("recording buffer: a finished recording waits 45 s for the connection, then is dropped") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 5);
+  r.app.on_transport_closed("disconnected");
+  r.app.on_button(hg::Button::Talk, false);
+  // Every attempt fails (no open): each connect times out after 10 s, without extending the wait.
+  r.advance(hg::App::kRecordingWaitMs - 1000);
+  CHECK(r.fake.connects >= 3);
+  CHECK(r.app.in_turn());
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  r.advance(1100);
+  CHECK(!r.app.in_turn());
+  CHECK_EQ(r.app.model().detail, std::string("Couldn't send the recording"));
+  // Back online later: nothing is sent.
+  r.advance(20000);
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":false})");
+  r.server(R"({"type":"welcome","session":"s3","heartbeat_s":20,"paired":true})");
+  r.advance(100);
+  CHECK_EQ(count_type(r, "audio.start"), size_t(1));
+  CHECK(r.fake.last("audio.end") == nullptr);
+}
+
+TEST("recording buffer: cancel discards a held recording, while recording or waiting") {
+  {
+    Rig r(buffered_profile());
+    r.bring_online(true);
+    Speech sp;
+    r.app.on_button(hg::Button::Talk, true);
+    sp.talk(r, 5);
+    r.app.on_transport_closed("disconnected");
+    r.app.on_button(hg::Button::Cancel, true);
+    r.app.on_button(hg::Button::Cancel, false);
+    CHECK(!r.app.in_turn());
+    CHECK(!r.fake.mic_on);
+    reconnect(r);
+    r.advance(100);
+    CHECK_EQ(count_type(r, "audio.start"), size_t(1));
+  }
+  {
+    Rig r(buffered_profile());
+    r.bring_online(true);
+    Speech sp;
+    r.app.on_button(hg::Button::Talk, true);
+    sp.talk(r, 5);
+    r.app.on_transport_closed("disconnected");
+    r.app.on_button(hg::Button::Talk, false);
+    r.app.on_button(hg::Button::Cancel, true);
+    r.app.on_button(hg::Button::Cancel, false);
+    CHECK(!r.app.in_turn());
+    reconnect(r);
+    r.advance(100);
+    CHECK_EQ(count_type(r, "audio.start"), size_t(1));
+    CHECK(r.fake.last("audio.end") == nullptr);
+    CHECK(r.fake.last("cancel") == nullptr);  // Hermes had no turn to cancel
+  }
+}
+
+TEST("recording buffer: tap mode ends a held recording with a tap, and the limit still ends it") {
+  hg::DeviceProfile p = buffered_profile();
+  Rig r(p);
+  r.bring_online(true);
+  r.app.console("set talk_mode tap");
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.screen() == hg::Screen::Listening);
+  sp.talk(r, 3);
+  r.app.on_transport_closed("disconnected");
+  sp.talk(r, 3);
+  r.app.on_button(hg::Button::Talk, true);  // the tap that ends it, though not connected
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  CHECK_EQ(r.app.model().detail, std::string("Reconnecting to send..."));
+
+  Rig limit(buffered_profile());
+  limit.bring_online(true);
+  Speech all;
+  limit.app.on_button(hg::Button::Talk, true);
+  limit.app.on_transport_closed("disconnected");
+  all.talk(limit, hg::App::kMaxUtteranceMs / 100 + 2);  // 30 s and a bit, offline throughout
+  CHECK(!limit.fake.mic_on);
+  CHECK(limit.app.screen() == hg::Screen::Thinking);
+  reconnect(limit);
+  limit.advance(1000);  // the link takes the 30 s over a few ticks
+  const Value* again = limit.fake.last("audio.start");
+  const int stream = again ? static_cast<int>((*again)["stream"].as_int()) : -1;
+  const auto got = uploaded(limit, stream, 0);
+  CHECK(got.size() >= size_t(hg::App::kMaxUtteranceMs) * 16);  // all 30 s, nothing dropped
+  CHECK(std::equal(got.begin(), got.end(), all.all.begin()));
+  CHECK(limit.fake.last("audio.end") != nullptr);
+}
+
+TEST("recording buffer: a device unpaired on reconnect drops the held recording") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 5);
+  r.app.on_transport_closed("disconnected");
+  r.app.on_button(hg::Button::Talk, false);
+  reconnect(r, false);
+  r.advance(100);
+  CHECK(!r.app.in_turn());
+  CHECK_EQ(count_type(r, "audio.start"), size_t(1));
+  CHECK(r.app.screen() == hg::Screen::Pairing);
+}
+
+TEST("recording buffer: a connection lost after audio.end went ends the turn, as before") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 5);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.last("audio.end") != nullptr);
+  r.app.on_transport_closed("disconnected");
+  CHECK(!r.app.in_turn());
+  reconnect(r);
+  r.advance(100);
+  CHECK_EQ(count_type(r, "audio.start"), size_t(1));  // Hermes has it: no second copy
+}
+
+TEST("recording buffer: a board without one ends the recording on a lost connection, as before") {
+  Rig r;  // no recording_alloc
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 5);
+  r.app.on_transport_closed("disconnected");
+  CHECK(!r.app.in_turn());
+  CHECK(!r.fake.mic_on);
+  CHECK(r.app.screen() == hg::Screen::Connecting);
+}
+
+// --- Diagnostics for lost connections -----------------------------------------
+
+namespace {
+Value diag_of(Rig& r) {
+  Value v;
+  const std::string out = r.app.console("diag");
+  CHECK(out.rfind("@diag {", 0) == 0);
+  CHECK(hg::json::parse(out.substr(6), v));
+  return v;
+}
+bool logged(const Rig& r, const std::string& text) {
+  for (const auto& l : r.fake.logs)
+    if (l.find(text) != std::string::npos) return true;
+  return false;
+}
+}  // namespace
+
+TEST("diag: every lost connection is logged and kept with what the device was doing") {
+  Rig r;
+  r.bring_online(true);
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(1600, 1000);
+  r.app.on_mic_samples(pcm.data(), pcm.size());
+  r.app.on_transport_closed("disconnected: a 1286 B send in flight for 10000 ms; transport errno 11; rssi -74");
+  CHECK(logged(r, "connection closed: disconnected: a 1286 B send in flight for 10000 ms; transport errno 11; rssi -74 (recording)"));
+  // A reconnect that times out counts too.
+  r.advance(12000);
+  CHECK(logged(r, "connection closed: connect timeout (idle)"));
+  // The Wi-Fi goes while the next attempt is connecting: that attempt ends with the Wi-Fi's reason.
+  const int attempts = r.fake.connects;
+  for (int i = 0; i < 100 && r.fake.connects == attempts; ++i) r.advance(100);
+  r.app.on_network(false, "Wi-Fi lost (reason 200 beacon timeout, rssi -80)");
+  CHECK(logged(r, "network down: Wi-Fi lost (reason 200 beacon timeout, rssi -80) (idle)"));
+
+  Value v = diag_of(r);
+  CHECK(v["connection"]["closes_total"].as_int() >= 2);
+  const auto& closes = v["connection"]["closes"].elements();
+  CHECK(closes.size() >= 2);
+  if (closes.size() < 2) return;
+  CHECK_EQ(closes.front()["during"].as_string(), std::string("recording"));
+  CHECK(closes.front()["reason"].as_string().find("rssi -74") != std::string::npos);
+  bool timeout = false;
+  for (const auto& c : closes) timeout |= c["reason"].as_string() == "connect timeout";
+  CHECK(timeout);
+  // The Wi-Fi loss ends the attempt, and its reason and signal stay after the network is back.
+  r.app.on_network(true, "192.168.1.20");
+  v = diag_of(r);
+  const auto& after = v["connection"]["closes"].elements();
+  CHECK(!after.empty());
+  if (after.empty()) return;
+  CHECK_EQ(after.back()["reason"].as_string(), std::string("Wi-Fi lost (reason 200 beacon timeout, rssi -80)"));
+}
+
+TEST("diag: a Wi-Fi loss after the WebSocket reported its own loss counts once") {
+  Rig r;
+  r.bring_online(true);
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(640, 1000);
+  r.app.on_mic_samples(pcm.data(), pcm.size());
+  r.app.on_transport_closed("disconnected; rssi -82");
+  r.app.on_network(false, "Wi-Fi lost (reason 200 beacon timeout, rssi -82)");
+  CHECK(logged(r, "network down: Wi-Fi lost (reason 200 beacon timeout, rssi -82) (idle)"));
+  const Value v = diag_of(r);
+  CHECK_EQ(v["connection"]["closes_total"].as_int(), int64_t(1));
+  const auto& closes = v["connection"]["closes"].elements();
+  CHECK_EQ(closes.size(), size_t(1));
+  if (closes.empty()) return;
+  CHECK_EQ(closes[0]["reason"].as_string(), std::string("disconnected; rssi -82"));
+  CHECK_EQ(closes[0]["during"].as_string(), std::string("recording"));
+  CHECK(r.app.screen() == hg::Screen::Offline);  // the network state still moves on
+}
+
+TEST("diag: a recording a lost connection cut short is the last recording") {
+  Rig r;
+  r.bring_online(true);
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(640, 1000);
+  for (int i = 0; i < 15; ++i) {
+    r.app.on_mic_samples(pcm.data(), pcm.size());
+    r.advance(40);
+  }
+  r.app.on_transport_closed("disconnected");
+  Value v = diag_of(r);
+  CHECK(v["recordings"]["last"]["ms"].as_int() >= 600);
+  CHECK_EQ(v["recordings"]["last"]["frames_lost"].as_int(), int64_t(0));  // every frame went
+
+  // Cut short with part of a frame built: that part never went.
+  reconnect(r);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_mic_samples(pcm.data(), pcm.size());
+  r.app.on_mic_samples(pcm.data(), 320);
+  r.advance(500);
+  r.app.on_transport_closed("disconnected");
+  v = diag_of(r);
+  CHECK_EQ(v["recordings"]["last"]["frames_lost"].as_int(), int64_t(1));
+}
+
+TEST("diag: the close history keeps the last five") {
+  Rig r;
+  r.bring_online(true);
+  for (int i = 0; i < 7; ++i) {
+    r.app.on_transport_closed("gone " + std::to_string(i));
+    reconnect(r);
+  }
+  Value v = diag_of(r);
+  CHECK_EQ(v["connection"]["closes_total"].as_int(), int64_t(7));
+  const auto& closes = v["connection"]["closes"].elements();
+  CHECK_EQ(closes.size(), size_t(5));
+  if (closes.size() != 5) return;
+  CHECK_EQ(closes.front()["reason"].as_string(), std::string("gone 2"));
+  CHECK_EQ(closes.back()["reason"].as_string(), std::string("gone 6"));
+  CHECK_EQ(closes.back()["during"].as_string(), std::string("idle"));
+}
+
+TEST("diag: the last recording's length and lost frames") {
+  Rig r;
+  r.bring_online(true);
+  CHECK(diag_of(r)["recordings"]["last"].is_null());
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(640, 1000);
+  for (int i = 0; i < 10; ++i) {
+    r.fake.refuse_binary = i >= 4 && i < 7;
+    r.app.on_mic_samples(pcm.data(), pcm.size());
+    r.advance(40);
+  }
+  r.app.on_button(hg::Button::Talk, false);
+  const Value v = diag_of(r);
+  CHECK_EQ(v["recordings"]["last"]["frames_lost"].as_int(), int64_t(3));
+  CHECK(v["recordings"]["last"]["ms"].as_int() >= 400);
+}
+
+TEST("recording buffer: a turn that ends some other way takes its unsent recording with it") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 5);
+  r.fake.refuse_binary = true;  // the link never takes the rest
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.in_turn());
+  for (int i = 0; i < 10; ++i) {  // past the 180 s Thinking gives Hermes, the server pinging meanwhile
+    r.advance(18100);
+    r.server(R"({"type":"ping","ts":1})");
+  }
+  CHECK(!r.app.in_turn());
+  r.fake.refuse_binary = false;
+  const size_t before = r.fake.sent_binary.size();
+  r.advance(1000);
+  CHECK_EQ(r.fake.sent_binary.size(), before);  // nothing more goes
+  CHECK(r.fake.last("audio.end") == nullptr);
+  const Value* cancel = r.fake.last("audio.cancel");  // and the hub drops what it has
+  CHECK(cancel && (*cancel)["reason"].as_string() == "timeout");
+}
+
+TEST("diag: a buffered recording logs its length, frames lost and the link's backlog, and diag keeps the last") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 2);
+  r.fake.refuse_binary = true;  // the link stalls for 300 ms of audio
+  sp.say(r, 1600);
+  sp.say(r, 1600);
+  sp.say(r, 1600);
+  r.fake.refuse_binary = false;
+  sp.talk(r, 2);
+  r.fake.logs.clear();
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(logged(r, " 0 frames lost (past the buffer), link backlog peaked at "));
+  Value v = diag_of(r);
+  CHECK(v["recordings"]["buffer"].as_int() > 0);
+  const Value& last = v["recordings"]["last"];
+  CHECK_EQ(last["frames_lost"].as_int(), int64_t(0));
+  CHECK(last["backlog_peak_ms"].as_int() >= 300);
+  CHECK_EQ(last["resends"].as_int(), int64_t(0));
+
+  // Held through a lost connection and sent again: the log and diag say so.
+  r.server(R"({"type":"turn.end","turn":"t","outcome":"success"})");
+  r.advance(7000);
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 5);
+  r.app.on_transport_closed("disconnected");
+  CHECK(logged(r, "connection closed: disconnected (recording)"));
+  CHECK(logged(r, "connection lost during a recording; still recording, 500 ms held"));
+  r.app.on_button(hg::Button::Talk, false);
+  r.advance(12000);  // a reconnect that times out
+  CHECK(logged(r, "connection closed: connect timeout (sending a recording)"));
+  r.fake.logs.clear();
+  reconnect(r);
+  r.advance(50);
+  CHECK(logged(r, "sent again 1x after a lost connection"));
+  v = diag_of(r);
+  CHECK_EQ(v["recordings"]["held"].as_int(), int64_t(1));
+  CHECK_EQ(v["recordings"]["resent"].as_int(), int64_t(1));
+  CHECK_EQ(v["recordings"]["last"]["resends"].as_int(), int64_t(1));
+}
+
+TEST("diag: a recording dropped for want of a connection is counted") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 5);
+  r.app.on_transport_closed("disconnected");
+  r.app.on_button(hg::Button::Talk, false);
+  r.advance(hg::App::kRecordingWaitMs + 500);
+  CHECK_EQ(diag_of(r)["recordings"]["dropped"].as_int(), int64_t(1));
+  CHECK(logged(r, "dropped a held recording: no connection within 45 s"));
+}
+
+namespace {
+// PSRAM free for psram_alloc, the allocator main.cpp gives a board with PSRAM: it sets the
+// buffer aside only when RecordingBuffer::kPsramHeadroom stays free after it.
+size_t g_psram_free = 0;
+void* psram_alloc(size_t n) {
+  return hg::RecordingBuffer::leaves_headroom(g_psram_free, n) ? std::malloc(n) : nullptr;
+}
+}  // namespace
+
+TEST("recording buffer: set aside only when about 1 MB of PSRAM stays free after it") {
+  using hg::RecordingBuffer;
+  const size_t n = RecordingBuffer::bytes_for(hg::App::kMaxUtteranceMs, 24000);  // the 2.06's 1.5 MB
+  CHECK(RecordingBuffer::leaves_headroom(n + RecordingBuffer::kPsramHeadroom, n));
+  CHECK(!RecordingBuffer::leaves_headroom(n + RecordingBuffer::kPsramHeadroom - 1, n));
+  CHECK(!RecordingBuffer::leaves_headroom(n - 1, n));  // no wrap-around when PSRAM is short
+
+  // A small PSRAM part (2 MB, 1.5 MB of it free): no buffer, and a lost connection ends the
+  // recording as before. Start-up says so.
+  hg::DeviceProfile small = Rig::profile("ws://hermes.local:8765/gadget");
+  small.mic_rate = 24000;
+  small.recording_alloc = psram_alloc;
+  g_psram_free = 1536 * 1024;
+  Rig r(small);
+  r.bring_online(true);
+  CHECK(logged(r, "no room for the recording buffer: a lost connection ends a recording"));
+  CHECK_EQ(diag_of(r)["recordings"]["buffer"].as_int(), int64_t(0));
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(960, 1);
+  r.app.on_mic_samples(pcm.data(), pcm.size());
+  r.advance(500);
+  r.app.on_transport_closed("disconnected");
+  CHECK(!r.app.in_turn());
+  CHECK(!r.fake.mic_on);
+
+  // An 8 MB part with room to spare: the buffer is on, start-up says so, and a recording
+  // outlives a lost connection.
+  hg::DeviceProfile big = small;
+  g_psram_free = 7 * 1024 * 1024;
+  Rig b(big);
+  b.bring_online(true);
+  CHECK(logged(b, "recording buffer on: " + std::to_string(n / 1024) + " KB, a lost connection keeps the recording"));
+  CHECK_EQ(diag_of(b)["recordings"]["buffer"].as_int(), static_cast<int64_t>(n));
+  b.app.on_button(hg::Button::Talk, true);
+  b.app.on_mic_samples(pcm.data(), pcm.size());
+  b.advance(500);
+  b.app.on_transport_closed("disconnected");
+  CHECK(b.app.in_turn());
+  CHECK(b.fake.mic_on);
+}
+
+TEST("recording buffer: an earlier turn's reply arriving during the upload leaves the new recording alone") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  const int stream = static_cast<int>((*r.fake.last("audio.start"))["stream"].as_int());
+  sp.talk(r, 3);
+  r.fake.refuse_binary = true;  // a slow link: the end of the recording waits to go
+  sp.talk(r, 5);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  // Hermes, not having the new recording yet, finishes the turn the user talked over.
+  r.server(R"({"type":"turn.start","turn":"old"})");
+  r.server(R"({"type":"reply.delta","turn":"old","text":"The weather is"})");
+  r.server(R"({"type":"reply","turn":"old","text":"The weather is sunny."})");
+  r.server(R"({"type":"audio.start","stream":9,"rate":16000,"format":"pcm16"})");
+  r.server(R"({"type":"turn.end","turn":"old","outcome":"success"})");
+  r.advance(100);
+  CHECK(r.app.in_turn());
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  CHECK(r.fake.last("audio.end") == nullptr);
+  r.fake.refuse_binary = false;
+  r.advance(50);
+  bool in_order = false;
+  CHECK(uploaded(r, stream, 0, &in_order) == sp.all);  // every sample still goes
+  CHECK(in_order);
+  CHECK(r.fake.last("audio.end") != nullptr);
+  // The new turn then goes as usual.
+  r.server(R"({"type":"turn.start","turn":"new"})");
+  r.server(R"({"type":"reply","turn":"new","text":"Done."})");
+  r.server(R"({"type":"turn.end","turn":"new","outcome":"success"})");
+  r.advance(200);
+  CHECK_EQ(r.app.model().body, std::string("Done."));
+}
+
+TEST("recording buffer: a new session drops a recording still uploading") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  const int stream = static_cast<int>((*r.fake.last("audio.start"))["stream"].as_int());
+  sp.talk(r, 3);
+  r.fake.refuse_binary = true;
+  sp.talk(r, 5);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  r.app.on_button(hg::Button::Cancel, true);  // held for a new session
+  r.advance(2200);
+  r.app.on_button(hg::Button::Cancel, false);
+  CHECK(r.fake.last("session.new") != nullptr);
+  const Value* cancel = r.fake.last("audio.cancel");
+  CHECK(cancel && (*cancel)["stream"].as_int() == stream);
+  CHECK(cancel && (*cancel)["reason"].as_string() == "new session");
+  const size_t before = r.fake.sent_binary.size();
+  r.fake.refuse_binary = false;
+  r.advance(500);
+  CHECK_EQ(r.fake.sent_binary.size(), before);  // nothing of it follows session.new
+  CHECK(r.fake.last("audio.end") == nullptr);
+}
+
+TEST("recording buffer: talking over a recording still uploading replaces it, and the hub hears so") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  const int first = static_cast<int>((*r.fake.last("audio.start"))["stream"].as_int());
+  sp.talk(r, 3);
+  r.fake.refuse_binary = true;
+  sp.talk(r, 5);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  r.app.on_button(hg::Button::Talk, true);  // talks again before the first one has all gone
+  const Value* cancel = r.fake.last("audio.cancel");
+  CHECK(cancel && (*cancel)["stream"].as_int() == first);
+  CHECK(cancel && (*cancel)["reason"].as_string() == "replaced");
+  const Value* start = r.fake.last("audio.start");
+  CHECK(start && (*start)["stream"].as_int() != first);
+  r.fake.refuse_binary = false;
+  r.advance(50);
+  for (const auto& f : r.fake.sent_binary) {
+    hg::proto::BinaryFrame b;
+    if (hg::proto::parse_binary(f.data(), f.size(), b)) CHECK(b.stream != first || b.seq < 100);
+  }
+  CHECK(uploaded(r, first, 0).size() <= size_t(3 * 1600));  // only what went before the stall
+}
+
+TEST("recording buffer: once its audio.end goes, the Thinking timeout is the short one again") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  sp.talk(r, 3);
+  r.fake.refuse_binary = true;
+  sp.talk(r, 3);
+  r.app.on_button(hg::Button::Talk, false);
+  r.server(R"({"type":"turn.start","turn":"old"})");  // the earlier turn's, during the upload
+  r.fake.refuse_binary = false;
+  r.advance(50);
+  CHECK(r.fake.last("audio.end") != nullptr);
+  for (int i = 0; i < 10; ++i) {  // Hermes never answers this request; the server pings meanwhile
+    r.advance(18100);
+    r.server(R"({"type":"ping","ts":1})");
+  }
+  CHECK(!r.app.in_turn());
+  CHECK_EQ(r.app.model().detail, std::string("No reply from Hermes"));
 }
