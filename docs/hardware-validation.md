@@ -194,7 +194,7 @@ After this report, review disabled light sleep for this board. Its FT3168 interr
 ## Waveshare AMOLED-2.06 light sleep report
 
 - **Board:** a Waveshare ESP32-S3-Touch-AMOLED-2.06 in its watch case, on its own cell. The PCB revision was not recorded.
-- **Firmware:** branch `light-sleep-206` on `BrOrlandi/hermes-gadget-sdk`, at [`1134c76`](https://github.com/BrOrlandi/hermes-gadget-sdk/commit/1134c76), the commit this change was rebased from, built with ESP-IDF 6.1.0 through PlatformIO. Two fixes from review came after it and were not run on the watch: the CYD build guard, and keeping the touch INT on its edge interrupt while a Wi-Fi join attempt holds the chip awake during a doze.
+- **Firmware:** branch `light-sleep-206` on `BrOrlandi/hermes-gadget-sdk`, at [`1134c76`](https://github.com/BrOrlandi/hermes-gadget-sdk/commit/1134c76), the commit this change was rebased from, built with ESP-IDF 6.1.0 through PlatformIO. Fixes from review came after it and were not run on the watch: the CYD build guard, re-arming the wake when `touch_wake` changes during a doze, and keeping the touch INT on its edge interrupt while a Wi-Fi join attempt holds the chip awake during a doze.
 - **Waking:** with the screen dark on battery, a tap on the screen, BOOT and a short PWR press each lit it.
 - **Sleep share:** about 75% of the doze time was spent in light sleep. The remaining wake-ups, about 14 a second, came from Wi-Fi beacons under the `MIN_MODEM` power save.
 - **Use:** the owner wore it for several days with this firmware. Recordings, replies and the connection to Hermes behaved as before; light sleep only runs while the screen is dark, on battery and idle.
