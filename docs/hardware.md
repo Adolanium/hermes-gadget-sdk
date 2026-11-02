@@ -638,13 +638,15 @@ Board option `esp32s3-touch-amoled-206`, for Waveshare's 2.06" AMOLED touch watc
 | Touch | FT3168 | I2C 0x38, read with the FT5x06 driver; reset 9; INT 38, read on its falling edge (the idle chip dozes, refuses reads and reports its waking touch only briefly) |
 | Speaker DAC | ES8311 | I2C 0x18; I2S MCLK 16, BCLK 41, WS 45, DOUT 40; NS4150B amplifier enable 46 |
 | Microphones | ES7210 | I2C 0x40; two microphones on MIC1/MIC2 (MIC3 is the speaker loopback, unused); I2S DIN 42 |
-| Power | AXP2101 | I2C 0x34; battery/USB readings, PWR short press and local power-off; charging and rails keep their defaults |
+| Power | AXP2101 | I2C 0x34; battery/USB readings, PWR short press and local power-off; charging and rails keep their defaults; battery percent from a measured discharge curve |
 | Clock chip | PCF85063 | I2C 0x51; keeps the time in UTC across resets, set from network time (resting clock) |
 | I2C bus | | SDA 15, SCL 14, 400 kHz |
 | BOOT key | | GPIO 0 |
 | Not used | QMI8658 IMU (I2C 0x6B), TF card | |
 
 The audio codecs and amplifier run from the always-on 3.3 V rail, so no AXP2101 rail is switched for audio. The UI uses rows 8–493 of the panel. The glass corners are rounded with a radius of about 100 px (measured with a test grid), so the status row also keeps its text 64 px (`corner_inset`) in from the sides.
+
+On battery the percentage follows a discharge curve measured on the watch's own cell (`kAmoled206Curve`), at the median voltage of the last minute, and never rises until the watch is charged; a full watch shows 100 right after unplugging. The AXP2101 gauge it replaces read low through most of a discharge: 25% with 42% left, the 15% alert with over two hours left, and 0% 11 minutes before shutdown. The curve comes from one full discharge of 8 h 14 min with light use and the screen mostly dark ([battery report](hardware-validation.md#waveshare-amoled-206-battery-report)), so a heavier load reads a few points low. While charging the percentage is still the gauge's, and it shows 100 once the AXP2101 reports charging done: the cell reaches 4.18 V less than halfway through a charge, so the voltage can't tell how far the charge has got.
 
 The microphones are quiet: speech averaged about 170 RMS at the default 24 dB gain, under tap mode's usual 500 floor. This profile sets 30 dB and a floor of 200 (`codec.mic_gain_db`, `codec.vad_min_rms`), and tap mode's noise estimate still raises the threshold in a loud room.
 
