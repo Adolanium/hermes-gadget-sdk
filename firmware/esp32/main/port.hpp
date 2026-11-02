@@ -187,6 +187,9 @@ class WsTransport final : public hg::Transport {
   // True when the send task has been stuck on one item for hg::ws::kStuckMs, or
   // couldn't take a client to close: the transport can't recover without a restart.
   bool stuck() const;
+  // While on (a turn), the send task logs once a second what it sent: bytes, messages, the
+  // longest send, the queue's peak, refusals, the CPU clock and the signal ("uplink: ...").
+  void set_metering(bool on) { metering_ = on; }
 
  private:
   static void on_event(void* arg, const char* base, int32_t id, void* data);
@@ -205,6 +208,13 @@ class WsTransport final : public hg::Transport {
   // message's first frame clears it.
   std::string rx_;
   uint8_t rx_opcode_ = 0;
+  std::atomic<bool> metering_{false};
+  std::atomic<uint32_t> refused_{0};  // messages enqueue() turned away for want of room
+  // The send in flight on the send task (generation 0: none), for the close reason on_event
+  // reports: a failed send closes the connection before it returns.
+  std::atomic<uint32_t> sending_gen_{0}, sending_since_{0};
+  std::atomic<uint32_t> connected_gen_{0};  // the last client generation that reached CONNECTED
+  std::atomic<size_t> sending_bytes_{0};
 };
 
 // ESP-IDF RGB timing bus with ST7701 command initialization on 3-wire SPI.

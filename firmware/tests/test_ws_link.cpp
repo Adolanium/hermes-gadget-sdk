@@ -117,8 +117,8 @@ TEST("ws: a message for the current connection is sent with a time limit") {
   CHECK(hg::ws::process(message(&client_a, 1), 1, ops) == Outcome::Sent);
   CHECK(hg::ws::process(message(&client_a, 1, hg::ws::kBinary), 1, ops) == Outcome::Sent);
   CHECK_EQ(ops.calls.size(), 2u);
-  CHECK_EQ(ops.calls[0], std::string("text A 5 2000ms"));
-  CHECK_EQ(ops.calls[1], std::string("binary A 5 2000ms"));
+  CHECK_EQ(ops.calls[0], std::string("text A 5 10000ms"));
+  CHECK_EQ(ops.calls[1], std::string("binary A 5 10000ms"));
 }
 
 TEST("ws: a short send is reported as failed") {
@@ -159,7 +159,7 @@ TEST("ws: the old client is closed after its queued messages, and the new one ca
   CHECK_EQ(ops.calls.size(), 3u);
   CHECK_EQ(ops.calls[0], std::string("close frame A 1000ms"));
   CHECK_EQ(ops.calls[1], std::string("destroy A"));
-  CHECK_EQ(ops.calls[2], std::string("text B 5 2000ms"));
+  CHECK_EQ(ops.calls[2], std::string("text B 5 10000ms"));
 }
 
 // --- Closing never waits without a limit (the Wi-Fi-loss freeze) -------------
@@ -181,8 +181,24 @@ TEST("ws: closing a client whose link is gone skips the close frame") {
 }
 
 TEST("ws: every network wait has a limit of a few seconds at most") {
-  CHECK(hg::ws::kSendTimeoutMs > 0 && hg::ws::kSendTimeoutMs <= 5000);
+  CHECK(hg::ws::kSendTimeoutMs > 0 && hg::ws::kSendTimeoutMs <= 15000);
   CHECK(hg::ws::kCloseTimeoutMs > 0 && hg::ws::kCloseTimeoutMs <= 5000);
+}
+
+TEST("ws: a send rides out a TCP stall of several seconds") {
+  // A failed send closes the connection, so the limit is the longest stall the
+  // link survives; 2 s lost recordings to ordinary Wi-Fi hiccups.
+  CHECK(hg::ws::kSendTimeoutMs >= 8000);
+  CHECK(hg::ws::kNetworkTimeoutMs >= hg::ws::kSendTimeoutMs);
+}
+
+TEST("ws: a dead link is still found well before the send task counts as stuck") {
+  // A stalled send gives up and the client reports the loss long before the
+  // watchdog would restart the device, and within the shortest heartbeat window
+  // the app accepts (3 x 5 s).
+  CHECK(hg::ws::kSendTimeoutMs * 4 <= hg::ws::kStuckMs);
+  CHECK(hg::ws::kNetworkTimeoutMs + hg::ws::kCloseTimeoutMs < hg::ws::kStuckMs);
+  CHECK(hg::ws::kSendTimeoutMs <= 3 * 5000);
 }
 
 // --- A stuck send task ends in a restart, not a wedge (#136) -----------------
@@ -240,4 +256,40 @@ TEST("ws: no item that ends by itself is taken for stuck") {
   constexpr uint32_t close = 2 * hg::ws::kCloseTimeoutMs + hg::ws::kNetworkTimeoutMs;
   CHECK(hg::ws::kStuckMs >= 2 * send);
   CHECK(hg::ws::kStuckMs >= 2 * close);
+}
+
+// --- The uplink line ----------------------------------------------------------
+
+TEST("ws: the uplink meter's first window starts with the turn, not after the last message") {
+  hg::ws::UplinkMeter m;
+  hg::ws::UplinkMeter::Report r;
+  m.set_on(true, 1000);
+  m.item(1, 5, 2000, true, false);
+  CHECK(m.take(2000, r));
+  CHECK_EQ(r.bytes_per_s, uint32_t(2000));
+  m.set_on(false, 2000);  // the turn ends; the send task then waits without a limit
+  // A minute later the next turn starts: its first second counts from then.
+  m.set_on(true, 62000);
+  m.item(3, 40, 48000, true, false);
+  CHECK(!m.take(62500, r));  // not a second yet
+  CHECK(m.take(63000, r));
+  CHECK_EQ(r.bytes_per_s, uint32_t(48000));
+  CHECK_EQ(r.msgs, uint32_t(1));
+  CHECK_EQ(r.longest_ms, uint32_t(40));
+  CHECK_EQ(r.queue_peak, uint32_t(3));
+  m.item(1, 10000, 1924, false, true);  // a send that gave up
+  CHECK(m.take(64000, r));
+  CHECK_EQ(r.failed, uint32_t(1));
+  CHECK_EQ(r.bytes_per_s, uint32_t(0));
+}
+
+TEST("ws: turning metering on again mid-turn doesn't restart the window") {
+  hg::ws::UplinkMeter m;
+  hg::ws::UplinkMeter::Report r;
+  m.set_on(true, 0);
+  m.item(1, 1, 500, true, false);
+  m.set_on(true, 600);  // still on: the same window
+  m.item(1, 1, 500, true, false);
+  CHECK(m.take(1000, r));
+  CHECK_EQ(r.msgs, uint32_t(2));
 }

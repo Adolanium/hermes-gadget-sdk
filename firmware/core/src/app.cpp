@@ -57,7 +57,10 @@ constexpr uint32_t kSensorIntervalMs = 2000;
 constexpr uint32_t kDefaultCardMs = 15000;
 constexpr int kDashboardVersion = 1;    // the dashboard message this firmware draws
 constexpr size_t kDashMaxEach = 12;     // sessions, and tiles, kept from one dashboard message
-constexpr size_t kMicChunkSamples = 640;  // 40 ms at 16 kHz per binary frame
+// Microphone audio goes in 40 ms frames whatever the port delivers (the codec boards hand
+// over 13 ms at a time): each frame is a WebSocket message, a TLS record and a queue slot, so
+// three times as many small ones cost the uplink, and fill the send queue three times sooner.
+constexpr uint32_t kMicFrameMs = 40;
 constexpr size_t kOtaAckBytes = 16 * 1024;  // a firmware update acknowledges every 16 KB written
 constexpr uint32_t kOtaIdleMs = 30000;      // ...and is abandoned when no data comes for this long
 constexpr uint32_t kOtaRestartMs = 1000;    // time for ota.done to leave before the restart
@@ -393,12 +396,19 @@ std::string App::next_id(char prefix) {
 // Connection lifecycle
 
 void App::on_network(bool up, std::string_view detail) {
+  if (!up && network_up_)
+    log(LogLevel::Warn, "network down: " + std::string(detail.empty() ? "no detail" : detail) + " (" + activity() + ")");
   network_up_ = up;
   network_detail_ = std::string(detail);
   if (!up) {
-    if (phase_ == Phase::Connecting || phase_ == Phase::Handshake || phase_ == Phase::Online) {
+    // Only a connection (or a connect in flight) the network took with it: after the WebSocket
+    // reported its loss, the session already ended, and a second close would count it twice.
+    if (transport_active_ &&
+        (phase_ == Phase::Connecting || phase_ == Phase::Handshake || phase_ == Phase::Online)) {
       hal_.transport->close();
-      drop_session("network lost");
+      // The port's words ("Wi-Fi lost (reason 200 beacon timeout, rssi -78)") stay in the close
+      // history: network_detail_ is replaced once the network is back.
+      drop_session(detail.empty() ? std::string_view("network lost") : detail);
     }
     if (phase_ != Phase::Boot) {
       phase_ = Phase::NoNetwork;
@@ -467,14 +477,36 @@ void App::schedule_reconnect() {
   reconnect_pending_ = network_up_;
 }
 
+// What the device was doing, for the log and `diag` when a connection ends.
+const char* App::activity() const {
+  if (mode_ == Mode::Listening) return "recording";
+  if (mode_ == Mode::Thinking) return "waiting for a reply";
+  if (mode_ == Mode::Responding) return "replying";
+  return "idle";
+}
+
 void App::drop_session(std::string_view reason) {
   last_close_ = std::string(reason);
+  // Every end of a session, whoever noticed it: the transport, a timeout or the network.
+  ++closes_total_;
+  if (closes_.size() >= kCloseHistory) closes_.erase(closes_.begin());
+  closes_.push_back({now(), last_close_, activity()});
+  log(LogLevel::Warn, "connection closed: " + last_close_ + " (" + activity() + ")");
   if (ota_busy()) {
     if (ota_ == Ota::Receiving) hal_.updater->abort();
     ota_reset();
     log(LogLevel::Warn, "firmware update abandoned: the connection dropped");
   }
-  if (mode_ == Mode::Listening && hal_.mic) hal_.mic->stop();
+  if (mode_ == Mode::Listening) {
+    if (hal_.mic) hal_.mic->stop();
+    // A recording the loss cut short is the last recording diag reports; the part frame
+    // still being built never went, so it counts as lost.
+    if (!mic_pending_.empty()) ++mic_unsent_;
+    mic_pending_.clear();
+    rec_stats_.any = true;
+    rec_stats_.last_ms = now() - mode_since_;
+    rec_stats_.last_unsent = mic_unsent_;
+  }
   stop_playback();
   mode_ = Mode::Idle;
   overlay_ = Overlay::None;
@@ -504,7 +536,6 @@ void App::on_transport_open() {
 void App::on_transport_closed(std::string_view reason) {
   // Closes we initiated (timeouts, reconfiguration) were already handled.
   if (!transport_active_) return;
-  log(LogLevel::Warn, std::string("connection closed: ") + std::string(reason));
   drop_session(reason);
   update_model();
 }
@@ -1433,6 +1464,8 @@ void App::start_listening(bool hands_free) {
   mic_stream_ = static_cast<uint8_t>(mic_stream_ % 250 + 1);
   mic_seq_ = 0;
   mic_unsent_ = 0;
+  mic_pending_.clear();
+  mic_pending_.reserve(mic_frame_samples());
   request_id_ = next_id('a');
   level_ = 0;
   Vad::Config vc;
@@ -1454,14 +1487,32 @@ void App::start_listening(bool hands_free) {
   scroll_ = -1;
 }
 
+size_t App::mic_frame_samples() const {
+  return std::max<size_t>(1, static_cast<size_t>(profile_.mic_rate) * kMicFrameMs / 1000);
+}
+
+// The frame built so far (all of it, or the part left at the end) as one binary message.
+void App::send_mic_frame() {
+  if (mic_pending_.empty()) return;
+  frame_buf_.resize(proto::kBinaryHeader + mic_pending_.size() * 2);
+  proto::write_binary_header(frame_buf_.data(), proto::Channel::Audio, mic_stream_, mic_seq_++);
+  std::memcpy(frame_buf_.data() + proto::kBinaryHeader, mic_pending_.data(), mic_pending_.size() * 2);
+  if (!hal_.transport->send_binary(frame_buf_.data(), frame_buf_.size())) ++mic_unsent_;
+  mic_pending_.clear();
+}
+
 void App::finish_listening() {
   talk_key_armed_ = false;  // a recording on its way to Hermes is not one a second press can take back
   if (hal_.mic) hal_.mic->stop();
+  send_mic_frame();  // the last part frame, before audio.end
   json::Value end = proto::message("audio.end");
   end.set("id", request_id_).set("stream", mic_stream_).set("duration_ms", now() - mode_since_);
   if (mic_unsent_)
     log(LogLevel::Warn, "recording: " + std::to_string(mic_unsent_) + " of " + std::to_string(mic_seq_) +
                             " audio frames not sent, the link couldn't keep up");
+  rec_stats_.any = true;
+  rec_stats_.last_ms = now() - mode_since_;
+  rec_stats_.last_unsent = mic_unsent_;
   if (!send(end)) {
     // Hermes would wait for the rest of the recording and never answer.
     mode_ = Mode::Idle;
@@ -1547,14 +1598,14 @@ void App::on_mic_samples(const int16_t* samples, size_t count) {
   }
   if (mode_ != Mode::Listening || count == 0) return;
   level_ = level_percent(rms(samples, count));
+  const size_t frame = mic_frame_samples();
   size_t off = 0;
   while (off < count) {
-    size_t n = std::min(kMicChunkSamples, count - off);
-    frame_buf_.resize(proto::kBinaryHeader + n * 2);
-    proto::write_binary_header(frame_buf_.data(), proto::Channel::Audio, mic_stream_, mic_seq_++);
-    std::memcpy(frame_buf_.data() + proto::kBinaryHeader, samples + off, n * 2);
-    if (!hal_.transport->send_binary(frame_buf_.data(), frame_buf_.size())) ++mic_unsent_;
+    // Fills the frame being built; a full one goes.
+    const size_t n = std::min(frame - mic_pending_.size(), count - off);
+    mic_pending_.insert(mic_pending_.end(), samples + off, samples + off + n);
     off += n;
+    if (mic_pending_.size() == frame) send_mic_frame();
   }
   if (hands_free_) {
     Vad::Result r = vad_.feed(samples, count);
@@ -2427,7 +2478,22 @@ std::string App::diag_report() {
   if (tailnet_wanted()) conn.set("tailnet", tunnel_up_ ? std::string("up") : tunnel_detail_.empty() ? std::string("joining") : tunnel_detail_);
   if (!last_close_.empty()) conn.set("last_close", last_close_);
   if (online_since_) conn.set("online_s", (now() - online_since_) / 1000);
+  conn.set("closes_total", closes_total_);
+  json::Value closes = json::Value::array();
+  for (const auto& c : closes_) {
+    json::Value e = json::Value::object();
+    e.set("ago_s", (now() - c.at) / 1000).set("reason", c.reason).set("during", c.during);
+    closes.push(e);
+  }
+  conn.set("closes", closes);  // oldest first
   r.set("connection", conn);
+  json::Value rec = json::Value::object();
+  if (rec_stats_.any) {
+    json::Value last = json::Value::object();
+    last.set("ms", rec_stats_.last_ms).set("frames_lost", rec_stats_.last_unsent);
+    rec.set("last", last);
+  }
+  r.set("recordings", rec);
   r.set("app", status_value());
   if (frame_stats_) r.set("frames", frame_stats_->to_json());
   if (on_diag) on_diag(r);

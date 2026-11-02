@@ -569,6 +569,51 @@ TEST("app: microphone frames the link refused are counted when the recording end
   for (const auto& l : r.fake.logs) CHECK(l.find("recording:") == std::string::npos);
 }
 
+TEST("app: microphone audio goes in 40 ms frames whatever size the port delivers") {
+  // The codec boards record at 24 kHz and deliver 320 samples (13 ms) at a time: before, each
+  // went as its own message, 75 a second, and the send queue held under a second of audio.
+  hg::DeviceProfile p = Rig::profile("ws://hermes.local:8765/gadget");
+  p.mic_rate = 24000;
+  Rig r(p);
+  r.bring_online(true);
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> all;
+  int16_t next = 0;
+  for (int i = 0; i < 31; ++i) {  // 9,920 samples: ten 960-sample frames and 320 over
+    std::vector<int16_t> pcm(320);
+    for (auto& v : pcm) v = next++;
+    all.insert(all.end(), pcm.begin(), pcm.end());
+    r.app.on_mic_samples(pcm.data(), pcm.size());
+    r.advance(10);
+  }
+  CHECK_EQ(r.fake.sent_binary.size(), size_t(10));
+  for (const auto& f : r.fake.sent_binary) CHECK_EQ(f.size(), hg::proto::kBinaryHeader + 960 * 2);
+  r.advance(400);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK_EQ(r.fake.sent_binary.size(), size_t(11));  // the part frame goes before audio.end
+  CHECK_EQ(r.fake.sent_binary.back().size(), hg::proto::kBinaryHeader + 320 * 2);
+  std::vector<int16_t> got;
+  uint16_t seq = 0;
+  for (const auto& f : r.fake.sent_binary) {
+    hg::proto::BinaryFrame b;
+    CHECK(hg::proto::parse_binary(f.data(), f.size(), b));
+    CHECK_EQ(b.seq, seq++);
+    const auto* sm = reinterpret_cast<const int16_t*>(f.data() + hg::proto::kBinaryHeader);
+    got.insert(got.end(), sm, sm + (f.size() - hg::proto::kBinaryHeader) / 2);
+  }
+  CHECK(got == all);
+  CHECK(r.fake.last("audio.end") != nullptr);
+
+  // At 16 kHz, 640 samples, as before.
+  Rig sixteen;
+  sixteen.bring_online(true);
+  sixteen.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(1600, 1);
+  sixteen.app.on_mic_samples(pcm.data(), pcm.size());
+  CHECK_EQ(sixteen.fake.sent_binary.size(), size_t(2));
+  CHECK_EQ(sixteen.fake.sent_binary[0].size(), hg::proto::kBinaryHeader + 640 * 2);
+}
+
 TEST("app: a recording whose end can't be sent says so instead of waiting for a reply") {
   Rig r;
   r.bring_online(true);
@@ -7645,4 +7690,144 @@ TEST("settings list: Double press home and Talk from dark screen are toggle rows
   r.app.console("set double_home off");
   CHECK(row("Talk from dark screen")->level == 1);
   CHECK(row("Double press home")->level == 0);
+}
+
+// --- Diagnostics for lost connections -----------------------------------------
+
+namespace {
+// Waits for the next connection attempt (the first retry is 1 s after a loss) and lets it through.
+void reconnect(Rig& r) {
+  const int before = r.fake.connects;
+  for (int i = 0; i < 400 && r.fake.connects == before; ++i) r.advance(100);
+  CHECK_EQ(r.fake.connects, before + 1);
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":false})");
+  r.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":true})");
+}
+Value diag_of(Rig& r) {
+  Value v;
+  const std::string out = r.app.console("diag");
+  CHECK(out.rfind("@diag {", 0) == 0);
+  CHECK(hg::json::parse(out.substr(6), v));
+  return v;
+}
+bool logged(const Rig& r, const std::string& text) {
+  for (const auto& l : r.fake.logs)
+    if (l.find(text) != std::string::npos) return true;
+  return false;
+}
+}  // namespace
+
+TEST("diag: every lost connection is logged and kept with what the device was doing") {
+  Rig r;
+  r.bring_online(true);
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(1600, 1000);
+  r.app.on_mic_samples(pcm.data(), pcm.size());
+  r.app.on_transport_closed("disconnected: a 1286 B send in flight for 10000 ms; transport errno 11; rssi -74");
+  CHECK(logged(r, "connection closed: disconnected: a 1286 B send in flight for 10000 ms; transport errno 11; rssi -74 (recording)"));
+  // A reconnect that times out counts too.
+  r.advance(12000);
+  CHECK(logged(r, "connection closed: connect timeout (idle)"));
+  // The Wi-Fi goes while the next attempt is connecting: that attempt ends with the Wi-Fi's reason.
+  const int attempts = r.fake.connects;
+  for (int i = 0; i < 100 && r.fake.connects == attempts; ++i) r.advance(100);
+  r.app.on_network(false, "Wi-Fi lost (reason 200 beacon timeout, rssi -80)");
+  CHECK(logged(r, "network down: Wi-Fi lost (reason 200 beacon timeout, rssi -80) (idle)"));
+
+  Value v = diag_of(r);
+  CHECK(v["connection"]["closes_total"].as_int() >= 2);
+  const auto& closes = v["connection"]["closes"].elements();
+  CHECK(closes.size() >= 2);
+  if (closes.size() < 2) return;
+  CHECK_EQ(closes.front()["during"].as_string(), std::string("recording"));
+  CHECK(closes.front()["reason"].as_string().find("rssi -74") != std::string::npos);
+  bool timeout = false;
+  for (const auto& c : closes) timeout |= c["reason"].as_string() == "connect timeout";
+  CHECK(timeout);
+  // The Wi-Fi loss ends the attempt, and its reason and signal stay after the network is back.
+  r.app.on_network(true, "192.168.1.20");
+  v = diag_of(r);
+  const auto& after = v["connection"]["closes"].elements();
+  CHECK(!after.empty());
+  if (after.empty()) return;
+  CHECK_EQ(after.back()["reason"].as_string(), std::string("Wi-Fi lost (reason 200 beacon timeout, rssi -80)"));
+}
+
+TEST("diag: a Wi-Fi loss after the WebSocket reported its own loss counts once") {
+  Rig r;
+  r.bring_online(true);
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(640, 1000);
+  r.app.on_mic_samples(pcm.data(), pcm.size());
+  r.app.on_transport_closed("disconnected; rssi -82");
+  r.app.on_network(false, "Wi-Fi lost (reason 200 beacon timeout, rssi -82)");
+  CHECK(logged(r, "network down: Wi-Fi lost (reason 200 beacon timeout, rssi -82) (idle)"));
+  const Value v = diag_of(r);
+  CHECK_EQ(v["connection"]["closes_total"].as_int(), int64_t(1));
+  const auto& closes = v["connection"]["closes"].elements();
+  CHECK_EQ(closes.size(), size_t(1));
+  if (closes.empty()) return;
+  CHECK_EQ(closes[0]["reason"].as_string(), std::string("disconnected; rssi -82"));
+  CHECK_EQ(closes[0]["during"].as_string(), std::string("recording"));
+  CHECK(r.app.screen() == hg::Screen::Offline);  // the network state still moves on
+}
+
+TEST("diag: a recording a lost connection cut short is the last recording") {
+  Rig r;
+  r.bring_online(true);
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(640, 1000);
+  for (int i = 0; i < 15; ++i) {
+    r.app.on_mic_samples(pcm.data(), pcm.size());
+    r.advance(40);
+  }
+  r.app.on_transport_closed("disconnected");
+  Value v = diag_of(r);
+  CHECK(v["recordings"]["last"]["ms"].as_int() >= 600);
+  CHECK_EQ(v["recordings"]["last"]["frames_lost"].as_int(), int64_t(0));  // every frame went
+
+  // Cut short with part of a frame built: that part never went.
+  reconnect(r);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_mic_samples(pcm.data(), pcm.size());
+  r.app.on_mic_samples(pcm.data(), 320);
+  r.advance(500);
+  r.app.on_transport_closed("disconnected");
+  v = diag_of(r);
+  CHECK_EQ(v["recordings"]["last"]["frames_lost"].as_int(), int64_t(1));
+}
+
+TEST("diag: the close history keeps the last five") {
+  Rig r;
+  r.bring_online(true);
+  for (int i = 0; i < 7; ++i) {
+    r.app.on_transport_closed("gone " + std::to_string(i));
+    reconnect(r);
+  }
+  Value v = diag_of(r);
+  CHECK_EQ(v["connection"]["closes_total"].as_int(), int64_t(7));
+  const auto& closes = v["connection"]["closes"].elements();
+  CHECK_EQ(closes.size(), size_t(5));
+  if (closes.size() != 5) return;
+  CHECK_EQ(closes.front()["reason"].as_string(), std::string("gone 2"));
+  CHECK_EQ(closes.back()["reason"].as_string(), std::string("gone 6"));
+  CHECK_EQ(closes.back()["during"].as_string(), std::string("idle"));
+}
+
+TEST("diag: the last recording's length and lost frames") {
+  Rig r;
+  r.bring_online(true);
+  CHECK(diag_of(r)["recordings"]["last"].is_null());
+  r.app.on_button(hg::Button::Talk, true);
+  std::vector<int16_t> pcm(640, 1000);
+  for (int i = 0; i < 10; ++i) {
+    r.fake.refuse_binary = i >= 4 && i < 7;
+    r.app.on_mic_samples(pcm.data(), pcm.size());
+    r.advance(40);
+  }
+  r.app.on_button(hg::Button::Talk, false);
+  const Value v = diag_of(r);
+  CHECK_EQ(v["recordings"]["last"]["frames_lost"].as_int(), int64_t(3));
+  CHECK(v["recordings"]["last"]["ms"].as_int() >= 400);
 }

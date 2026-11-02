@@ -48,10 +48,20 @@ inline bool may_queue_message(size_t free_slots, uint8_t opcode) {
 
 // Every network wait has a limit. The library's own esp_websocket_client_close()
 // waits for its close frame without one and froze the app on a dead link.
-constexpr uint32_t kSendTimeoutMs = 2000;
+//
+// A send that fails or runs out of time makes esp_websocket_client abort the
+// whole connection (esp_websocket_client.c, send_with_exact_opcode), so this
+// limit is also the longest TCP stall the link survives. At 2 s, a Wi-Fi hiccup
+// in the middle of a recording, the one time the device uploads 32-48 KB/s, closed
+// the connection and lost the recording. 10 s rides out retransmissions and a
+// slow access point, and a link that is really dead is still found: a stalled
+// send gives up after 10 s, and an idle one is caught by the protocol heartbeat
+// (no message for 3 heartbeats, 60 s by default; App::tick, "server silent").
+constexpr uint32_t kSendTimeoutMs = 10000;
 constexpr uint32_t kCloseTimeoutMs = 1000;
-// The client's own reads and connects (esp_websocket_client_config_t::network_timeout_ms).
-constexpr uint32_t kNetworkTimeoutMs = 10000;
+// The client's own reads and connects (esp_websocket_client_config_t::network_timeout_ms);
+// the same limit as a send, so a stall of the same length is survived both ways.
+constexpr uint32_t kNetworkTimeoutMs = kSendTimeoutMs;
 
 // Handing a client to the send task for closing waits at most this long for a
 // queue slot. The reserved slots normally make it immediate.
@@ -82,6 +92,49 @@ class TxWatch {
  private:
   std::atomic<bool> busy_{false};
   std::atomic<uint32_t> since_{0};
+};
+
+// What the send task did in the current window, for its once-a-second "uplink:" line while a
+// turn runs. Turning metering on starts a fresh window: the send task waits without a limit
+// while it is off, and idle time before a turn must not count against that turn's rate.
+class UplinkMeter {
+ public:
+  struct Report {
+    uint32_t bytes_per_s, msgs, longest_ms, queue_peak, failed;
+  };
+  void set_on(bool on, uint32_t now_ms) {
+    if (on && !on_) restart(now_ms);
+    on_ = on;
+  }
+  bool on() const { return on_; }
+  // One queued item the send task handled: the queue's depth when it took it, how long it took,
+  // and whether it was sent or failed (neither: dropped, or a client closed).
+  void item(uint32_t queue_depth, uint32_t took_ms, size_t bytes, bool sent, bool failed) {
+    if (queue_depth > queue_peak_) queue_peak_ = queue_depth;
+    if (took_ms > longest_ms_) longest_ms_ = took_ms;
+    if (sent) {
+      bytes_ += bytes;
+      ++msgs_;
+    }
+    if (failed) ++failed_;
+  }
+  // Once a second has passed since the window began: fills `r` and starts the next window.
+  bool take(uint32_t now_ms, Report& r) {
+    const uint32_t span = now_ms - since_;
+    if (span < 1000) return false;
+    r = {static_cast<uint32_t>(bytes_ * 1000ull / span), msgs_, longest_ms_, queue_peak_, failed_};
+    restart(now_ms);
+    return true;
+  }
+
+ private:
+  void restart(uint32_t now_ms) {
+    since_ = now_ms;
+    bytes_ = msgs_ = longest_ms_ = queue_peak_ = failed_ = 0;
+  }
+  bool on_ = false;
+  uint32_t since_ = 0, msgs_ = 0, longest_ms_ = 0, queue_peak_ = 0, failed_ = 0;
+  uint64_t bytes_ = 0;
 };
 
 struct TxItem {
