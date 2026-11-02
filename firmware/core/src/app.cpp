@@ -2625,6 +2625,7 @@ void App::update_model() {
   } else if (overlay_ == Overlay::Profiles) {
     m.screen = Screen::Profiles;
     m.headline = tr(Msg::ProfileListTitle);
+    m.face_row = m.mascot_row = -1;  // model_ is edited in place: an earlier profile's face must not linger
     // One cell per profile: its name, and its id, which picks the colour of its initial.
     for (size_t i = 0; i < agent_profiles_.size(); ++i) {
       const AgentProfile& p = agent_profiles_[i];

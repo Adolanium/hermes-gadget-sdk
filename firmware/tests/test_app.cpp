@@ -6034,6 +6034,21 @@ TEST("profiles: the current profile's face is its icon in the grid; the default 
   CHECK_EQ(d.app.model().mascot_row, -1);
 }
 
+TEST("profiles: after switching away from a profile with a face, its cell shows its initial again") {
+  Rig r(Rig::touch_profile());
+  r.bring_online_with_profiles(true, "ops");
+  r.server(face_message("ops", "f1"));
+  CHECK(r.app.open_profile_picker());
+  CHECK_EQ(r.app.model().face_row, 1);
+  CHECK_EQ(r.app.model().mascot_row, 0);
+  CHECK(r.app.select_agent_profile(0));  // back to the default profile, which has no face of its own
+  r.server(R"({"type":"profile","profile":"default"})");
+  CHECK_EQ(r.app.agent_profile(), std::string("default"));
+  CHECK(r.app.profile_picker_open() || r.app.open_profile_picker());
+  CHECK_EQ(r.app.model().face_row, -1);  // Ops shows its initial, not a face it no longer wears
+  CHECK_EQ(r.app.model().mascot_row, 0);
+}
+
 TEST("faces: a face replaces the mascot until a face without bits brings it back") {
   Rig r;
   r.bring_online(true);
