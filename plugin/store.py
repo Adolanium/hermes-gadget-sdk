@@ -22,6 +22,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -67,13 +68,25 @@ class DeviceStore:
 
     def _save(self) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)
-        tmp = self._path.with_name(f"{self._path.stem}.{os.getpid()}.tmp")
-        tmp.write_text(json.dumps(self._data, indent=2, sort_keys=True), encoding="utf-8")
+        # A unique temporary file, created mode 600: two stores in one process (the gateway's, and the
+        # CLI's or the dashboard's) writing at once each replace their own, never the other's.
+        fd, tmp = tempfile.mkstemp(dir=self._dir, prefix=f"{self._path.stem}.", suffix=".tmp")
         try:
-            os.chmod(tmp, 0o600)
-        except OSError:
-            pass
-        os.replace(tmp, self._path)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(json.dumps(self._data, indent=2, sort_keys=True))
+            # Windows refuses to replace a file another replace or reader holds at that moment
+            # (PermissionError); it frees up within milliseconds, so try a few times.
+            for attempt in range(10):
+                try:
+                    os.replace(tmp, self._path)
+                    break
+                except PermissionError:
+                    if attempt == 9:
+                        raise
+                    time.sleep(0.01)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
 
     # -- enrollment -----------------------------------------------------------
 
