@@ -74,6 +74,8 @@ PLATFORM_NAME = "gadget"
 MAX_MESSAGE_LENGTH = 4000
 PAIRING_TTL_S = 3600          # mirrors Hermes's pairing-code lifetime
 PAIRING_POLL_S = 2.0
+# A profile's changed face or avatar files are read for its thumbnail once they have held still this long.
+THUMB_HOLD_S = 1.5
 PAIRING_GRACE_S = 6.0
 UPDATE_POLL_S = 3.0           # how often staged firmware ('hermes gadget update') is looked for
 DASHBOARD_POLL_S = 2.0        # how often tiles ('hermes gadget tile') and expiries are looked at
@@ -192,6 +194,18 @@ def confirm_text(title: str, message: str, charset: str = "ascii") -> Tuple[str,
     return head or textfmt.for_device(title, charset), detail
 
 
+def _profile_label(info: Any) -> str:
+    """A profile's name as the Hermes interface shows it: its display name, else its Desktop Bots
+    title (``profile.yaml`` ``ui_meta['hermes-bots'].title``, which Hermes reads as ``bot_title``), else its id
+    with a capital first letter."""
+    for attr in ("display_name", "bot_title"):
+        label = str(getattr(info, attr, "") or "").strip()
+        if label:
+            return label
+    name = str(info.name)
+    return name[:1].upper() + name[1:]
+
+
 class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     MAX_MESSAGE_LENGTH = MAX_MESSAGE_LENGTH
     supports_status_text = True
@@ -232,6 +246,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._pushed_seq: Dict[str, int] = {}  # device -> the newest push that read a roster for it
         # connection -> its last face lookup; it goes with the connection, and a replaced one keeps its own
         self._face_from: "weakref.WeakKeyDictionary[DeviceSession, _FaceLook]" = weakref.WeakKeyDictionary()
+        # Profile thumbnails (thumb()): (profile, size, avatars on) -> (the files' stamp, the thumbnail), and
+        # a stamp seen changing that has yet to hold still, with when it was first seen.
+        self._thumbs: Dict[tuple, tuple] = {}
+        self._thumb_changing: Dict[tuple, tuple] = {}
         self._battery_log: Optional[BatteryLog] = None
         self._tls_cert = extra.get("tls_cert")
         self._tls_key = extra.get("tls_key")
@@ -357,7 +375,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             return []
         if not self._offer_all:
             served &= self._offered | {"default"}
-        roster = [{"id": p.name, "name": (p.display_name or p.name)[:24]} for p in infos if p.name in served]
+        roster = [{"id": p.name, "name": _profile_label(p)[:24]} for p in infos if p.name in served]
         return sorted(roster, key=lambda p: p["id"] != "default")
 
     def _busy(self, device_id: str) -> bool:
@@ -524,6 +542,42 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             logger.warning("[%s] no face for profile %s: %s", self.name, profile, exc)
             return None
 
+    async def thumb(self, session: DeviceSession, profile: str) -> Optional[faces.ProfileFace]:
+        """``profile``'s thumbnail for a device's grid: its face file or avatar, as its own face would be.
+        Each profile's files are stat'ed on every call and read only when they changed and then held
+        still until a call at least THUMB_HOLD_S later, a debounce for a file being written;
+        until then the last one stays."""
+        if not self._profile_faces or not session.thumb_px:
+            return None
+        if self._convert_avatars is None:
+            self._convert_avatars = imaging.pillow_available()
+        key = (profile, session.thumb_px, self._convert_avatars)
+        try:
+            home = self._profile_home(profile)
+            now = await asyncio.to_thread(faces.stamp, home, self._convert_avatars)
+            cached = self._thumbs.get(key)
+            if cached is not None and cached[0] == now:
+                return cached[1]
+            if cached is not None:
+                # Changed since: read it once it has held still for THUMB_HOLD_S, about a pairing check.
+                # Several devices ask in the same check, so the second one to see the change waits too.
+                seen = self._thumb_changing.get(key)
+                if seen is None or seen[0] != now:
+                    self._thumb_changing[key] = (now, time.monotonic())
+                    return cached[1]
+                if time.monotonic() - seen[1] < THUMB_HOLD_S:
+                    return cached[1]
+            found = await asyncio.to_thread(faces.thumb_for_profile, home, self._convert_avatars, session.thumb_px)
+        except Exception as exc:  # an unreadable profile keeps what the device shows
+            logger.debug("[%s] no thumbnail for profile %s: %s", self.name, profile, exc)
+            cached = self._thumbs.get(key)
+            if cached:
+                return cached[1]
+            raise  # nothing known yet: not "no thumbnail", which would clear the one the device holds
+        self._thumbs[key] = (now, found)
+        self._thumb_changing.pop(key, None)
+        return found
+
     @staticmethod
     def _unsettled(look: _FaceLook) -> faces.ProfileFace:
         """The files changed after they settled, before or while they were read: they settle again."""
@@ -656,6 +710,14 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 if refusal is None:  # a pairing code can let it in again
                     await self.on_ready(session)
         await self._follow_face(session)
+        if session.thumb_px and session.roster_ids and session.paired:
+            if served is None:  # one look at the served profiles per check, shared by every device
+                served = {p["id"] for p in await asyncio.to_thread(self.profiles)}
+            # A profile's new face file or avatar reaches the grid at the next checks; one parked or taken
+            # off the offer since the welcome is left alone. A list Hermes could not give filters nothing.
+            session.update_thumbs(served or None)
+        else:
+            session.update_thumbs()
         return served
 
     async def _watch_pairing(self) -> None:

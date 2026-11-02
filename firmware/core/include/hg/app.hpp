@@ -180,10 +180,17 @@ class App {
   // device keeps a profile only once Hermes confirms it, and asks again only after an answer.
   bool next_agent_profile();
   bool select_agent_profile(size_t index);
-  // Touch: a quick tap on the name under the mascot opens the list of profiles;
-  // a tap on a row asks for that profile; CANCEL (swipe down) closes it.
+  // Touch: a sideways swipe on the Ready screen, or a quick tap on the name under the mascot,
+  // opens the grid of profiles at the page holding the current one; a sideways swipe there turns
+  // the page, a tap on a profile asks for it, and CANCEL (swipe down) closes it.
   bool profile_name_hit(int x, int y) const;
   bool open_profile_picker();
+  // Whether a sideways swipe that starts now opens the grid: the Ready screen, with profiles to switch to.
+  bool profile_swipe_opens() const;
+  // Turns the grid's page: +1 the next, -1 the previous, wrapping around.
+  bool profile_page_step(int dir);
+  // Profiles a page of the open grid holds on this panel (0: the grid is closed).
+  int profile_per_page() const;
   // A tap or a scroll while a spoken reply's latest lines caption the talking face shows its whole text.
   bool show_reply_text();
   bool profile_picker_open() const { return overlay_ == Overlay::Profiles; }
@@ -191,6 +198,11 @@ class App {
   static constexpr uint32_t kProfileReplyMs = 15000;
   int profile_row_hit(int x, int y) const;
   void profile_tap(int x, int y);
+  // The roster a welcome may bring: the device keeps the first kMaxProfiles entries.
+  static constexpr size_t kMaxProfiles = 32;
+  // Profile thumbnails' side: the grid's largest icon, held to this range (docs/protocol.md#profile-thumbnails).
+  static constexpr int kMaxThumbPx = 128, kMinThumbPx = 32;
+  int thumb_px() const { return thumb_px_; }
   const std::string& agent_profile() const { return agent_profile_; }
   // The resting clock face is up: the time, the date and the mascot.
   bool clock_showing() const { return clock_showing_; }
@@ -333,6 +345,13 @@ class App {
   void h_face_end(const json::Value& m);
   void face_chunk(uint8_t stream, uint16_t seq, const uint8_t* data, size_t len);
   void drop_face();
+  void h_face_thumb(const json::Value& m);
+  void h_face_thumb_start(const json::Value& m);
+  void h_face_thumb_end(const json::Value& m);
+  // The slot holding `id`'s thumbnail, or kMaxProfiles for none.
+  size_t thumb_slot(const std::string& id) const;
+  void drop_thumb(size_t slot);
+  void drop_thumbs();
   size_t face_bytes() const;
   bool can_switch_profile() const;
   void set_agent_profile(const std::string& id);
@@ -484,14 +503,33 @@ class App {
     uint16_t seq = 0;
   };
   std::optional<FaceTransfer> face_in_;
+  // Thumbnails of the offered profiles' faces for the grid (docs/protocol.md#profile-thumbnails):
+  // kMaxProfiles slots of thumb_px_ square RGB565 in one block set aside at start-up, each named by its
+  // profile and hash, kept through reconnects. 0: no thumbnails (no PSRAM, or no room).
+  struct Thumb {
+    std::string id, hash;
+    bool ready = false;  // all its pixels arrived
+  };
+  std::unique_ptr<uint16_t, mascot::Face::Free> thumbs_;
+  int thumb_px_ = 0;
+  std::vector<Thumb> thumb_slots_;
+  uint32_t thumbs_rev_ = 0;  // changes with any thumbnail, so the grid redraws
+  struct ThumbTransfer {
+    int stream;
+    size_t slot;
+    size_t got = 0;
+    uint16_t seq = 0;
+  };
+  std::optional<ThumbTransfer> thumb_in_;
   // A profile.select awaiting Hermes's answer; one at a time (empty: none).
   std::string profile_pending_;
   uint32_t profile_pending_at_ = 0;
-  int profile_page_ = 0;  // first profile on the list's page
+  int profile_page_ = 0;  // first profile on the grid's page
+  uint8_t profile_grid_ = 9;  // the `profile_grid` setting: profiles per page (4, 6, 9 or 16)
   // `language` is auto: follow the language Hermes sends in `welcome` (English until it does).
   bool lang_auto_ = false;
   std::optional<i18n::Lang> hermes_lang_;  // from the last `welcome` that named one this firmware has
-  enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, TouchTalk, Profile, Microphone, Speaker, Display, Inputs,
+  enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, TouchTalk, Profile, ProfileGrid, Microphone, Speaker, Display, Inputs,
                               Info, Power, BatteryAlert, BatteryAlertSound, ChargingNotice, ChargingSound, ChargedNotice, ChargedSound, IdleTimer, TouchWake, FaceDownSleep, Clock, PowerOff, WifiSetup, Phone, Language, DoubleHome, WakeTalk, Back };
   enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };
   Menu menu_ = Menu::Closed;

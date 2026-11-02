@@ -1328,6 +1328,195 @@ def test_timer_runs_and_rings_through_the_hub(loop_thread, devserver, make_sim):
     assert not any(m.get("type") == "audio.start" for m in sim.sent[-5:])
 
 
+class _Thumbs(_TwoProfiles):
+    """Three profiles; ``colours`` gives each one with a thumbnail its colour, named by it."""
+
+    def __init__(self):
+        self.colours = {"ops": (20, 170, 160), "lab": (220, 60, 120)}
+        self.loads = []
+
+    def profiles(self, session=None):
+        return [{"id": "default", "name": "Default"}, {"id": "ops", "name": "Ops"}, {"id": "lab", "name": "Lab"}]
+
+    async def thumb(self, session, profile):
+        if profile not in self.colours:
+            return None
+        r, g, b = self.colours[profile]
+        px = session.thumb_px
+
+        def load():
+            self.loads.append(profile)
+            return struct.pack("<H", (r & 0xF8) << 8 | (g & 0xFC) << 3 | b >> 3) * (px * px)
+
+        return ProfileFace(f"{profile}-{r}-{g}-{b}-{px}", load)
+
+
+def _rgb565(rgb) -> int:
+    r, g, b = rgb
+    return (r & 0xF8) << 8 | (g & 0xFC) << 3 | b >> 3
+
+
+def test_profile_thumbnails_reach_the_grid_once_and_follow_changes(loop_thread, tmp_path, make_sim):
+    delegate = _Thumbs()
+    hub = _hub(loop_thread, tmp_path, delegate)
+    thumbs = lambda kind="face.thumb.start": [m for m in sim.received if m.get("type") == kind]  # noqa: E731
+    try:
+        sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget", board="sim-410x486")
+        assert sim.wait_screen("ready", timeout=10)
+        hello = [m for m in sim.sent if m.get("type") == "hello"][-1]
+        px = hello["caps"]["faces"]["thumbs"]
+        assert 32 <= px <= 128 and hello["thumbs"] == {}
+        assert sim.wait_for(lambda: len(thumbs()) == 2, timeout=5)
+        assert {m["profile"] for m in thumbs()} == {"ops", "lab"} and all(m["width"] == px for m in thumbs())
+
+        sim.touch(True, 300, 240)  # a swipe from right to left opens the grid
+        for x in (260, 220, 180, 140):
+            sim.run_for(0.02)
+            sim.touch(True, x, 240)
+        sim.touch(False)
+        assert sim.wait_screen("profiles", timeout=3)
+        sim.run_for(0.3)
+        pixels = array("H", sim.device.framebuffer_rows())
+        assert pixels.count(_rgb565(delegate.colours["ops"])) > 1000
+        assert pixels.count(_rgb565(delegate.colours["lab"])) > 1000
+
+        # A reconnect names both, and nothing is sent again.
+        sim.console("reconnect")
+        assert sim.wait_for(lambda: len([m for m in sim.sent if m.get("type") == "hello"]) == 2, timeout=10)
+        assert set([m for m in sim.sent if m.get("type") == "hello"][-1]["thumbs"]) == {"ops", "lab"}
+        assert sim.wait_screen("ready", timeout=10)
+        sim.run_for(0.5)
+        assert len(thumbs()) == 2 and len(delegate.loads) == 2
+
+        # Ops's avatar changes: only its thumbnail goes again. Lab's goes away: a clear.
+        delegate.colours["ops"] = (240, 200, 40)
+        del delegate.colours["lab"]
+        session = hub.get(sim.status()["device_id"])
+        loop_thread.loop.call_soon_threadsafe(session.update_thumbs)
+        assert sim.wait_for(lambda: len(thumbs()) == 3 and thumbs("face.thumb"), timeout=5)
+        assert thumbs()[-1]["profile"] == "ops" and thumbs("face.thumb") == [{"type": "face.thumb", "profile": "lab"}]
+        sim.run_for(0.3)
+        sim.console("reconnect")
+        assert sim.wait_for(lambda: len([m for m in sim.sent if m.get("type") == "hello"]) == 3, timeout=10)
+        held = [m for m in sim.sent if m.get("type") == "hello"][-1]["thumbs"]
+        assert held == {"ops": f"ops-240-200-40-{px}"}
+    finally:
+        loop_thread.run(hub.stop())
+
+
+class _BrokenThumbs(_Thumbs):
+    """Ops's picture cannot be read and Lab's comes out the wrong size, until ``fixed``."""
+
+    def __init__(self):
+        super().__init__()
+        self.fixed = False
+
+    async def thumb(self, session, profile):
+        face = await super().thumb(session, profile)
+        if face is None or self.fixed:
+            return face
+        loads = self.loads
+
+        def broken():
+            loads.append(profile)
+            if profile == "ops":
+                raise OSError("truncated file")
+            return b"\0" * 10
+
+        return ProfileFace(face.hash, broken)
+
+
+def test_a_thumbnail_that_cannot_be_made_is_tried_once_per_hash(loop_thread, tmp_path, make_sim):
+    delegate = _BrokenThumbs()
+    hub = _hub(loop_thread, tmp_path, delegate)
+    thumbs = lambda: [m for m in sim.received if m.get("type") == "face.thumb.start"]  # noqa: E731
+    try:
+        sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget", board="sim-410x486")
+        assert sim.wait_screen("ready", timeout=10)
+        assert sim.wait_for(lambda: sorted(delegate.loads) == ["lab", "ops"], timeout=5)
+        session = hub.get(sim.status()["device_id"])
+        for _ in range(3):  # pairing checks with the same pictures: neither is read again
+            task = loop_thread.run(_call(session.update_thumbs))
+            assert sim.wait_for(task.done, timeout=5)
+        assert sorted(delegate.loads) == ["lab", "ops"] and not thumbs()
+
+        delegate.colours["ops"] = (240, 200, 40)  # new pictures: tried again, and sent once they read
+        delegate.colours["lab"] = (60, 60, 220)
+        delegate.fixed = True
+        task = loop_thread.run(_call(session.update_thumbs))
+        assert sim.wait_for(task.done, timeout=5)
+        assert sim.wait_for(lambda: {m["profile"] for m in thumbs()} == {"ops", "lab"}, timeout=5)
+    finally:
+        loop_thread.run(hub.stop())
+
+
+async def _call(fn):
+    return fn()
+
+
+def test_a_profile_no_longer_offered_gets_no_thumbnail_until_the_next_welcome(loop_thread, tmp_path, make_sim):
+    delegate = _Thumbs()
+    hub = _hub(loop_thread, tmp_path, delegate)
+    thumbs = lambda: [m for m in sim.received if m.get("type") == "face.thumb.start"]  # noqa: E731
+    try:
+        sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget", board="sim-410x486")
+        assert sim.wait_screen("ready", timeout=10)
+        assert sim.wait_for(lambda: len(thumbs()) == 2, timeout=5)
+        session = hub.get(sim.status()["device_id"])
+        delegate.colours["ops"] = (240, 200, 40)  # both pictures change, but Lab was parked meanwhile
+        delegate.colours["lab"] = (60, 60, 220)
+        delegate.loads.clear()
+        task = loop_thread.run(_call(lambda: session.update_thumbs({"default", "ops"})))
+        assert sim.wait_for(task.done, timeout=5)
+        assert sim.wait_for(lambda: len(thumbs()) == 3, timeout=5)
+        sim.run_for(0.3)
+        assert thumbs()[-1]["profile"] == "ops" and len(thumbs()) == 3
+        assert delegate.loads == ["ops"]  # Lab's picture is not even read
+        assert not [m for m in sim.received if m.get("type") == "face.thumb"]
+    finally:
+        loop_thread.run(hub.stop())
+
+
+def test_a_thumbnail_lookup_that_fails_keeps_what_the_device_shows(loop_thread, tmp_path, make_sim):
+    delegate = _Thumbs()
+    hub = _hub(loop_thread, tmp_path, delegate)
+    try:
+        sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget", board="sim-410x486")
+        assert sim.wait_screen("ready", timeout=10)
+        assert sim.wait_for(lambda: len([m for m in sim.received if m.get("type") == "face.thumb.start"]) == 2,
+                            timeout=5)
+        session = hub.get(sim.status()["device_id"])
+
+        async def broken(session, profile):  # say, a profile tree that can't be read after a restart
+            raise OSError("unreadable")
+
+        delegate.thumb = broken
+        task = loop_thread.run(_call(session.update_thumbs))
+        assert sim.wait_for(task.done, timeout=5)
+        sim.run_for(0.3)
+        assert not [m for m in sim.received if m.get("type") == "face.thumb"]  # no clear
+        assert set(session.thumb_hashes) == {"ops", "lab"}
+    finally:
+        loop_thread.run(hub.stop())
+
+
+def test_a_board_without_a_touchscreen_or_room_gets_no_thumbnails(loop_thread, tmp_path, make_sim):
+    delegate = _Thumbs()
+    hub = _hub(loop_thread, tmp_path, delegate)
+    try:
+        sim = make_sim(f"ws://127.0.0.1:{hub.bound_port}/gadget")  # buttons only
+        assert sim.wait_screen("ready", timeout=10)
+        hello = [m for m in sim.sent if m.get("type") == "hello"][-1]
+        faces = hello["caps"].get("faces")
+        assert not isinstance(faces, dict) or "thumbs" not in faces
+        assert "thumbs" not in hello
+        sim.run_for(0.5)
+        assert not [m for m in sim.received if m.get("type", "").startswith("face.thumb")]
+        assert hub.get(sim.status()["device_id"]).thumb_px == 0
+    finally:
+        loop_thread.run(hub.stop())
+
+
 @pytest.mark.parametrize("board", ["sim-360x360-knob", "sim-480x480-round-nospeaker"])
 def test_timer_on_a_board_without_a_speaker_shows_the_alarm_silently(loop_thread, devserver, make_sim, board):
     import asyncio

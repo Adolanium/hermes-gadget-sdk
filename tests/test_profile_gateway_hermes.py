@@ -36,6 +36,88 @@ def test_extra_profiles_limits_the_roster(hermes_home, offered, ids):
     assert sorted(p["id"] for p in roster) == sorted(ids) and roster[:1] == [r for r in roster if r["id"] == "default"]
 
 
+def test_roster_names_follow_the_hermes_interface(hermes_home):
+    """display_name, else the Desktop Bots title, else the id with a capital first letter."""
+    from gateway.config import PlatformConfig
+    from hermes_gadget_plugin.adapter import GadgetAdapter
+
+    for name, meta in (("lab", "display_name: Research Lab\n"),
+                       ("garage", "ui_meta:\n  hermes-bots:\n    title: My Garage\n"),
+                       ("saude", "")):
+        (hermes_home / "profiles" / name).mkdir()
+        (hermes_home / "profiles" / name / "config.yaml").write_text("{}\n")
+        if meta:
+            (hermes_home / "profiles" / name / "profile.yaml").write_text(meta)
+    roster = GadgetAdapter(PlatformConfig(enabled=True, extra={"profiles": "all"})).profiles()
+    names = {p["id"]: p["name"] for p in roster}
+    assert names["lab"] == "Research Lab"
+    assert names["garage"] == "My Garage"
+    assert names["saude"] == "Saude"
+    assert names["ops"] == "Ops"
+
+
+def test_roster_names_on_a_hermes_without_bot_title():
+    import types
+    from hermes_gadget_plugin.adapter import _profile_label
+
+    assert _profile_label(types.SimpleNamespace(name="fiscal", display_name="")) == "Fiscal"
+    assert _profile_label(types.SimpleNamespace(name="x", display_name=" X Bot ", bot_title="T")) == "X Bot"
+    assert _profile_label(types.SimpleNamespace(name="x", display_name="", bot_title="Travel")) == "Travel"
+
+
+def test_a_profiles_thumbnail_follows_its_avatar_once_the_file_holds_still(hermes_home, monkeypatch):
+    """thumb() stats each time, reads only after a change has held still for a second look at least
+    THUMB_HOLD_S later, and keeps the last thumbnail meanwhile; a profile without a face file or
+    avatar has none."""
+    import asyncio
+    import os
+    import types
+
+    pytest.importorskip("PIL")
+    from PIL import Image
+
+    from gateway.config import PlatformConfig
+    from hermes_gadget_plugin import adapter as adapter_module
+    from hermes_gadget_plugin.adapter import PAIRING_POLL_S, THUMB_HOLD_S, GadgetAdapter
+
+    clock = [1000.0]
+    monkeypatch.setattr(adapter_module.time, "monotonic", lambda: clock[0])
+    adapter = GadgetAdapter(PlatformConfig(enabled=True, extra={"profiles": "all"}))
+    session = types.SimpleNamespace(thumb_px=64)
+    assets = hermes_home / "profiles" / "ops" / "assets"
+    assets.mkdir()
+
+    def thumb():  # one look per pairing check
+        clock[0] += PAIRING_POLL_S
+        return asyncio.run(adapter.thumb(session, "ops"))
+    assert thumb() is None
+
+    def avatar(colour, when):
+        Image.new("RGB", (80, 80), colour).save(assets / "avatar.png")
+        os.utime(assets / "avatar.png", ns=(when, when))
+
+    avatar((20, 170, 160), 1_000_000_000)
+    assert thumb() is None  # a new file, maybe still being written: nothing yet
+    first = thumb()
+    assert first is not None and len(first.load()) == 64 * 64 * 2
+    fresh = GadgetAdapter(PlatformConfig(enabled=True, extra={"profiles": "all"}))
+    assert asyncio.run(fresh.thumb(session, "ops")).hash == first.hash  # the first look reads at once
+    assert thumb().hash == first.hash
+    avatar((240, 200, 40), 2_000_000_000)
+    assert thumb().hash == first.hash  # changed, maybe still being written: the old one stays
+    other = types.SimpleNamespace(thumb_px=64)  # a second device in the same pairing check waits too
+    assert asyncio.run(adapter.thumb(other, "ops")).hash == first.hash
+    clock[0] += THUMB_HOLD_S - 0.1  # and so does a look that comes too soon
+    assert asyncio.run(adapter.thumb(other, "ops")).hash == first.hash
+    clock[0] -= THUMB_HOLD_S - 0.1
+    second = thumb()  # the same on the next look: read
+    assert second.hash != first.hash
+    (assets / "avatar.png").unlink()
+    assert thumb().hash == second.hash
+    assert thumb() is None  # gone, and still gone: the initial again
+    assert asyncio.run(adapter.thumb(types.SimpleNamespace(thumb_px=0), "ops")) is None  # no thumbnails asked
+
+
 def test_without_the_key_a_device_behaves_as_before(hermes_home, tmp_path):
     import asyncio
 

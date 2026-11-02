@@ -32,6 +32,8 @@ AUDIO_FRAME_MS = 40          # outbound audio frame duration
 PLAYBACK_LEAD_S = 0.5        # how far ahead of real time playback audio is sent, at least
 PLAYBACK_LEAD_MAX_S = 3.0    # the most a device's announced buffer can raise the lead to
 IMAGE_CHUNK_BYTES = 4096
+MAX_THUMB_PX = 128           # the largest profile thumbnail a device may ask for (caps.faces.thumbs)
+MAX_THUMBS = 32              # the profiles a device keeps from welcome, and so thumbnails at most
 MIN_UTTERANCE_S = 0.25
 MAX_FRAME_BYTES = 1 << 20
 MAX_PENDING_DEVICES = 16     # unapproved devices the store keeps, in total...
@@ -67,6 +69,11 @@ class HubDelegate:
     async def face(self, session: "DeviceSession") -> ProfileFace | None:
         """The face of the profile answering ``session`` (docs/protocol.md#faces), or None for the mascot.
         Return quickly: the welcome waits for its hash. Slow work belongs in ``ProfileFace.load``."""
+        return None
+
+    async def thumb(self, session: "DeviceSession", profile: str) -> ProfileFace | None:
+        """``profile``'s thumbnail for ``session``'s profile grid (docs/protocol.md#profile-thumbnails):
+        its ``load`` gives ``session.thumb_px`` square RGB565. None: the device shows the initial."""
         return None
 
     def language(self, session: "DeviceSession") -> Optional[str]:
@@ -286,6 +293,18 @@ class DeviceSession:
         self._pending: dict[str, asyncio.Future] = {}
         self._tasks: set[asyncio.Task] = set()
         self._face_task: asyncio.Task | None = None  # update_face(): at most one, ended with the session
+        # The profiles the welcome offered, and the thumbnails the device holds for them (profile -> hash):
+        # what it named in hello, until the welcome says which it keeps.
+        self.roster_ids: list[str] = []
+        held = hello.get("thumbs")
+        self.thumb_hashes: dict[str, str] = {
+            str(k): v for k, v in held.items() if isinstance(v, str) and 0 < len(v) <= 64
+        } if isinstance(held, dict) and self.thumb_px else {}
+        self._thumb_task: asyncio.Task | None = None  # update_thumbs(): one at a time
+        # profile -> the hash of a thumbnail that could not be made: not tried again until the hash changes
+        self._thumb_failed: dict[str, str] = {}
+        self._thumbs_offered: set[str] | None = None  # the served profiles at the last pairing check
+        self._thumbs_dirty = False
         self._ota_inbox: asyncio.Queue | None = None  # the device's ota.* replies, while an update runs
         self._dashboard_sent: dict | None = None  # the last dashboard this connection delivered
         self._dashboards = 0  # dashboards offered, sent or held
@@ -341,6 +360,12 @@ class DeviceSession:
     def face_frames(self) -> bool:
         """Whether the device's colour faces blink and talk (docs/protocol.md#faces)."""
         return self.face_px > 0 and self.caps["faces"].get("frames") is True
+
+    @property
+    def thumb_px(self) -> int:
+        """The side of the profile thumbnails the device's grid takes (caps.faces.thumbs); 0: none."""
+        px = self.face_px and self.caps["faces"].get("thumbs")
+        return px if type(px) is int and 16 <= px <= MAX_THUMB_PX else 0
 
     def shows_faces(self) -> bool:
         """Whether the device draws the faces the server sends: one-colour ones, or colour ones too."""
@@ -426,7 +451,10 @@ class DeviceSession:
         await self.send_json(protocol.message("paired" if paired else "unpaired", **extra))
         if not paired:
             self.face_hash = None  # unpaired drops the device's face
+            self.thumb_hashes.clear()  # and its thumbnails
         self.update_face()
+        if paired:
+            self.update_thumbs()
 
     async def ask(self, prompt_id: str, title: str, text: str, ttl_s: float | None = None) -> None:
         """Show a yes/no question; the answer arrives as ``on_prompt_reply``."""
@@ -507,6 +535,67 @@ class DeviceSession:
             await self.send_json(protocol.message(
                 "face", profile=state[0], hash=digest, bits=base64.b64encode(data).decode() if data else None))
         self.face_hash = digest
+
+    def update_thumbs(self, offered: "set[str] | None" = None) -> asyncio.Task | None:
+        """Bring the device's profile thumbnails up to date: each offered profile's, sent only where its
+        hash differs from the one the device holds, and a clear where a profile has none any more. One
+        pass at a time; a call during one makes it go over the profiles again. ``offered``, when given,
+        is the profiles the gateway serves now: a welcome's profile that has since been parked or taken
+        off the offer is skipped until the next welcome drops it."""
+        if not self.thumb_px or not self.paired or self.closed:
+            return None
+        if offered is not None:
+            self._thumbs_offered = offered
+        self._thumbs_dirty = True
+        if self._thumb_task is None or self._thumb_task.done():
+            self._thumb_task = self.spawn(self._send_thumbs())
+        return self._thumb_task
+
+    async def _send_thumbs(self) -> None:
+        px = self.thumb_px
+        while self._thumbs_dirty and self.current() and self.paired:
+            self._thumbs_dirty = False
+            for profile in list(self.roster_ids):
+                if self._thumbs_dirty or not self.current() or not self.paired:
+                    break
+                if self._thumbs_offered is not None and profile not in self._thumbs_offered:
+                    continue  # parked or no longer offered since the welcome
+                digest = None
+                try:
+                    thumb = await self.hub.delegate.thumb(self, profile)
+                except Exception as exc:  # a lookup that failed says nothing: the device keeps what it shows
+                    log.debug("thumbnail lookup of %s for %s failed: %s", profile, self.device_id, exc)
+                    continue
+                try:
+                    digest = thumb.hash if thumb else None
+                    if digest == self.thumb_hashes.get(profile) or (digest and digest == self._thumb_failed.get(profile)):
+                        continue
+                    self._thumb_failed.pop(profile, None)
+                    if thumb is None:
+                        await self.send_json(protocol.message("face.thumb", profile=profile))
+                        self.thumb_hashes.pop(profile, None)
+                        continue
+                    data = await asyncio.to_thread(thumb.load)
+                except Exception as exc:  # an unreadable picture leaves what the device shows, once per hash
+                    if digest:
+                        self._thumb_failed[profile] = digest
+                    log.warning("no thumbnail of %s for %s: %s", profile, self.device_id, exc)
+                    continue
+                if len(data) != px * px * 2:
+                    self._thumb_failed[profile] = digest
+                    log.warning("no thumbnail of %s for %s: %d bytes, not %d", profile, self.device_id, len(data), px * px * 2)
+                    continue
+                if not self.current() or not self.paired:
+                    continue
+                self.thumb_hashes.pop(profile, None)  # until the last message is out
+                stream = self._next_stream()
+                await self.send_json(protocol.message(
+                    "face.thumb.start", stream=stream, profile=profile, hash=digest, width=px, height=px,
+                    format="rgb565"))
+                await self._send_chunks(protocol.CHANNEL_FACE, stream, data)
+                await self.send_json(protocol.message("face.thumb.end", stream=stream))
+                if self.paired:  # an unpaired device dropped it, and the hub forgot it
+                    self.thumb_hashes[profile] = digest
 
     async def show_card(self, title: str, body: str, ttl_s: float = 15) -> bool:
         """Show a card. False when it is held until the screen lights up."""
@@ -660,6 +749,8 @@ class DeviceSession:
         self.closed = True
         if self._face_task:
             self._face_task.cancel()
+        if self._thumb_task:
+            self._thumb_task.cancel()
         for fut in self._pending.values():
             if not fut.done():
                 fut.set_exception(ActionError(f"{self.name} disconnected"))
@@ -918,6 +1009,7 @@ class DeviceHub:
                 welcome["language"] = language
             if roster:
                 welcome.update(profile=session.profile, profiles=roster)
+                session.roster_ids = [str(p["id"]) for p in roster if isinstance(p, dict) and p.get("id")][:MAX_THUMBS]
             if (isinstance(face, ProfileFace) and session.paired and hello.get("face") == face.hash
                     and session.device_profile == named and face.valid()):
                 welcome["face"] = face.hash
@@ -926,6 +1018,10 @@ class DeviceHub:
             session.face_hash = welcome.get("face")  # the welcome keeps that face, or drops the device's
             session.update_face(face, looked_up)  # after the welcome's send, which may let the state change
             face = None  # the task has it; an avatar's picture goes with the task
+            # The welcome keeps the device's thumbnails of offered profiles, and only while it is paired.
+            session.thumb_hashes = {k: v for k, v in session.thumb_hashes.items()
+                                    if session.paired and k in session.roster_ids}
+            session.update_thumbs()
             log.info("device %s (%s) online, paired=%s", session.device_id, session.name, session.paired)
             await self.delegate.on_ready(session)
             if not session.display_sleeping:

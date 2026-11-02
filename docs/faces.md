@@ -202,6 +202,22 @@ a file or saving the same picture again changes nothing. A file replaced by one 
 and modification time, as a copy that keeps its timestamp can be, goes unnoticed until the device
 reconnects or switches profile.
 
+### Thumbnails in the profile grid
+
+On a touchscreen board with PSRAM, the [profile grid](using-gadget.md#device-settings-and-hardware-checks)
+shows each offered profile with a small picture of its face instead of its initial: the idle
+picture of its `gadget-face.bin`, in the colour the device draws one-colour faces in, or else its
+Hermes avatar in colour. A profile with neither keeps its initial, and so does every profile on a
+board without PSRAM. The current profile shows the face the device holds for it.
+
+The thumbnails follow the files the same way: every 2 seconds the plugin compares each offered
+profile's face file and avatars with what it last read, and reads them again once they have
+changed and then stayed the same on two checks in a row. Only the thumbnail that changed is sent;
+the device keeps the others, and keeps them all through a reconnect, so nothing unchanged is sent
+again. Removing a profile's face file and avatar brings its initial back. A picture that cannot be read keeps what
+the device shows, and is tried again only once the files change. A profile parked or taken off the offer
+since the device connected is not looked at again.
+
 ## Placing the eye and the mouth
 
 The device blinks and talks, so the generator has to know where the face's features are. It

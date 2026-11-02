@@ -270,7 +270,7 @@ constexpr Msg kLines[] = {
     Msg::ButtonShowsSessions, Msg::LowBattery, Msg::Listening, Msg::SpeakNowPause, Msg::LiftFingerToSend, Msg::OfflineStillRecording, Msg::ReconnectingToSend,
     Msg::ReleaseToSend, Msg::Thinking, Msg::HermesAsks, Msg::Restarting, Msg::Updating, Msg::SetupNeeded,
     Msg::NoNetwork, Msg::Authenticating, Msg::ConnectingToHermes, Msg::PairingCode, Msg::PairThisDevice, Msg::RefusedByRoute,
-    Msg::ProfileTapName, Msg::ProfileInSettings,
+    Msg::ProfileSwipe, Msg::ProfileInSettings,
     Msg::TimerLeft, Msg::TapScreenToStop,
 };
 // A profile's greeting, in the name panel a touchscreen taps.
@@ -285,7 +285,7 @@ constexpr Msg kHeadlines[] = {
 constexpr Msg kButtons[] = {Msg::TapYes, Msg::ButtonYes, Msg::SwipeNo, Msg::ButtonNo};
 // Dashboard headings, and the session states shown as a row's value.
 constexpr Msg kDashHeadings[] = {Msg::HermesSessions, Msg::NoSessions, Msg::DashStatus};
-constexpr Msg kDashValues[] = {Msg::DashApproval, Msg::DashBusy, Msg::DashIdle, Msg::ProfileListCurrent};
+constexpr Msg kDashValues[] = {Msg::DashApproval, Msg::DashBusy, Msg::DashIdle};
 
 struct Panel {
   int w, h;

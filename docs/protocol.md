@@ -73,7 +73,7 @@ Because the id is derived from the key, nobody can claim another device's id wit
 - `caps.dashboard` (`{"v": 1, "rows": 6}`) means the device draws the [dashboard](#dashboard). `v` is the newest layout it draws, and `rows` is how many lines fit on its screen at once.
 - `actions` is the device's tool manifest. Each action has a JSON-Schema `params` object and a `description` written for the model.
 - `caps.profiles: true` means the device can switch Hermes profiles (see [Profiles](#profiles)). `profile` is the profile it used last; it is omitted for `default`.
-- `caps.faces: 1` means the device draws a face that the server sends for the profile answering it (see [Faces](#faces)). `caps.faces: {"v": 2, "px": 192}` means it also draws colour faces, at `px` pixels square (at most 256): the largest size its Ready screen draws the face at. Where Ready has less room, for example with a second caption line while the device offers profiles, the device scales the face down. `"frames": true` in that object means its colour faces also blink and talk. `face` is the `hash` of the face it holds from an earlier connection; it is omitted when it shows the mascot.
+- `caps.faces: 1` means the device draws a face that the server sends for the profile answering it (see [Faces](#faces)). `caps.faces: {"v": 2, "px": 192}` means it also draws colour faces, at `px` pixels square (at most 256): the largest size its Ready screen draws the face at. Where Ready has less room, for example with a second caption line while the device offers profiles, the device scales the face down. `"frames": true` in that object means its colour faces also blink and talk. `"thumbs": 96` in that object means the device's profile grid also takes a thumbnail of each offered profile, 96 pixels square (16 to 128); see [Profile thumbnails](#profile-thumbnails). `face` is the `hash` of the face it holds from an earlier connection; it is omitted when it shows the mascot. `thumbs` (`{"ops": "9c1d0e2f3a4b5c6d"}`) names the thumbnails it holds from an earlier connection, profile id to `hash`; it is `{}` when it holds none, and omitted by a device without `caps.faces.thumbs`.
 - `token` is required only when the host sets `GADGET_ACCESS_TOKEN`. A mismatch is rejected with error code `bad_token`.
 - `display_sleeping: true` means the screen is dark as the device connects; it is omitted while the screen is lit. See [Screen sleep](#screen-sleep).
 
@@ -110,7 +110,7 @@ If authentication fails, the server sends `{"type": "error", "code": "auth_faile
  "profile": "ops", "profiles": [{"id": "default", "name": "Hermes"}, {"id": "ops", "name": "Ops"}]}
 ```
 
-`profile` and `profiles` are present only when the device sent `caps.profiles` and the server offers profiles. The Hermes plugin offers the profiles a multiplexed gateway serves that `platforms.gadget.extra.profiles` lists (all of them for `all`), with `default` first; without that setting it offers none. The device keeps the first 8 entries of `profiles` and ignores the rest.
+`profile` and `profiles` are present only when the device sent `caps.profiles` and the server offers profiles. The Hermes plugin offers the profiles a multiplexed gateway serves that `platforms.gadget.extra.profiles` lists (all of them for `all`), with `default` first; without that setting it offers none. The device keeps the first 32 entries of `profiles` and ignores the rest.
 
 `face` is present only when the device named a face in `hello.face` and may keep it; see [Faces](#faces).
 
@@ -174,6 +174,25 @@ A device with `"frames": true` also takes a colour face that blinks and talks. I
 - The reference firmware sets the face's memory aside at start-up, after the framebuffer, on boards with PSRAM, and sends `"v": 2` only when that worked. It asks for room for `px / 2` band rows as well (36 KB at 192 px) and sends `"frames": true` only when it got it; otherwise it sets aside the picture alone. A server that predates colour faces compares `caps.faces` with 1, so it sends such a device no faces at all.
 
 The Hermes plugin sends a profile's `gadget-face.bin`, or else the profile's Hermes avatar made into a still face: in colour where the device draws colour faces, with the avatar's blink and talk pictures where it takes frames. See [Faces](faces.md#a-face-for-each-hermes-profile).
+
+### Profile thumbnails
+
+A device that sends `caps.faces.thumbs: N` shows each profile in its [profile grid](#profiles) with a picture, `N` pixels square, instead of the profile's initial. The server sends one for each profile in `welcome.profiles` that has a face, like a colour face but for any offered profile:
+
+| Message | Meaning |
+|---|---|
+| `{"type": "face.thumb.start", "stream": 12, "profile": "ops", "hash": "9c1d0e2f3a4b5c6d", "width": 96, "height": 96, "format": "rgb565"}` | A thumbnail begins; its pixels follow on binary channel 4, on `stream`, then `face.thumb.end` |
+| `{"type": "face.thumb.end", "stream": 12}` | End of the thumbnail's pixels |
+| `{"type": "face.thumb", "profile": "ops"}` | `ops` has no picture any more: the device shows its initial again |
+
+- The pixels are `N * N` RGB565 values, as for a colour face: little-endian, row-major, `0x0000` transparent, in chunks of up to 4096 bytes whose sequence numbers count up from 0. They share channel 4 with colour faces; `stream` tells them apart, so a thumbnail and a face may arrive at the same time.
+- `hash` names the thumbnail. The device keeps its thumbnails in memory through reconnects and names them in `hello.thumbs`; the server sends a profile's thumbnail only when its hash differs from the one the device named, or from the one it sent on this connection, so a reconnect sends nothing that did not change. A new thumbnail replaces only that profile's; the device shows the initial while its pixels arrive.
+- The device keeps a thumbnail only while it is paired and the profile is offered: a `welcome` that does not list the profile, a `welcome` with `paired: false` and `unpaired` drop it, and the server then forgets the hash too.
+- The device ignores a `face.thumb.start` for a profile the welcome did not offer, with another size or `format`, or a `hash` that is empty or longer than 64 characters, while unpaired, and a thumbnail whose chunks skip a sequence number or bring more than `N * N * 2` bytes; one whose `face.thumb.end` comes early is dropped.
+- The current profile's own colour or one-colour face, when the device holds one, shows in its cell instead of its thumbnail.
+- The reference firmware sends `caps.faces.thumbs` only on touchscreens with colour faces (so PSRAM). At start-up it sets aside room for 32 thumbnails at the size of the largest icon its grid draws, at most 128 px (1 MB); without room it tries smaller sizes down to 32 px, and without room for those sends no `thumbs`. A server that predates thumbnails ignores `caps.faces.thumbs` and `hello.thumbs`, and the grid shows initials.
+
+The Hermes plugin makes a profile's thumbnail from its `gadget-face.bin` (the idle picture, in the colour the device draws one-colour faces in) or else its Hermes avatar in colour. It looks again at each pairing check, every 2 seconds: see [Faces](faces.md#thumbnails-in-the-profile-grid).
 
 ## Conversation
 
