@@ -392,8 +392,11 @@ void TouchInput::gate_on_int() {
 // interrupt type register, so the edge ISR is off meanwhile), and the sleep exit hook sends the
 // task to read when INT is low after a wake. Awake again, the edge ISR comes back. With the
 // touch_wake setting off, a doze leaves INT quiet: no wake, no read, only a key lights the screen.
+// A touch_wake change during a doze (set_wakes nudges the task) re-arms with the new setting.
 void TouchInput::arm_sleep_wake(bool dozing) {
-  if (!sleep_wake_ || dozing == sleep_wake_armed_) return;
+  if (!sleep_wake_) return;
+  if (dozing && sleep_wake_armed_ && quiet_ == wakes_.load()) arm_sleep_wake(false);
+  if (dozing == sleep_wake_armed_) return;
   const auto pin = static_cast<gpio_num_t>(touch_.int_gpio);
   sleep_wake_armed_ = dozing;
   if (dozing) {
