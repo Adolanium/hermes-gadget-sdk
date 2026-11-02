@@ -1284,8 +1284,8 @@ void App::on_button(Button button, bool pressed) {
   }
   // A press closes the low battery alert and then does what it always does.
   if (pressed) {
+    mark_reply_read();  // what was on screen, before a notice over the reply closes
     close_notices_for_input();
-    mark_reply_read();
   }
   // The alarm: a press dismisses it, and its release is swallowed above, so nothing records.
   if (alarm_ && model_.screen == Screen::Alarm && pressed) {

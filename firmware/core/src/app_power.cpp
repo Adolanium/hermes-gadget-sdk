@@ -98,14 +98,14 @@ void App::set_dozing(bool dozing) {
 
 void App::on_power_key() {
   if (!hal_.display || !hal_.display->info().has_backlight) return;
+  // Turning the screen off is an answer to what was on it, before anything closes: a reply
+  // under a notice or a card the press closes stays unread. A press that only wakes reads nothing.
+  if (!display_sleeping_ && !display_dimmed_) mark_reply_read();
   close_notices_for_input();  // like any other press: it closes the alert and does its own thing
   if (display_sleeping_ || display_dimmed_) {
     wake_display();
     return;
   }
-  // Turning the screen off is an answer to what was on it, before anything closes:
-  // a reply under a card the press closes stays unread.
-  mark_reply_read();
   // Off means off: the menu, a list or a card the user was on closes, so the
   // next press wakes to the home screen and nothing open turns the screen back on.
   if (settings_open()) close_settings();

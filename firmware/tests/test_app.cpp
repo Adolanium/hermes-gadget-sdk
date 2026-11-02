@@ -2894,6 +2894,31 @@ TEST("battery alert: the indicator turns red at 15%, or at the highest alert lev
   CHECK(!r.app.model().battery_low);  // never red on USB
 }
 
+TEST("charging notice: PWR that closes it leaves the reply it covered unread") {
+  AlertPower battery;
+  Rig r;
+  r.hal.power = &battery;
+  r.fake.backlight = true;
+  battery.on_battery(42);
+  r.bring_online(true);
+  wait_quietly(r, 10000);
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(R"({"type":"reply","turn":"t","text":"Here is the answer."})");
+  r.server(R"({"type":"turn.end","turn":"t","outcome":"success"})");
+  wait_quietly(r, 10000);  // the turn settles; the reply's text still shows
+  CHECK(!r.app.model().hero);
+  battery.on_usb(42);
+  r.advance(5000);  // a lit screen reads the supply every few seconds
+  CHECK(r.app.charging_notice());  // over the reply's text, which has 5 s left
+  r.app.on_power_key();  // closes the notice and turns the screen off
+  CHECK_EQ(r.fake.brightness, 0);
+  wait_quietly(r, 30000);  // dark past the reply's 20 s
+  r.app.on_power_key();  // the wake shows the reply the notice covered
+  r.advance(200);
+  CHECK(!r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string("Here is the answer."));
+}
+
 TEST("charging notice: plugging in lights the dark screen with the level, which then times out as usual") {
   AlertPower battery;
   Rig r;
