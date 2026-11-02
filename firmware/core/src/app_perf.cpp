@@ -173,10 +173,12 @@ void App::bench_step() {
     case Bench::Mascot: m.frame = static_cast<uint32_t>(2 * i); break;  // the mouth moves every 2 frames
     case Bench::Redraw: ui_->invalidate(); break;
     case Bench::Settings: {
-      // The list moves 3 px per scale step per frame, down to the end and back, as a drag would.
+      // The list moves 3 px per scale step per frame, as a drag would, down to the end and
+      // back: each sweep lands on both ends exactly.
       const int span = std::max(1, ui_->settings_max_scroll(m)), px = 3 * ui_->layout().scale;
-      const int step = (i * px) % (2 * span);
-      m.settings_scroll = step <= span ? step : 2 * span - step;
+      const int half = (span + px - 1) / px;  // frames from the top to the end
+      const int k = i % (2 * half);
+      m.settings_scroll = std::min(span, (k <= half ? k : 2 * half - k) * px);
       break;
     }
     case Bench::None: return;
