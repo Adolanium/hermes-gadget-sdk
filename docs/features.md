@@ -74,7 +74,7 @@ The screenshots come from the desktop simulator, which runs the same device core
 - **Wi-Fi setup from a phone.** The gadget opens a temporary network with a QR code; a page on your phone saves the new network. [Phone setup](setup-board.md#set-up-wi-fi-with-your-phone)
 - **Several Wi-Fi networks.** The device keeps up to five and joins whichever is in range. [Saved Wi-Fi networks](hardware.md#saved-wi-fi-networks)
 - **Updates over the air.** `hermes gadget update <device> --latest` installs a newer release. A build that cannot reach Hermes rolls itself back. [Manage an existing gadget](setup-board.md#manage-an-existing-gadget)
-- **A recording survives a lost connection.** On boards with PSRAM, the device keeps recording while offline and sends the recording once it is back. [The recording buffer](architecture.md#the-recording-buffer)
+- **A recording survives a lost connection.** On boards with PSRAM to spare for the recording buffer, the device keeps recording while offline and sends the recording once it is back; a recording that ends offline is dropped after 45 seconds without a connection. [The recording buffer](architecture.md#the-recording-buffer)
 - **Short network stalls.** A Wi-Fi hiccup of up to 10 seconds no longer closes the connection to Hermes. [Troubleshooting](troubleshooting.md#connection-and-pairing)
 - **Slow links.** Boards with PSRAM use larger network buffers, so audio keeps up on a phone hotspot. [Network buffers](porting.md#network-buffers)
 - **Why a connection dropped.** Each lost connection is logged with its reason, and `diag` keeps the last five. [Troubleshooting](troubleshooting.md#connection-and-pairing)
@@ -87,7 +87,7 @@ The screenshots come from the desktop simulator, which runs the same device core
 
 ![Two pages of the profile grid on the 2.06-inch watch screen: Hermes with its face, example bots such as Finance Bot, Developer Bot and Travel Planner with robot avatars, and a Settings gear after the last profile](images/features/profile-grid.png)
 
-- **Profile grid.** When the host offers several profiles, swipe from right to left on the idle screen of a touchscreen for a grid of icons with names, then tap one to switch to it. A sideways swipe turns the page. **Hermes profile** in settings opens the same grid; boards without a touchscreen switch to the next profile from there. [Device settings](using-gadget.md#device-settings-and-hardware-checks)
+- **Profile grid.** When the host offers several profiles, swipe from right to left on the idle screen of a touchscreen for a grid of icons with names, then tap one to switch to it. A sideways swipe turns the page. **Hermes profile** in settings opens the same grid; boards without a touchscreen switch to the next profile from there. On Hermes v0.22.5 and other versions without the routing hook it needs, messages to the new profile fail. [Device settings](using-gadget.md#device-settings-and-hardware-checks), [Hermes versions](hermes-integration.md#running-against-a-profile-or-a-multiplexed-gateway)
 - **Up to 32 profiles.** The device keeps the default profile and up to 31 more, named as the Hermes interface names them. [Profile switching](hermes-integration.md#running-against-a-profile-or-a-multiplexed-gateway)
 - **Profiles per page.** A page holds 3 x 3 by default; the **Profiles per page** setting chooses 2 x 2, 2 x 3, 3 x 3 or 4 x 4, and a small screen uses the largest grid whose icons stay about 7 mm. [Device settings](using-gadget.md#device-settings-and-hardware-checks)
 - **A picture for each profile.** On boards with PSRAM, each profile's icon is its own face or Hermes avatar, sent by the plugin and updated when it changes. Other boards, and profiles with no picture, show the first letter in a colour of its own. [Thumbnails in the profile grid](faces.md#thumbnails-in-the-profile-grid)
@@ -110,7 +110,7 @@ The screenshots come from the desktop simulator, which runs the same device core
 
 ## Desktop, Linux and the simulator
 
-![The desktop simulator window](images/sim-window.png)
+![The desktop simulator: a round 466 x 466 device screen showing a reply from Hermes, Hold to talk and Cancel buttons below it, and the conversation with a text box on the right](images/sim-window.png)
 
 - **Desktop simulator.** Run the device on Windows, macOS or Linux, type or speak to it, and pick a board's screen size. [Try the simulator](desktop.md)
 - **Scripted runs.** Drive the simulator from a script or from Python, without a window. [Simulator controls](simulator.md#headless-and-scripted-runs)
@@ -131,9 +131,9 @@ The table shows what each board profile drives. In the battery column, "Voltage"
 | Waveshare ESP32-S3-Touch-LCD-1.46 | Yes | Yes | Yes | No | | Not run on a board |
 | Waveshare ESP32-S3-Touch-AMOLED-1.32 | Yes | Yes | Yes | No | | Not run on a board |
 | Waveshare ESP32-S3-Touch-AMOLED-1.43C | Yes | Yes | Yes | Voltage | | Not run on a board |
-| Waveshare ESP32-S3-Touch-AMOLED-1.75 | Yes | Yes | Yes | Gauge | Face-down sleep, clock chip | Some features checked |
+| Waveshare ESP32-S3-Touch-AMOLED-1.75 | Yes | Yes | Output, needs a speaker | Gauge | Face-down sleep, clock chip | Some features checked |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | Yes | Yes | Yes | Voltage (measured curves) | Light sleep | Report, on a branch build |
-| Waveshare ESP32-S3-Touch-AMOLED-1.8 (V2) | Yes | Yes | Yes | Gauge | | Smoke test |
+| Waveshare ESP32-S3-Touch-AMOLED-1.8 (V2) | Yes | Yes | Output, needs a speaker | Gauge | | Smoke test |
 | Waveshare ESP32-S3-Touch-AMOLED-2.06 (watch) | Yes | Yes | Yes | Gauge | Light sleep, clock chip | Partial report |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | Yes | Yes | Yes | Gauge | Clock chip | Smoke test |
 | Waveshare ESP32-S3-Touch-LCD-1.85C V2 | Yes | Yes | Speaker-box version | No | | Partial report |
@@ -141,7 +141,7 @@ The table shows what each board profile drives. In the battery column, "Voltage"
 | Espressif ESP-VoCat v1.2 | Yes | Yes | Yes | No | | Smoke test |
 | Xorigin AIPI Lite | No | Yes | Yes | No | | Smoke test |
 | Spotpear ESP32-S3-1.28-BOX | Yes | Yes | Yes | Voltage | | Not run on a board |
-| Spotpear ESP32-S3-1.54 muma | Yes | Yes | Yes | Voltage | Light sleep | Smoke test |
+| Spotpear ESP32-S3-1.54 muma | Touch version | Yes | Yes | Voltage | Light sleep | Smoke test |
 | Espressif ESP32-S3-BOX | Yes | Yes | Yes | No | | Not run on a board |
 | Espressif ESP32-S3-Korvo-2 | Yes | Yes | Yes | Voltage | | Not run on a board |
 | Espressif ESP32-S3-BOX-3 | Yes | Yes | Yes | No | | No report yet |
@@ -156,4 +156,4 @@ The table shows what each board profile drives. In the battery column, "Voltage"
 | Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C | Yes | Yes | Yes | No | | Partial report |
 | Raspberry Pi 4 or 5 | Optional screen | USB audio | USB audio | No | GPIO buttons and outputs | No report yet |
 
-Every board with a display can show the resting clock and run timers. Boards with PSRAM also keep a recording through a lost connection, show colour faces, and show each profile's picture in the profile grid. Voice needs [speech recognition and text-to-speech in Hermes](connect-hermes.md#4-enable-speech); boards without audio show replies as text.
+Every board with a display can show the resting clock and run timers. Boards with PSRAM also keep a recording through a lost connection (when the recording buffer fits), show colour faces, and show each profile's picture in the profile grid. Voice needs [speech recognition and text-to-speech in Hermes](connect-hermes.md#4-enable-speech); boards without audio show replies as text.
