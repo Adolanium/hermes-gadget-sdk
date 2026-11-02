@@ -13,7 +13,8 @@ Hermes's gateway runs "platform adapters": Telegram, Slack and about twenty othe
 | `adapter.py` | `GadgetAdapter(BasePlatformAdapter)`: the Hermes-facing side |
 | `hub.py` | WebSocket server, auth, audio, images, actions (no Hermes imports) |
 | `tools.py` | `gadget_devices`, `gadget_display`, `gadget_action` |
-| `store.py`, `protocol.py`, `audio.py`, `textfmt.py`, `imaging.py` | Support modules (no Hermes imports) |
+| `store.py`, `status.py`, `protocol.py`, `audio.py`, `textfmt.py`, `imaging.py` | Support modules (no Hermes imports) |
+| `dashboard/` | The **Gadgets** tab of the Hermes web dashboard: `manifest.json`, the backend routes in `plugin_api.py`, and the tab's bundle in `dist/`, built from `src/` (see [The Gadgets tab](#the-gadgets-tab-in-the-hermes-dashboard)) |
 
 Each device is a direct-message chat whose `chat_id` and `user_id` are the device id. Everything Hermes does for a DM on any platform then applies unchanged: sessions and memory, `/new`, `/stop`, `/voice`, model routing, approvals and delivery.
 
@@ -73,6 +74,29 @@ After the restart, run `hermes gadget info` and use the new URL to update each d
 
 `hermes gadget info` prints the configured URL. It does not confirm that the running gateway has rebound to that address. Check the gateway's startup log for the listening port and confirm that a device reconnects.
 
+## The Gadgets tab in the Hermes dashboard
+
+The plugin adds a **Gadgets** tab to the Hermes web dashboard (`hermes dashboard`). It lists every device this Hermes knows, with its board, firmware, when it was last seen, whether it is waiting to be paired, and, while the gateway runs, whether it is online and its battery. The tab is read-only for now: pair, rename, forget and update devices with `hermes gadget` as before.
+
+It needs nothing beyond the plugin: the tab appears once the plugin is enabled (`plugins.enabled: [gadget]`) and the dashboard has been restarted, since the dashboard mounts plugin routes when it starts. Without the `dashboard/` folder the plugin works exactly as before.
+
+**Which process does what.** The tab's backend, `dashboard/plugin_api.py`, runs in the dashboard's process, behind the dashboard's own login: Hermes refuses an unauthenticated request to `/api/plugins/gadget/` before the plugin's code runs. The devices' connections are in the gateway's process. The two never call each other; they read the same files in `<hermes home>/plugin-data/gadget/`, like `hermes gadget` does:
+
+| File | Written by | The tab reads |
+|---|---|---|
+| `devices.json` | the gateway, `hermes gadget pair` and `forget` | name, board, firmware, last seen, pending pairing. Device keys are never returned |
+| `status.json` | the running gateway | which devices are connected now, since when, and their battery readings (`battery_percent`, `battery_mv`, `charging`, `external_power`, `battery_present`) |
+
+The gateway replaces `status.json` in one step (a temporary file, then a rename), so a reader never sees half of it. It rewrites the file within about 2 seconds of a device connecting or leaving, of a change of pairing or profile, and of a new battery percentage or power source, and at least every 30 seconds otherwise. A voltage change alone waits for the next write. A gateway that stops writes the file with no devices online; one that dies without doing so leaves a file older than 90 seconds, which the tab treats the same way. Either way the tab says the gateway is not running and shows no online state or battery.
+
+| Route | Returns |
+|---|---|
+| `GET /api/plugins/gadget/devices` | `gateway`: `running` and `updated_at` of the status file; `devices`: `id`, `name`, `board`, `firmware`, `last_seen`, `enrolled_at`, `pending`, `online`, `connected_at` and `battery` (null when offline or not reported) |
+
+**The bundle.** `dashboard/dist/index.js` is built output. Its source is `dashboard/src/index.jsx`; `npm run build:dashboard-tab` in `site/` rebuilds it with esbuild (pinned in `site/package.json`) as one IIFE that takes React and the UI components from the dashboard's plugin SDK (`window.__HERMES_PLUGIN_SDK__`) and bundles no library. `npm test` in `site/` fails when the committed bundle differs from a fresh build of the source.
+
+The Hermes desktop app has its own plugin SDK and does not show this tab; only the `/api/plugins/gadget/` routes are shared with it.
+
 ## Hermes surfaces the SDK uses
 
 | Need | Hermes surface | Notes |
@@ -98,7 +122,8 @@ After the restart, run `hermes gadget info` and use the new URL to update each d
 | Authorization state | `BasePlatformAdapter._is_sender_authorized()` | The runner-installed check; used to mirror approval and revocation to the device |
 | Agent tools | `ctx.register_tool(toolset="gadget")` | Part of the implicit `hermes-gadget` toolset; also usable from other chats |
 | Tool session context | `gateway.session_context.get_session_env` | `HERMES_SESSION_PLATFORM` / `HERMES_SESSION_CHAT_ID` pick the default device |
-| Durable state | `plugins.plugin_storage.plugin_data_dir("gadget")` | Enrolled device keys, pending pairing codes, and firmware staged for updates (`updates/`) |
+| Durable state | `plugins.plugin_storage.plugin_data_dir("gadget")` | Enrolled device keys, pending pairing codes, firmware staged for updates (`updates/`), and the running gateway's live device status (`status.json`) |
+| Web dashboard tab | `dashboard/manifest.json`, `dashboard/plugin_api.py` (a FastAPI `router` under `/api/plugins/gadget/`), `window.__HERMES_PLUGIN_SDK__` | The **Gadgets** tab. Reads the plugin's data files; never calls the gateway. See [The Gadgets tab](#the-gadgets-tab-in-the-hermes-dashboard) |
 | Host CLI | `ctx.register_cli_command("gadget", ...)` | `hermes gadget devices / forget / info / pair / update`. `pair` waits for a device to show a code and approves it after asking. `update` stages an image in the plugin's data directory (a file, or with `--latest` the newest release's image for the device's board, checked against the release manifest); the gateway's adapter installs it once the device is online and writes progress back for the command |
 | Send and cron targets | `parse_target_ref_fn`, `cron_deliver_env_var` | `gadget:hg-0123456789abcdef` works with send_message and cron delivery; `GADGET_HOME_CHANNEL` supplies a default cron device |
 
