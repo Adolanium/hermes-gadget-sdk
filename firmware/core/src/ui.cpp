@@ -389,6 +389,20 @@ Ui::Ui(Display& display)
       }
     };
     runs(band_rows_, [&](int d2) { return d2 <= band_out_ * band_out_ && d2 > band_in_ * band_in_; });
+    // Each degree's rectangle of band pixels, by the angle ring_pixel reads (comet_box).
+    const RingBox none{static_cast<int16_t>(panel_.width), static_cast<int16_t>(panel_.height), 0, 0};
+    ring_degrees_.assign(360, none);
+    for (int y = 0; y < panel_.height; ++y) {
+      const BandRow& row = band_rows_[static_cast<size_t>(y)];
+      for (int run = 0; run < 2; ++run)
+        for (int x = row.x0[run]; x < row.x1[run]; ++x) {
+          RingBox& b = ring_degrees_[static_cast<size_t>(ring_angle64(x - cx, y - cy) / 64)];
+          b.x0 = std::min(b.x0, static_cast<int16_t>(x));
+          b.y0 = std::min(b.y0, static_cast<int16_t>(y));
+          b.x1 = std::max(b.x1, static_cast<int16_t>(x + 1));
+          b.y1 = std::max(b.y1, static_cast<int16_t>(y + 1));
+        }
+    }
     // The resting clock's ring takes the band and the seconds dot's reach, which is wider:
     // radii within the dot's radius, 4s, of the band's middle, plus a pixel. In half pixels,
     // so every bound is a whole number: the reach is 8s plus 2. Past the band, ring_pixel
@@ -508,11 +522,15 @@ void Ui::draw_frame(const UiModel& m) {
   // The edge ring (round panels). One that appears or goes repaints the panel once: without a
   // ring the bands own its pixels in the UI square's corners. A banded framebuffer no longer
   // holds the rows a change would resend, so any change repaints it. Otherwise only the
-  // band's pixels that changed go out, after whatever this frame draws (update_ring).
+  // band's pixels that changed go out, after whatever this frame draws (update_ring), and a
+  // comet's step computes only the pixels it lights where it was or where it is now.
   const EdgeRing ring = panel_.round ? edge_ring(m) : EdgeRing{};
   if ((ring.kind == EdgeRing::Kind::None) != (ring_.kind == EdgeRing::Kind::None)) valid_ = false;
   if (ring != ring_ && display_.framebuffer_rows() > 0) valid_ = false;
   bool ring_moved = valid_ && ring != ring_;
+  const RingBox moved = ring_moved && ring_.kind == EdgeRing::Kind::Comet && ring.kind == EdgeRing::Kind::Comet
+                            ? comet_box(ring_.head, ring.head)
+                            : RingBox{0, 0, static_cast<int16_t>(panel_.width), static_cast<int16_t>(panel_.height)};
   // On the clock only the seconds dot moves from one second to the next: where it was. A new
   // minute turns the ticks too, but then draw_clock repaints the whole panel, ring included
   // (its hash keys on the minute), and the dot's rows hold nothing more to change.
@@ -530,9 +548,10 @@ void Ui::draw_frame(const UiModel& m) {
       // either side of each centre's row.
       const int cy = panel_.height / 2, reach = isqrt(ring_dot_r2_) / 16;
       const int32_t top = std::min(dot_was, ring_dot_y16_), bottom = std::max(dot_was, ring_dot_y16_);
-      update_ring(cy + top / 16 - reach, cy + bottom / 16 + reach + 1);
+      update_ring({0, static_cast<int16_t>(cy + top / 16 - reach), static_cast<int16_t>(panel_.width),
+                   static_cast<int16_t>(cy + bottom / 16 + reach + 1)});
     } else if (ring_moved) {
-      update_ring(0, panel_.height);
+      update_ring(moved);
     }
     return;
   }
@@ -607,7 +626,7 @@ void Ui::draw_frame(const UiModel& m) {
     hero_valid_ = true;
     hash_[1] = hash_[2] = 0;  // header and content must repaint when hero mode ends
     valid_ = true;
-    if (ring_moved) update_ring(0, panel_.height);
+    if (ring_moved) update_ring(moved);
     return;
   }
   hero_valid_ = false;
@@ -640,7 +659,7 @@ void Ui::draw_frame(const UiModel& m) {
     hash_[i] = hashes[i];
   }
   valid_ = true;
-  if (ring_moved) update_ring(0, panel_.height);
+  if (ring_moved) update_ring(moved);
 }
 
 void Ui::draw_top(Canvas& c, const UiModel& m) {
@@ -1733,21 +1752,38 @@ void Ui::paint_ring(int y0, int y1) {
   }
 }
 
-// Only the ring changed on a panel that stays: writes the ring's pixels in panel rows [y0, y1)
-// that differ and sends their rows, changed rows at most 8 apart as one run. A framebuffer that
+// The rectangle that holds every band pixel a comet lights with its head at `was` or at
+// `now`: ring_pixel lights the 70 degrees behind the head and the one ahead of it, so the
+// whole degrees from 70 behind each head to the head (ring_degrees_).
+Ui::RingBox Ui::comet_box(uint16_t was, uint16_t now) const {
+  RingBox box{static_cast<int16_t>(panel_.width), static_cast<int16_t>(panel_.height), 0, 0};
+  for (const uint16_t head : {was, now})
+    for (int back = 0; back <= kTail64 / 64; ++back) {
+      const RingBox& d = ring_degrees_[static_cast<size_t>((head % 360 + 360 - back) % 360)];
+      box.x0 = std::min(box.x0, d.x0);
+      box.y0 = std::min(box.y0, d.y0);
+      box.x1 = std::max(box.x1, d.x1);
+      box.y1 = std::max(box.y1, d.y1);
+    }
+  return box;
+}
+
+// Only the ring changed on a panel that stays: writes the ring's pixels inside `box` that
+// differ and sends their rows, changed rows at most 8 apart as one run. A framebuffer that
 // holds the whole panel only (draw_frame repaints a banded one).
-void Ui::update_ring(int y0, int y1) {
+void Ui::update_ring(const RingBox& box) {
   if (ring_.kind == EdgeRing::Kind::None || band_rows_.empty() || display_.framebuffer_rows() > 0) return;
   uint16_t* fb = display_.framebuffer();
   const int w = panel_.width, cx = w / 2, cy = panel_.height / 2;
   const std::vector<BandRow>& rows = ring_rows();
   int first = -1, last = -1;  // the run of changed rows not sent yet
-  for (int y = std::max(0, y0); y < std::min<int>(panel_.height, y1); ++y) {
+  for (int y = std::max<int>(0, box.y0); y < std::min<int>(panel_.height, box.y1); ++y) {
     const BandRow& row = rows[static_cast<size_t>(y)];
     uint16_t* line = fb + static_cast<size_t>(y) * static_cast<size_t>(w);
     bool changed = false;
     for (int run = 0; run < 2; ++run) {
-      for (int x = row.x0[run]; x < row.x1[run]; ++x) {
+      const int x1 = std::min<int>(row.x1[run], box.x1);
+      for (int x = std::max<int>(row.x0[run], box.x0); x < x1; ++x) {
         uint16_t c = ring_pixel(x - cx, y - cy);
         if (panel_.swap_bytes) c = static_cast<uint16_t>((c >> 8) | (c << 8));
         if (line[x] == c) continue;

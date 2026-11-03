@@ -666,6 +666,69 @@ TEST("ring: a comet step sends only the rows it crossed, and a repeated frame se
   CHECK_EQ(p.display.flushed_rows, 0);
 }
 
+TEST("ring: step by step on every round size, each comet's update leaves exactly what a full paint draws") {
+  // A comet's step computes only the rectangle that holds what it lights where it was and
+  // where it is (comet_box). Every head each comet takes, a lap's wrap past 12 o'clock, the
+  // changes of colour and of lap, a recording's arc before and after a comet, and skipped
+  // frames must all end as a fresh paint of the same model does.
+  const struct {
+    int size, font_scale;
+    bool emissive;
+  } panels[] = {{240, 1, false}, {360, 1, false}, {360, 2, false}, {412, 1, false},
+                {466, 2, true},  {480, 2, false}, {800, 3, false}};
+  for (const auto& t : panels) {
+    Panel p(t.size, t.size, t.font_scale, t.emissive, true);  // byte-swapped, as the AMOLED panels are
+    int wrong = 0;
+    auto show = [&](Screen screen, uint32_t frame, bool speaking = false, int progress = -1) {
+      hg::UiModel m = ring_model(screen, frame);
+      m.speaking = speaking;
+      m.progress_permille = static_cast<int16_t>(progress);
+      p.ui.render(m);
+      Panel fresh(t.size, t.size, t.font_scale, t.emissive, true);
+      fresh.ui.render(m);
+      if (p.display.fb != fresh.display.fb) ++wrong;
+    };
+    uint32_t f = 0;
+    for (; f <= 25; ++f) show(Screen::Boot, f);  // amber, 15 degrees a frame, past 12 o'clock
+    for (; f <= 28; ++f) show(Screen::Connecting, f);
+    for (; f <= 30; ++f) show(Screen::Listening, f, false, 100 + 30 * static_cast<int>(f));  // the level arc
+    for (; f <= 56; ++f) show(Screen::Thinking, f);  // blue: a new colour, a lap and more
+    for (; f <= 98; ++f) show(Screen::Responding, f, true);  // amber, 9 degrees a frame: the head jumps
+    for (; f <= 120; f += 3) show(Screen::Responding, f, true);  // skipped frames: 27 degrees a step
+    show(Screen::Responding, f, false);  // nothing spoken: the ring goes
+    show(Screen::Thinking, ++f);
+    show(Screen::Listening, ++f, false, 500);  // a talk-over: the comet gives way to the arc
+    CHECK_EQ(wrong, 0);
+  }
+}
+
+TEST("ring: a comet's step leaves the band away from both of its places alone") {
+  // update_ring writes a band pixel only where the colour it computes differs, so a pixel it
+  // never computes keeps whatever the framebuffer held: here a colour no comet uses, on the
+  // ring's far side. From frame 6 to 7 the head moves from 90 to 105 degrees, so the two
+  // comets light 20 to 106 degrees between them.
+  Panel p(466, 466, 2, true);  // the AMOLED-1.75's size, scale and glass
+  hg::UiModel m = ring_model(Screen::Thinking, 6);  // frames 6 and 7: the mascot holds still
+  m.headline = "Thinking";
+  p.ui.render(m);
+  constexpr uint16_t kMark = hg::rgb565(255, 0, 255);
+  int marked = 0;
+  for (int y = 0; y < p.h; ++y)
+    for (int x = 0; x < p.w; ++x) {
+      const double a = angle_deg(x, y, p.cx, p.cy);
+      if (!p.in_band(x, y) || a < 200.0 || a > 320.0) continue;  // 94 degrees clear of each end
+      p.display.fb[static_cast<size_t>(y * p.w + x)] = kMark;
+      ++marked;
+    }
+  CHECK(marked > 1000);
+
+  m.frame = 7;
+  p.ui.render(m);
+  const double head = brightest_angle(p);
+  CHECK(head >= 102.0 && head <= 108.0);  // the comet moved
+  CHECK_EQ(static_cast<int>(pixels_of(p, kMark).size()), marked);  // and nothing far off was computed
+}
+
 TEST("ring: on every round size, every state's lit pixels outside the UI square lie in the band") {
   const struct {
     int size, font_scale;
