@@ -28,6 +28,7 @@ bool App::menu_offered(Menu item) const {
     case Menu::ChargingSound: return hal_.power != nullptr && hal_.speaker != nullptr;
     case Menu::ChargedNotice: return hal_.power != nullptr && hal_.display != nullptr;
     case Menu::ChargedSound: return hal_.power != nullptr && hal_.speaker != nullptr;
+    case Menu::WifiDeepSleep: return hal_.power != nullptr && static_cast<bool>(current_wifi);
     case Menu::TouchTalk: return profile_.touch_screen && profile_.talk_key;
     case Menu::TouchWake: return profile_.touch_screen && profile_.wake_key && hal_.display != nullptr;
     case Menu::DoubleHome: return profile_.talk_key;
@@ -195,6 +196,9 @@ void App::settings_input(Button button, bool pressed) {
     case Menu::TouchWake:
       console(touch_wake_ ? "set touch_wake off" : "set touch_wake on");
       break;
+    case Menu::WifiDeepSleep:
+      console(wifi_deep_sleep_ ? "set wifi_deep_sleep off" : "set wifi_deep_sleep on");
+      break;
     case Menu::DoubleHome:
       console(double_home_ ? "set double_home off" : "set double_home on");
       break;
@@ -342,6 +346,7 @@ SettingRow App::settings_row(Menu item, const std::string& label, const std::str
     case Menu::ChargingSound: row.icon = Icon::Volume; row.kind = Kind::Toggle; row.level = charging_sound_; break;
     case Menu::ChargedNotice: row.icon = Icon::Check; row.kind = Kind::Toggle; row.level = charged_notice_enabled_; break;
     case Menu::ChargedSound: row.icon = Icon::Volume; row.kind = Kind::Toggle; row.level = charged_sound_; break;
+    case Menu::WifiDeepSleep: row.icon = Icon::Wifi; row.kind = Kind::Toggle; row.level = wifi_deep_sleep_; break;
     case Menu::IdleTimer: row.icon = Icon::Timer; break;
     case Menu::TouchTalk: row.icon = Icon::Touch; row.kind = Kind::Toggle; row.level = touch_talk_; break;
     case Menu::TouchWake: row.icon = Icon::Touch; row.kind = Kind::Toggle; row.level = touch_wake_; break;
@@ -568,6 +573,10 @@ void App::settings_item(Menu item, UiModel& m) const {
     case Menu::ChargedSound:
       m.detail = tr(Msg::ChargedSound);
       m.body = tr(charged_sound_ ? Msg::ChargedSoundOn : Msg::ChargedSoundOff);
+      break;
+    case Menu::WifiDeepSleep:
+      m.detail = tr(Msg::WifiDeepSleep);
+      m.body = tr(wifi_deep_sleep_ ? Msg::WifiDeepSleepOn : Msg::WifiDeepSleepOff);
       break;
     case Menu::TouchWake:
       m.detail = tr(Msg::TouchWake);

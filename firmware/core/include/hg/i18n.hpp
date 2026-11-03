@@ -95,6 +95,9 @@ namespace hg::i18n {
   X(ChargedSoundOff,        "Off\nA full battery is silent.") \
   X(BatteryFull,            "Battery full") \
   X(YouCanUnplug,           "You can unplug") \
+  X(WifiDeepSleep,          "Deep Wi-Fi sleep") \
+  X(WifiDeepSleepOn,        "On\nOn battery with the screen dark, Wi-Fi sleeps deeper.") \
+  X(WifiDeepSleepOff,       "Off\nFor a router that drops the gadget while it sleeps.") \
   X(TouchWake,              "Touch wakes screen") \
   X(TouchWakeOn,            "On\nA touch lights the dark screen.") \
   X(TouchWakeOff,           "Off\nOnly a button lights the dark screen.") \

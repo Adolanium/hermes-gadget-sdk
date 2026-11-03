@@ -7946,6 +7946,45 @@ TEST("settings list: the battery alert and charging items have their icons and s
   CHECK_EQ(int(row("Charging sound").level), before ? 0 : 1);
 }
 
+TEST("settings: Deep Wi-Fi sleep is on by default, toggles wifi_deep_sleep, and shows only with a battery and Wi-Fi") {
+  KeyPower key;
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.hal.power = &key;
+  r.app.current_wifi = [] { return std::string("home"); };
+  r.bring_online(true);
+  CHECK(r.app.wifi_deep_sleep());
+  CHECK_EQ(r.app.console("set wifi_deep_sleep maybe"), std::string("@error wifi_deep_sleep must be on or off"));
+  CHECK(r.app.open_settings());
+  const int i = settings_row(r, "Deep Wi-Fi sleep");
+  CHECK(i >= 0);
+  const hg::SettingRow& row = r.app.model().settings[static_cast<size_t>(i < 0 ? 0 : i)];
+  CHECK(row.icon == hg::SettingRow::Icon::Wifi);
+  CHECK(row.kind == hg::SettingRow::Kind::Toggle);
+  CHECK_EQ(int(row.level), 1);
+  CHECK(find_setting(r, "Deep Wi-Fi sleep"));
+  CHECK(r.app.model().body.rfind("On\n", 0) == 0);
+  r.app.on_button(hg::Button::Talk, true);  // select: the switch flips and is kept
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(!r.app.wifi_deep_sleep());
+  CHECK_EQ(r.fake.kv["wifi_deep_sleep"], std::string("off"));
+  CHECK(r.app.model().body.rfind("Off\n", 0) == 0);
+  CHECK_EQ(r.app.console("set wifi_deep_sleep on"), std::string("@ok wifi_deep_sleep"));
+  CHECK(r.app.wifi_deep_sleep());
+
+  Rig plugged(Rig::touch_profile());  // no battery reading: no item
+  plugged.app.current_wifi = [] { return std::string("home"); };
+  plugged.bring_online(true);
+  CHECK(plugged.app.open_settings());
+  CHECK(settings_row(plugged, "Deep Wi-Fi sleep") < 0);
+  KeyPower key2;
+  Rig no_wifi(Rig::touch_profile());  // the simulator: no Wi-Fi to tune
+  no_wifi.hal.power = &key2;
+  no_wifi.bring_online(true);
+  CHECK(no_wifi.app.open_settings());
+  CHECK(settings_row(no_wifi, "Deep Wi-Fi sleep") < 0);
+}
+
 TEST("settings list: buttons scroll the list smoothly to the selection, and back to the top on the next visit") {
   Rig r;
   r.fake.backlight = true;

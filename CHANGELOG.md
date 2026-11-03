@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Firmware
+
+- On battery with the screen dark and nothing going on (the doze that lets a light-sleep board sleep), Wi-Fi switches from minimum to maximum modem sleep once Hermes has sent nothing but its heartbeat ping for 10 s: the radio wakes every third beacon, about every 300 ms, instead of at every DTIM. A message from Hermes then waits at most that long at the access point, well inside the 20 s heartbeat and its 60 s timeout. The screen lighting, a turn, or any other message from Hermes goes back to minimum modem sleep at once, and a turn or USB keeps the radio fully awake as before. The station asks the access point for a listen interval of 3 when it joins, and each switch is logged (`hg.wifi: power save: max modem`). A **Deep Wi-Fi sleep** settings item, or `set wifi_deep_sleep off`, keeps minimum modem sleep on battery as before, for an access point that drops or delays clients in deeper sleep; it is on by default and shows on ESP32 boards that read their battery. On a Waveshare AMOLED-2.06 under light use, discharges of the same firmware with the setting on and off reached 15% within 10 minutes of each other (6 h 22 min to 6 h 32 min), so no clear battery gain was measured on that board. [Hardware verification](docs/hardware-validation.md#waveshare-amoled-206-wi-fi-max-modem-sleep-report).
+
 ## 0.5.0
 
 Hermes Gadget 0.5.0 adds a **Gadgets** page to the Hermes desktop app: a gadget that runs in the window, pairing with one click, a live copy of each device's screen, and buttons to send a card or run a device action. Profile faces come in colour on boards with PSRAM, and they blink and talk. The screen shows Russian, and Chinese as a build option. On boards with PSRAM a recording survives a lost connection, and larger network buffers keep the microphone up on slow links such as a phone hotspot. Eight experimental board profiles arrive: the M5Stack StickS3, the Waveshare ESP32-P4-WIFI6-Touch-LCD-7B with camera capture, the Waveshare ESP32-S3-Touch-AMOLED-1.32 and 1.43C, the Waveshare ESP32-S3-Touch-LCD-1.83 and 1.46, the original Espressif ESP32-S3-BOX and the ESP32-S3-Korvo-2. Details by area follow.

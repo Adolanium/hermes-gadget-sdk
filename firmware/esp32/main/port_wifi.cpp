@@ -306,9 +306,10 @@ void Wifi::scan_done() {
 
 void Wifi::apply_power_save(uint32_t now, const hg::App& app) {
   // Modem sleep only on battery and outside a turn, deeper while dozing quietly
-  // (wifi_power.hpp); a board without a battery reading counts as plugged in.
+  // (wifi_power.hpp) unless `wifi_deep_sleep` is off; a board without a battery
+  // reading counts as plugged in.
   const auto want = power_save_.change(now, [this] { return on_battery && on_battery(); }, app.in_turn(),
-                                       app.dozing(), app.traffic_at());
+                                       app.dozing() && app.wifi_deep_sleep(), app.traffic_at());
   if (!want) return;
   static constexpr wifi_ps_type_t kMode[] = {WIFI_PS_NONE, WIFI_PS_MIN_MODEM, WIFI_PS_MAX_MODEM};
   if (esp_wifi_set_ps(kMode[static_cast<int>(*want)]) != ESP_OK) return;

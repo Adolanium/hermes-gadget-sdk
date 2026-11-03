@@ -200,6 +200,26 @@ After this report, review disabled light sleep for this board. Its FT3168 interr
 - **Use:** the owner wore it for several days with this firmware. Recordings, replies and the connection to Hermes behaved as before; light sleep only runs while the screen is dark, on battery and idle.
 - **Not measured:** battery life before and after the change. A full discharge with `battery_log` will add it.
 
+## Waveshare AMOLED-2.06 Wi-Fi max modem sleep report
+
+- **Board:** the same Waveshare ESP32-S3-Touch-AMOLED-2.06 as the light sleep report, on its own cell.
+- **Firmware:** `main` at [`a483c88`](https://github.com/Adolanium/hermes-gadget-sdk/commit/a483c88) with the first commit of this change for the switching check and the first discharge. `main` at [`5fbbc77`](https://github.com/Adolanium/hermes-gadget-sdk/commit/5fbbc77) with both commits (the `wifi_deep_sleep` setting included) for the setting checks and the later discharges. Both images carry a local commit that only logs the battery at the start and end of each doze. Built with ESP-IDF 6.1.0 through PlatformIO.
+- **Switching:** unplugged with the screen dark, the log showed `power save: max modem` 2.6 s after the doze began. Plugging back in 523 s later ended the doze and showed `min modem`, then `off` at the next 5 s battery check. That doze spent 77% of its time in light sleep, with 7,415 wake-ups (about 14 a second): no fewer wake-ups than under minimum modem sleep in the light sleep report.
+- **Setting:** `set wifi_deep_sleep maybe` is refused, `off` and `on` are accepted, and the value survives a reset. With it on, an overnight doze of 27,034 s stayed in `max modem` (75% light sleep, about 12 wake-ups a second); the low-battery alert lit the screen and gave `min modem`, the next doze `max modem`, and USB `off`. With it on and with it off, USB gave `off` at start-up. With it off, the two discharges below ran without a serial log (the board restarted when plugged back in, which clears the log), so that `off` never reaches `max modem` on the watch was not seen in a log; the setting read `off` before and after them, and host tests cover the rule.
+- **Connection:** online through every doze and discharge, with a battery reading every 30 s and no gap longer than 2 min until the cell ran out. A text turn worked on USB with the setting off. Voice and text turns during the first discharge worked as before; no turn was made on battery on the second image.
+- **Battery life:** each run starts from a full charge, unplugged with `battery_log` reading every 30 s, under light use with the screen mostly dark. The end is the last reading before the cell ran out.
+
+  | Image | `wifi_deep_sleep` | Unplugged | To 15% | To the end |
+  |---|---|---|---|---|
+  | older `dev-206-next` at `ee57539` (before the change) | (minimum only) | 4,126 mV | 5 h 59 min | 8 h 14 min (3,038 mV) |
+  | `a483c88` + first commit | (on) | 4,173 mV | 6 h 52 min | 9 h 19 min (3,047 mV) |
+  | `5fbbc77` + both commits | on | 4,130 mV | 6 h 32 min | not run down: plugged in at 15% |
+  | `5fbbc77` + both commits | off | 4,126 mV | 6 h 22 min | 9 h 00 min (2,992 mV) |
+  | `5fbbc77` + both commits | off | 4,131 mV | 6 h 29 min | 8 h 52 min (3,039 mV) |
+
+  On the same image, the run with the setting on reached 15% 3 to 10 min later than the two runs with it off, which is within the spread between the two runs with it off. These runs show no clear battery gain from maximum modem sleep on this board. The 1 h 05 min between the first two rows came mostly from other changes between those images. Use was not controlled between runs.
+- **Not measured:** the current draw in each mode.
+
 ## Waveshare AMOLED-2.16 physical smoke check
 
 - **Board / revision:** Waveshare ESP32-S3-Touch-AMOLED-2.16, SKU 33969. USB discovery reported ESP32-S3 chip revision v0.2, 16 MB flash and 8 MB octal PSRAM (gen-3 die, 80 MHz). PCB revision not established.
