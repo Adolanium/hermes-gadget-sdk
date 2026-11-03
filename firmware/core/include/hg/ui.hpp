@@ -303,13 +303,18 @@ class Ui {
   // Rows [y0, y1) that hero animations may touch for this screen.
   void hero_anim_rows(const UiModel& m, int& y0, int& y1) const;
   // Round panels: the edge ring (set_ring derives what its pixels need once per frame;
-  // paint_ring paints it over rows; update_ring writes and sends only what changed), and
-  // the whole-panel faces (draw_alarm, draw_clock).
+  // paint_ring paints it over rows; update_ring writes and sends only what changed in a
+  // rectangle, which comet_box narrows to what a comet's step can change), and the
+  // whole-panel faces (draw_alarm, draw_clock).
+  struct RingBox {
+    int16_t x0, y0, x1, y1;  // panel columns [x0, x1) and rows [y0, y1)
+  };
   void set_ring(const EdgeRing& ring);
   void turn_ticks(int32_t turn64);
   uint16_t ring_pixel(int dx, int dy) const;
   void paint_ring(int y0, int y1);
-  void update_ring(int y0, int y1);
+  void update_ring(const RingBox& box);
+  RingBox comet_box(uint16_t was, uint16_t now) const;
   void draw_alarm(const UiModel& m);
   void draw_clock(const UiModel& m);
   void draw_battery_face(const UiModel& m);  // LowBattery, Charging, Charged
@@ -335,9 +340,10 @@ class Ui {
   uint64_t input_at_ = 0;
   bool input_pending_ = false;
   // Round panels: the edge ring's band per panel row (up to two runs of pixels), the rows the
-  // resting clock's ring takes (the band and the seconds dot's reach past it) and the radii
-  // the band spans; what push() paints the ring with this frame, and what that needs per
-  // pixel: the level's sweep, the comet's head (1/64 degree) and its colour and the
+  // resting clock's ring takes (the band and the seconds dot's reach past it), the radii the
+  // band spans and, for each degree clockwise from 12 o'clock, the rectangle that holds the
+  // band's pixels at that angle; what push() paints the ring with this frame, and what that
+  // needs per pixel: the level's sweep, the comet's head (1/64 degree) and its colour and the
   // background as 8-bit channels, the dot's centre (1/16 px) and radius squared, and the 60
   // ticks' directions (cos, sin times 4096) at their turn (1/64 degree).
   struct BandRow {
@@ -346,6 +352,7 @@ class Ui {
   const std::vector<BandRow>& ring_rows() const;
   std::vector<BandRow> band_rows_, clock_rows_;
   int band_out_ = 0, band_in_ = 0;
+  std::vector<RingBox> ring_degrees_;
   EdgeRing ring_;
   ArcSweep ring_sweep_;
   int32_t ring_head64_ = 0;
