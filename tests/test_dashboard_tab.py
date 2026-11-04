@@ -238,6 +238,9 @@ def test_hermes_dashboard_refuses_the_tab_api_without_a_session(tmp_path, monkey
     routes = web_server.app.router.routes
     before = list(routes)
     web_server._dashboard_plugins_cache = None
+    # Importing web_server can already have mounted the plugin from this HERMES_HOME, and Hermes
+    # skips a plugin whose routes it already serves. Drop them so the mount below is the one tested.
+    routes[:] = [r for r in before if not getattr(r, "path", "").startswith("/api/plugins/gadget")]
     try:
         web_server_dashboard._mount_plugin_api_routes()
         added = [r for r in routes if r not in before]
