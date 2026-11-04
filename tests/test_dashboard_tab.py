@@ -238,16 +238,20 @@ def test_hermes_dashboard_refuses_the_tab_api_without_a_session(tmp_path, monkey
     routes = web_server.app.router.routes
     before = list(routes)
     web_server._dashboard_plugins_cache = None
+    # Importing web_server can already have mounted the plugin from this HERMES_HOME, and Hermes
+    # skips a plugin whose routes it already serves. Drop them so the mount below is the one tested.
+    routes[:] = [r for r in before if not getattr(r, "path", "").startswith("/api/plugins/gadget")]
     try:
         web_server_dashboard._mount_plugin_api_routes()
         added = [r for r in routes if r not in before]
         assert added, "Hermes did not mount the gadget plugin's API"
-        # Mounted after startup, the routes land behind the SPA's catch-all; put them where a
-        # startup mount puts them, ahead of it.
-        catch_all = next((i for i, r in enumerate(routes) if getattr(r, "path", "") == "/{full_path:path}"), None)
-        if catch_all is not None:
-            routes[:] = [r for r in routes[:catch_all] if r not in added] + added + [
-                r for r in routes[catch_all:] if r not in added]
+        # Mounted after startup, the routes land behind the SPA's catch-all and, in newer Hermes, the
+        # /api/plugins/{name}/ hot-mount fallback; put them where a startup mount puts them, ahead of both.
+        rest = [r for r in routes if r not in added]
+        first = next((i for i, r in enumerate(rest)
+                      if getattr(r, "path", "") in ("/{full_path:path}", "/api/plugins/{name}/{path:path}")), None)
+        if first is not None:
+            routes[:] = rest[:first] + added + rest[first:]
 
         client = TestClient(web_server.app)
         refused = client.get("/api/plugins/gadget/devices")
