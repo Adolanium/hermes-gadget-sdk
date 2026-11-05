@@ -121,7 +121,7 @@ def test_the_wheel_carries_the_dashboard_files():
     text = (REPO / "pyproject.toml").read_text(encoding="utf-8")
     line = re.search(r"^hermes_gadget_plugin = \[(.*)\]$", text, re.M).group(1)
     globs = re.findall(r'"([^"]+)"', line)
-    for path in ("dashboard/manifest.json", "dashboard/plugin_api.py", "dashboard/dist/index.js"):
+    for path in ("dashboard/manifest.json", "dashboard/plugin_api.py", "dashboard/dist/index.js", "desktop/plugin.js"):
         assert (REPO / "plugin" / path).is_file()
         assert any(fnmatch.fnmatch(path, g) for g in globs), path
 

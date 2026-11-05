@@ -15,6 +15,7 @@ Hermes's gateway runs "platform adapters": Telegram, Slack and about twenty othe
 | `tools.py` | `gadget_devices`, `gadget_display`, `gadget_action` |
 | `store.py`, `status.py`, `protocol.py`, `audio.py`, `textfmt.py`, `imaging.py` | Support modules (no Hermes imports) |
 | `dashboard/` | The **Gadgets** tab of the Hermes web dashboard: `manifest.json`, the backend routes in `plugin_api.py`, and the tab's bundle in `dist/`, built from `src/` (see [The Gadgets tab](#the-gadgets-tab-in-the-hermes-dashboard)) |
+| `desktop/plugin.js`, `desk.py` | The **Gadgets** page of the Hermes desktop app, built from `desktop-src/`, and the queue that carries its cards and actions to the gateway (see [The Gadgets page in Hermes Desktop](#the-gadgets-page-in-hermes-desktop)) |
 
 Each device is a direct-message chat whose `chat_id` and `user_id` are the device id. Everything Hermes does for a DM on any platform then applies unchanged: sessions and memory, `/new`, `/stop`, `/voice`, model routing, approvals and delivery.
 
@@ -89,7 +90,7 @@ After the restart, run `hermes gadget info` and use the new URL to update each d
 
 ## The Gadgets tab in the Hermes dashboard
 
-The plugin adds a **Gadgets** tab to the Hermes web dashboard (`hermes dashboard`). It lists every device this Hermes knows, with its board, firmware, when it was last seen, whether it is waiting to be paired, and, while the gateway runs, whether it is online and its battery. The tab is read-only for now: pair, rename, forget and update devices with `hermes gadget` as before.
+The plugin adds a **Gadgets** tab to the Hermes web dashboard (`hermes dashboard`). It lists every device this Hermes knows, with its board, firmware, when it was last seen, whether it is waiting to be paired, and, while the gateway runs, whether it is online and its battery. The tab is read-only: pair, rename, forget and update devices with `hermes gadget` as before, or pair from the [Desktop page](#the-gadgets-page-in-hermes-desktop).
 
 It needs nothing beyond the plugin: the tab appears once the plugin is enabled (`plugins.enabled: [gadget]`) and the dashboard has been restarted, since the dashboard mounts plugin routes when it starts. Without the `dashboard/` folder the plugin works exactly as before.
 
@@ -98,17 +99,35 @@ It needs nothing beyond the plugin: the tab appears once the plugin is enabled (
 | File | Written by | The tab reads |
 |---|---|---|
 | `devices.json` | the gateway, `hermes gadget pair` and `forget` | name, board, firmware, last seen, pending pairing. Device keys are never returned |
-| `status.json` | the running gateway | which devices are connected now, since when, and their battery readings (`battery_percent`, `battery_mv`, `charging`, `external_power`, `battery_present`) |
+| `status.json` | the running gateway | which devices are connected now, since when, and their battery readings (`battery_percent`, `battery_mv`, `charging`, `external_power`, `battery_present`); for the Desktop page, whether each is paired, its action names, and what its screen shows |
+| `desk/inbox/`, `desk/done/` | the Desktop page's routes, then the running gateway | the outcome of a card or action the page sent (see [The Gadgets page in Hermes Desktop](#the-gadgets-page-in-hermes-desktop)) |
 
-The gateway replaces `status.json` in one step (a temporary file, then a rename), so a reader never sees half of it. It rewrites the file within about 2 seconds of a device connecting or leaving, of a change of pairing or profile, and of a new battery percentage or power source, and at least every 30 seconds otherwise. A voltage change alone waits for the next write. A gateway that stops writes the file with no devices online; one that dies without doing so leaves a file older than 90 seconds, which the tab treats the same way. Either way the tab says the gateway is not running and shows no online state or battery.
+The gateway replaces `status.json` in one step (a temporary file, then a rename), so a reader never sees half of it. It rewrites the file within about half a second of a device connecting or leaving, of a change of pairing or profile, of a new battery percentage or power source, and of a change to what a screen shows (listening, thinking or speaking, the words heard, the reply), and at least every 30 seconds otherwise. A voltage change alone waits for the next write. A gateway that stops writes the file with no devices online; one that dies without doing so leaves a file older than 90 seconds, which the tab treats the same way. Either way the tab says the gateway is not running and shows no online state or battery.
 
 | Route | Returns |
 |---|---|
-| `GET /api/plugins/gadget/devices` | `gateway`: `running` and `updated_at` of the status file; `devices`: `id`, `name`, `board`, `firmware`, `last_seen`, `enrolled_at`, `pending`, `online`, `connected_at` and `battery` (null when offline or not reported) |
+| `GET /api/plugins/gadget/devices` | `gateway`: `running` and `updated_at` of the status file; `devices`: `id`, `name`, `board`, `firmware`, `last_seen`, `enrolled_at`, `pending`, `online`, `connected_at` and `battery` (null when offline or not reported), and for the Desktop page `paired`, `actions` and `activity` (`state`, `heard`, `reply`, `status`) |
+| `GET /api/plugins/gadget/pairing` | Devices showing a pairing code Hermes hasn't approved: `id`, `name`, `board`, `code` |
+| `POST /api/plugins/gadget/pairing/{id}/approve` | Approves the code that device is showing, through Hermes's `PairingStore`, as `hermes gadget pair` does |
+| `POST /api/plugins/gadget/devices/{id}/card?title=&text=&seconds=` | Shows a card on a connected, paired device's screen; waits up to 8 seconds for the gateway's answer |
+| `POST /api/plugins/gadget/devices/{id}/action?name=&args=` | Runs one of the actions that device advertises, with `args` as a JSON object; waits up to 18 seconds |
+| `GET /api/plugins/gadget/info` | Whether the platform is enabled and the gateway running, and the local URL a gadget on this computer connects to |
+
+The web tab uses only `/devices`. The other routes are for the Desktop page, and like every plugin route they sit behind the dashboard's login.
 
 **The bundle.** `dashboard/dist/index.js` is built output. Its source is `dashboard/src/index.jsx`; `npm run build:dashboard-tab` in `site/` rebuilds it with esbuild (pinned in `site/package.json`) as one IIFE that takes React and the UI components from the dashboard's plugin SDK (`window.__HERMES_PLUGIN_SDK__`) and bundles no library. `npm test` in `site/` fails when the committed bundle differs from a fresh build of the source.
 
-The Hermes desktop app has its own plugin SDK and does not show this tab; only the `/api/plugins/gadget/` routes are shared with it.
+## The Gadgets page in Hermes Desktop
+
+The Hermes desktop app gets a **Gadgets** page: a sidebar row, a route at `/gadgets`, and an **Open Gadgets** command in the palette. Turn the plugin on in **Capabilities › Plugins** if the page doesn't appear. It has three parts.
+
+- **A gadget in the window.** The page runs the device protocol itself, as a gadget on this computer with a round screen, a microphone and a speaker. It connects to the gateway at the local URL from `/info`, enrolls with a key it keeps in the page's storage, and pairs like any device: its code shows on its screen, and **Approve** next to it approves it. Hold the button or Space to talk, or type. Hermes answers on its screen and, when text-to-speech is set up, out loud. It advertises two actions the agent can call: `light.set`, a coloured glow around the screen, and `timer.start`, a countdown that ends with a chime. It needs the Gadget platform on and the gateway running. When the gateway requires `GADGET_ACCESS_TOKEN`, the page asks for it and keeps it in the page's storage.
+- **Your gadgets, live.** Each known device with a small copy of its screen: listening, thinking or speaking, what Hermes heard and the reply so far. The running gateway writes this to `status.json`, and the page reads it about once a second.
+- **Controls.** Send a card to a connected device's screen, or run one of the actions it advertises, without asking the agent.
+
+**How a card reaches a device.** The page's routes run in the dashboard's process and the device connections in the gateway's. The route writes a request to `desk/inbox/` in the plugin's data folder and waits. The gateway checks that folder every 0.4 seconds, sends the card or action to the device, and writes the outcome to `desk/done/`. A request no gateway picks up within 30 seconds is dropped, and a route that gets no answer withdraws its request and says the gateway isn't running. At most 32 requests wait at once. A card's title is cut to 64 characters and its text to 600. Action arguments must be a JSON object of at most 2,000 characters. The gateway refuses a device that isn't connected, isn't paired, or doesn't advertise the action.
+
+**The bundle.** `desktop/plugin.js` is built output. Its source is `desktop-src/`: `npm ci && npm run build` there rebuilds it with esbuild, and `npm test` runs the protocol client's tests (device id, authentication MAC and binary frames). Hermes Desktop publishes the file from the installed plugin. To try a change without reinstalling, copy it to `~/.hermes/desktop-plugins/gadget/plugin.js` and reload the page.
 
 ## Hermes surfaces the SDK uses
 
@@ -137,6 +156,7 @@ The Hermes desktop app has its own plugin SDK and does not show this tab; only t
 | Tool session context | `gateway.session_context.get_session_env` | `HERMES_SESSION_PLATFORM` / `HERMES_SESSION_CHAT_ID` pick the default device |
 | Durable state | `plugins.plugin_storage.plugin_data_dir("gadget")` | Enrolled device keys, pending pairing codes, firmware staged for updates (`updates/`), and the running gateway's live device status (`status.json`) |
 | Web dashboard tab | `dashboard/manifest.json`, `dashboard/plugin_api.py` (a FastAPI `router` under `/api/plugins/gadget/`), `window.__HERMES_PLUGIN_SDK__` | The **Gadgets** tab. Reads the plugin's data files; never calls the gateway. See [The Gadgets tab](#the-gadgets-tab-in-the-hermes-dashboard) |
+| Desktop page | `desktop/plugin.js` with `@hermes/plugin-sdk` (`ROUTES_AREA`, `SIDEBAR_NAV_AREA`, `PALETTE_AREA`, `ctx.rest`, `ctx.storage`) | The **Gadgets** page, on the same routes. See [The Gadgets page in Hermes Desktop](#the-gadgets-page-in-hermes-desktop) |
 | Host CLI | `ctx.register_cli_command("gadget", ...)` | `hermes gadget devices / forget / info / pair / update`. `pair` waits for a device to show a code and approves it after asking. `update` stages an image in the plugin's data directory (a file, or with `--latest` the newest release's image for the device's board, checked against the release manifest); the gateway's adapter installs it once the device is online and writes progress back for the command |
 | Send and cron targets | `parse_target_ref_fn`, `cron_deliver_env_var` | `gadget:hg-0123456789abcdef` works with send_message and cron delivery; `GADGET_HOME_CHANNEL` supplies a default cron device |
 

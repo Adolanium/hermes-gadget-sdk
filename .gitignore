@@ -13,6 +13,9 @@ build/
 # Host (CMake) builds
 /build/
 
+# The Desktop page's build tools (its bundle, plugin/desktop/plugin.js, ships with the plugin)
+plugin/desktop-src/node_modules/
+
 # Installer site
 site/node_modules/
 site/_site/

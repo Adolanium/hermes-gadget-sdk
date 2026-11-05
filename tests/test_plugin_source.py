@@ -12,7 +12,9 @@ def test_plugin_source_has_no_invisible_characters():
     # bidi controls, ...) as possible hidden instructions. Write them as escapes ("\u200b").
     found = []
     for path in sorted((REPO / "plugin").rglob("*")):
-        if not path.is_file() or "__pycache__" in path.parts:
+        # node_modules holds the Desktop page's build tools, never committed or installed; images
+        # are not text.
+        if not path.is_file() or {"__pycache__", "node_modules"} & set(path.parts) or path.suffix == ".png":
             continue
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             for char in line:

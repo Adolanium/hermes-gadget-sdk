@@ -1,4 +1,5 @@
-"""Backend of the Hermes dashboard's Gadgets tab, mounted at ``/api/plugins/gadget/``.
+"""Backend of the Hermes dashboard's Gadgets tab and the Hermes Desktop Gadgets page, mounted at
+``/api/plugins/gadget/``.
 
 The dashboard imports this file on its own, in its own process, behind its auth: it is not the
 gateway, which holds the device connections. It reads the files the gateway and ``hermes gadget``
@@ -6,7 +7,11 @@ already share, in the plugin's data directory, and never calls into the gateway:
 
 - ``devices.json`` (``store.DeviceStore``): every known device, its board, firmware and last contact;
 - ``status.json`` (``status``): which devices are connected now and their battery, written by the
-  running gateway.
+  running gateway, with what each screen shows (the Desktop page's mirrors);
+- ``desk/`` (``desk.Desk``): cards and device actions the Desktop page sends, which the running
+  gateway carries to the device and answers.
+
+Pairing approval goes through Hermes's own pairing store, as ``hermes gadget pair`` does.
 
 Device keys never leave the store: only the fields listed in ``_device`` are returned.
 """
@@ -14,6 +19,7 @@ Device keys never leave the store: only the fields listed in ``_device`` are ret
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -43,7 +49,10 @@ def _plugin_package():
 
 _plugin_package()
 from hermes_gadget_dashboard_plugin import status as live_status  # noqa: E402
+from hermes_gadget_dashboard_plugin.desk import Desk  # noqa: E402
 from hermes_gadget_dashboard_plugin.store import DeviceStore  # noqa: E402
+
+_STATES = ("ready", "listening", "thinking", "speaking")
 
 router = APIRouter()
 
@@ -68,7 +77,20 @@ def _device(device_id: str, rec: dict[str, Any], live: dict[str, Any] | None) ->
         "online": bool(live.get("online")),
         "connected_at": live.get("connected_at"),
         "battery": live.get("battery") if isinstance(live.get("battery"), dict) else None,
+        "paired": bool(live.get("paired")) if live else None,
+        "activity": _activity(live.get("activity")),
+        "actions": [a for a in (live.get("actions") or []) if isinstance(a, str)][:16],
     }
+
+
+def _activity(raw: Any) -> dict[str, Any] | None:
+    """What the device's screen shows (Desktop's live mirror); only known fields, plain strings."""
+    if not isinstance(raw, dict):
+        return None
+    state = raw.get("state") if raw.get("state") in _STATES else "ready"
+    text = {k: str(raw.get(k) or "")[:280] for k in ("heard", "reply", "status")}
+    at = raw.get("at") if isinstance(raw.get("at"), (int, float)) else None
+    return {"state": state, **text, "at": at}
 
 
 @router.get("/devices")
@@ -85,3 +107,93 @@ def devices() -> dict[str, Any]:
                     "stale_after_s": live_status.STALE_AFTER_S},
         "devices": rows,
     }
+
+
+
+# -- the Hermes Desktop page ---------------------------------------------------------------------
+# The page shows the same devices with what each screen is showing, approves pairing codes, and
+# sends cards and actions. Pairing goes through Hermes's own pairing store, as `hermes gadget pair`
+# does; cards and actions go through desk/inbox/, which the running gateway carries to the device.
+
+
+def _error(message: str, status: int = 400) -> dict[str, Any]:
+    return {"ok": False, "error": message, "status": status}
+
+
+@router.get("/pairing")
+def pairing() -> dict[str, Any]:
+    """Devices showing a pairing code that Hermes hasn't approved yet."""
+    from gateway.pairing import PairingStore
+
+    store, approvals = DeviceStore(_data_dir()), PairingStore()
+    waiting = []
+    for device_id, rec in sorted(store.devices().items()):
+        found = store.pairing_for(device_id)
+        if found and not approvals.is_approved("gadget", device_id):
+            waiting.append({"id": device_id, "name": rec.get("name") or device_id,
+                            "board": rec.get("board") or "", "code": found[0]})
+    return {"ok": True, "waiting": waiting}
+
+
+@router.post("/pairing/{device_id}/approve")
+def approve(device_id: str) -> dict[str, Any]:
+    """Approve the code a device is showing. Only a device that is waiting can be approved."""
+    from gateway.pairing import PairingStore
+
+    store, approvals = DeviceStore(_data_dir()), PairingStore()
+    found = store.pairing_for(device_id)
+    if not found or approvals.is_approved("gadget", device_id):
+        return _error("That gadget isn't waiting to pair. It gets a new code when it reconnects.", 404)
+    if approvals.approve_code("gadget", found[0]) is None:
+        return _error("Hermes didn't accept the code: it may have expired. The gadget gets a new one when it reconnects.", 409)
+    return {"ok": True, "approved": device_id}
+
+
+@router.post("/devices/{device_id}/card")
+def card(device_id: str, title: str = "", text: str = "", seconds: str = "20") -> dict[str, Any]:
+    """Show a card on a connected device's screen."""
+    desk = Desk(_data_dir())
+    try:
+        req = desk.post(device_id, "card", title=title, text=text, seconds=seconds)
+    except ValueError as exc:
+        return _error(str(exc))
+    return desk.wait(req, 8.0)
+
+
+@router.post("/devices/{device_id}/action")
+def action(device_id: str, name: str, args: str = "{}") -> dict[str, Any]:
+    """Run one of the actions a connected device advertises (an LED, a relay)."""
+    import json
+
+    try:
+        parsed = json.loads(args or "{}")
+    except ValueError:
+        return _error("args must be JSON")
+    desk = Desk(_data_dir())
+    try:
+        req = desk.post(device_id, "action", action=name, args=parsed)
+    except ValueError as exc:
+        return _error(str(exc))
+    return desk.wait(req, 18.0)
+
+
+@router.get("/info")
+def info() -> dict[str, Any]:
+    """Where devices connect, for the Desktop page's virtual gadget on this computer."""
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = ((load_config() or {}).get("platforms") or {}).get("gadget") or {}
+    except Exception:
+        cfg = {}
+    extra = cfg.get("extra") or {}
+    try:
+        port = int(extra.get("port") or 8765)
+    except (TypeError, ValueError):
+        port = 8765
+    path = "/" + str(extra.get("path") or "/gadget").strip("/")
+    scheme = "wss" if extra.get("tls_cert") else "ws"
+    live = live_status.read(_data_dir())
+    return {"ok": True, "enabled": bool(cfg.get("enabled")), "running": live["running"],
+            "url": f"{scheme}://127.0.0.1:{port}{path}", "port": port, "path": path,
+            "token_required": bool(os.environ.get("GADGET_ACCESS_TOKEN"))}
