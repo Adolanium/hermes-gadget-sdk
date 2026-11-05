@@ -124,7 +124,7 @@ The Hermes desktop app has its own plugin SDK and does not show this tab; only t
 | Turn boundaries | `on_processing_start` / `on_processing_complete` | Become `turn.start` / `turn.end` |
 | Live status | `supports_status_text = True` + `set_status_text()` | Becomes `status` frames |
 | Streaming text | `supports_draft_streaming()` + `send_draft()`; `edit_message()` | Used when streaming is enabled; becomes `reply.delta` |
-| Final replies | `send()` | Markdown stripped and folded to the device's `charset` (`ascii` or `latin1`) for small screens |
+| Final replies | `send()` | Markdown stripped and folded to the device's `charset` (`ascii`, `latin1` or `latin1-cyrillic`) for small screens |
 | Whole-file TTS | `play_tts()` / `send_voice()` | WAV decoded in Python; other formats through ffmpeg; resampled to the device rate |
 | Streaming TTS | `supports_streaming_tts` / `begin_` / `write_` / `finish_` / `abort_streaming_tts` | PCM chunks forwarded as they are generated, for TTS providers Hermes can stream |
 | Images from the agent | `send_image_file()` / `send_image()` | Converted to RGB565 to fit the screen (needs Pillow) |

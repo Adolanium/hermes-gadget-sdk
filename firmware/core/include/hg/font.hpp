@@ -24,7 +24,8 @@ constexpr int kCellHeight = 9;
 constexpr int kAsciiYOffset = 0;
 #endif
 
-// Text is UTF-8. The font draws printable ASCII and Latin-1 (U+00A0..U+00FF)
+// Text is UTF-8. The font draws printable ASCII, Latin-1 (U+00A0..U+00FF) and
+// the Russian alphabet (U+0410..U+044F, U+0401 Ё, U+0451 ё)
 // at one column each, plus about 7,400 CJK characters at two columns (a 12x12
 // bitmap, font_cjk.hpp); any other code point draws as '?'. Widths and columns
 // count display columns: 1 for narrow code points, 2 for wide ones.

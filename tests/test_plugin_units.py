@@ -40,6 +40,25 @@ def test_a_cjk_device_keeps_chinese_and_folds_the_rest():
     assert textfmt.for_device("日本 ok", "latin1") == "ok"
 
 
+def test_a_latin1_cyrillic_device_keeps_russian_and_folds_the_rest():
+    out = textfmt.for_device("Привет, Ёжик! “Café” — 20°C \U0001F600 日本", "latin1-cyrillic")
+    assert out == 'Привет, Ёжик! "Café" - 20°C'
+    # Letters outside Russian are folded like any other script: dropped or to their base letter.
+    assert textfmt.for_device("Київ ok", "latin1-cyrillic") == "Кив ok"
+    # The other charsets still drop Cyrillic.
+    assert textfmt.for_device("Привет ok", "latin1") == "ok"
+
+
+def test_a_latin1_cyrillic_device_composes_decomposed_russian_letters():
+    # й and ё written as и/е plus a combining breve/diaeresis keep their marks.
+    decomposed = "\u0438\u0306 \u0435\u0308 \u0418\u0306 \u0415\u0308"
+    assert textfmt.for_device(decomposed, "latin1-cyrillic") == "й ё Й Ё"
+    assert textfmt.for_device("мо\u0438\u0306 ёж", "latin1-cyrillic") == "мой ёж"
+    # Decomposed Latin folds exactly as for "latin1" (the mark is dropped, not composed).
+    assert (textfmt.for_device("Cafe\u0301", "latin1-cyrillic")
+            == textfmt.for_device("Cafe\u0301", "latin1"))
+
+
 def test_a_latin1_device_gets_plain_spaces_and_no_soft_hyphens():
     assert textfmt.for_device("a\xa0b co\xadop\tx", "latin1") == "a b coop x"
 
