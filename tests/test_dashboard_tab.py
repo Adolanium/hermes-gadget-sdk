@@ -300,12 +300,22 @@ def test_gateway_writes_live_status_for_the_tab(registered_platform, loop_thread
         session = types.SimpleNamespace(
             device_id=DEVICE, closed=False, paired=True, profile="default", connected_at=1000.0,
             sensors={"battery_percent": 72, "battery_mv": 3950, "charging": 0, "temperature_c": 21.5},
-            sensors_at=1001.0)
+            sensors_at=1001.0, name="Desk", actions=[{"name": "light.set"}],
+            activity={"state": "thinking", "heard": "hi", "reply": "", "status": "", "at": 1002.0})
         loop_thread.run(_add_session(adapter, session))
         got = wait_for(lambda s: DEVICE in s["devices"])
         assert got["devices"][DEVICE] == {
             "online": True, "paired": True, "profile": "default", "connected_at": 1000.0,
-            "battery": {"battery_percent": 72, "battery_mv": 3950, "charging": False}, "sensors_at": 1001.0}
+            "battery": {"battery_percent": 72, "battery_mv": 3950, "charging": False}, "sensors_at": 1001.0,
+            "name": "Desk", "actions": ["light.set"],
+            "activity": {"state": "thinking", "heard": "hi", "reply": "", "status": "", "at": 1002.0}}
+
+        # Ready, but still playing the reply audio it buffered: the Desktop mirror shows speaking.
+        session.activity = {"state": "ready", "heard": "hi", "reply": "Hello", "status": "", "at": 1003.0,
+                            "ready_after": time.time() + 60}
+        got = wait_for(lambda s: (s["devices"].get(DEVICE) or {}).get("activity", {}).get("reply") == "Hello")
+        assert got["devices"][DEVICE]["activity"]["state"] == "speaking"
+        assert "ready_after" not in got["devices"][DEVICE]["activity"]
 
         session.sensors = {**session.sensors, "charging": 1}  # plugged in: written at once
         wait_for(lambda s: (s["devices"].get(DEVICE) or {}).get("battery", {}).get("charging") is True)
