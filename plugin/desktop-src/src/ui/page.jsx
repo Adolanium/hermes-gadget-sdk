@@ -122,26 +122,37 @@ function VirtualGadget({ rest, storage, info, onDevice }) {
     holdGen.current++
   }, [])
 
+  // The turn starts only once the microphone runs, so a refused or failed microphone sends Hermes
+  // no empty recording.
+  const talking = useRef(false)
   const press = useCallback(async () => {
     const d = dev.current
     if (!d || held || !d.state.paired) return
     setMicError(null)
     setHeld(true)
+    const gen = ++holdGen.current
+    let stop
+    try {
+      stop = await startMic(frame => {
+        if (talking.current) d.talkData(frame)
+      })
+    } catch (e) {
+      if (gen !== holdGen.current) return
+      setHeld(false)
+      setMicError(e?.name === 'NotAllowedError' ? 'Microphone access is off for Hermes. Allow it in System Settings › Privacy › Microphone, or type below.' : `Microphone unavailable: ${e?.message ?? e}`)
+      return
+    }
+    if (gen !== holdGen.current) {
+      stop() // released, or the page left, while the permission prompt was open
+      return
+    }
     if (!d.talkStart()) {
+      stop()
       setHeld(false)
       return
     }
-    const gen = ++holdGen.current
-    try {
-      const stop = await startMic(frame => d.talkData(frame))
-      if (gen !== holdGen.current) stop()
-      else mic.current = stop
-    } catch (e) {
-      if (gen !== holdGen.current) return
-      d.talkEnd()
-      setHeld(false)
-      setMicError(e?.name === 'NotAllowedError' ? 'Microphone access is off for Hermes. Allow it in System Settings › Privacy › Microphone, or type below.' : `Microphone unavailable: ${e?.message ?? e}`)
-    }
+    talking.current = true
+    mic.current = stop
   }, [held])
 
   const release = useCallback(() => {
@@ -150,13 +161,17 @@ function VirtualGadget({ rest, storage, info, onDevice }) {
     setHeld(false)
     mic.current?.()
     mic.current = null
-    dev.current?.talkEnd()
+    if (talking.current) {
+      talking.current = false
+      dev.current?.talkEnd()
+    }
   }, [held])
 
   // Space bar holds to talk too, when the page (not a text field) has focus.
   useEffect(() => {
     const down = e => {
-      if (e.code !== 'Space' || e.repeat || e.target.closest?.('input, textarea')) return
+      // Space on another control (a field, a list, a button) keeps its own meaning there.
+      if (e.code !== 'Space' || e.repeat || e.target.closest?.('input, textarea, select, button:not(.hg-talk), [contenteditable]')) return
       e.preventDefault()
       void press()
     }

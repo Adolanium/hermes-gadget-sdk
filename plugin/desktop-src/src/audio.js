@@ -29,10 +29,20 @@ export function makeDownsampler(fromRate, toRate) {
 /** Start the microphone; `onFrame(Int16Array)` gets 40 ms frames. Resolves to a stop function. */
 export async function startMic(onFrame, rate = 16000) {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
-  const ctx = new AudioContext()
-  const source = ctx.createMediaStreamSource(stream)
-  // ScriptProcessor is deprecated but runs everywhere without a worklet module file to load.
-  const node = ctx.createScriptProcessor(2048, 1, 1)
+  let ctx = null
+  let source = null
+  let node = null
+  try {
+    ctx = new AudioContext()
+    source = ctx.createMediaStreamSource(stream)
+    // ScriptProcessor is deprecated but runs everywhere without a worklet module file to load.
+    node = ctx.createScriptProcessor(2048, 1, 1)
+  } catch (e) {
+    // Setup failed after access was granted: release the microphone before reporting it.
+    stream.getTracks().forEach(t => t.stop())
+    void ctx?.close()
+    throw e
+  }
   const down = makeDownsampler(ctx.sampleRate, rate)
   let pending = new Int16Array(0)
   let level = 0

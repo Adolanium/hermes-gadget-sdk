@@ -309,7 +309,15 @@ export function createDevice(opts) {
     disconnect() {
       closedByUser = true
       clearTimeout(retry)
-      ws?.close()
+      const old = ws
+      ws = null
+      upload = null
+      if (old) {
+        // Detach first: a late event from the old socket must not change this gadget's state.
+        old.onopen = old.onmessage = old.onerror = old.onclose = null
+        old.close()
+      }
+      set({ conn: 'offline' })
     },
     sendText(text) {
       const t = String(text ?? '').trim().slice(0, 4000)

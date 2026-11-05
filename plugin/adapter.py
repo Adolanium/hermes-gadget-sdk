@@ -929,15 +929,20 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         while True:
             await asyncio.sleep(DESK_POLL_S)
             try:
-                for req_id, req in await asyncio.to_thread(desk.pending):
+                batch = await asyncio.to_thread(desk.pending)
+            except Exception as exc:
+                logger.warning("[%s] Desktop requests unreadable: %s", self.name, exc)
+                continue
+            for req_id, req in batch:
+                try:
                     # An earlier request in this batch can take up to 15 s; one whose page gave up
                     # meanwhile was withdrawn (its file deleted) and must not run late.
                     if not await asyncio.to_thread(desk.waiting, req_id):
                         continue
                     outcome = await self._desk_request(req)
                     await asyncio.to_thread(desk.finish, req_id, outcome)
-            except Exception as exc:
-                logger.warning("[%s] Desktop request failed: %s", self.name, exc)
+                except Exception as exc:  # one bad request doesn't hold up the rest
+                    logger.warning("[%s] Desktop request failed: %s", self.name, exc)
 
     async def _desk_request(self, req: Dict[str, Any]) -> Dict[str, Any]:
         session = self._hub.get(req["device"]) if self._hub else None
