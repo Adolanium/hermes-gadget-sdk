@@ -123,6 +123,10 @@ class Desk:
             out.append((path.stem, req))
         return out
 
+    def waiting(self, req_id: str) -> bool:
+        """Whether the request is still queued: the page withdraws one it stopped waiting for."""
+        return bool(_ID.match(req_id or "")) and (self.inbox / f"{req_id}.json").exists()
+
     def finish(self, req_id: str, outcome: dict, now: float | None = None) -> None:
         now = time.time() if now is None else now
         _write_json(self.done / f"{req_id}.json", {**outcome, "at": now})

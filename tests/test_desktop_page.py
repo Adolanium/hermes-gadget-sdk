@@ -98,6 +98,17 @@ def test_stale_and_malformed_requests_are_dropped_not_run(tmp_path):
     assert sorted(p.name for p in desk.inbox.iterdir()) == [f"{fresh}.json"]
 
 
+def test_the_gateway_skips_a_request_the_page_withdrew(tmp_path):
+    # The gateway loads a batch, and an action ahead of a card can take 15 s; by then the card's
+    # page may have given up and deleted it, and the card must not run late.
+    desk = Desk(tmp_path)
+    req = desk.post(DEVICE, "card", text="late")
+    assert desk.waiting(req)
+    desk.wait(req, 0.05, poll=0.02)  # gives up and withdraws it
+    assert not desk.waiting(req)
+    assert not desk.waiting("../../devices")
+
+
 def test_a_request_nobody_answers_is_withdrawn(tmp_path):
     desk = Desk(tmp_path)
     req = desk.post(DEVICE, "card", text="hello")
@@ -277,6 +288,32 @@ def test_info_says_where_a_local_gadget_connects(api, monkeypatch):
     monkeypatch.setenv("GADGET_ACCESS_TOKEN", "t")
     got = api.client.get("/api/plugins/gadget/info").json()
     assert got["enabled"] is False and got["url"] == "ws://127.0.0.1:8765/gadget" and got["token_required"] is True
+
+
+@pytest.mark.parametrize("host, url", [
+    ("0.0.0.0", "ws://127.0.0.1:8765/gadget"),       # a wildcard bind includes loopback
+    ("::", "ws://127.0.0.1:8765/gadget"),
+    ("192.168.1.20", "ws://192.168.1.20:8765/gadget"),  # a specific address does not
+    ("::1", "ws://[::1]:8765/gadget"),
+])
+def test_info_connects_where_the_gateway_listens(api, monkeypatch, host, url):
+    cli = types.ModuleType("hermes_cli")
+    config = types.ModuleType("hermes_cli.config")
+    config.load_config = lambda: {"platforms": {"gadget": {"enabled": True, "extra": {"host": host}}}}
+    monkeypatch.setitem(sys.modules, "hermes_cli", cli)
+    monkeypatch.setitem(sys.modules, "hermes_cli.config", config)
+    assert api.client.get("/api/plugins/gadget/info").json()["url"] == url
+
+
+def test_info_sees_a_token_set_in_the_config(api, monkeypatch):
+    cli = types.ModuleType("hermes_cli")
+    config = types.ModuleType("hermes_cli.config")
+    config.load_config = lambda: {"platforms": {"gadget": {"enabled": True, "extra": {"access_token": "s3cret"}}}}
+    monkeypatch.setitem(sys.modules, "hermes_cli", cli)
+    monkeypatch.setitem(sys.modules, "hermes_cli.config", config)
+    monkeypatch.delenv("GADGET_ACCESS_TOKEN", raising=False)
+    got = api.client.get("/api/plugins/gadget/info").json()
+    assert got["token_required"] is True and "s3cret" not in str(got)
 
 
 # -- what the screen shows ---------------------------------------------------------------------

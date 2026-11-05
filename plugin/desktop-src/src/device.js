@@ -123,6 +123,7 @@ export function createDevice(opts) {
     closedByUser = false
     clearTimeout(retry)
     deviceId = deviceId ?? (await deviceIdFor(opts.key))
+    if (closedByUser) return // disconnected while the key was hashing: open nothing
     set({ conn: 'connecting', error: null })
     try {
       ws = new WS(opts.url, SUBPROTOCOL)

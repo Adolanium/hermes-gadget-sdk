@@ -29,9 +29,9 @@ function fmtTimer(ms) {
 
 /**
  * props: { size, view: { conn, paired, pairingCode, state, heard, reply, status, card, image, notice,
- *          prompt, light, timer }, now, offline, compact, onTap, onAnswer }
+ *          prompt, light, timer }, now, offline, compact, onAnswer, onDismiss }
  */
-export function Screen({ size = 360, view, now = Date.now(), offline = false, compact = false, onAnswer, children }) {
+export function Screen({ size = 360, view, now = Date.now(), offline = false, compact = false, onAnswer, onDismiss, children }) {
   const state = view.state ?? 'ready'
   const color = offline ? '#5b6474' : STATE_COLOR[state] ?? STATE_COLOR.ready
   const card = view.card && (!view.card.until || view.card.until > now) ? view.card : null
@@ -78,13 +78,14 @@ export function Screen({ size = 360, view, now = Date.now(), offline = false, co
               ) : null}
             </div>
           ) : image ? (
-            <div className="hg-screen-center">
+            <div className="hg-screen-center" onClick={onDismiss} title={onDismiss ? 'Tap to dismiss' : undefined}>
               <ImageCanvas image={image} />
             </div>
           ) : card ? (
-            <div className="hg-screen-center hg-card">
+            <div className="hg-screen-center hg-card" onClick={onDismiss} title={onDismiss ? 'Tap to dismiss' : undefined}>
               {card.title ? <span className="hg-card-title">{card.title}</span> : null}
               <span className="hg-card-body">{card.body}</span>
+              {onDismiss ? <span className="hg-hint">Tap to dismiss</span> : null}
             </div>
           ) : unpaired ? (
             <div className="hg-screen-center">

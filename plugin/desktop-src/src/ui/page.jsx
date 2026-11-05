@@ -115,6 +115,13 @@ function VirtualGadget({ rest, storage, info, onDevice }) {
     return () => clearInterval(id)
   }, [held])
 
+  // Bumped by every release and by leaving the page, so a microphone that starts after either
+  // (the permission prompt was still open) is stopped at once instead of left recording.
+  const holdGen = useRef(0)
+  useEffect(() => () => {
+    holdGen.current++
+  }, [])
+
   const press = useCallback(async () => {
     const d = dev.current
     if (!d || held || !d.state.paired) return
@@ -124,9 +131,13 @@ function VirtualGadget({ rest, storage, info, onDevice }) {
       setHeld(false)
       return
     }
+    const gen = ++holdGen.current
     try {
-      mic.current = await startMic(frame => d.talkData(frame))
+      const stop = await startMic(frame => d.talkData(frame))
+      if (gen !== holdGen.current) stop()
+      else mic.current = stop
     } catch (e) {
+      if (gen !== holdGen.current) return
       d.talkEnd()
       setHeld(false)
       setMicError(e?.name === 'NotAllowedError' ? 'Microphone access is off for Hermes. Allow it in System Settings › Privacy › Microphone, or type below.' : `Microphone unavailable: ${e?.message ?? e}`)
@@ -135,6 +146,7 @@ function VirtualGadget({ rest, storage, info, onDevice }) {
 
   const release = useCallback(() => {
     if (!held) return
+    holdGen.current++
     setHeld(false)
     mic.current?.()
     mic.current = null
@@ -153,9 +165,11 @@ function VirtualGadget({ rest, storage, info, onDevice }) {
     }
     window.addEventListener('keydown', down)
     window.addEventListener('keyup', up)
+    window.addEventListener('blur', release) // the keyup lands in another window
     return () => {
       window.removeEventListener('keydown', down)
       window.removeEventListener('keyup', up)
+      window.removeEventListener('blur', release)
     }
   }, [press, release])
 
@@ -168,7 +182,7 @@ function VirtualGadget({ rest, storage, info, onDevice }) {
   }
   return (
     <section className="hg-panel hg-stage" aria-label="Desktop Gadget">
-      <Screen size={380} view={v} now={now} onAnswer={yes => dev.current?.answer(yes)} />
+      <Screen size={380} view={v} now={now} onAnswer={yes => dev.current?.answer(yes)} onDismiss={() => dev.current?.dismiss()} />
       <div className="hg-stage-row">
         <button
           type="button"
@@ -298,9 +312,13 @@ function Controls({ d, rest }) {
   const [result, setResult] = useState(null)
   const [busy, setBusy] = useState(false)
   useEffect(() => {
-    setAction(d.actions?.[0] ?? '')
     setResult(null)
-  }, [d.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [d.id])
+  const actionsKey = (d.actions ?? []).join('|')
+  useEffect(() => {
+    // A device seen offline first has no actions; when it reconnects, select one it has.
+    setAction(cur => (d.actions?.includes(cur) ? cur : d.actions?.[0] ?? ''))
+  }, [d.id, actionsKey]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (action === 'light.set') setArgs('{"color": "#7c5cff"}')
     else if (action === 'timer.start') setArgs('{"seconds": 60, "label": "Tea"}')

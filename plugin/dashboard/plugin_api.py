@@ -193,7 +193,26 @@ def info() -> dict[str, Any]:
         port = 8765
     path = "/" + str(extra.get("path") or "/gadget").strip("/")
     scheme = "wss" if extra.get("tls_cert") else "ws"
+    # The gateway listens on its configured host; a wildcard bind (the default) includes loopback.
+    host = str(extra.get("host") or "").strip()
+    if host in ("", "0.0.0.0", "::", "[::]", "*", "localhost"):
+        host = "127.0.0.1"
+    elif ":" in host and not host.startswith("["):
+        host = f"[{host}]"  # an IPv6 address in a URL
     live = live_status.read(_data_dir())
     return {"ok": True, "enabled": bool(cfg.get("enabled")), "running": live["running"],
-            "url": f"{scheme}://127.0.0.1:{port}{path}", "port": port, "path": path,
-            "token_required": bool(os.environ.get("GADGET_ACCESS_TOKEN"))}
+            "url": f"{scheme}://{host}:{port}{path}", "port": port, "path": path,
+            "token_required": _token_required(extra)}
+
+
+def _token_required(extra: dict[str, Any]) -> bool:
+    """Whether the gateway asks devices for a token: ``extra.access_token`` or the
+    ``GADGET_ACCESS_TOKEN`` secret, the same two places the adapter reads."""
+    if str(extra.get("access_token") or "").strip():
+        return True
+    try:
+        from agent.secret_scope import get_secret
+
+        return bool(get_secret("GADGET_ACCESS_TOKEN"))
+    except Exception:
+        return bool(os.environ.get("GADGET_ACCESS_TOKEN"))
