@@ -104,11 +104,21 @@ def _is_ru(ch: str) -> bool:
     return "\u0410" <= ch <= "\u044f" or ch in "\u0401\u0451"
 
 
+_RU_COMPOSITIONS = (
+    ("\u0438\u0306", "\u0439"),  # и + combining breve -> й
+    ("\u0418\u0306", "\u0419"),  # И + combining breve -> Й
+    ("\u0435\u0308", "\u0451"),  # е + combining diaeresis -> ё
+    ("\u0415\u0308", "\u0401"),  # Е + combining diaeresis -> Ё
+)
+
+
 def fold_latin1_cyrillic(text: str) -> str:
     """For a device whose font draws Latin-1 and Russian Cyrillic (U+0410..U+044F, Ё/ё)."""
-    # Compose first: й and ё may arrive as и/е plus a combining mark, and the mark alone would be
-    # folded away by fold_latin1, leaving the wrong letter.
-    text = unicodedata.normalize("NFC", text)
+    # й and ё may arrive as и/е plus a combining mark; the mark alone would be folded away by
+    # fold_latin1, leaving the wrong letter. Compose just those, so Latin text folds exactly as
+    # it does for "latin1".
+    for decomposed, composed in _RU_COMPOSITIONS:
+        text = text.replace(decomposed, composed)
     out, run = [], []
     for ch in text:
         if _is_ru(ch):
