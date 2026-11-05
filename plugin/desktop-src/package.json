@@ -1,6 +1,6 @@
 {
   "name": "hermes-gadget-desktop",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "description": "Source of desktop/plugin.js. `npm ci && npm run build` regenerates it.",

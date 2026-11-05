@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.5.0
+
+Hermes Gadget 0.5.0 adds a **Gadgets** page to the Hermes desktop app: a gadget that runs in the window, pairing with one click, a live copy of each device's screen, and buttons to send a card or run a device action. Profile faces come in colour on boards with PSRAM, and they blink and talk. The screen shows Russian, and Chinese as a build option. On boards with PSRAM a recording survives a lost connection, and larger network buffers keep the microphone up on slow links such as a phone hotspot. Eight experimental board profiles arrive: the M5Stack StickS3, the Waveshare ESP32-P4-WIFI6-Touch-LCD-7B with camera capture, the Waveshare ESP32-S3-Touch-AMOLED-1.32 and 1.43C, the Waveshare ESP32-S3-Touch-LCD-1.83 and 1.46, the original Espressif ESP32-S3-BOX and the ESP32-S3-Korvo-2. Details by area follow.
+
 ### Firmware
 
 - The screen shows Russian. The 5×7 font gains the Russian alphabet, U+0410..U+044F plus Ё and ё, in the same ASCII-art form as Latin-1; letters that look like Latin ones (А, В, Е, К, М, Н, О, Р, С, Т, Х and the lowercase а, е, о, р, с, у, х) reuse those glyphs. The device reports the display `charset` `latin1-cyrillic`, and the Hermes plugin keeps Russian for it. Other Cyrillic letters (і, ї, є, ђ and so on) still show as `?`. Firmware built with the Chinese font has the glyphs too but still reports `cjk`. An older plugin leaves `latin1-cyrillic` text unfolded: Russian shows there as well, but typographic quotes, dashes and emoji draw as `?`, so update the plugin before the firmware. Run on a Waveshare ESP32-S3-Touch-LCD-1.83 with Russian replies on screen.
@@ -67,6 +71,16 @@
 ### Tools and documentation
 
 - A [Features](docs/features.md) guide lists what the gadget does, grouped by use, with a line and a link for each feature, simulator screenshots, and a table of which features each supported board has. It sits under **Get started** on the website, and the README links it. Contributed by @BrOrlandi.
+
+### Upgrade and verification
+
+Update the plugin first, with the commit-pinned command in the release notes, in every Hermes profile that has a copy (see [One profile per gadget](docs/hermes-integration.md#one-profile-per-gadget)). Colour faces and Russian text need the new plugin: an older plugin sends colour firmware no face and leaves `latin1-cyrillic` text unfolded. Then update devices with `hermes gadget update <device> --latest`, or use the [browser installer](https://adolanium.github.io/hermes-gadget-sdk/installer.html) for USB installation.
+
+Hardware ports remain experimental until a complete physical report is recorded for the exact revision; see [hardware capabilities and verification](docs/hardware-validation.md). Several entries above say "host tests only" or "built, not yet run on a board": software tests and successful builds do not establish physical hardware verification.
+
+### Contributors
+
+Special thanks to [@BrOrlandi](https://github.com/BrOrlandi), who carried much of this release: recordings that survive a lost connection, the connection diagnostics, the lighter microphone upload, unread replies that come back after a dark screen, the charging and low-battery screens, the touch-wake setting, and the Features guide. Thanks also to [@mforce](https://github.com/mforce) for colour faces that blink and talk, the talking face while Hermes speaks and the refusal screen for routed devices; [Antonio Lourenco (@tozes)](https://github.com/tozes) for the tailnet client, the PSRAM network buffers and the speaker buffer announcement; [@sanasol](https://github.com/sanasol) for Russian on screen; [@chijanzen](https://github.com/chijanzen) for the Chinese font; [Richard Ahlquist (@rahlquist)](https://github.com/rahlquist) for the Waveshare P4 7B and camera capture; [Leo Li (@leoshcn)](https://github.com/leoshcn) for the M5Stack StickS3; and [@momoshamiko](https://github.com/momoshamiko) for the edge ring on round panels and the resting clock's burn-in shift.
 
 ## 0.4.1
 
