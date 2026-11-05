@@ -381,6 +381,35 @@ TEST("font: every Latin-1 code point has its own glyph") {
   CHECK(!hg::font::drawable(0x0101));
 }
 
+TEST("font: every Russian letter has its own glyph") {
+  const std::string question(hg::font::glyph('?'));
+  std::set<std::string> seen;
+  std::vector<char32_t> letters;
+  for (char32_t cp = 0x410; cp <= 0x44F; ++cp) letters.push_back(cp);
+  letters.push_back(0x401);  // Ё
+  letters.push_back(0x451);  // ё
+  for (char32_t cp : letters) {
+    CHECK(hg::font::drawable(cp));
+    CHECK_EQ(hg::font::columns(cp), 1);
+    const std::string g(hg::font::glyph(cp));
+    CHECK_EQ(g.size(), size_t(hg::font::kGlyphWidth * hg::font::kGlyphHeight));
+    if (g == question) check::fail(__FILE__, __LINE__, "U+" + std::to_string(cp) + " draws as '?'");
+    if (!seen.insert(g).second) check::fail(__FILE__, __LINE__, "U+" + std::to_string(cp) + " repeats a glyph");
+  }
+  // Letters that look the same as Latin ones share the Latin glyph on purpose.
+  CHECK_EQ(std::string(hg::font::glyph(U'А')), std::string(hg::font::glyph(U'A')));
+  CHECK_EQ(std::string(hg::font::glyph(U'о')), std::string(hg::font::glyph(U'o')));
+  // The rest do not borrow a Latin shape.
+  CHECK(std::string(hg::font::glyph(U'И')) != hg::font::glyph(U'N'));
+  CHECK(std::string(hg::font::glyph(U'Я')) != hg::font::glyph(U'R'));
+  CHECK(std::string(hg::font::glyph(U'Й')) != hg::font::glyph(U'И'));
+  CHECK(std::string(hg::font::glyph(U'ё')) != hg::font::glyph(U'е'));
+  // Other Cyrillic (Ukrainian і, ї, є, Serbian ђ, ...) is outside the font.
+  CHECK(!hg::font::drawable(0x0456));
+  CHECK(!hg::font::drawable(0x0452));
+  CHECK_EQ(hg::font::length("Привет"), size_t(6));
+}
+
 TEST("font: UTF-8 reads one code point at a time and survives malformed input") {
   const std::string_view s = "añ€😀";
   size_t i = 0;

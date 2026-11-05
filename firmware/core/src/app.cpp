@@ -600,7 +600,7 @@ void App::send_hello() {
   if (hal_.display) {
     DisplayInfo di = hal_.display->info();
     json::Value d = json::Value::object();
-    d.set("width", di.width).set("height", di.height).set("color", true).set("charset", HG_CJK_FONT ? "cjk" : "latin1");
+    d.set("width", di.width).set("height", di.height).set("color", true).set("charset", HG_CJK_FONT ? "cjk" : "latin1-cyrillic");
     if (di.round) d.set("shape", "round");
     if (ui_) {
       const UiLayout& l = ui_->layout();

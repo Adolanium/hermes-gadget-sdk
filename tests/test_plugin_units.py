@@ -40,6 +40,15 @@ def test_a_cjk_device_keeps_chinese_and_folds_the_rest():
     assert textfmt.for_device("日本 ok", "latin1") == "ok"
 
 
+def test_a_latin1_cyrillic_device_keeps_russian_and_folds_the_rest():
+    out = textfmt.for_device("Привет, Ёжик! “Café” — 20°C \U0001F600 日本", "latin1-cyrillic")
+    assert out == 'Привет, Ёжик! "Café" - 20°C'
+    # Letters outside Russian are folded like any other script: dropped or to their base letter.
+    assert textfmt.for_device("Київ ok", "latin1-cyrillic") == "Кив ok"
+    # The other charsets still drop Cyrillic.
+    assert textfmt.for_device("Привет ok", "latin1") == "ok"
+
+
 def test_a_latin1_device_gets_plain_spaces_and_no_soft_hyphens():
     assert textfmt.for_device("a\xa0b co\xadop\tx", "latin1") == "a b coop x"
 
