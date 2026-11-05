@@ -62,6 +62,7 @@ from gateway.platforms.event import MessageEvent, MessageType
 
 from . import audio as gaudio
 from . import compat, dashboard, imaging, ota, runtime, stt, textfmt
+from .desk import Desk
 from . import status as live_status
 from . import face as faces
 from .battery_log import BatteryLog
@@ -80,7 +81,8 @@ PAIRING_GRACE_S = 6.0
 UPDATE_POLL_S = 3.0           # how often staged firmware ('hermes gadget update') is looked for
 DASHBOARD_POLL_S = 2.0        # how often tiles ('hermes gadget tile') and expiries are looked at
 DASHBOARD_SETTLE_S = 0.3      # session changes this close together go out as one dashboard
-STATUS_POLL_S = 2.0           # how often live device state is compared with status.json
+DESK_POLL_S = 0.4             # how often the Desktop page's request inbox is checked
+STATUS_POLL_S = 0.5           # how often live device state is compared with status.json (cheap: a compare)
 # Trigger text for Hermes's unauthorized-DM flow. Never reaches the agent while the
 # device is unpaired; if approval races it, it is a cheap read-only command.
 PAIRING_TRIGGER = "/status"
@@ -261,6 +263,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._watch_task: Optional[asyncio.Task] = None
         self._update_task: Optional[asyncio.Task] = None
         self._status_task: Optional[asyncio.Task] = None
+        self._desk_task: Optional[asyncio.Task] = None
         self._status_dir: Optional[Path] = None
         self._status_failing = False  # warned once; again only after a write succeeds
         self._installing: Dict[str, asyncio.Task] = {}  # device id -> staged update being installed
@@ -308,6 +311,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._update_task = asyncio.create_task(self._watch_updates())
         self._status_dir = plugin_data_dir(PLATFORM_NAME)
         self._status_task = asyncio.create_task(self._watch_status())
+        self._desk_task = asyncio.create_task(self._watch_desk())
         if self._dashboard_on:
             self._tiles = dashboard.TileStore(plugin_data_dir(PLATFORM_NAME))
             self._dashboard_wake = asyncio.Event()
@@ -324,10 +328,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         for unsubscribe in self._boards.values():
             unsubscribe()
         self._boards.clear()
-        for task in (self._watch_task, self._update_task, self._dashboard_task, self._status_task):
+        for task in (self._watch_task, self._update_task, self._dashboard_task, self._status_task, self._desk_task):
             if task:
                 task.cancel()
-        self._watch_task = self._update_task = self._dashboard_task = self._status_task = None
+        self._watch_task = self._update_task = self._dashboard_task = self._status_task = self._desk_task = None
         if self._hub:
             await self._hub.stop()
             self._hub = None
@@ -860,8 +864,15 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         for session in list(self._hub.sessions.values()) if self._hub else []:
             if session.closed:
                 continue
+            activity = dict(session.activity)
+            if activity.get("state") == "ready" and activity.get("ready_after", 0) > time.time():
+                activity["state"] = "speaking"  # still playing the audio it buffered
+            activity.pop("ready_after", None)
             devices[session.device_id] = {
                 "online": True,
+                "name": session.name,
+                "activity": activity,
+                "actions": [a["name"] for a in session.actions][:16],
                 "paired": session.paired,
                 "profile": session.profile,
                 "connected_at": session.connected_at,
@@ -876,7 +887,9 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         percent and power source. Voltage and reading times ride along with the next write."""
         def brief(rec: Dict[str, Any]) -> Dict[str, Any]:
             power = {k: v for k, v in (rec.get("battery") or {}).items() if k != "battery_mv"}
-            return {**{k: v for k, v in rec.items() if k not in ("battery", "sensors_at")}, "battery": power}
+            activity = {k: v for k, v in (rec.get("activity") or {}).items() if k != "at"}
+            return {**{k: v for k, v in rec.items() if k not in ("battery", "sensors_at", "activity")},
+                    "battery": power, "activity": activity}
 
         return json.dumps({k: brief(v) for k, v in devices.items()}, sort_keys=True)
 
@@ -907,6 +920,49 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             except Exception as exc:
                 logger.warning("[%s] live status update failed: %s", self.name, exc)
             await asyncio.sleep(STATUS_POLL_S)
+
+    # -- requests from the Hermes Desktop page ----------------------------------------
+
+    async def _watch_desk(self) -> None:
+        """Carry cards and device actions from the Desktop page (desk/inbox/) to connected devices."""
+        desk = Desk(self._status_dir)
+        while True:
+            await asyncio.sleep(DESK_POLL_S)
+            try:
+                batch = await asyncio.to_thread(desk.pending)
+            except Exception as exc:
+                logger.warning("[%s] Desktop requests unreadable: %s", self.name, exc)
+                continue
+            for req_id, req in batch:
+                try:
+                    # An earlier request in this batch can take up to 15 s; one whose page gave up
+                    # meanwhile was withdrawn (its file deleted) and must not run late.
+                    if not await asyncio.to_thread(desk.waiting, req_id):
+                        continue
+                    outcome = await self._desk_request(req)
+                    await asyncio.to_thread(desk.finish, req_id, outcome)
+                except Exception as exc:  # one bad request doesn't hold up the rest
+                    logger.warning("[%s] Desktop request failed: %s", self.name, exc)
+
+    async def _desk_request(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        session = self._hub.get(req["device"]) if self._hub else None
+        if session is None or session.closed:
+            return {"ok": False, "error": "That gadget isn't connected right now."}
+        if not session.paired:
+            return {"ok": False, "error": f"{session.name} is waiting for pairing approval."}
+        try:
+            if req["kind"] == "card":
+                title = textfmt.for_device(str(req.get("title") or ""), session.charset)
+                text = textfmt.for_device(str(req.get("text") or ""), session.charset)
+                shown = await session.show_card(title, text, int(req.get("seconds") or 0))
+                return {"ok": True, "held": shown is False}
+            names = {a["name"] for a in session.actions}
+            if req["action"] not in names:
+                return {"ok": False, "error": f"{session.name} has no action called {req['action']}."}
+            result = await session.invoke_action(req["action"], req.get("args") or {}, timeout=15)
+            return {"ok": True, "result": result if isinstance(result, (dict, list, str, int, float, bool)) else None}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:200] or "the device didn't answer"}
 
     async def _claim_home(self, session: DeviceSession) -> None:
         """Make the first approved device the platform's home channel.

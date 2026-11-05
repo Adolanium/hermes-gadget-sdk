@@ -1,0 +1,16 @@
+{
+  "name": "hermes-gadget-desktop",
+  "version": "0.4.1",
+  "private": true,
+  "type": "module",
+  "description": "Source of desktop/plugin.js. `npm ci && npm run build` regenerates it.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  }
+}

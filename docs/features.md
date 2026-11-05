@@ -104,6 +104,7 @@ The screenshots come from the desktop simulator, which runs the same device core
 - **Sessions on the device.** CANCEL or a swipe down opens a list of Hermes sessions, with busy ones in blue and those waiting for approval in amber. [The dashboard](using-gadget.md#watch-hermes-sessions-on-the-dashboard)
 - **Status tiles.** Put up to eight lines, such as a NAS's state, on that list from a script on the host. [The dashboard](using-gadget.md#watch-hermes-sessions-on-the-dashboard)
 - **Gadgets tab.** The Hermes web dashboard lists your devices with board, firmware, last seen, online state and battery. [The Gadgets tab](hermes-integration.md#the-gadgets-tab-in-the-hermes-dashboard)
+- **Gadgets page in Hermes Desktop.** A gadget that runs in the desktop app's window, pairing with one click, a live copy of each device's screen, and buttons to send a card or run an action. [The Gadgets page](hermes-integration.md#the-gadgets-page-in-hermes-desktop)
 - **Device commands.** `hermes gadget devices`, `info`, `pair`, `update` and `forget` manage devices from the host. [Hermes integration](hermes-integration.md#hermes-surfaces-the-sdk-uses)
 - **Speech language.** Set the language gadget speech is transcribed in, whichever profile answers. [Fix the language of gadget speech](hermes-integration.md#fix-the-language-of-gadget-speech)
 - **Faster replies.** Settings in Hermes that shorten the wait for an answer. [Making replies fast](hermes-integration.md#making-replies-fast)

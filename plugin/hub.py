@@ -180,6 +180,7 @@ class AudioOut:
         self.done = asyncio.Event()
 
     async def start(self, *, turn: str | None = None) -> None:
+        _note(self._session, state="speaking")
         await self._session.send_json(
             protocol.message("audio.start", stream=self.stream, rate=self.rate, format=self.format, turn=turn))
         self._task = asyncio.create_task(self._pump())
@@ -206,6 +207,7 @@ class AudioOut:
         if self.aborted:
             return
         self.closed = self.aborted = True
+        _note(self._session, state="ready")
         if self._task:
             self._task.cancel()
         try:
@@ -250,7 +252,18 @@ class AudioOut:
         finally:
             if self._encoder:
                 self._encoder.close()
+            # The device plays what it buffered after the last frame goes out; the mirror says so.
+            activity = getattr(self._session, "activity", None) or {}
+            if getattr(self._session, "_audio_out", None) in (self, None) and activity.get("state") == "speaking":
+                _note(self._session, state="ready", ready_after=time.time() + min(self._lead, 3.0))
             self.done.set()
+
+
+def _note(session, **changes) -> None:
+    """Record what a device shows, for the Desktop mirror; a stand-in session without it is fine."""
+    note = getattr(session, "note", None)
+    if callable(note):
+        note(**changes)
 
 
 class DeviceSession:
@@ -285,6 +298,9 @@ class DeviceSession:
         self.device_profile = "default"
         self.connected_at = time.time()
         self.last_rx = time.monotonic()
+        # What the device's screen is showing, for the Desktop page's live mirror (status.json):
+        # ready, listening, thinking or speaking, with what Hermes heard and the reply so far.
+        self.activity: dict = {"state": "ready", "heard": "", "reply": "", "status": "", "at": time.time()}
         self.closed = False
         self._send_lock = asyncio.Lock()
         self._upload: _Upload | None = None
@@ -393,6 +409,14 @@ class DeviceSession:
     def action_names(self) -> list[str]:
         return [a["name"] for a in self.actions]
 
+    # -- what the screen shows, for the Desktop mirror ------------------------------
+
+    def note(self, **changes) -> None:
+        """Record a change to what the device shows. Text is cut short: this is a mirror, not a log."""
+        for key, value in changes.items():
+            self.activity[key] = value[:280] if isinstance(value, str) else value
+        self.activity["at"] = time.time()
+
     # -- outbound -----------------------------------------------------------------
 
     async def send_json(self, obj: dict) -> None:
@@ -405,12 +429,16 @@ class DeviceSession:
             await self._ws.send(data)
 
     async def send_reply(self, text: str, *, turn: str | None = None, interim: bool = False) -> None:
+        if not interim:
+            self.note(reply=text)
         await self.send_json(protocol.message("reply", text=text, turn=turn, interim=interim or None))
 
     async def send_delta(self, text: str, *, turn: str | None = None) -> None:
+        self.note(reply=text)
         await self.send_json(protocol.message("reply.delta", text=text, turn=turn))
 
     async def send_transcript(self, text: str) -> None:
+        self.note(heard=text)
         await self.send_json(protocol.message("transcript", text=text))
 
     async def send_status(self, text: str) -> bool:
@@ -421,6 +449,7 @@ class DeviceSession:
         held = self.hub._held.get(self.device_id)
         if held:
             held.status = None
+        self.note(status=text)
         await self.send_json(protocol.message("status", text=text))
         return True
 
@@ -428,12 +457,16 @@ class DeviceSession:
         await self.send_json(protocol.message("notice", text=text, ttl_s=ttl_s))
 
     async def turn_start(self, turn: str) -> None:
+        if self.activity.get("state") != "thinking":
+            self.note(state="thinking", reply="", status="")
         await self.send_json(protocol.message("turn.start", turn=turn))
 
     async def turn_end(self, turn: str, outcome: str = "success") -> None:
         held = self.hub._held.get(self.device_id)
         if held:
             held.status = None  # the phrase was about this turn
+        out = self._audio_out
+        self.note(state="speaking" if out is not None and not out.done.is_set() else "ready", status="")
         await self.send_json(protocol.message("turn.end", turn=turn, outcome=outcome))
 
     async def send_pairing(self, code: str, command: str) -> None:
@@ -1085,6 +1118,7 @@ class DeviceHub:
     async def _h_text(self, session: DeviceSession, msg: dict) -> None:
         text = str(msg.get("text") or "").strip()
         if text:
+            _note(session, state="thinking", heard=text[:4000], reply="", status="")
             session.spawn(self.delegate.on_text(session, str(msg.get("id") or ""), text[:4000]))
 
     async def _h_audio_start(self, session: DeviceSession, msg: dict) -> None:
@@ -1098,6 +1132,7 @@ class DeviceHub:
             return
         session._upload = _Upload(
             id=str(msg.get("id") or ""), stream=int(msg.get("stream") or 0), rate=rate, started=time.monotonic())
+        _note(session, state="listening", heard="", reply="", status="")
         resent = msg.get("resent")
         if isinstance(resent, int) and resent > 0:
             # Recorded through a lost connection and sent whole now, as fast as the link takes it.
@@ -1133,10 +1168,12 @@ class DeviceHub:
             await session.turn_end("", outcome="cancelled")
             return
         wav = audio.wav_bytes(bytes(up.pcm), up.rate)
+        _note(session, state="thinking")
         session.spawn(self.delegate.on_utterance(session, up.id, wav, seconds))
 
     async def _h_audio_cancel(self, session: DeviceSession, msg: dict) -> None:
         session._upload = None
+        _note(session, state="ready")
 
     async def _h_cancel(self, session: DeviceSession, msg: dict) -> None:
         await session.stop_audio()

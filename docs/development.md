@@ -87,6 +87,8 @@ hermes gateway run
 
 The plugin's tab in the Hermes web dashboard is `plugin/dashboard/`. Its bundle, `dist/index.js`, is built from `src/index.jsx`: after editing the source, run `npm ci` once and then `npm run build:dashboard-tab` in `site/`, and commit both files. `npm test` there fails when they differ. Restart `hermes dashboard` after changing `plugin_api.py`; it mounts plugin routes only at startup. A changed bundle needs only a page reload.
 
+The Gadgets page in Hermes Desktop is `plugin/desktop/plugin.js`, built from `plugin/desktop-src/`: run `npm ci` once there, then `npm run build` after editing, and commit both. `npm test` there checks the protocol client. To see a change without reinstalling the plugin, copy the bundle to `~/.hermes/desktop-plugins/gadget/plugin.js` and reload the page.
+
 If your Hermes is a source checkout whose virtualenv Python differs from the Python Hermes's package manager prepares for plugins, `hermes plugins enable` can create an environment the gateway cannot import from. Adding `plugins: {enabled: [gadget]}` to `config.yaml` directly avoids that; the plugin has no Python dependencies of its own.
 
 ## Working on the firmware
