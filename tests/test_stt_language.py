@@ -169,3 +169,18 @@ def test_other_audio_keeps_the_profiles_stt_settings(monkeypatch, tmp_path):
     voice_note = tmp_path / "audio_0f0f0f0f0f0f.ogg"  # another platform's voice note
     voice_note.write_bytes(b"OggS")
     assert _transcribe(monkeypatch, str(voice_note), {"local": {}}) is None
+
+
+def test_plugin_yaml_declares_every_hook_the_plugin_registers():
+    # Hermes's catalog validation fails a plugin whose registered hooks aren't in provides_hooks.
+    import re
+
+    from conftest import REPO
+    from hermes_gadget_plugin.dashboard import SessionBoard
+
+    manifest = (REPO / "plugin" / "plugin.yaml").read_text(encoding="utf-8")
+    block = re.search(r"(?m)^provides_hooks:.*\n((?:  - .*\n)+)", manifest).group(1)
+    declared = {re.match(r"  - (\w+)", line).group(1) for line in block.splitlines()}
+    ctx = _HookCtx()
+    stt.register(ctx)
+    assert declared == set(SessionBoard.HOOKS) | set(ctx.hooks)

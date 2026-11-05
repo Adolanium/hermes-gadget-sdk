@@ -26,6 +26,7 @@ provides_hooks:  # session state for the device's dashboard (dashboard.SessionBo
   - post_approval_response
   - on_session_finalize
   - on_session_reset
+  - pre_transcription  # the language gadget speech is transcribed in (stt.py, stt_language)
 optional_env:
   - name: GADGET_ACCESS_TOKEN
     description: "Optional shared token every gadget must present (configure the same value on the device)"

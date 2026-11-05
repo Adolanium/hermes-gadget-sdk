@@ -50,6 +50,7 @@
 
 ### Hermes plugin
 
+- `plugin.yaml` declares the `pre_transcription` hook that `stt_language` registers. Without it, `hermes plugins validate` failed its declared-hooks check, which the Hermes plugin catalog requires. A test now compares the manifest's `provides_hooks` with the hooks the plugin registers.
 - The display `charset` `latin1-cyrillic`: Latin-1 as for `latin1`, plus the Russian alphabet kept as written. Other Cyrillic and other scripts fold as before.
 - The hub logs a recording a device sends again after a lost connection (`audio.start` with `resent`), with how long ago it began. It took such a recording before too: an utterance is assembled by stream, whatever the pace of its frames. Contributed by @BrOrlandi.
 - The plugin sends each offered profile's thumbnail to devices that ask for them (`caps.faces.thumbs`): its `gadget-face.bin`'s idle picture or its Hermes avatar in colour, only where the hash differs from the one the device holds. The pairing check, every 2 seconds, stats each profile's face file and avatars and sends a new thumbnail once a change has held still for two checks; a profile whose sources are gone gets `face.thumb`, and the initial again. [Faces](docs/faces.md#thumbnails-in-the-profile-grid). Contributed by @BrOrlandi.
