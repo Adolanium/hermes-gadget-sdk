@@ -106,6 +106,9 @@ def _is_ru(ch: str) -> bool:
 
 def fold_latin1_cyrillic(text: str) -> str:
     """For a device whose font draws Latin-1 and Russian Cyrillic (U+0410..U+044F, Ё/ё)."""
+    # Compose first: й and ё may arrive as и/е plus a combining mark, and the mark alone would be
+    # folded away by fold_latin1, leaving the wrong letter.
+    text = unicodedata.normalize("NFC", text)
     out, run = [], []
     for ch in text:
         if _is_ru(ch):
