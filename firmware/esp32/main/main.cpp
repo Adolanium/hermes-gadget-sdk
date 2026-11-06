@@ -1,6 +1,7 @@
 // Hermes Gadget firmware entry point: wires the ESP32 drivers to the portable
 // core (hg::App) and runs the app loop on the main task.
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h
+#include "port_cardputer.hpp"
 
 #include <cstring>
 #include <utility>
@@ -50,6 +51,10 @@ hgp::EspSystem g_system;
 hgp::NvsStorage g_storage;
 hgp::WsTransport g_transport;
 hgp::SpiDisplay g_display;
+#if CONFIG_HG_BOARD_CARDPUTER_ADV
+hg::CardputerCompose g_compose(g_display);
+hgp::CardputerKeyboard g_keyboard;
+#endif
 // The microphone object holds handles and no buffers, so the CYD uses it too:
 // its PDM mic runs on I2S0, the one port with the PDM-to-PCM converter.
 hgp::I2sMic g_mic;
@@ -468,6 +473,11 @@ extern "C" void app_main(void) {
   parts.motion = imu ? &g_motion : nullptr;
   parts.time = &g_time;
 #endif
+#if CONFIG_HG_BOARD_CARDPUTER_ADV
+  const bool keyboard = g_keyboard.begin(i2c_bus);
+  if (hal.display == &g_display) hal.display = &g_compose;
+  parts.key = keyboard;
+#endif
   g_buttons.begin(board.buttons);
   hgp::diag::set_parts(parts);
   hgp::diag::log_boot_summary();
@@ -514,6 +524,10 @@ extern "C" void app_main(void) {
   profile.talk_key = board.buttons.talk >= 0;
   profile.talk_label = board.talk_label;
   profile.cancel_label = board.cancel_label;
+#if CONFIG_HG_BOARD_CARDPUTER_ADV
+  profile.has_cancel_button = keyboard;
+  profile.has_scroll_buttons = keyboard;
+#endif
   if (touch && board.touch.enabled) {
     profile.touch_screen = true;
     profile.touch_ppi = board.touch.ppi;
@@ -623,6 +637,9 @@ extern "C" void app_main(void) {
       esp_restart();
     }
     g_buttons.poll(app);
+#if CONFIG_HG_BOARD_CARDPUTER_ADV
+    g_keyboard.poll(app, g_compose);
+#endif
     g_wifi.tick(app, g_system.now_ms());
 #if !CONFIG_HG_BOARD_ESP32_CYD
     g_tailnet.tick(g_system.now_ms());

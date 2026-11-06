@@ -129,3 +129,14 @@ Firmware packages include `hermes-gadget-<version>-licenses.zip` with this docum
 Python distributions and Linux device packages also include this document and the project's license texts and notices. The Linux installer copies them to `/opt/hermes-gadget/current/licenses/`.
 
 The Waveshare ESP32-P4-WIFI6-Touch-LCD-7B's optional OV5647/MIPI-CSI camera and SCCB pin facts follow Waveshare's [camera preview example](https://github.com/waveshareteam/ESP32-P4-WIFI6-Touch-LCD-7B/tree/9fcd49a8c927a00f5583c22d568b3448addbe51c/examples/arduino/examples/06_Camera_Preview) at commit `9fcd49a8c927a00f5583c22d568b3448addbe51c` (Apache 2.0). Only hardware facts are used; no vendor source code is copied. See [NOTICE](NOTICE).
+
+## Cardputer ADV hardware references
+
+`cardputer_keys.hpp`, `board.cpp` and `port_cardputer.cpp` use hardware facts
+from M5Stack's [K132-Adv documentation](https://docs.m5stack.com/en/core/Cardputer-Adv),
+[M5Cardputer bf64d3178ab43928fa02365fbe3937cec99716ad](https://github.com/m5stack/M5Cardputer/tree/bf64d3178ab43928fa02365fbe3937cec99716ad),
+[M5Unified 96576a14247ddc935149145aa6b51943464120f1](https://github.com/m5stack/M5Unified/tree/96576a14247ddc935149145aa6b51943464120f1)
+and [M5GFX 28d47949bdc84f30881623476f555398e2194313](https://github.com/m5stack/M5GFX/tree/28d47949bdc84f30881623476f555398e2194313).
+These specify pin numbers, printed key legends, matrix wiring, the BCLK-derived
+ES8311 clock and the battery divider. No vendor driver or register table is
+included; the existing managed Espressif codec driver initializes the ES8311.

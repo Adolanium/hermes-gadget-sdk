@@ -346,3 +346,11 @@ hardware facts are used and no Elecrow source code is copied.
 The optional OV5647 camera build fetches Espressif's `esp_video` 2.5.0 and `esp_ipa` 2.4.0 (Espressif MIT), plus `esp_cam_sensor` 2.6.0 (Apache License 2.0). The Espressif MIT license text is included in `LICENSES/Espressif-MIT.txt`.
 
 The Waveshare ESP32-P4-WIFI6-Touch-LCD-7B camera connector and SCCB wiring facts follow the vendor's Arduino camera preview example at commit `9fcd49a8c927a00f5583c22d568b3448addbe51c`: https://github.com/waveshareteam/ESP32-P4-WIFI6-Touch-LCD-7B/tree/9fcd49a8c927a00f5583c22d568b3448addbe51c/examples/arduino/examples/06_Camera_Preview. The vendor repository is Apache License 2.0. Only hardware facts are used; no vendor source code is copied.
+
+The Cardputer ADV pin map, ES8311 clock source, TCA8418 scan mapping and battery
+divider are hardware facts from M5Stack K132-Adv documentation,
+https://docs.m5stack.com/en/core/Cardputer-Adv, M5Cardputer commit
+bf64d3178ab43928fa02365fbe3937cec99716ad, M5Unified commit
+96576a14247ddc935149145aa6b51943464120f1, and M5GFX commit
+28d47949bdc84f30881623476f555398e2194313. The driver and local text editor are
+independent implementations; no M5Stack or Adafruit source is copied.

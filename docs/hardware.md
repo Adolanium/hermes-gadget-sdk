@@ -1284,3 +1284,87 @@ How long a reconnect takes has not been measured on hardware for this firmware.
 - Wi-Fi setup works over USB or a temporary password-protected network. A Bluetooth link for a phone app exists, but no board enables it yet: each board turns it on after it passes the [Bluetooth checks](hardware-validation.md#bluetooth). There is no phone app in this repository.
 - Firmware updates are authorized with the device key, but images aren't signed: the bootloader runs whatever a trusted Hermes installs. Secure Boot isn't enabled.
 - The text font is ASCII only; the host folds other characters.
+
+## M5Stack Cardputer ADV
+
+Experimental profile `cardputer-adv`, for **K132-Adv with Stamp-S3A** only.
+The original Cardputer and Cardputer v1.1 have different audio and keyboards.
+ESP32-S3FN8 provides 8 MB flash and no PSRAM. SD is not required: firmware,
+Wi-Fi configuration and pairing identity live in internal flash/NVS.
+
+| Peripheral | Wiring |
+|---|---|
+| ST7789V2, landscape 240x135 | MOSI 35, SCLK 36, CS 37, DC 34, reset 33, backlight 38 |
+| Shared I2C | SDA 8, SCL 9; ES8311 at 0x18, TCA8418 at 0x34 |
+| ES8311 duplex I2S | BCLK 41, LRCLK 43, speaker data 42, microphone data 46; no MCLK wire |
+| TCA8418 keyboard | Interrupt GPIO11; 7x8 scan matrix mapped to the 4x14 printed layout |
+| G0 / BOOT | GPIO0, active low |
+| Battery sense | GPIO10, divider ratio 2; voltage only |
+
+The ES8311 derives its clock from BCLK. The existing Gadget codec driver owns
+both directions; the microphone and speaker share the codec. No amplifier
+control GPIO is assigned; the headphone jack disables the speaker in hardware.
+The BMI270, SD slot, RGB LED and IR are left unused.
+
+### Build and first flash
+
+```bash
+cd firmware/esp32
+pio run -e cardputer-adv -j 1
+```
+
+Before the first install, read and keep a complete 8 MB flash backup with
+esptool. Keep it private: it can contain settings from the previous firmware.
+For recovery hold G0 while connecting USB with the power switch OFF, as in
+[M5Stack's download-mode instructions](https://docs.m5stack.com/en/core/Cardputer-Adv).
+
+```bash
+esptool --chip esp32s3 --port /dev/ttyACM0 read-flash 0 ALL original-cardputer-adv.bin
+pio run -e cardputer-adv -t upload --upload-port /dev/ttyACM0
+```
+
+The initial install replaces the previous bootloader and partition table,
+including an existing launcher. Restore the complete backup at address 0 to
+return to the previous installation. This profile uses Gadget's normal two
+application slots and rollback behavior; it does not preserve M5Launcher.
+
+Configure Wi-Fi and the Hermes URL over the USB serial console, or through
+[phone setup](setup-board.md#set-up-wi-fi-with-your-phone), then approve pairing
+on the Hermes server. The USB console runs through the S3's native Serial/JTAG
+port, not the UART pins used by audio.
+
+### Controls
+
+| Control | Action |
+|---|---|
+| Hold G0, speak, release | Voice request; tap selects in settings or answers a prompt |
+| Type, then Enter | Open local editor and send a text message (up to 256 ASCII characters) |
+| Shift + character | Uppercase or printed symbol |
+| Backspace | Delete the last draft character |
+| Fn + Esc (the backtick key) | Discard draft, cancel recording/reply, or go Back |
+| Fn + ; / Fn + . | Scroll up / down; navigate settings |
+| Tab or Fn + Enter | Open settings |
+| Enter in settings or a prompt | Select / confirm |
+| Fn + P | Next configured Hermes profile |
+| Fn + Z | Screen off/on; Wi-Fi stays connected |
+
+The editor is local to this board port. It neither sends unfinished text nor
+executes typed console commands. Typing is enabled on Ready and reply screens
+while online and idle. A network loss, incoming prompt, alarm, update or active voice turn closes the editor and
+clears the draft. The first keyboard press on a dark screen only wakes it.
+The normal Gadget display returns after sending or discarding a draft.
+
+### Sources and verification
+
+Hardware facts: [M5Stack K132-Adv product page and schematic](https://docs.m5stack.com/en/core/Cardputer-Adv),
+[M5Cardputer bf64d317](https://github.com/m5stack/M5Cardputer/tree/bf64d3178ab43928fa02365fbe3937cec99716ad)
+(key layout and TCA8418 scan mapping),
+[M5Unified 96576a14](https://github.com/m5stack/M5Unified/tree/96576a14247ddc935149145aa6b51943464120f1)
+(audio clock source and battery divider), and
+[M5GFX 28d47949](https://github.com/m5stack/M5GFX/tree/28d47949bdc84f30881623476f555398e2194313)
+(panel geometry). No vendor implementation is copied.
+
+Physical verification is pending; retain experimental status. Host tests cover
+key event decoding, modifiers, invalid FIFO events, bounded text entry and
+restoring the normal UI after editing. See the
+[physical checklist](hardware-validation.md#record-a-physical-test).

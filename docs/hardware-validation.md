@@ -10,6 +10,7 @@ Firmware builds and simulator tests check software behavior. A physical verifica
 
 | Model | Display and input | Audio | Power support | Verification |
 |---|---|---|---|---|
+| M5Stack Cardputer ADV, K132-Adv / Stamp-S3A | ST7789 240x135; G0 and TCA8418 keyboard; local ASCII editor | ES8311 microphone and speaker, BCLK-derived clock | Calibrated battery voltage and screen timeout; mechanical power switch; no charge-state or percentage | Experimental; [port status](#cardputer-adv-port-status); full physical checklist pending |
 | ESP32-S3-DevKitC-1 N8R8 breadboard | Wired ST7789, TALK and CANCEL buttons | Wired I2S microphone; optional MAX98357A speaker | External power | CI build; physical report not recorded |
 | Waveshare ESP32-S3-LCD-1.54, SKUs 33866/33867, and Touch-LCD-1.54, SKUs 33868/33869 | ST7789 240×240; BOOT, PLUS and PWR (screen on/off, hold to power off); CST816 touch on the touch SKUs | ES7210 microphones and ES8311 speaker | Calibrated voltage, charging signal, battery latch and screen timeout; idle CPU at 80 MHz and light sleep while dozing on battery; USB bypasses shutdown | CI build; physical report not recorded |
 | Waveshare ESP32-S3-Touch-LCD-1.83, SKUs 32790/32791 | ST7789P 240×284; CST816D touch, BOOT and PWR (short press from the AXP2101 turns the screen off and on) | ES7210 microphones (MIC1 and MIC2) and ES8311 speaker; echo reference unused | AXP2101 voltage, charging and external power; ALDO1 at 3.3 V for the microphone; no measured battery curve; IMU, RTC and TF card unused | Experimental; firmware builds; not run on a board; full checklist not completed |
@@ -242,6 +243,24 @@ After this report, review disabled light sleep for this board. Its FT3168 interr
 - **Power:** `AXP2101 reporting ready`; charging and supply settings unchanged. USB power only; no battery was connected.
 - **Identity:** device ready with board tag `esp32s3-touch-amoled-2.16`, fw 0.2.0.
 - **Not verified in this smoke check:** Wi-Fi connection to a real gateway, pairing and persistence, microphone capture level, speaker playback, touch coordinate accuracy and orientation, the PWR key, battery operation, volume/brightness steps, OTA, and a long session. The touch orientation was changed during review to match Waveshare's BSP and has not been checked on the board. The port stays experimental until the full [checklist](#record-a-physical-test) is completed.
+
+## Cardputer ADV port status
+
+The `cardputer-adv` profile targets M5Stack K132-Adv with Stamp-S3A
+(ESP32-S3FN8, 8 MB flash, no PSRAM). It stays **experimental** until the full
+physical checklist below is completed. A successful build or a host test does
+not verify display orientation, key wiring or analog audio quality.
+
+Implemented: ST7789 240x135 display and backlight; ES8311 microphone and speaker;
+TCA8418 keyboard; G0 push-to-talk; USB provisioning; calibrated battery voltage.
+The text editor sends through the unchanged Hermes Gadget protocol.
+
+Not implemented: SD storage, IR, BMI270 motion, battery percentage, charge-state
+telemetry or software shutdown. The mechanical power switch remains usable.
+Without PSRAM, voice streams live and is not retained through a lost connection.
+Keyboard entry is ASCII; the normal Gadget font can display Russian replies.
+
+Physical results are recorded in the [Cardputer ADV section](hardware.md#m5stack-cardputer-adv).
 
 ## Record a physical test
 

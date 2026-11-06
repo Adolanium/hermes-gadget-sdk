@@ -45,6 +45,8 @@ class Board:
 BOARDS = {
     "sim-320x240": Board("sim-320x240", 320, 240),
     "sim-240x135": Board("sim-240x135", 240, 135),
+    # Geometry/audio only; physical keyboard/editor have separate host C++ tests.
+    "cardputer-adv": Board("cardputer-adv", 240, 135),
     "sim-480x320": Board("sim-480x320", 480, 320),
     "sim-240x240-nospeaker": Board("sim-240x240-nospeaker", 240, 240, speaker=False),
     # A 1.54" 240x240 SPI LCD with codecs (e.g. Waveshare ESP32-S3-LCD-1.54): no scroll buttons.

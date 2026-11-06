@@ -8,6 +8,7 @@ Hardware ports remain experimental until the [verification table](hardware-valid
 
 | Board | Controls | Audio |
 |---|---|---|
+| [M5Stack Cardputer ADV / Stamp-S3A](hardware.md#m5stack-cardputer-adv) | Hold G0 to talk; keyboard to type; Fn+Esc cancels; Fn+; / Fn+. scroll; Tab opens settings | Onboard ES8311 microphone and speaker. Experimental; ADV only |
 | [Waveshare ESP32-S3-LCD-1.54](hardware.md#waveshare-esp32-s3-lcd-154) | Hold BOOT to talk | Onboard microphones and speaker |
 | [Waveshare ESP32-S3-Touch-LCD-1.83](hardware.md#waveshare-esp32-s3-touch-lcd-183) | Hold the screen or BOOT to talk; PWR turns the screen off and on | Onboard microphones and speaker. Experimental |
 | [Waveshare ESP32-S3-Touch-LCD-1.46](hardware.md#waveshare-esp32-s3-touch-lcd-146) | Hold the screen or BOOT to talk | Onboard microphone and speaker. Experimental |
