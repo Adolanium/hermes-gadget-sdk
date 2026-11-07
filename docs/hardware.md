@@ -1487,9 +1487,12 @@ After reboot, live diagnostics identified ELF prefix `5718545567a38d7e` in
 `kept the new firmware`. ST7789, ES8311 microphone/speaker and the keyboard were
 initialized. The device identity and connection settings were retained.
 
-Fresh owner checks of the display, physical keyboard/text send and a voice turn
-with capture and playback on this exact build are pending. Initialization and
-online status alone do not establish those physical checks.
+After this exact build was installed, the owner confirmed on 2026-11-07 that
+the display is readable and correctly oriented, physical keyboard entry with
+Backspace and Enter sends text successfully, and a G0 voice request captures
+speech and receives an audible spoken reply. These are owner-reported physical
+functional checks, separate from initialization diagnostics and host tests;
+they do not establish exhaustive key coverage or measured audio quality.
 
 App SHA-256:
 `979946abc4ed68fa18efcf6ffb0236196b9e4c855f4195e7419fa768c281603a`.
