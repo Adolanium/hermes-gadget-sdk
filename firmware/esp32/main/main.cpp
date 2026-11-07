@@ -298,6 +298,7 @@ void dispatch(hg::App& app, hgp::Event& ev) {
 
 }  // namespace
 
+/** Initialize the selected board and serialize App, input and display work on this task. */
 extern "C" void app_main(void) {
   hgp::diag::begin();  // first, so `diag log` has the whole boot
   init_nvs();

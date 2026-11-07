@@ -45,6 +45,33 @@ TxItem close_item(void* client) { return TxItem{client, 0, hg::ws::kClose, nullp
 
 }  // namespace
 
+TEST("ws: blocked receive admission owns its frame while a replacement client reuses the buffer") {
+  std::string reassembly(4096, 'a');
+  reassembly[0] = '\x03';
+  const std::string original = reassembly;
+  const bool accepted = hg::ws::deliver_owned_message(reassembly, [&](const uint8_t* data, size_t len) {
+    // Simulate a new client's callback running while OTA admission is blocked.
+    // Force reallocation, then leave a partial next frame for its later callback.
+    reassembly.assign(65536, 'b');
+    CHECK_EQ(std::string(reinterpret_cast<const char*>(data), len), original);
+    reassembly = "replacement partial frame";
+    return true;
+  });
+  CHECK(accepted);
+  CHECK_EQ(reassembly, "replacement partial frame");
+}
+
+TEST("ws: refused receive admission preserves replacement bytes and binary short frames") {
+  std::string reassembly("\x03\0\x01\0old", 7);
+  const std::string original = reassembly;
+  CHECK(!hg::ws::deliver_owned_message(reassembly, [&](const uint8_t* data, size_t len) {
+    reassembly = "new";
+    CHECK_EQ(std::string(reinterpret_cast<const char*>(data), len), original);
+    return false;
+  }));
+  CHECK_EQ(reassembly, "new");
+}
+
 // --- Which connection is current, and whether it was lost -------------------
 
 TEST("ws: nothing is lost before the first connection") {

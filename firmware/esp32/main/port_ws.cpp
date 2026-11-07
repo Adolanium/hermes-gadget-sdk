@@ -174,6 +174,10 @@ void WsTransport::tx_task(void* arg) {
   }
 }
 
+/** Reassemble this connection's frames and hand completed messages to the app.
+ * Cardputer delivery detaches payload storage before its bounded OTA wait; old
+ * generations are still rejected by dispatch after asynchronous client close.
+ */
 void WsTransport::on_event(void* arg, const char*, int32_t id, void* event_data) {
   auto* self = static_cast<WsTransport*>(arg);
   auto* d = static_cast<esp_websocket_event_data_t*>(event_data);
@@ -229,8 +233,16 @@ void WsTransport::on_event(void* arg, const char*, int32_t id, void* event_data)
       bool frame_done = d->payload_offset + d->data_len >= d->payload_len;
       if (frame_done && d->fin) {
         EventType t = self->rx_opcode_ == 0x2 ? EventType::WsBinary : EventType::WsText;
+#if CONFIG_HG_BOARD_CARDPUTER_ADV
+        // OTA admission can wait for RAM. Do not borrow shared rx_ storage
+        // across that wait or clear a replacement client's frame afterward.
+        hg::ws::deliver_owned_message(self->rx_, [t, gen](const uint8_t* data, size_t len) {
+          return events::post(t, data, len, gen);
+        });
+#else
         events::post(t, self->rx_.data(), self->rx_.size(), gen);
         self->rx_.clear();
+#endif
       }
       break;
     }

@@ -273,7 +273,10 @@ candidate's five-minute probation. Wi-Fi, identity and pairing survived; see
 verification is still pending. The [review-build recheck](hardware.md#cardputer-adv-review-build-recheck)
 records a clean build with the shared platform, live boot/OTA confirmation,
 and owner-confirmed display, physical keyboard/text send and voice capture
-with a spoken reply on that exact build.
+with a spoken reply on that exact build. A subsequent
+[receive-ownership follow-up](hardware.md#cardputer-adv-receive-ownership-follow-up)
+has software verification only; the device currently runs M5Launcher for
+separate experiments.
 Results and limitations are recorded in the
 [Cardputer ADV section](hardware.md#m5stack-cardputer-adv).
 

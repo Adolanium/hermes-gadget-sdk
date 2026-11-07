@@ -10,7 +10,12 @@ class CardputerKeys {
   enum class Kind : uint8_t { None, Character, Enter, Backspace, Cancel, Up, Down, Settings, Power, Profile };
   struct Key { Kind kind = Kind::None; char text = 0; };
 
+  /** Clear held modifiers after a FIFO overflow or lost release event. */
   void reset() { held_ = 0; }
+  /** Consume one TCA8418 press/release byte and return a new key action.
+   * Releases, repeated presses and unwired scan positions produce no action.
+   * Modifier state persists until release or reset; text is printed ASCII.
+   */
   Key feed(uint8_t event) {
     const int code = event & 0x7f;
     if (code < 1 || code > 68) return {};

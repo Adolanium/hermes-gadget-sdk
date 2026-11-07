@@ -17,6 +17,7 @@ const char* TAG = "hg.events";
 QueueHandle_t queue = nullptr;
 #if CONFIG_HG_BOARD_CARDPUTER_ADV
 SemaphoreHandle_t firmware_slots = nullptr;
+/** Identify complete firmware-channel events without interpreting their payload. */
 bool firmware_frame(EventType type, const void* data, size_t len) {
   return type == EventType::WsBinary && data && len >= hg::proto::kBinaryHeader &&
          *static_cast<const uint8_t*>(data) == static_cast<uint8_t>(hg::proto::Channel::Firmware);
@@ -38,6 +39,11 @@ void init() {
 #endif
 }
 
+/** Copy a payload into the app queue; the caller retains its source storage.
+ * Cardputer firmware frames wait for a bounded receive slot before allocation.
+ * The source must remain valid throughout that wait. Failed admission returns
+ * false and releases the slot; successful admission transfers the copy to release().
+ */
 bool post(EventType type, const void* data, size_t len, uint32_t generation, ConsoleRequest* console) {
   Event ev{type, generation, nullptr, len, console};
 #if CONFIG_HG_BOARD_CARDPUTER_ADV

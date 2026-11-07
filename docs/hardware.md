@@ -1498,3 +1498,23 @@ App SHA-256:
 `979946abc4ed68fa18efcf6ffb0236196b9e4c855f4195e7419fa768c281603a`.
 The earlier reports retain their original firmware identities; the board stays
 experimental while the remaining full-checklist items are unverified.
+
+### Cardputer ADV receive ownership follow-up
+
+Review found that waiting for an OTA receive slot must not keep a borrowed
+pointer into the transport's shared reassembly buffer. The SDK uses a separate
+event loop for each WebSocket client, while closing the old client runs on the
+send task, so callbacks from a replacement client can overlap that wait.
+
+The Cardputer receive path now detaches a completed message into local owned
+storage before posting it. The payload remains valid throughout admission,
+and returning from the old callback does not clear a replacement client's
+partial frame. Host regression tests reuse/reallocate the shared buffer during
+delivery and exercise both successful and refused admission, including binary
+short frames. This protects the newly introduced waiting interval; it is not
+a claim that every pre-existing transport reconnect path was redesigned.
+
+These follow-up changes are checked in host tests and an ESP32 build only.
+The physical reports above describe their recorded images. The device now runs
+M5Launcher for separate experiments, so this newer Hermes receive change has
+not yet been installed or physically tested.

@@ -5,8 +5,21 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 namespace hg::ws {
+
+/** Deliver a completed frame with storage owned for the entire callback.
+ * Detach before calling a potentially blocking receiver. A replacement client
+ * may reuse reassembly during that wait; neither its bytes nor its partial
+ * next frame are touched after delivery, including when admission fails.
+ */
+template <class Deliver>
+bool deliver_owned_message(std::string& reassembly, Deliver&& deliver) {
+  std::string message;
+  message.swap(reassembly);
+  return deliver(reinterpret_cast<const uint8_t*>(message.data()), message.size());
+}
 
 // Each connection gets a generation. Leaving a connection moves to the next
 // one, so whatever the old client still reports can be told apart and ignored.
