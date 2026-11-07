@@ -172,6 +172,7 @@ bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus)
   if (out_) {
     esp_codec_dev_set_out_vol(out_, 70);
     esp_codec_dev_set_out_mute(out_, true);  // unmuted while something plays
+    esp_codec_dev_write_reg(out_, 0x37, 0x38);  // DAC fade ramp (reg37 bits4-7) to soften mute/unmute transients
   }
   if (in_) esp_codec_dev_set_in_gain(in_, cfg.mic_gain_db);
   mic_link_ = {in_ && in_ != out_, rx_, fs, cfg.mic_gain_db};
@@ -291,6 +292,7 @@ void CodecSpeaker::power_up() {
   }
   esp_codec_dev_set_out_vol(dev_, volume_);
   esp_codec_dev_set_out_mute(dev_, true);  // unmuted while something plays
+  esp_codec_dev_write_reg(dev_, 0x37, 0x38);  // DAC fade ramp to soften mute/unmute transients
   powered_ = true;
 }
 
