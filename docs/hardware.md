@@ -1333,6 +1333,28 @@ Configure Wi-Fi and the Hermes URL over the USB serial console, or through
 on the Hermes server. The USB console runs through the S3's native Serial/JTAG
 port, not the UART pins used by audio.
 
+### Enter Wi-Fi from a phone
+
+The network name and password shown on the **setup** screen belong to the
+Cardputer's temporary access point. They are not fields to fill with its keyboard.
+
+1. Open the phone's Wi-Fi settings and join that temporary network with the
+   password currently displayed on the Cardputer. Stay connected if the phone
+   warns that the network has no internet.
+2. Open `http://192.168.4.1` in the phone's browser.
+3. Enter your home **2.4 GHz** Wi-Fi name and password. Keep the Hermes URL
+   already provisioned, or enter the server's Gadget URL.
+4. Choose **Check connection and save**. When it succeeds, reconnect the phone
+   to its usual Wi-Fi and approve the Cardputer's pairing code on Hermes.
+
+The temporary network expires after ten minutes. To reopen it, press Tab on the
+Cardputer, navigate with Fn+; / Fn+. to **Wi-Fi setup**, and select with Enter.
+USB console command `wifi-setup` opens it too. Each setup session has a new
+password; use the current one shown on the display.
+
+The keyboard editor in this profile sends chat messages after connection. Wi-Fi
+credentials are entered on the phone page or provisioned over USB.
+
 ### Controls
 
 | Control | Action |
@@ -1364,7 +1386,17 @@ Hardware facts: [M5Stack K132-Adv product page and schematic](https://docs.m5sta
 [M5GFX 28d47949](https://github.com/m5stack/M5GFX/tree/28d47949bdc84f30881623476f555398e2194313)
 (panel geometry). No vendor implementation is copied.
 
-Physical verification is pending; retain experimental status. Host tests cover
+USB smoke testing on a connected K132-Adv / Stamp-S3A identified ESP32-S3 rev
+v0.2, 8 MB flash and no PSRAM. Installation checksum verification passed.
+Firmware 0.5.0 booted and reported ST7789 240x135, ES8311 microphone and speaker,
+and a ready TCA8418; I2C probes found 0x18, 0x34 and 0x69. Initial diagnostics
+reported 84,764 bytes free internal RAM (largest block 43,008 bytes). The saved
+server URL and device identity remained present after about 11.7 hours powered
+on. The owner reports seeing the Wi-Fi setup information on the display.
+This checks initialization and USB provisioning, not microphone capture,
+speaker quality, physical keyboard operation, Wi-Fi association or pairing.
+Those checks and the full physical checklist remain pending; retain
+experimental status. Host tests cover
 key event decoding, modifiers, invalid FIFO events, bounded text entry and
 restoring the normal UI after editing. See the
 [physical checklist](hardware-validation.md#record-a-physical-test).

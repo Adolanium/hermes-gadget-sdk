@@ -638,7 +638,7 @@ extern "C" void app_main(void) {
     }
     g_buttons.poll(app);
 #if CONFIG_HG_BOARD_CARDPUTER_ADV
-    g_keyboard.poll(app, g_compose);
+    if (hal.display == &g_compose) g_keyboard.poll(app, g_compose);
 #endif
     g_wifi.tick(app, g_system.now_ms());
 #if !CONFIG_HG_BOARD_ESP32_CYD
