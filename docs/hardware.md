@@ -1402,10 +1402,16 @@ The device's own diagnostics confirmed **online, paired**. The server's
 built-in `hermes pairing approve gadget <request-id>` command approved the
 request identified as this Cardputer.
 
-This checks initialization, USB provisioning, Wi-Fi association and pairing,
-not microphone capture, speaker quality or physical keyboard operation.
-Those checks, reboot persistence and the full physical checklist remain pending; retain
-experimental status. Host tests cover
+The owner subsequently confirmed that keyboard/text entry and the G0 voice
+request/response flow work on this installed firmware. The owner also confirmed
+that Wi-Fi settings survive switching the device off and on. These are
+owner-reported functional checks, not instrumented audio-quality measurements
+or an exhaustive test of every key and shortcut. Pairing persistence across
+that power cycle was not separately reported.
+
+Systematic display checks, phone provisioning, battery-only endurance, network
+loss recovery, OTA/rollback and the rest of the physical checklist remain
+pending; retain experimental status. Host tests cover
 key event decoding, modifiers, invalid FIFO events, bounded text entry and
 restoring the normal UI after editing. See the
 [physical checklist](hardware-validation.md#record-a-physical-test).

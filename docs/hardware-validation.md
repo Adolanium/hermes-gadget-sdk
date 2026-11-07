@@ -260,7 +260,10 @@ telemetry or software shutdown. The mechanical power switch remains usable.
 Without PSRAM, voice streams live and is not retained through a lost connection.
 Keyboard entry is ASCII; the normal Gadget font can display Russian replies.
 
-Physical results are recorded in the [Cardputer ADV section](hardware.md#m5stack-cardputer-adv).
+The owner reports working keyboard/text entry, G0 voice requests/responses and
+Wi-Fi settings retained through an off/on cycle on the installed 0.5.0-based
+port. Full physical verification is still pending. Results and limitations are
+recorded in the [Cardputer ADV section](hardware.md#m5stack-cardputer-adv).
 
 ## Record a physical test
 
