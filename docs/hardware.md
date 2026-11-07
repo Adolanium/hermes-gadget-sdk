@@ -1283,7 +1283,7 @@ How long a reconnect takes has not been measured on hardware for this firmware.
 - Push-to-talk or tap with energy VAD. There is no wake word; the protocol leaves room for one (`audio.start.mode`).
 - Wi-Fi setup works over USB or a temporary password-protected network. A Bluetooth link for a phone app exists, but no board enables it yet: each board turns it on after it passes the [Bluetooth checks](hardware-validation.md#bluetooth). There is no phone app in this repository.
 - Firmware updates are authorized with the device key, but images aren't signed: the bootloader runs whatever a trusted Hermes installs. Secure Boot isn't enabled.
-- The text font is ASCII only; the host folds other characters.
+- Keyboard entry is ASCII. Replies use the shared font (ASCII, Latin-1 and the Russian alphabet); the plugin folds other characters to what it draws.
 
 ## M5Stack Cardputer ADV
 
