@@ -34,6 +34,7 @@ idf_component_register(
         ${HG_P4_SOURCES}
         "port_ble.cpp"
         "port_buttons.cpp"
+        "port_cardputer.cpp"
         "port_codec.cpp"
         "port_cores3.cpp"
         "port_sticks3.cpp"

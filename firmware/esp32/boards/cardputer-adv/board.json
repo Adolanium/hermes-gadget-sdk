@@ -1,0 +1,6 @@
+{
+  "title": "M5Stack Cardputer ADV",
+  "summary": "Stamp-S3A, ST7789 240x135, ES8311 microphone and speaker, TCA8418 keyboard. Experimental; not the original Cardputer.",
+  "ready_made": true,
+  "docs": "docs/hardware.md#m5stack-cardputer-adv"
+}

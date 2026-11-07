@@ -40,6 +40,8 @@ namespace {
 #define HG_BOARD_NAME "m5stack-cores3"
 #elif CONFIG_HG_BOARD_STICKS3
 #define HG_BOARD_NAME "m5stack-sticks3"
+#elif CONFIG_HG_BOARD_CARDPUTER_ADV
+#define HG_BOARD_NAME "cardputer-adv"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_185C_V2
 #define HG_BOARD_NAME "waveshare-esp32-s3-touch-lcd-1.85c-v2"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_146
@@ -1395,6 +1397,45 @@ BoardConfig make() {
   b.buttons = {0, -1, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";
+  return b;
+}
+#elif CONFIG_HG_BOARD_CARDPUTER_ADV
+// M5Stack K132-Adv / Stamp-S3A. Hardware facts and pinned vendor references:
+// docs/hardware.md#m5stack-cardputer-adv. No external PSRAM on ESP32-S3FN8.
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.lcd.enabled = true;
+  b.lcd.width = 240;
+  b.lcd.height = 135;
+  b.lcd.swap_xy = true;
+  b.lcd.mirror_x = true;
+  b.lcd.mirror_y = false;
+  b.lcd.gap_x = 40;
+  b.lcd.gap_y = 53;
+  b.lcd.mosi = 35;
+  b.lcd.sclk = 36;
+  b.lcd.cs = 37;
+  b.lcd.dc = 34;
+  b.lcd.rst = 33;
+  b.lcd.backlight = 38;
+  b.i2c = {8, 9, 400000};
+  b.codec.enabled = true;
+  b.codec.mclk = -1;  // ES8311 derives its clock from BCLK
+  b.codec.bclk = 41;
+  b.codec.ws = 43;
+  b.codec.dout = 42;
+  b.codec.din = 46;
+  b.codec.dac_mclk = false;
+  b.codec.mic = MicCodec::Es8311;
+  b.codec.amp_supply_v = 3.3f;
+  b.latch_power.enabled = true;
+  b.latch_power.adc = 10;
+  b.latch_power.mv_ratio = 2;
+  b.latch_power.power_off_supported = false;  // mechanical switch
+  b.buttons = {0, -1, -1, -1};
+  b.talk_label = "G0";
+  b.cancel_label = "Fn+Esc";
   return b;
 }
 #elif CONFIG_HG_BOARD_CUSTOM

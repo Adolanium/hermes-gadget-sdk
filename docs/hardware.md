@@ -1283,4 +1283,238 @@ How long a reconnect takes has not been measured on hardware for this firmware.
 - Push-to-talk or tap with energy VAD. There is no wake word; the protocol leaves room for one (`audio.start.mode`).
 - Wi-Fi setup works over USB or a temporary password-protected network. A Bluetooth link for a phone app exists, but no board enables it yet: each board turns it on after it passes the [Bluetooth checks](hardware-validation.md#bluetooth). There is no phone app in this repository.
 - Firmware updates are authorized with the device key, but images aren't signed: the bootloader runs whatever a trusted Hermes installs. Secure Boot isn't enabled.
-- The text font is ASCII only; the host folds other characters.
+- Keyboard entry is ASCII. Replies use the shared font (ASCII, Latin-1 and the Russian alphabet); the plugin folds other characters to what it draws.
+
+## M5Stack Cardputer ADV
+
+Experimental profile `cardputer-adv`, for **K132-Adv with Stamp-S3A** only.
+The original Cardputer and Cardputer v1.1 have different audio and keyboards.
+ESP32-S3FN8 provides 8 MB flash and no PSRAM. SD is not required: firmware,
+Wi-Fi configuration and pairing identity live in internal flash/NVS.
+
+| Peripheral | Wiring |
+|---|---|
+| ST7789V2, landscape 240x135 | MOSI 35, SCLK 36, CS 37, DC 34, reset 33, backlight 38 |
+| Shared I2C | SDA 8, SCL 9; ES8311 at 0x18, TCA8418 at 0x34 |
+| ES8311 duplex I2S | BCLK 41, LRCLK 43, speaker data 42, microphone data 46; no MCLK wire |
+| TCA8418 keyboard | Interrupt GPIO11; 7x8 scan matrix mapped to the 4x14 printed layout |
+| G0 / BOOT | GPIO0, active low |
+| Battery sense | GPIO10, divider ratio 2; voltage only |
+
+The ES8311 derives its clock from BCLK. The existing Gadget codec driver owns
+both directions; the microphone and speaker share the codec. No amplifier
+control GPIO is assigned; the headphone jack disables the speaker in hardware.
+The BMI270, SD slot, RGB LED and IR are left unused.
+
+### Build and first flash
+
+```bash
+cd firmware/esp32
+pio run -e cardputer-adv -j 1
+```
+
+Before the first install, read and keep a complete 8 MB flash backup with
+esptool. Keep it private: it can contain settings from the previous firmware.
+For recovery hold G0 while connecting USB with the power switch OFF, as in
+[M5Stack's download-mode instructions](https://docs.m5stack.com/en/core/Cardputer-Adv).
+
+```bash
+esptool --chip esp32s3 --port /dev/ttyACM0 read-flash 0 ALL original-cardputer-adv.bin
+pio run -e cardputer-adv -t upload --upload-port /dev/ttyACM0
+```
+
+The initial install replaces the previous bootloader and partition table,
+including an existing launcher. Restore the complete backup at address 0 to
+return to the previous installation. This profile uses Gadget's normal two
+application slots and rollback behavior; it does not preserve M5Launcher.
+
+Configure Wi-Fi and the Hermes URL over the USB serial console, or through
+[phone setup](setup-board.md#set-up-wi-fi-with-your-phone), then approve pairing
+on the Hermes server. The USB console runs through the S3's native Serial/JTAG
+port, not the UART pins used by audio.
+
+### Enter Wi-Fi from a phone
+
+The network name and password shown on the **setup** screen belong to the
+Cardputer's temporary access point. They are not fields to fill with its keyboard.
+
+1. Open the phone's Wi-Fi settings and join that temporary network with the
+   password currently displayed on the Cardputer. Stay connected if the phone
+   warns that the network has no internet.
+2. Open `http://192.168.4.1` in the phone's browser.
+3. Enter your home **2.4 GHz** Wi-Fi name and password. Keep the Hermes URL
+   already provisioned, or enter the server's Gadget URL.
+4. Choose **Check connection and save**. When it succeeds, reconnect the phone
+   to its usual Wi-Fi and approve the Cardputer's pairing code on Hermes.
+
+The temporary network expires after ten minutes. To reopen it, press Tab on the
+Cardputer, navigate with Fn+; / Fn+. to **Wi-Fi setup**, and select with Enter.
+USB console command `wifi-setup` opens it too. Each setup session has a new
+password; use the current one shown on the display.
+
+The keyboard editor in this profile sends chat messages after connection. Wi-Fi
+credentials are entered on the phone page or provisioned over USB.
+
+### Controls
+
+| Control | Action |
+|---|---|
+| Hold G0, speak, release | Voice request; tap selects in settings or answers a prompt |
+| Type, then Enter | Open local editor and send a text message (up to 256 ASCII characters) |
+| Shift + character | Uppercase or printed symbol |
+| Backspace | Delete the last draft character |
+| Fn + Esc (the backtick key) | Discard draft, cancel recording/reply, or go Back |
+| Fn + ; / Fn + . | Scroll up / down; navigate settings |
+| Tab or Fn + Enter | Open settings |
+| Enter in settings or a prompt | Select / confirm |
+| Fn + P | Next configured Hermes profile |
+| Fn + Z | Screen off/on; Wi-Fi stays connected |
+
+The editor is local to this board port. It neither sends unfinished text nor
+executes typed console commands. Typing is enabled on Ready and reply screens
+while online and idle. A network loss, incoming prompt, alarm, update or active voice turn closes the editor and
+clears the draft. The first keyboard press on a dark screen only wakes it.
+The normal Gadget display returns after sending or discarding a draft.
+
+### Sources and verification
+
+Hardware facts: [M5Stack K132-Adv product page and schematic](https://docs.m5stack.com/en/core/Cardputer-Adv),
+[M5Cardputer bf64d317](https://github.com/m5stack/M5Cardputer/tree/bf64d3178ab43928fa02365fbe3937cec99716ad)
+(key layout and TCA8418 scan mapping),
+[M5Unified 96576a14](https://github.com/m5stack/M5Unified/tree/96576a14247ddc935149145aa6b51943464120f1)
+(audio clock source and battery divider), and
+[M5GFX 28d47949](https://github.com/m5stack/M5GFX/tree/28d47949bdc84f30881623476f555398e2194313)
+(panel geometry). No vendor implementation is copied.
+
+USB smoke testing on a connected K132-Adv / Stamp-S3A identified ESP32-S3 rev
+v0.2, 8 MB flash and no PSRAM. The PCB revision was not recorded. The initial
+checks below used firmware built from upstream `7e18943` (0.5.0) plus this
+Cardputer port, including its display-initialization guard. The later OTA report
+uses the rebased port and a Cardputer-specific receive-buffer fix. Installation
+checksum verification passed.
+Firmware 0.5.0 booted and reported ST7789 240x135, ES8311 microphone and speaker,
+and a ready TCA8418; I2C probes found 0x18, 0x34 and 0x69. Initial diagnostics
+reported 84,764 bytes free internal RAM (largest block 43,008 bytes). The saved
+server URL and device identity remained present after about 11.7 hours powered
+on. The owner reports seeing the Wi-Fi setup information on the display.
+On 2026-11-07, USB provisioning joined the owner's home Wi-Fi (reported RSSI
+-54 dBm), reached the existing Hermes Gadget gateway and completed pairing.
+The device's own diagnostics confirmed **online, paired**. The server's
+built-in `hermes pairing approve gadget <request-id>` command approved the
+request identified as this Cardputer.
+
+The owner subsequently confirmed that keyboard/text entry and the G0 voice
+request/response flow work on this installed firmware. The owner also confirmed
+that Wi-Fi settings survive switching the device off and on. These are
+owner-reported functional checks, not instrumented audio-quality measurements
+or an exhaustive test of every key and shortcut. The owner also confirmed
+that the device remains usable after switching it off and on without another
+pairing approval; subsequent USB diagnostics confirmed it was still paired.
+
+The owner also confirmed readable text, correct display orientation and no
+visible cropping or color problems; text and voice requests with USB disconnected
+and the device powered by its battery; and screen off/on with Fn+Z followed by
+successful requests. This verifies basic battery operation, not battery endurance
+or a full discharge curve. Network-loss recovery testing was explicitly skipped
+at the owner's request and remains unverified.
+
+Phone provisioning, battery endurance and the rest of the physical checklist
+remain pending; retain experimental status. See the OTA report below for the
+separate update and recovery checks. Host tests cover
+key event decoding, modifiers, invalid FIFO events, bounded text entry and
+restoring the normal UI after editing. See the
+[physical checklist](hardware-validation.md#record-a-physical-test).
+
+### OTA and rollback report
+
+Tested on 2026-11-07 on the same K132-Adv / Stamp-S3A, powered by USB and
+connected to the existing Hermes gateway over Wi-Fi. The host retained a full
+8 MB backup privately before testing. The source was the port at `f7ef488`,
+based on upstream `648fbde`, plus the Cardputer-only OTA receive fix in
+`port_events.cpp`. Firmware reports `0.5.0-cadv-ota-f7ef488`; that version label
+identifies the base and is shared by the working and deliberately faulty test
+variants. Their ELF hashes distinguish the actual images.
+
+- **Reproduced failure:** two OTA attempts from the original installed 0.5.0
+  failed with `sequence: a chunk of the image went missing`. USB logs showed
+  `out of memory for a 4100 byte event`; one attempt used passive USB logging
+  without diagnostic polling. The existing firmware kept running. The sender's
+  64 KB window could exhaust internal RAM while the app task wrote to flash.
+- **Fix:** only on `CONFIG_HG_BOARD_CARDPUTER_ADV`, the ESP32 event bridge limits
+  outstanding firmware events to four, including the event being processed.
+  With the sender's 4 KB chunks this holds about 16 KB of queued payload. The
+  receive task waits for a slot, applying TCP backpressure; all allocation,
+  queue-failure and event-release paths return their slot. Waiting is bounded
+  to two seconds. The portable core and wire protocol are unchanged.
+- **Bootstrap:** the fix was first installed over USB as an app-only write at
+  `0x20000`, with flash hash verification. NVS, the partition table and OTA data
+  were not rewritten. The same identity, Wi-Fi and pairing remained usable.
+- **Successful OTA:** the corrected working image (1,601,616 bytes) then
+  installed over Wi-Fi from `ota_0` into `ota_1`. After reboot, diagnostics
+  identified ELF hash prefix `c5e63ff93ed374ba`, online and paired, with
+  `probation: false`; the log reported `kept the new firmware`.
+- **Rollback:** a second OTA installed a local variant in `ota_0` whose
+  `WsTransport::connect` logged `TEST ONLY` and returned without connecting.
+  Diagnostics identified the fault variant's ELF prefix `06879bf9648b52aa`,
+  Wi-Fi joined, Hermes connecting and `probation: true`. At uptime 300,372 ms
+  (five minutes after its updater started at 372 ms), the unmodified updater
+  logged that it was going back and rebooted without manual intervention.
+  Diagnostics then identified the working ELF `c5e63ff93ed374ba` in `ota_1`,
+  online and paired, with `probation: false`. Device identity, saved server and
+  Wi-Fi matched the pre-test state. No access-point or gateway outage was used.
+
+The working app's SHA-256 is
+`7d3b2fc9ee15b6cf3a0322132c9e09acad07407eef1c2e884e070664d9ab9a7f`.
+The fault-injection image's SHA-256 is
+`1d2a186af3bac48210ad5fce17b4b1f778cd5e6ed040c29d3d63589923c8b150`.
+The temporary fault injection is not part of the board profile or release
+sources. These checks do not establish battery endurance, network-loss recovery
+or complete physical verification.
+
+### Cardputer ADV review build recheck
+
+Following the maintainer's review, firmware sources at `ed4f99e` inherit the
+shared `platform = espressif32` instead of pinning a board-specific platform.
+A clean `pio run -e cardputer-adv -t clean` followed by
+`pio run -e cardputer-adv -j 2` succeeded with the resolved platform 8.0.0 and
+ESP-IDF 6.1.0. The standard build reports version `0.5.0`, with no temporary
+configuration or version override. Static RAM is 54,464 bytes; the application
+uses 1,601,199 of 2,031,616 slot bytes (21% headroom).
+
+The 1,601,616-byte app was installed by OTA on the same Cardputer on 2026-11-07.
+After reboot, live diagnostics identified ELF prefix `5718545567a38d7e` in
+`ota_0`, online and paired, Wi-Fi joined, and `probation: false`; the log reported
+`kept the new firmware`. ST7789, ES8311 microphone/speaker and the keyboard were
+initialized. The device identity and connection settings were retained.
+
+After this exact build was installed, the owner confirmed on 2026-11-07 that
+the display is readable and correctly oriented, physical keyboard entry with
+Backspace and Enter sends text successfully, and a G0 voice request captures
+speech and receives an audible spoken reply. These are owner-reported physical
+functional checks, separate from initialization diagnostics and host tests;
+they do not establish exhaustive key coverage or measured audio quality.
+
+App SHA-256:
+`979946abc4ed68fa18efcf6ffb0236196b9e4c855f4195e7419fa768c281603a`.
+The earlier reports retain their original firmware identities; the board stays
+experimental while the remaining full-checklist items are unverified.
+
+### Cardputer ADV receive ownership follow-up
+
+Review found that waiting for an OTA receive slot must not keep a borrowed
+pointer into the transport's shared reassembly buffer. The SDK uses a separate
+event loop for each WebSocket client, while closing the old client runs on the
+send task, so callbacks from a replacement client can overlap that wait.
+
+The Cardputer receive path now detaches a completed message into local owned
+storage before posting it. The payload remains valid throughout admission,
+and returning from the old callback does not clear a replacement client's
+partial frame. Host regression tests reuse/reallocate the shared buffer during
+delivery and exercise both successful and refused admission, including binary
+short frames. This protects the newly introduced waiting interval; it is not
+a claim that every pre-existing transport reconnect path was redesigned.
+
+These follow-up changes are checked in host tests and an ESP32 build only.
+The physical reports above describe their recorded images. The device now runs
+M5Launcher for separate experiments, so this newer Hermes receive change has
+not yet been installed or physically tested.
