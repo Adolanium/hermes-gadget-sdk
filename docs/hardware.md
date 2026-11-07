@@ -1393,9 +1393,15 @@ and a ready TCA8418; I2C probes found 0x18, 0x34 and 0x69. Initial diagnostics
 reported 84,764 bytes free internal RAM (largest block 43,008 bytes). The saved
 server URL and device identity remained present after about 11.7 hours powered
 on. The owner reports seeing the Wi-Fi setup information on the display.
-This checks initialization and USB provisioning, not microphone capture,
-speaker quality, physical keyboard operation, Wi-Fi association or pairing.
-Those checks and the full physical checklist remain pending; retain
+On 2026-11-07, USB provisioning joined the owner's home Wi-Fi (reported RSSI
+-54 dBm), reached the existing Hermes Gadget gateway and completed pairing.
+The device's own diagnostics confirmed **online, paired**. The server's
+built-in `hermes pairing approve gadget <request-id>` command approved the
+request identified as this Cardputer.
+
+This checks initialization, USB provisioning, Wi-Fi association and pairing,
+not microphone capture, speaker quality or physical keyboard operation.
+Those checks, reboot persistence and the full physical checklist remain pending; retain
 experimental status. Host tests cover
 key event decoding, modifiers, invalid FIFO events, bounded text entry and
 restoring the normal UI after editing. See the
