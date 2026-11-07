@@ -417,6 +417,7 @@ void CodecSpeaker::task(void* arg) {
           }
         }
         esp_codec_dev_set_out_mute(self->dev_, true);
+        if (pa) vTaskDelay(pdMS_TO_TICKS(20));  // DAC decays to silence before PA off
         self->draining_ = false;  // busy() stays true until the tail is played and muted
         if (errs) ESP_LOGW(TAG, "spk tail drain: %d/3 writes failed (rc of first=%d), tail may clip", errs, first_rc);
         if (pa) pa->disable();
@@ -450,11 +451,14 @@ void CodecSpeaker::task(void* arg) {
     }
     gaps.resumed(speaker_now_ms());
     if (!playing) {
+      if (pa) {
+        if (!pa->enable(generation)) continue;
+        vTaskDelay(pdMS_TO_TICKS(20));  // PA settles while the DAC is still muted
+      }
       esp_codec_dev_set_out_mute(self->dev_, false);
       playing = true;
     }
     // Drop a chunk taken before an abort() rather than replay it.
-    if (pa && !pa->enable(generation)) continue;
     if (stream_t0 == 0) stream_t0 = esp_timer_get_time() / 1000;  // the stream-end log's clock starts at the first frame played
     if (self->stereo32_) {
       const size_t frames = got / sizeof(int16_t);
