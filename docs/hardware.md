@@ -1387,10 +1387,11 @@ Hardware facts: [M5Stack K132-Adv product page and schematic](https://docs.m5sta
 (panel geometry). No vendor implementation is copied.
 
 USB smoke testing on a connected K132-Adv / Stamp-S3A identified ESP32-S3 rev
-v0.2, 8 MB flash and no PSRAM. The PCB revision was not recorded. The physical
+v0.2, 8 MB flash and no PSRAM. The PCB revision was not recorded. The initial
 checks below used firmware built from upstream `7e18943` (0.5.0) plus this
-Cardputer port, including its display-initialization guard; they have not yet
-been repeated after rebasing onto newer upstream firmware. Installation checksum verification passed.
+Cardputer port, including its display-initialization guard. The later OTA report
+uses the rebased port and a Cardputer-specific receive-buffer fix. Installation
+checksum verification passed.
 Firmware 0.5.0 booted and reported ST7789 240x135, ES8311 microphone and speaker,
 and a ready TCA8418; I2C probes found 0x18, 0x34 and 0x69. Initial diagnostics
 reported 84,764 bytes free internal RAM (largest block 43,008 bytes). The saved
@@ -1406,8 +1407,9 @@ The owner subsequently confirmed that keyboard/text entry and the G0 voice
 request/response flow work on this installed firmware. The owner also confirmed
 that Wi-Fi settings survive switching the device off and on. These are
 owner-reported functional checks, not instrumented audio-quality measurements
-or an exhaustive test of every key and shortcut. Pairing persistence across
-that power cycle was not separately reported.
+or an exhaustive test of every key and shortcut. The owner also confirmed
+that the device remains usable after switching it off and on without another
+pairing approval; subsequent USB diagnostics confirmed it was still paired.
 
 The owner also confirmed readable text, correct display orientation and no
 visible cropping or color problems; text and voice requests with USB disconnected
@@ -1416,9 +1418,55 @@ successful requests. This verifies basic battery operation, not battery enduranc
 or a full discharge curve. Network-loss recovery testing was explicitly skipped
 at the owner's request and remains unverified.
 
-Phone provisioning, battery endurance, pairing persistence after a power cycle,
-OTA/rollback and the rest of the physical checklist remain pending; retain
-experimental status. Host tests cover
+Phone provisioning, battery endurance and the rest of the physical checklist
+remain pending; retain experimental status. See the OTA report below for the
+separate update and recovery checks. Host tests cover
 key event decoding, modifiers, invalid FIFO events, bounded text entry and
 restoring the normal UI after editing. See the
 [physical checklist](hardware-validation.md#record-a-physical-test).
+
+### OTA and rollback report
+
+Tested on 2026-11-07 on the same K132-Adv / Stamp-S3A, powered by USB and
+connected to the existing Hermes gateway over Wi-Fi. The host retained a full
+8 MB backup privately before testing. The source was the port at `f7ef488`,
+based on upstream `648fbde`, plus the Cardputer-only OTA receive fix in
+`port_events.cpp`. Firmware reports `0.5.0-cadv-ota-f7ef488`; that version label
+identifies the base and is shared by the working and deliberately faulty test
+variants. Their ELF hashes distinguish the actual images.
+
+- **Reproduced failure:** two OTA attempts from the original installed 0.5.0
+  failed with `sequence: a chunk of the image went missing`. USB logs showed
+  `out of memory for a 4100 byte event`; one attempt used passive USB logging
+  without diagnostic polling. The existing firmware kept running. The sender's
+  64 KB window could exhaust internal RAM while the app task wrote to flash.
+- **Fix:** only on `CONFIG_HG_BOARD_CARDPUTER_ADV`, the ESP32 event bridge limits
+  outstanding firmware events to four, including the event being processed.
+  With the sender's 4 KB chunks this holds about 16 KB of queued payload. The
+  receive task waits for a slot, applying TCP backpressure; all allocation,
+  queue-failure and event-release paths return their slot. Waiting is bounded
+  to two seconds. The portable core and wire protocol are unchanged.
+- **Bootstrap:** the fix was first installed over USB as an app-only write at
+  `0x20000`, with flash hash verification. NVS, the partition table and OTA data
+  were not rewritten. The same identity, Wi-Fi and pairing remained usable.
+- **Successful OTA:** the corrected working image (1,601,616 bytes) then
+  installed over Wi-Fi from `ota_0` into `ota_1`. After reboot, diagnostics
+  identified ELF hash prefix `c5e63ff93ed374ba`, online and paired, with
+  `probation: false`; the log reported `kept the new firmware`.
+- **Rollback:** a second OTA installed a local variant in `ota_0` whose
+  `WsTransport::connect` logged `TEST ONLY` and returned without connecting.
+  Diagnostics identified the fault variant's ELF prefix `06879bf9648b52aa`,
+  Wi-Fi joined, Hermes connecting and `probation: true`. At uptime 300,372 ms
+  (five minutes after its updater started at 372 ms), the unmodified updater
+  logged that it was going back and rebooted without manual intervention.
+  Diagnostics then identified the working ELF `c5e63ff93ed374ba` in `ota_1`,
+  online and paired, with `probation: false`. Device identity, saved server and
+  Wi-Fi matched the pre-test state. No access-point or gateway outage was used.
+
+The working app's SHA-256 is
+`7d3b2fc9ee15b6cf3a0322132c9e09acad07407eef1c2e884e070664d9ab9a7f`.
+The fault-injection image's SHA-256 is
+`1d2a186af3bac48210ad5fce17b4b1f778cd5e6ed040c29d3d63589923c8b150`.
+The temporary fault injection is not part of the board profile or release
+sources. These checks do not establish battery endurance, network-loss recovery
+or complete physical verification.

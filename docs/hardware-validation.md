@@ -265,8 +265,12 @@ Wi-Fi settings retained through an off/on cycle on the installed 0.5.0-based
 port. The owner also confirmed display readability/orientation/colors, text and
 voice requests on battery with USB disconnected, and successful requests after
 Fn+Z screen off/on. Battery endurance is untested. Network-loss recovery was
-skipped at the owner's request. Full physical verification is still pending.
-Results and limitations are recorded in the
+skipped at the owner's request. A later test on the rebased port plus a
+Cardputer-only OTA receive-buffer fix verified app-only USB installation,
+OTA into the other slot and automatic rollback after a deliberately offline
+candidate's five-minute probation. Wi-Fi, identity and pairing survived; see
+[OTA and rollback report](hardware.md#ota-and-rollback-report). Full physical
+verification is still pending. Results and limitations are recorded in the
 [Cardputer ADV section](hardware.md#m5stack-cardputer-adv).
 
 ## Record a physical test
