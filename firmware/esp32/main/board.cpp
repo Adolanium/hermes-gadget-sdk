@@ -373,6 +373,9 @@ BoardConfig make() {
   // Light sleep while dozing: the FT3168's INT (low level) wakes the CPU, and the touch
   // task reads the report right after (TouchInput::arm_sleep_wake).
   b.light_sleep = true;
+  // On battery the percent follows a discharge curve measured on the watch's cell;
+  // charging keeps the AXP2101's gauge (no charge curve).
+  b.battery_curve = hg::kAmoled206Curve;
   return b;
 }
 #elif CONFIG_HG_BOARD_AMOLED_216
