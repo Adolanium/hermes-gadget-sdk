@@ -65,6 +65,8 @@ bool Wifi::configure(const std::string& ssid, const std::string& password, const
   std::memcpy(cfg.sta.password, password.data(), password.size());
   cfg.sta.threshold.authmode = password.empty() ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
   cfg.sta.pmf_cfg.capable = true;
+  // Asked for when joining; only max modem sleep uses it (wifi_power.hpp).
+  cfg.sta.listen_interval = hg::WifiPowerSave::kListenInterval;
   if (aim) {
     // The access point that last worked, on its channel: no scan first (wifi_fast.hpp).
     cfg.sta.bssid_set = true;
@@ -255,7 +257,7 @@ void Wifi::tick(hg::App& app, uint32_t now) {
                 (close_at_ && static_cast<int32_t>(now - close_at_) >= 0))) app.close_wifi_setup();
   if (configured_ && retry_.due(now)) attempt(now);
   hold_while_attempting();
-  apply_power_save(now, app.in_turn());
+  apply_power_save(now, app);
 }
 
 void Wifi::attempt(uint32_t now) {
@@ -302,11 +304,17 @@ void Wifi::scan_done() {
   if (esp_wifi_connect() != ESP_OK) retry_.start_failed(now_ms());
 }
 
-void Wifi::apply_power_save(uint32_t now, bool in_turn) {
-  // Modem sleep only on battery and outside a turn (wifi_power.hpp); a board without a
-  // battery reading counts as plugged in.
-  const auto want = power_save_.change(now, [this] { return on_battery && on_battery(); }, in_turn);
-  if (want && esp_wifi_set_ps(*want ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE) == ESP_OK) power_save_.applied(*want);
+void Wifi::apply_power_save(uint32_t now, const hg::App& app) {
+  // Modem sleep only on battery and outside a turn, deeper while dozing quietly
+  // (wifi_power.hpp) unless `wifi_deep_sleep` is off; a board without a battery
+  // reading counts as plugged in.
+  const auto want = power_save_.change(now, [this] { return on_battery && on_battery(); }, app.in_turn(),
+                                       app.dozing() && app.wifi_deep_sleep(), app.traffic_at());
+  if (!want) return;
+  static constexpr wifi_ps_type_t kMode[] = {WIFI_PS_NONE, WIFI_PS_MIN_MODEM, WIFI_PS_MAX_MODEM};
+  if (esp_wifi_set_ps(kMode[static_cast<int>(*want)]) != ESP_OK) return;
+  power_save_.applied(*want);
+  ESP_LOGI("hg.wifi", "power save: %s", hg::wifi_sleep_name(*want));
 }
 
 void Wifi::on_event(void*, const char* base, int32_t id, void* data) {
