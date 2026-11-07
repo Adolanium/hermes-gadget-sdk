@@ -830,6 +830,9 @@ TEST("app: traffic_at counts every frame from Hermes but its heartbeat ping") {
   const uint8_t frame[] = {0, 0, 0, 0};  // too short to parse: still traffic on the radio
   r.app.on_transport_binary(frame, sizeof(frame));
   CHECK_EQ(r.app.traffic_at(), r.fake.clock);
+  r.advance(1000);
+  r.app.on_transport_text("{not json");  // dropped, but not a ping either
+  CHECK_EQ(r.app.traffic_at(), r.fake.clock);
 }
 
 TEST("app: console reconfigures the server and reconnects") {

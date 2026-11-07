@@ -698,6 +698,7 @@ void App::on_transport_text(std::string_view text) {
   std::string err;
   if (!json::parse(text, msg, &err) || !msg.is_object()) {
     log(LogLevel::Warn, "dropping malformed frame: " + err);
+    traffic_at_ = now();  // not a ping, so it counts, like a binary frame that doesn't parse
     return;
   }
   const std::string& type = msg["type"].as_string();
