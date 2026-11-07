@@ -1327,7 +1327,8 @@ BoardConfig make() {
   b.codec.dout = 9;
   b.codec.din = 11;
   b.codec.pa = 53;
-  b.codec.speaker_pa = false;
+  b.codec.speaker_pa = true;   // port-driven PA so we can sequence mute before amp on/off (reduces speaker pop)
+  b.codec.dac_fade_ramp = true;  // the ES8311 ramps mute/unmute too
   b.codec.mic = MicCodec::Es7210;
   b.codec.speaker = SpeakerCodec::Es8311;
   b.codec.dac_mclk = true;

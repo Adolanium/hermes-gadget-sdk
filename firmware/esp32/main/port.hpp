@@ -541,6 +541,9 @@ class CodecSpeaker final : public hg::AudioOut {
   // An amplifier enable that isn't an ESP32 pin (StickS3: behind the M5PM1).
   // Used when begin() gets no PA pin; set it before begin().
   std::function<void(bool)> board_pa;
+  // The board's ES8311 DAC fade ramp (CodecAudioConfig::dac_fade_ramp), written again when
+  // power_up() reopens the codec. Set it before begin().
+  bool es8311_fade_ramp = false;
 
  private:
   static void task(void* arg);

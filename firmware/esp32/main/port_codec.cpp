@@ -172,6 +172,9 @@ bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus)
   if (out_) {
     esp_codec_dev_set_out_vol(out_, 70);
     esp_codec_dev_set_out_mute(out_, true);  // unmuted while something plays
+    // A board that asks for it: the ES8311's DAC ramps volume on mute/unmute (reg 0x37, ramp
+    // rate in bits 4-7). Another speaker codec has some other register there.
+    if (cfg.dac_fade_ramp && cfg.speaker == SpeakerCodec::Es8311) esp_codec_dev_write_reg(out_, 0x37, 0x38);
   }
   if (in_) esp_codec_dev_set_in_gain(in_, cfg.mic_gain_db);
   mic_link_ = {in_ && in_ != out_, rx_, fs, cfg.mic_gain_db};
@@ -291,6 +294,7 @@ void CodecSpeaker::power_up() {
   }
   esp_codec_dev_set_out_vol(dev_, volume_);
   esp_codec_dev_set_out_mute(dev_, true);  // unmuted while something plays
+  if (es8311_fade_ramp) esp_codec_dev_write_reg(dev_, 0x37, 0x38);  // reopening reset it (CodecAudio::begin)
   powered_ = true;
 }
 
@@ -417,6 +421,7 @@ void CodecSpeaker::task(void* arg) {
           }
         }
         esp_codec_dev_set_out_mute(self->dev_, true);
+        if (pa) vTaskDelay(pdMS_TO_TICKS(20));  // DAC decays to silence before PA off
         self->draining_ = false;  // busy() stays true until the tail is played and muted
         if (errs) ESP_LOGW(TAG, "spk tail drain: %d/3 writes failed (rc of first=%d), tail may clip", errs, first_rc);
         if (pa) pa->disable();
@@ -450,11 +455,15 @@ void CodecSpeaker::task(void* arg) {
     }
     gaps.resumed(speaker_now_ms());
     if (!playing) {
+      if (pa) {
+        if (!pa->enable(generation)) continue;
+        vTaskDelay(pdMS_TO_TICKS(20));  // PA settles while the DAC is still muted
+      }
       esp_codec_dev_set_out_mute(self->dev_, false);
       playing = true;
+    } else if (pa && !pa->enable(generation)) {
+      continue;  // a chunk taken before an abort(): drop it rather than play it
     }
-    // Drop a chunk taken before an abort() rather than replay it.
-    if (pa && !pa->enable(generation)) continue;
     if (stream_t0 == 0) stream_t0 = esp_timer_get_time() / 1000;  // the stream-end log's clock starts at the first frame played
     if (self->stereo32_) {
       const size_t frames = got / sizeof(int16_t);
