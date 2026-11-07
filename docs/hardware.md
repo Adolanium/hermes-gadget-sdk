@@ -1470,3 +1470,28 @@ The fault-injection image's SHA-256 is
 The temporary fault injection is not part of the board profile or release
 sources. These checks do not establish battery endurance, network-loss recovery
 or complete physical verification.
+
+### Cardputer ADV review build recheck
+
+Following the maintainer's review, firmware sources at `ed4f99e` inherit the
+shared `platform = espressif32` instead of pinning a board-specific platform.
+A clean `pio run -e cardputer-adv -t clean` followed by
+`pio run -e cardputer-adv -j 2` succeeded with the resolved platform 8.0.0 and
+ESP-IDF 6.1.0. The standard build reports version `0.5.0`, with no temporary
+configuration or version override. Static RAM is 54,464 bytes; the application
+uses 1,601,199 of 2,031,616 slot bytes (21% headroom).
+
+The 1,601,616-byte app was installed by OTA on the same Cardputer on 2026-11-07.
+After reboot, live diagnostics identified ELF prefix `5718545567a38d7e` in
+`ota_0`, online and paired, Wi-Fi joined, and `probation: false`; the log reported
+`kept the new firmware`. ST7789, ES8311 microphone/speaker and the keyboard were
+initialized. The device identity and connection settings were retained.
+
+Fresh owner checks of the display, physical keyboard/text send and a voice turn
+with capture and playback on this exact build are pending. Initialization and
+online status alone do not establish those physical checks.
+
+App SHA-256:
+`979946abc4ed68fa18efcf6ffb0236196b9e4c855f4195e7419fa768c281603a`.
+The earlier reports retain their original firmware identities; the board stays
+experimental while the remaining full-checklist items are unverified.

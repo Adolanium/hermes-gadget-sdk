@@ -270,7 +270,10 @@ Cardputer-only OTA receive-buffer fix verified app-only USB installation,
 OTA into the other slot and automatic rollback after a deliberately offline
 candidate's five-minute probation. Wi-Fi, identity and pairing survived; see
 [OTA and rollback report](hardware.md#ota-and-rollback-report). Full physical
-verification is still pending. Results and limitations are recorded in the
+verification is still pending. The [review-build recheck](hardware.md#cardputer-adv-review-build-recheck)
+records a clean build with the shared platform and live boot/OTA confirmation;
+fresh owner display, keyboard and voice checks on that build are pending.
+Results and limitations are recorded in the
 [Cardputer ADV section](hardware.md#m5stack-cardputer-adv).
 
 ## Record a physical test
