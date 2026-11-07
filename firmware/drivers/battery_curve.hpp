@@ -65,6 +65,21 @@ inline constexpr CurvePoint kAmoled175cChargePoints[] = {
 inline constexpr Curve kAmoled175cChargeCurve{kAmoled175cChargePoints,
                                               sizeof(kAmoled175cChargePoints) / sizeof(kAmoled175cChargePoints[0])};
 
+// The AMOLED-2.06 watch's own cell: one full discharge, 8 h 14 min from
+// unplugging at full to a brown-out at 3038 mV, with light use, the screen mostly
+// dark, light sleep and Wi-Fi modem sleep (WIFI_PS_MIN_MODEM). Percent = share of
+// the time left until shutdown; voltage = median of the 11 readings (30 s apart)
+// around that time; 0 = the last minute before shutdown. 100 is the first reading
+// after unplugging (4126 mV; the cell read 4155 half a minute later), so a full
+// cell shows 100 from the start and up to 4 high in the first 20 minutes. Over the
+// same run the AXP2101's gauge read 25% with 42% left and 0% 11 minutes before
+// shutdown. No charge curve: charging shows the gauge.
+inline constexpr CurvePoint kAmoled206Points[] = {
+    {4126, 100}, {4112, 95}, {4050, 90}, {3964, 80}, {3863, 70}, {3775, 60}, {3709, 50}, {3654, 40},
+    {3610, 30},  {3547, 20}, {3508, 15}, {3479, 10}, {3385, 5},  {3216, 2},  {3054, 0},
+};
+inline constexpr Curve kAmoled206Curve{kAmoled206Points, sizeof(kAmoled206Points) / sizeof(kAmoled206Points[0])};
+
 // What the device shows, from readings every few seconds, with the median of the
 // last kWindow voltages (about a minute) on the curve for the direction of flow:
 // - on battery, the discharge curve, never rising: a lighter load lifts the
