@@ -14,6 +14,10 @@ bool CardputerKeyboard::write(uint8_t reg, uint8_t value) {
   const uint8_t data[] = {reg, value};
   return i2c_master_transmit(dev_, data, sizeof(data), 20) == ESP_OK;
 }
+/** Drain at most ten hardware FIFO entries, then reset modifiers and IRQ flags.
+ * Return false on an I2C failure; callers performing recovery also clear held
+ * keys before draining so an unread release cannot leave a modifier pressed.
+ */
 bool CardputerKeyboard::flush() {
   for (int n = 0; n < 10; ++n) {
     uint8_t event;
@@ -27,6 +31,10 @@ void CardputerKeyboard::recover() {
   keys_.reset();  // an unread release must never leave Shift/Fn held
   flush();
 }
+/** Probe address 0x34 and configure its 7x8 keypad, debounce and GPIO11 IRQ.
+ * A partially configured device is removed from the bus on failure. Call from
+ * the app task before polling, using the board's shared I2C bus.
+ */
 bool CardputerKeyboard::begin(i2c_master_bus_handle_t bus) {
   if (!bus || i2c_master_probe(bus, 0x34, 50) != ESP_OK) return false;
   i2c_device_config_t cfg{};
@@ -48,6 +56,11 @@ bool CardputerKeyboard::begin(i2c_master_bus_handle_t bus) {
   ESP_LOGI("hg.keyboard", "TCA8418 %s", ok ? "ready" : "initialization failed");
   return ok;
 }
+/** Poll the FIFO on the app task, at 20 ms with an IRQ or a 100 ms fallback.
+ * Translate fresh presses into context-appropriate App controls or ASCII draft
+ * edits. Lost FIFO state resets modifiers, and leaving an editable screen
+ * discards its draft so setup, prompts and active turns remain visible.
+ */
 void CardputerKeyboard::poll(hg::App& app, hg::CardputerCompose& display) {
   const auto can_type = [&] {
     return app.online() && !app.in_turn() && !app.settings_open() &&

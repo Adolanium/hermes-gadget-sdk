@@ -84,6 +84,10 @@ bool post(EventType type, const void* data, size_t len, uint32_t generation, Con
 
 bool receive(Event& out, TickType_t wait) { return xQueueReceive(queue, &out, wait) == pdTRUE; }
 
+/** Free a dispatched or stale event's owned copy and return its OTA slot.
+ * The Cardputer receive gate counts an event until this release, including
+ * while the app processes it. Clearing data prevents a second payload release.
+ */
 void release(Event& ev) {
 #if CONFIG_HG_BOARD_CARDPUTER_ADV
   const bool firmware = firmware_frame(ev.type, ev.data, ev.len);

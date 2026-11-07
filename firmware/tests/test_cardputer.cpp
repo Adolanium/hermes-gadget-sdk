@@ -4,7 +4,10 @@
 #include "hg/ui.hpp"
 
 namespace {
-// Encode a physical position into the TCA8418 7x8 scan matrix.
+/** Encode a physical 4x14 key position as a TCA8418 7x8 FIFO event.
+ * Synthetic presses/releases exercise decoding without an I2C device; they
+ * do not establish that the real keyboard wiring has been physically checked.
+ */
 uint8_t event(int row, int col, bool down = true) {
   return (col / 2 * 10 + row + (col % 2) * 4 + 1) | (down ? 0x80 : 0);
 }
