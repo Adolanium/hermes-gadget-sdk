@@ -262,8 +262,12 @@ Keyboard entry is ASCII; the normal Gadget font can display Russian replies.
 
 The owner reports working keyboard/text entry, G0 voice requests/responses and
 Wi-Fi settings retained through an off/on cycle on the installed 0.5.0-based
-port. Full physical verification is still pending. Results and limitations are
-recorded in the [Cardputer ADV section](hardware.md#m5stack-cardputer-adv).
+port. The owner also confirmed display readability/orientation/colors, text and
+voice requests on battery with USB disconnected, and successful requests after
+Fn+Z screen off/on. Battery endurance is untested. Network-loss recovery was
+skipped at the owner's request. Full physical verification is still pending.
+Results and limitations are recorded in the
+[Cardputer ADV section](hardware.md#m5stack-cardputer-adv).
 
 ## Record a physical test
 

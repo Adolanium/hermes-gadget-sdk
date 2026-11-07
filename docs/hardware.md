@@ -1409,9 +1409,16 @@ owner-reported functional checks, not instrumented audio-quality measurements
 or an exhaustive test of every key and shortcut. Pairing persistence across
 that power cycle was not separately reported.
 
-Systematic display checks, phone provisioning, battery-only endurance, network
-loss recovery, OTA/rollback and the rest of the physical checklist remain
-pending; retain experimental status. Host tests cover
+The owner also confirmed readable text, correct display orientation and no
+visible cropping or color problems; text and voice requests with USB disconnected
+and the device powered by its battery; and screen off/on with Fn+Z followed by
+successful requests. This verifies basic battery operation, not battery endurance
+or a full discharge curve. Network-loss recovery testing was explicitly skipped
+at the owner's request and remains unverified.
+
+Phone provisioning, battery endurance, pairing persistence after a power cycle,
+OTA/rollback and the rest of the physical checklist remain pending; retain
+experimental status. Host tests cover
 key event decoding, modifiers, invalid FIFO events, bounded text entry and
 restoring the normal UI after editing. See the
 [physical checklist](hardware-validation.md#record-a-physical-test).
