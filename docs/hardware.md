@@ -1387,7 +1387,10 @@ Hardware facts: [M5Stack K132-Adv product page and schematic](https://docs.m5sta
 (panel geometry). No vendor implementation is copied.
 
 USB smoke testing on a connected K132-Adv / Stamp-S3A identified ESP32-S3 rev
-v0.2, 8 MB flash and no PSRAM. Installation checksum verification passed.
+v0.2, 8 MB flash and no PSRAM. The PCB revision was not recorded. The physical
+checks below used firmware built from upstream `7e18943` (0.5.0) plus this
+Cardputer port, including its display-initialization guard; they have not yet
+been repeated after rebasing onto newer upstream firmware. Installation checksum verification passed.
 Firmware 0.5.0 booted and reported ST7789 240x135, ES8311 microphone and speaker,
 and a ready TCA8418; I2C probes found 0x18, 0x34 and 0x69. Initial diagnostics
 reported 84,764 bytes free internal RAM (largest block 43,008 bytes). The saved
