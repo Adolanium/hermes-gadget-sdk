@@ -245,6 +245,15 @@ def test_card_and_action_routes_return_the_gateways_answer(api):
     assert got["ok"] is True and got["result"] == {"light": "#7c5cff"}
 
 
+def test_the_diag_route_returns_the_report_file_the_gateway_made(api):
+    thread, seen = _answer(api.dir, lambda req: {"ok": True, "file": "hermes-gadget-diag-x.txt", "text": "== report =="})
+    got = api.client.post(f"/api/plugins/gadget/devices/{DEVICE}/diag").json()
+    thread.join()
+    assert seen[0]["kind"] == "diag" and seen[0]["device"] == DEVICE
+    assert got["ok"] is True and got["file"] == "hermes-gadget-diag-x.txt" and got["text"] == "== report =="
+    assert api.client.post("/api/plugins/gadget/devices/hg-bad/diag").json()["error"] == "unknown device"
+
+
 def test_card_and_action_routes_refuse_bad_input_without_queueing(api):
     base = "/api/plugins/gadget/devices/"
     assert api.client.post(base + DEVICE + "/action", params={"name": "light.set", "args": "{nope"}).json() == {
