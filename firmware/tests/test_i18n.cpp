@@ -299,6 +299,7 @@ constexpr Panel kPanels[] = {
     {480, 480, false}, {800, 480, false},
     {480, 480, true},
     {360, 360, true, 2},  // the Knob-Touch-LCD-1.8 (lcd.font_scale = 2 in board.cpp)
+    {320, 172, false, 2},  // ESP32-S3-Touch-LCD-1.47 landscape (lcd.font_scale = 2 in board.cpp)
 };
 
 void check_fits(Lang lang, Msg m, int cols, const Panel& p) {

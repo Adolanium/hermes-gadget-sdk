@@ -77,8 +77,8 @@ BOARDS = {
     # A 1.9" 320x170 board with no audio hardware (e.g. LilyGO T-Display-S3).
     "sim-320x170-nospeaker": Board("sim-320x170-nospeaker", 320, 170, mic=False, speaker=False,
                                    scroll_buttons=False),
-    # A 1.47" 172x320 touch board with no audio hardware (e.g. Waveshare ESP32-S3-Touch-LCD-1.47).
-    "sim-172x320-nospeaker": Board("sim-172x320-nospeaker", 172, 320, mic=False, speaker=False,
+    # A 1.47" 320x172 landscape touch board with no audio hardware (e.g. Waveshare ESP32-S3-Touch-LCD-1.47).
+    "sim-320x172-nospeaker": Board("sim-320x172-nospeaker", 320, 172, mic=False, speaker=False,
                                    scroll_buttons=False, touch=True),
     # A 5.0" 800x480 RGB touch board with no audio hardware (e.g. Elecrow CrowPanel 5.0).
     "sim-800x480-nospeaker": Board("sim-800x480-nospeaker", 800, 480, mic=False, speaker=False,

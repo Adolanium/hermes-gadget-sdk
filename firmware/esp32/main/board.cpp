@@ -553,24 +553,31 @@ BoardConfig make() {
   return b;
 }
 #elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_147
-// Waveshare ESP32-S3-Touch-LCD-1.47: 172x320 ST7789 over SPI (column offset 34),
-// AXS5106L touch. No microphone, speaker or codec, so replies stay on the glass
-// and typed messages go out the USB console. Battery ADC and the microSD slot
-// stay off.
+// Waveshare ESP32-S3-Touch-LCD-1.47: native 172x320 JD9853, used landscape
+// (320x172) on the ST7789 SPI path. The column offset 34 follows the axis
+// swap onto the short side. AXS5106L touch. No microphone, speaker or codec,
+// so replies stay on the glass and typed messages go out the USB console.
+// Battery ADC and the microSD slot stay off.
 // Pins: docs/hardware.md#waveshare-esp32-s3-touch-lcd-147
 BoardConfig make() {
   BoardConfig b{};
   b.name = kBoardName;
   b.lcd.enabled = true;
-  b.lcd.width = 172;
-  b.lcd.height = 320;
-  b.lcd.swap_xy = false;
-  // This glass scans right to left. With mirror off, the setup text reads backwards.
-  b.lcd.mirror_x = true;
+  b.lcd.width = 320;
+  b.lcd.height = 172;
+  b.lcd.swap_xy = true;
+  // Portrait needed mirror_x so text read left to right. After the axis swap
+  // that same bit mirrors the landscape picture, so it stays off.
+  b.lcd.mirror_x = false;
   b.lcd.mirror_y = false;
   b.lcd.invert = false;  // Waveshare's Arduino demo constructs this glass with IPS off
-  b.lcd.gap_x = 34;
-  b.lcd.gap_y = 0;
+  // After the axis swap the 34-column window is the logical Y offset.
+  b.lcd.gap_x = 0;
+  b.lcd.gap_y = 34;
+  // 320x172 still picks scale 1 on its own (the short side). Double it. The
+  // hero was the 144 px bitmap; 64 is the stock size under half of that.
+  b.lcd.font_scale = 2;
+  b.lcd.mascot_px = 64;
   b.lcd.mosi = 39;
   b.lcd.sclk = 38;
   b.lcd.cs = 21;
@@ -584,9 +591,10 @@ BoardConfig make() {
   b.touch.addr = 0x63;
   b.touch.rst = 47;
   b.touch.int_gpio = 48;
-  b.touch.width = 172;
-  b.touch.height = 320;
-  b.touch.mirror_x = true;  // same axis as the panel, so a tap lands on the drawn pixel
+  b.touch.width = 320;
+  b.touch.height = 172;
+  b.touch.swap_xy = true;  // the report is still native 172x320; exchange into landscape
+  b.touch.mirror_x = false;  // same axis as the panel, so a tap lands on the drawn pixel
   b.buttons = {0, -1, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";

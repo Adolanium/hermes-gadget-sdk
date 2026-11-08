@@ -328,6 +328,7 @@ hg::DisplayInfo SpiDisplay::info() const {
   di.has_backlight = cfg_.backlight >= 0 || static_cast<bool>(board_backlight);
   di.round = cfg_.round;
   di.font_scale = cfg_.font_scale;
+  di.mascot_px = cfg_.mascot_px;
   return di;
 }
 

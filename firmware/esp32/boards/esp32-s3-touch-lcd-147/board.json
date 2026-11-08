@@ -1,6 +1,6 @@
 {
   "title": "Waveshare ESP32-S3-Touch-LCD-1.47",
-  "summary": "1.47\" 172x320 touchscreen. Text only: no microphone or speaker.",
+  "summary": "1.47\" 320x172 landscape touchscreen. Text only: no microphone or speaker.",
   "docs": "docs/hardware.md#waveshare-esp32-s3-touch-lcd-147",
   "ready_made": true
 }

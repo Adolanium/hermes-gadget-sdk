@@ -5,6 +5,7 @@
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h
 
 #include <algorithm>
+#include <utility>
 
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -214,7 +215,13 @@ bool TouchInput::read_touch(TouchSample& out) {
   if (touch_.controller == TouchController::Axs5106) {
     uint8_t data[14] = {};
     if (!axs5106_read(touch_dev_, 0x01, data, sizeof(data), 20)) return false;
-    if (!hg::axs5106_touch(data, touch_.width, touch_.height, out.touching, out.x, out.y)) {
+    // The controller reports the glass's native axes. swap_xy is applied after
+    // the mirror, matching the other touch drivers, so the limits here are the
+    // pre-swap size.
+    const int lim_w = touch_.swap_xy ? touch_.height : touch_.width;
+    const int lim_h = touch_.swap_xy ? touch_.width : touch_.height;
+    if (!hg::axs5106_touch(data, static_cast<uint16_t>(lim_w), static_cast<uint16_t>(lim_h), out.touching, out.x,
+                           out.y)) {
       static int ignored = 0;
       if (ignored < 8) {
         ++ignored;
@@ -223,8 +230,9 @@ bool TouchInput::read_touch(TouchSample& out) {
       return false;
     }
     if (out.touching) {
-      if (touch_.mirror_x && touch_.width) out.x = static_cast<int16_t>(touch_.width - 1 - out.x);
-      if (touch_.mirror_y && touch_.height) out.y = static_cast<int16_t>(touch_.height - 1 - out.y);
+      if (touch_.mirror_x && lim_w) out.x = static_cast<int16_t>(lim_w - 1 - out.x);
+      if (touch_.mirror_y && lim_h) out.y = static_cast<int16_t>(lim_h - 1 - out.y);
+      if (touch_.swap_xy) std::swap(out.x, out.y);
     }
     return true;
   }

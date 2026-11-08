@@ -214,13 +214,13 @@ References: [Waveshare documentation](https://docs.waveshare.com/ESP32-S3-Touch-
 
 ## Waveshare ESP32-S3-Touch-LCD-1.47
 
-Board option `esp32-s3-touch-lcd-147`, for the 1.47" module: an ESP32-S3R8 (8 MB octal PSRAM) with 16 MB flash, a 172×320 panel and an AXS5106L touchscreen. **This board has no microphone, speaker or audio codec**, so it works as a text gadget: Hermes replies, cards and prompts appear on the screen and typed messages go out the USB console. Holding TALK shows that no microphone is available. Nothing needs wiring. The microSD slot and the battery ADC stay unused.
+Board option `esp32-s3-touch-lcd-147`, for the 1.47" module: an ESP32-S3R8 (8 MB octal PSRAM) with 16 MB flash, a 172×320 panel used landscape (320×172) and an AXS5106L touchscreen. **This board has no microphone, speaker or audio codec**, so it works as a text gadget: Hermes replies, cards and prompts appear on the screen and typed messages go out the USB console. Holding TALK shows that no microphone is available. Nothing needs wiring. The microSD slot and the battery ADC stay unused.
 
-The glass is a JD9853. The first image drives it with the existing ST7789 SPI path, which is how Waveshare's Arduino demo constructs this panel (172×320, column offset 34, IPS off). If the panel stays blank, the next step is a JD9853 init table, recorded with its source and license. Do not flash the 1.46 image onto this board: that one is a round 412×412 QSPI panel.
+The glass is a JD9853. The first image drives it with the existing ST7789 SPI path, which is how Waveshare's Arduino demo constructs this panel (native 172×320, column offset 34, IPS off). The firmware swaps the axes so the UI is 320×172 and the column offset lands on the short side. If the panel stays blank, the next step is a JD9853 init table, recorded with its source and license. Do not flash the 1.46 image onto this board: that one is a round 412×412 QSPI panel.
 
 | Part | Chip | Connection |
 |---|---|---|
-| Display | ST7789 path, JD9853 glass | SPI: SCK 38, MOSI 39, CS 21, DC 45, RST 40; 172×320, column offset 34, X mirrored |
+| Display | ST7789 path, JD9853 glass | SPI: SCK 38, MOSI 39, CS 21, DC 45, RST 40; landscape 320×172 (native 172×320, column offset 34 on the short side), no mirror. Text is drawn at twice the automatic size. The mascot is the 64 px bitmap |
 | Backlight | | GPIO 46, active high |
 | Touch | AXS5106L | I2C SDA 42, SCL 41, address 0x63, RST 47, INT 48 |
 | Button (to GND) | | TALK = BOOT (0). Swipe down cancels |
@@ -232,14 +232,14 @@ cd firmware/esp32
 pio run -e esp32-s3-touch-lcd-147 -t upload -t monitor
 ```
 
-Or with `idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp32-s3-touch-lcd-147/sdkconfig.defaults" build`. The USB-C port is the S3's own USB Serial/JTAG, so flashing and the serial console (115200 baud) both use it. A 172×320 simulator profile is `sim-172x320-nospeaker`.
+Or with `idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp32-s3-touch-lcd-147/sdkconfig.defaults" build`. The USB-C port is the S3's own USB Serial/JTAG, so flashing and the serial console (115200 baud) both use it. A 320×172 simulator profile is `sim-320x172-nospeaker`.
 
 ### First flash: what to check
 
 This port is written from the Waveshare schematic and the Arduino demo's ST7789 offsets. On the first flash:
 
-1. **Boot log:** `st7789 172x320 ready` and `touch ready`. In `hermes-gadget diag` the parts line should list the display, and the `i2c` list should include `0x63`.
-2. **Screen:** the mascot is upright on the 172×320 glass, and the accents are amber, not blue. X is mirrored: without that, text reads backwards. A blank panel means the JD9853 needs its own init table, or SPI mode 3.
+1. **Boot log:** `st7789 320x172 ready` and `touch ready`. In `hermes-gadget diag` the parts line should list the display, and the `i2c` list should include `0x63`.
+2. **Screen:** the mascot is upright in landscape on the glass, and the accents are amber, not blue. Portrait needed an X mirror; landscape does not, because the axis swap already turns that scan around. A blank panel means the JD9853 needs its own init table, or SPI mode 3. The column offset is 34 on the short side after the axis swap; a picture shifted off the glass means that offset is on the wrong axis.
 3. **Touch:** a tap answers yes and a swipe down cancels. Holding the screen or BOOT reports that no microphone is available.
 4. **Text:** a paired Hermes card, prompt or notice should render on the display. A timer alarm is silent.
 
