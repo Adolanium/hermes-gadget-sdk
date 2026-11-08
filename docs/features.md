@@ -130,6 +130,7 @@ The table shows what each board profile drives. In the battery column, "Voltage"
 | Waveshare ESP32-S3-LCD-1.54 | Touch SKUs | Yes | Yes | Voltage | Light sleep | Partial report |
 | Waveshare ESP32-S3-Touch-LCD-1.83 | Yes | Yes | Yes | Gauge | | Not run on a board |
 | Waveshare ESP32-S3-Touch-LCD-1.46 | Yes | Yes | Yes | No | | Not run on a board |
+| Waveshare ESP32-S3-Touch-LCD-1.47 | Yes | No | No | No | | Picture, Wi-Fi, one card and swipe-down cancel checked; colour, a tap, a prompt and a silent timer not checked |
 | Waveshare ESP32-S3-Touch-AMOLED-1.32 | Yes | Yes | Yes | No | | Not run on a board |
 | Waveshare ESP32-S3-Touch-AMOLED-1.43C | Yes | Yes | Yes | Voltage | | Not run on a board |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | Yes | Yes | Output, needs a speaker | Gauge | Face-down sleep, clock chip | Some features checked |

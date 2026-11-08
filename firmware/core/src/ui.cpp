@@ -1504,7 +1504,8 @@ Ui::HeroGeom Ui::hero_geom(const UiModel& m) const {
   const int reserved = m.screen == Screen::Responding ? max_lines : 1;
   const int ch = caption_h(std::max<int>(reserved, static_cast<int>(g.detail.size()))) + std::max(0, g.name_h - (2 * lh + s));
   const int avail = std::min(w - 8 * s, layout_.main_h - ch - buttons_h - 4 * s);
-  g.size = mascot::pick(avail, mascot::Frame::Idle)->size;
+  const int limit = panel_.mascot_px ? std::min(avail, static_cast<int>(panel_.mascot_px)) : avail;
+  g.size = mascot::pick(limit, mascot::Frame::Idle)->size;
   const int block = g.size + 2 * s + ch + buttons_h;
   g.x = (w - g.size) / 2;
   g.y = layout_.main_y + std::max(s, (layout_.main_h - block) / 2);

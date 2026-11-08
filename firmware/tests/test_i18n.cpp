@@ -299,6 +299,7 @@ constexpr Panel kPanels[] = {
     {480, 480, false}, {800, 480, false},
     {480, 480, true},
     {360, 360, true, 2},  // the Knob-Touch-LCD-1.8 (lcd.font_scale = 2 in board.cpp)
+    {320, 172, false, 2},  // ESP32-S3-Touch-LCD-1.47 landscape (lcd.font_scale = 2 in board.cpp)
 };
 
 void check_fits(Lang lang, Msg m, int cols, const Panel& p) {
@@ -345,8 +346,9 @@ TEST("i18n: the talking face's two-line caption is on only where it fits, and it
   for (const Panel& p : kPanels) {
     BlankDisplay display(p.w, p.h, p.round, p.font_scale);
     const bool fits = hg::Ui(display).talk_caption_fits();
-    // The 240x135 and the 240x240 round (the Spotpear 1.28-BOX) show the face at its smallest size.
-    const bool small = p.h == 135 || (p.w == 240 && p.round);
+    // The 240x135, the 240x240 round (the Spotpear 1.28-BOX) and the 1.47's landscape 320x172 at
+    // twice the text size show the face at its smallest size.
+    const bool small = p.h == 135 || (p.w == 240 && p.round) || (p.w == 320 && p.h == 172);
     CHECK_EQ(fits, !small);
     if (!fits) continue;
     const Columns c = columns(p.w, p.h, p.round, p.font_scale);

@@ -64,6 +64,8 @@ namespace {
 #define HG_BOARD_NAME "waveshare-esp32-p4-wifi6-touch-lcd-7b"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154
 #define HG_BOARD_NAME "waveshare-esp32s3-lcd-154"
+#elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_147
+#define HG_BOARD_NAME "esp32-s3-touch-lcd-147"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_183
 #define HG_BOARD_NAME "waveshare-esp32-s3-touch-lcd-1.83"
 #elif CONFIG_HG_BOARD_ESP32_CYD
@@ -546,6 +548,54 @@ BoardConfig make() {
   b.touch.width = b.touch.height = 360;
   b.encoder = {8, 7, true};  // knob ring: one pulse per detent, channel = direction
   b.buttons = {0, -1, -1, -1};  // BOOT also works as TALK
+  b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
+  return b;
+}
+#elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_147
+// Waveshare ESP32-S3-Touch-LCD-1.47: native 172x320 JD9853, used landscape
+// (320x172) on the ST7789 SPI path. The column offset 34 follows the axis
+// swap onto the short side. AXS5106L touch. No microphone, speaker or codec,
+// so replies stay on the glass and typed messages go out the USB console.
+// Battery ADC and the microSD slot stay off.
+// Pins: docs/hardware.md#waveshare-esp32-s3-touch-lcd-147
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.lcd.enabled = true;
+  b.lcd.width = 320;
+  b.lcd.height = 172;
+  b.lcd.swap_xy = true;
+  // Portrait needed mirror_x so text read left to right. After the axis swap
+  // that same bit mirrors the landscape picture, so it stays off.
+  b.lcd.mirror_x = false;
+  b.lcd.mirror_y = false;
+  b.lcd.invert = false;  // Waveshare's Arduino demo constructs this glass with IPS off
+  // After the axis swap the 34-column window is the logical Y offset.
+  b.lcd.gap_x = 0;
+  b.lcd.gap_y = 34;
+  // 320x172 still picks scale 1 on its own (the short side). Double it. The
+  // hero was the 144 px bitmap; 64 is the stock size under half of that.
+  b.lcd.font_scale = 2;
+  b.lcd.mascot_px = 64;
+  b.lcd.mosi = 39;
+  b.lcd.sclk = 38;
+  b.lcd.cs = 21;
+  b.lcd.dc = 45;
+  b.lcd.rst = 40;
+  b.lcd.backlight = 46;
+  b.i2c = {42, 41, 400000};
+  b.touch.enabled = true;
+  b.touch.ppi = 247;  // sqrt(172^2 + 320^2) / 1.47
+  b.touch.controller = TouchController::Axs5106;
+  b.touch.addr = 0x63;
+  b.touch.rst = 47;
+  b.touch.int_gpio = 48;
+  b.touch.width = 320;
+  b.touch.height = 172;
+  b.touch.swap_xy = true;  // the report is still native 172x320; exchange into landscape
+  b.touch.mirror_x = false;  // same axis as the panel, so a tap lands on the drawn pixel
+  b.buttons = {0, -1, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";
   return b;

@@ -108,6 +108,7 @@ struct LcdConfig {
   int d1 = -1, d2 = -1, d3 = -1;  // QSPI data0 uses mosi
   bool round = false;
   uint8_t font_scale = 1;  // UI text scale multiplier, clamped so the scale stays 1..4 (hg::DisplayInfo)
+  uint16_t mascot_px = 0;   // largest mascot bitmap; 0 keeps the largest that fits
   // SPI data-in (the CYD wires its panel's SDO to GPIO 12); -1 when unused.
   // Last, so positional initializers written before it existed keep their meaning.
   int miso = -1;
@@ -191,7 +192,7 @@ struct CodecAudioConfig {
 };
 
 // Capacitive touch on the I2C bus: hold to talk, tap, swipe down to cancel.
-enum class TouchController { Cst9217, Box3, Ft5x06, Cst816, Gt911, Spd2010 };
+enum class TouchController { Cst9217, Box3, Ft5x06, Cst816, Gt911, Spd2010, Axs5106 };
 
 struct TouchConfig {
   bool enabled = false;

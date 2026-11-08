@@ -29,6 +29,8 @@ struct DisplayInfo {
   // Multiplier on the UI's automatic font scale, for panels small enough that
   // the automatic pick reads as too small. The UI clamps the final scale.
   uint8_t font_scale = 1;
+  // Largest mascot bitmap, in pixels. 0 keeps the largest that fits.
+  uint16_t mascot_px = 0;
   // Extra left and right padding for the top bar's text, for a rectangular
   // panel with rounded corners.
   uint8_t corner_inset = 0;
