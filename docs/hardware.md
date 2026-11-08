@@ -704,7 +704,7 @@ cd firmware/esp32
 pio run -e esp32s3-touch-amoled-216 -t upload -t monitor
 ```
 
-The USB-C port is the S3's own USB Serial/JTAG, used for both flashing and the serial console. If the port does not appear, hold BOOT while plugging in USB to enter download mode.
+The USB-C port is the S3's own USB Serial/JTAG, used for both flashing and the serial console. If the port does not appear, hold BOOT while plugging in USB to enter download mode. If the board shows nothing and writes no log after flashing, unplug USB and plug it in again: one unit stayed in download mode after a full image was written with `esptool`, until it was power-cycled ([partial report](hardware-validation.md#waveshare-amoled-216-partial-physical-report)).
 
 ### First flash: what to check
 
