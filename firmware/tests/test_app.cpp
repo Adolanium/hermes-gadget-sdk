@@ -874,6 +874,32 @@ TEST("app: diag reports the core's state plus what the port adds") {
   CHECK_EQ(v["connection"]["last_close"].as_string(), std::string("server went away"));
 }
 
+TEST("app: log sets a tag's level through the port and refuses unknown levels") {
+  Rig r;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("log hg.touch debug"), std::string("@error this device has no log levels"));
+
+  std::string tag, level;
+  r.app.on_log_level = [&](const std::string& t, const std::string& l) {
+    tag = t;
+    level = l;
+    return true;
+  };
+  CHECK_EQ(r.app.console("log hg.touch debug"), std::string("@ok log hg.touch debug"));
+  CHECK_EQ(tag, std::string("hg.touch"));
+  CHECK_EQ(level, std::string("debug"));
+  CHECK_EQ(r.app.console("log * warn"), std::string("@ok log * warn"));
+  CHECK_EQ(tag, std::string("*"));
+
+  tag.clear();
+  CHECK(r.app.console("log hg.touch loud").rfind("@error usage: log", 0) == 0);
+  CHECK(r.app.console("log").rfind("@error usage: log", 0) == 0);
+  CHECK(tag.empty());  // a refused command never reaches the port
+
+  r.app.on_log_level = [](const std::string&, const std::string&) { return false; };
+  CHECK_EQ(r.app.console("log hg.touch info"), std::string("@error could not set the log level"));
+}
+
 namespace {
 
 // The server's side of a firmware update, as the hub runs it.

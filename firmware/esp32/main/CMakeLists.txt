@@ -80,6 +80,8 @@ idf_component_register(
         esp_app_format
         esp_adc
         esp_event
+        esp_partition
+        espcoredump
         esp_lcd
         ${HG_RGB_REQUIRES}
         ${HG_P4_REQUIRES}
@@ -95,3 +97,8 @@ idf_component_register(
         # Empty unless CONFIG_HG_TAILNET (components/tailtiny).
         tailtiny
 )
+
+# The firmware's own debug lines stay in the build, so the console's `log <tag> debug`
+# can turn them on without a rebuild. A line below its tag's level is skipped at run
+# time. Only this component: ESP-IDF's and the managed components' debug lines stay out.
+target_compile_definitions(${COMPONENT_LIB} PRIVATE LOG_LOCAL_LEVEL=ESP_LOG_DEBUG)

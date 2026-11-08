@@ -45,6 +45,10 @@ def stage(project: Path, board: str, build: Path, notices: Path | None = None) -
     out.mkdir(parents=True, exist_ok=True)
     for entry, name in FLASHER_ENTRIES.items():
         shutil.copyfile(build / flasher[entry]["file"], out / name)
+    # The release keeps every board's ELF for reading core dumps; PlatformIO names it firmware.elf.
+    elf = build / Path(flasher["app"]["file"]).with_suffix(".elf")
+    if elf.is_file():
+        shutil.copyfile(elf, out / "firmware.elf")
     shutil.copyfile(build / "sdkconfig", project / f"sdkconfig.{board}")
     if notices:
         for source, name in build_notices(project):

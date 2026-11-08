@@ -469,6 +469,7 @@ extern "C" void app_main(void) {
       hal.speaker == &g_speaker ? "i2s" : "none";
   parts.touch = touch && g_touch.has_touch();
   parts.key = touch && g_touch.has_key();
+  parts.touch_input = touch ? &g_touch : nullptr;
   parts.i2c = i2c_bus;
   parts.imu = imu ? g_motion.chip_name() : "none";
   parts.rtc = g_time.rtc_ready() ? "pcf85063" : "none";
@@ -596,6 +597,17 @@ extern "C" void app_main(void) {
 #endif
   };
   app.recent_log = &hgp::diag::recent_log;
+  app.on_log_level = [](const std::string& tag, const std::string& level) {
+    static const esp_log_level_t kLevels[] = {ESP_LOG_NONE, ESP_LOG_ERROR, ESP_LOG_WARN, ESP_LOG_INFO, ESP_LOG_DEBUG};
+    static_assert(std::size(kLevels) == std::size(hg::App::kLogLevels));
+    for (size_t i = 0; i < std::size(kLevels); ++i) {
+      if (level != hg::App::kLogLevels[i]) continue;
+      esp_log_level_set(tag.c_str(), kLevels[i]);
+      ESP_LOGI(TAG, "log level of %s: %s", tag.c_str(), level.c_str());
+      return true;
+    }
+    return false;
+  };
   if (board.light_sleep) keep_pins_through_sleep(board);
 #if !CONFIG_HG_BOARD_ESP32_CYD
   g_system.on_doze_start = [] { g_codec_speaker.power_down(); };

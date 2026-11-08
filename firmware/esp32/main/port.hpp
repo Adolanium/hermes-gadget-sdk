@@ -127,6 +127,8 @@ bool post(EventType type, const void* data = nullptr, size_t len = 0, uint32_t g
           ConsoleRequest* console = nullptr);
 bool receive(Event& out, TickType_t wait);
 void release(Event& ev);
+// {waiting, peak, depth, dropped} for `diag`: a full queue drops touches, keys and audio.
+hg::json::Value stats();
 }  // namespace events
 
 // ---------------------------------------------------------------------------
@@ -575,6 +577,10 @@ class TouchInput {
   void nudge();  // ends the task's wait now, e.g. so a doze's end re-arms the INT edge at once
   // The touch_wake setting: off, a doze leaves INT quiet instead of arming it as a wake source.
   void set_wakes(bool on) { wakes_ = on; nudge(); }
+  // Counters for `diag`, safe to read from any task: whether the task still runs, how its
+  // reads go, and whether its events reach the app. A touch that stops answering, a task
+  // that stopped running and a full event queue each show as a different number here.
+  hg::json::Value stats() const;
 
  private:
   static void task(void* arg);
@@ -613,6 +619,9 @@ class TouchInput {
   volatile int8_t encoder_first_ = 0;        // leading channel of the current detent (0 = idle)
   volatile int64_t encoder_pair_deadline_us_ = 0;  // solo-pulse timeout (task checks it)
   volatile int64_t last_edge_us_ = INT64_MIN;  // per-edge debounce (ISR-written)
+  // For stats(). Written by the task, and int_edges_ by the INT handler.
+  std::atomic<uint32_t> reads_{0}, read_errors_{0}, error_streak_{0}, int_edges_{0}, posted_{0}, post_drops_{0};
+  std::atomic<int64_t> last_read_us_{0}, last_loop_us_{0};
 };
 
 // Reads the QMI8658 at 10 Hz from its own task, on its own device handle on
@@ -949,6 +958,7 @@ struct Parts {
   i2c_master_bus_handle_t i2c = nullptr;  // scanned by `diag`
   MotionInput* motion = nullptr;          // latest sample for the report
   TimePort* time = nullptr;       // time state for the report
+  const TouchInput* touch_input = nullptr;  // its counters for the report
 };
 
 // Starts keeping a RAM copy of recent log lines. Call first in app_main.
@@ -958,7 +968,11 @@ void set_parts(const Parts& parts);
 void log_boot_summary();
 // The port's half of the console's `diag` report (hg::App::on_diag).
 void report(hg::json::Value& r);
-// The log copy, oldest line first (hg::App::recent_log).
+// A whole `@diag` reply from the port alone, for when the app task doesn't answer:
+// memory, tasks, events, touch and the last crash. Safe from any task.
+std::string report_without_app();
+// The log copy, oldest line first (hg::App::recent_log). After a restart that kept
+// RAM, it opens with the previous boot's lines between `@log` marker lines.
 std::string recent_log();
 }  // namespace diag
 

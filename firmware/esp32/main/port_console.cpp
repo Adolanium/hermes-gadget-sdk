@@ -17,6 +17,14 @@ namespace {
 const char* TAG = "hg.console";
 
 int run(int argc, char** argv) {
+  const bool is_diag = argc && std::strcmp(argv[0], "diag") == 0;
+  // The log copy needs no app task: it answers even while that task is stuck.
+  if (is_diag && argc == 2 && std::strcmp(argv[1], "log") == 0) {
+    std::string out = diag::recent_log();
+    if (!out.empty() && out.back() != '\n') out += '\n';
+    std::printf("%s@log end\n", out.c_str());
+    return 0;
+  }
   // ESP-IDF has already split the line and removed its quotes. `wifi` takes several
   // values that may hold spaces, so its arguments are quoted again.
   const bool quote = argc && std::strcmp(argv[0], "wifi") == 0;
@@ -28,13 +36,16 @@ int run(int argc, char** argv) {
   // The app task answers on its own time. The slot outlives this function
   // if that answer comes after the wait below gave up.
   ConsoleRequest* req = ConsoleRequest::create();
-  if (!events::post(EventType::Console, line.data(), line.size(), 0, req)) {
-    req->release();  // nobody will answer: drop the app task's share too
-    std::printf("@error device busy\n");
-  } else if (!req->wait(3000)) {
-    std::printf("@error device busy\n");
-  } else {
+  const bool posted = events::post(EventType::Console, line.data(), line.size(), 0, req);
+  if (!posted) req->release();  // nobody will answer: drop the app task's share too
+  if (posted && req->wait(3000)) {
     std::printf("%s\n", req->reply().c_str());
+  } else if (is_diag && argc == 1) {
+    // A stuck app task or a full event queue is what a hang report most needs to
+    // show: the port answers for itself.
+    std::printf("%s\n", diag::report_without_app().c_str());
+  } else {
+    std::printf("@error device busy\n");
   }
   req->release();
   return 0;
@@ -45,7 +56,7 @@ int run(int argc, char** argv) {
 void begin() {
   static const char* const kCommands[] = {"help",      "status", "diag",   "get",         "set",       "say",
                                           "talk",      "release", "cancel", "new-session", "reconnect", "forget-key",
-                                          "factory-reset", "settings", "wifi-setup", "wifi", "phone", "perf"};
+                                          "factory-reset", "settings", "wifi-setup", "wifi", "phone", "perf", "log"};
   for (const char* name : kCommands) {
     esp_console_cmd_t cmd = {};
     cmd.command = name;
