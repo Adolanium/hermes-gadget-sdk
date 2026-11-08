@@ -233,3 +233,27 @@ def test_live_audio_without_the_extra_stops_instead_of_running_silent(monkeypatc
 def test_diag_summary_names_why_the_device_is_not_paired():
     report = dict(REPORT, app=dict(REPORT["app"], phase="online", unpaired_reason="routed"))
     assert "Hermes: online, not paired (routed), last connection ended: connection error" in cli._diag_summary(report)
+
+
+def test_diag_summary_shows_a_stalled_touch_a_full_queue_and_the_last_crash():
+    report = dict(REPORT,
+                  touch={"controller": "cst816", "read_on": "poll", "reads": 900, "read_errors": 40,
+                         "error_streak": 40, "last_read_ms_ago": 8200, "events": 310, "events_dropped": 3,
+                         "task_ms_ago": 12},
+                  events={"waiting": 96, "peak": 96, "depth": 96, "dropped": 17},
+                  crash={"state": "saved", "task": "hg.touch", "pc": "0x42001234", "elf_sha256": "0123456789abcdef",
+                         "this_build": False, "backtrace": ["0x42001234"]})
+    summary = cli._diag_summary(report)
+    assert ("touch: cst816 read on poll, 900 reads, 40 failed (40 in a row), last good read 8200 ms ago, "
+            "task last ran 12 ms ago, 3 events dropped") in summary
+    assert "event queue: 17 events dropped, peak 96 of 96" in summary
+    assert ("last crash: task hg.touch at 0x42001234 (build 0123456789abcdef); "
+            "the full report lists its backtrace") in summary
+
+
+def test_diag_summary_says_when_the_app_task_did_not_answer():
+    report = {"app": "not answering", "reset_reason": "software restart", "uptime_s": 40,
+              "crash": {"state": "none"}, "touch": {"task_ms_ago": 5}}
+    summary = cli._diag_summary(report)
+    assert summary[-1] == "Hermes: the app task did not answer; this report comes from the port alone"
+    assert not any(line.startswith("touch:") or line.startswith("last crash") for line in summary)
