@@ -24,8 +24,8 @@
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "mbedtls/ssl.h"
-/* Hermes gadget patch: Mbed TLS 4 (ESP-IDF 6) draws TLS randomness from PSA
- * and made the entropy/CTR-DRBG modules private. */
+/* Mbed TLS 4 (ESP-IDF 6) draws TLS randomness from PSA and made the entropy
+ * and CTR-DRBG modules private; Mbed TLS 3 needs them for mbedtls_ssl_conf_rng(). */
 #if MBEDTLS_VERSION_MAJOR < 4
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
@@ -400,8 +400,10 @@ struct tailtiny_s {
     TaskHandle_t derp_tx_task;
     TaskHandle_t coord_task;
     TaskHandle_t wg_mgr_task;
+    int wg_notifiers;                  /* producers inside ml_wg_notify(), under ml_wg_task_lock */
 
     /* Queues */
+    int derp_wake_fd;                  /* eventfd: wakes select for queued TX/control work */
     QueueHandle_t derp_tx_queue;        /* -> derp_tx task */
     QueueHandle_t disco_rx_queue;       /* net_io -> wg_mgr */
     QueueHandle_t wg_rx_queue;          /* net_io -> wg_mgr */
@@ -548,6 +550,35 @@ static inline void ml_tcpip_run(void (*fn)(void *arg), void *arg) {
 /* ============================================================================
  * Internal Function Declarations (per-module)
  * ========================================================================== */
+
+/* Notify the WireGuard manager task, if it is running. Safe against the task
+ * exiting at the same time: it clears its handle and waits for notifiers in
+ * flight before deleting itself (ml_wg_mgr.c). */
+void ml_wg_notify(tailtiny_t *ml);
+
+/* Wake the WireGuard manager after publishing work to one of its queues.
+ * A task notification is latched, so work published between the task draining
+ * its queues and starting its next wait still wakes it. */
+static inline void ml_wg_wake(tailtiny_t *ml) {
+    if (!(xEventGroupGetBits(ml->events) & ML_EVT_SHUTDOWN_REQUEST))
+        ml_wg_notify(ml);
+}
+
+static inline BaseType_t ml_wg_queue_send(tailtiny_t *ml, QueueHandle_t queue,
+                                         const void *item, TickType_t wait) {
+    BaseType_t sent = xQueueSend(queue, item, wait);
+    if (sent == pdTRUE) ml_wg_wake(ml);
+    return sent;
+}
+
+void ml_derp_wake(tailtiny_t *ml);
+
+static inline BaseType_t ml_derp_queue_item(tailtiny_t *ml, const void *item, bool front) {
+    BaseType_t sent = front ? xQueueSendToFront(ml->derp_tx_queue, item, 0)
+                            : xQueueSend(ml->derp_tx_queue, item, 0);
+    if (sent == pdTRUE) ml_derp_wake(ml);
+    return sent;
+}
 
 /* ml_net_io.c */
 void ml_net_io_task(void *arg);

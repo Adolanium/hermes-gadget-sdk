@@ -47,7 +47,8 @@ def test_the_websocket_transport_never_waits_without_a_limit_on_the_app_task():
 # wireguard-lwip's device state is shared by lwIP's thread (netif output) and TailTiny's WireGuard
 # task (timers, incoming packets); TailTiny's UDP send waits for lwIP's thread. So in
 # wireguardif.c the keys, counters, handshake state and peer table are only touched under
-# WG_LOCK, and nothing that sends or enters lwIP runs under it (components/TAILTINY.md, patch 07).
+# WG_LOCK, and nothing that sends or enters lwIP runs under it (upstream since TailTiny 3.1.0;
+# components/TAILTINY.md).
 WG_STATE_CALLS = (
     "wireguard_encrypt_packet", "wireguard_decrypt_packet", "keypair_destroy", "keypair_update",
     "wireguard_start_session", "wireguard_create_handshake_initiation",
@@ -143,3 +144,30 @@ def test_tailtiny_is_reset_only_at_boot_before_it_starts():
             if call.search(code):
                 found.append((path.name, function))
     assert found == [("port_tailnet.cpp", "TailnetLink::begin")], found
+
+
+def test_tailnet_relay_certificate_is_verified():
+    # TailTiny 3.1.0 verifies the DERP relay's certificate against ESP-IDF's CA bundle and the
+    # relay's host name when CONFIG_ML_DERP_VERIFY_CERT is on (components/TAILTINY.md). It
+    # defaults on but depends on MBEDTLS_CERTIFICATE_BUNDLE, so a board config dropping the
+    # bundle, or a vendor update losing the check, would quietly connect to any relay.
+    esp32 = FIRMWARE / "esp32"
+    tailtiny = esp32 / "components" / "tailtiny"
+    derp = (tailtiny / "src" / "ml_derp.c").read_text(encoding="utf-8")
+    verify = [m.group(1) for m in re.finditer(r"#if CONFIG_ML_DERP_VERIFY_CERT\n(.*?)#(?:else|endif)", derp, re.S)
+              if "mbedtls_ssl_conf_authmode" in m.group(1)]
+    assert len(verify) == 1, "ml_derp.c should set the auth mode in one CONFIG_ML_DERP_VERIFY_CERT branch"
+    assert "MBEDTLS_SSL_VERIFY_REQUIRED" in verify[0]
+    assert "esp_crt_bundle_attach(" in verify[0]
+    # The call itself, not the comment that names it.
+    assert re.search(r"=\s*mbedtls_ssl_set_hostname\(&ml->derp\.ssl,\s*derp_host\)", derp)
+    kconfig = (tailtiny / "Kconfig").read_text(encoding="utf-8")
+    option = re.search(r"config ML_DERP_VERIFY_CERT\n(.*?)\n\s*help", kconfig, re.S)
+    assert option and "default y" in option.group(1)
+    assert "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y" in (esp32 / "sdkconfig.defaults").read_text()
+    off = re.compile(r"^(CONFIG_ML_DERP_VERIFY_CERT=n|# CONFIG_ML_DERP_VERIFY_CERT is not set"
+                     r"|CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=n|# CONFIG_MBEDTLS_CERTIFICATE_BUNDLE is not set)",
+                     re.M)
+    found = [str(p.relative_to(REPO)) for p in sorted(esp32.rglob("sdkconfig.defaults*"))
+             if ".pio" not in p.parts and off.search(p.read_text())]
+    assert not found, found

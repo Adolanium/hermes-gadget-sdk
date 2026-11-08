@@ -160,7 +160,7 @@ static bool wireguardif_can_send_initiation(struct wireguard_peer *peer) {
 	return ((peer->last_initiation_tx == 0) || (wireguard_expired(peer->last_initiation_tx, REKEY_TIMEOUT)));
 }
 
-// Hermes gadget patch: the lwIP thread (netif output) and TailTiny's WireGuard task (timers,
+// The lwIP thread (netif output) and TailTiny's WireGuard task (timers,
 // incoming packets) both use a device's peers and keypairs. Everything that reads or changes
 // them, encryption and the sending counter included, runs under the device's lock. Sending
 // does not: the UDP path waits for the lwIP thread (ml_tcpip_run), which may itself be waiting
@@ -263,7 +263,7 @@ static err_t wireguardif_device_output(struct wireguard_device *device, struct p
 	return udp_sendto(device->udp_pcb, q, ipaddr, port);
 }
 
-// Hermes gadget patch: the sealing half of upstream's wireguardif_output_to_peer(). Call with
+// The sealing half of wireguardif_output_to_peer(). Call with
 // the device lock held. On ERR_OK *out is the encrypted packet and *ep where it goes.
 static err_t wireguardif_seal_locked(struct wireguard_peer *peer, struct pbuf *q, struct pbuf **out, struct wg_endpoint *ep) {
 	// The LWIP IP layer wants to send an IP packet out over the interface - we need to encrypt and send it to the peer
@@ -373,7 +373,7 @@ static err_t wireguardif_seal_locked(struct wireguard_peer *peer, struct pbuf *q
 	return result;
 }
 
-// Hermes gadget patch: sends a packet wireguardif_seal_locked() made, without the lock, then
+// Sends a packet wireguardif_seal_locked() made, without the lock, then
 // records the send under it.
 static err_t wireguardif_send_sealed(struct wireguard_device *device, struct wireguard_peer *peer, struct pbuf *pbuf, const struct wg_endpoint *ep) {
 	err_t result = wireguardif_endpoint_output(device, pbuf, ep);
@@ -408,7 +408,7 @@ static err_t wireguardif_output(struct netif *netif, struct pbuf *q, const ip4_a
 
 	WG_DEBUG("[WG_OUTPUT] Looking up peer for dest %s\n", ipaddr_ntoa(&addr));
 
-	// Hermes gadget patch: look up and seal under the lock, send after it.
+	// Look up and seal under the lock, send after it.
 	WG_LOCK(device);
 	struct wireguard_peer *peer = peer_lookup_by_allowed_ip(device, &addr);
 	if (peer) {
@@ -453,7 +453,7 @@ static void wireguardif_process_response_message(struct wireguard_device *device
 	WG_DEBUG("[WG] Processing handshake response from %s:%u\n",
 		ip_addr_isany(addr) ? "DERP" : ipaddr_ntoa(addr), port);
 
-	// Hermes gadget patch: the session changes under the lock; the keepalive and the link
+	// The session changes under the lock; the keepalive and the link
 	// change come after it.
 	WG_LOCK(device);
 	peer = peer_lookup_by_handshake(device, response->receiver);
@@ -516,7 +516,7 @@ static bool peer_add_ip(struct wireguard_peer *peer, ip_addr_t ip, ip_addr_t mas
 	return result;
 }
 
-// Hermes gadget patch: call with the device lock held. Instead of raising the link and handing
+// Call with the device lock held. Instead of raising the link and handing
 // the packet to lwIP itself, it sets *link_up and *deliver for the caller to do after the lock.
 static void wireguardif_process_data_message_locked(struct wireguard_device *device, struct wireguard_peer *peer, struct message_transport_data *data_hdr, size_t data_len, const ip_addr_t *addr, u16_t port, bool *link_up, struct pbuf **deliver) {
 	struct wireguard_keypair *keypair;
@@ -697,7 +697,7 @@ static struct pbuf *wireguardif_initiate_handshake(struct wireguard_device *devi
 	return pbuf;
 }
 
-// Hermes gadget patch: upstream's wireguardif_send_handshake_response() without the send. Call
+// wireguardif_send_handshake_response() without the send. Call
 // with the device lock held; returns the response for the caller to send after the lock.
 static struct pbuf *wireguardif_make_handshake_response_locked(struct wireguard_device *device, struct wireguard_peer *peer) {
 	struct message_handshake_response packet;
@@ -862,7 +862,7 @@ void wireguardif_network_rx(void *arg, struct udp_pcb *pcb, struct pbuf *p, cons
 				(unsigned long)msg_initiation->sender);
 
 			// Check mac1 (and optionally mac2) are correct - note it may internally generate a cookie reply packet
-			// Hermes gadget patch: the MAC checks read only keys fixed at init (a cookie reply,
+			// The MAC checks read only keys fixed at init (a cookie reply,
 			// and the cookie secret, only when wireguard_is_under_load(), always false here), so
 			// they run without the lock; the handshake state changes under it.
 			if (wireguardif_check_initiation_message(device, msg_initiation, addr, port)) {
@@ -879,7 +879,7 @@ void wireguardif_network_rx(void *arg, struct udp_pcb *pcb, struct pbuf *p, cons
 					endpoint_of(peer, &ep);
 					// If initiation arrived via DERP (addr=0.0.0.0), send the response via DERP
 					// too: the ESP32 on cellular may not reach the peer's direct endpoint.
-					// (Upstream cleared and restored the peer's endpoint around the send.)
+					// (This used to clear and restore the live peer's endpoint around the send.)
 					if (ip_addr_isany(addr)) {
 						ip_addr_set_any(false, &ep.ip);
 						ep.port = 0;
@@ -960,7 +960,7 @@ void wireguardif_network_rx(void *arg, struct udp_pcb *pcb, struct pbuf *p, cons
 	pbuf_free(p);
 }
 
-// Hermes gadget patch: builds the initiation under the device lock and sends it after.
+// Builds the initiation under the device lock and sends it after.
 // Call without the lock.
 static err_t wireguard_start_handshake(struct netif *netif, struct wireguard_peer *peer) {
 	if (!netif || !netif->state) {
@@ -1021,7 +1021,7 @@ static err_t wireguardif_lookup_peer(struct netif *netif, u8_t peer_index, struc
 err_t wireguardif_connect(struct netif *netif, u8_t peer_index) {
 	struct wireguard_peer *peer;
 	struct wireguard_device *device = (struct wireguard_device *)netif->state;
-	WG_LOCK(device);  // Hermes gadget patch
+	WG_LOCK(device);
 	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
 	if (result == ERR_OK) {
 		if (!ip_addr_isany(&peer->connect_ip) && (peer->connect_port > 0)) {
@@ -1045,7 +1045,7 @@ err_t wireguardif_connect(struct netif *netif, u8_t peer_index) {
 err_t wireguardif_disconnect(struct netif *netif, u8_t peer_index) {
 	struct wireguard_peer *peer;
 	struct wireguard_device *device = (struct wireguard_device *)netif->state;
-	WG_LOCK(device);  // Hermes gadget patch
+	WG_LOCK(device);
 	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
 	if (result == ERR_OK) {
 		// Set the peer as inactive
@@ -1071,7 +1071,7 @@ static bool keypair_usable(const struct wireguard_keypair *keypair) {
 err_t wireguardif_peer_is_up(struct netif *netif, u8_t peer_index, ip_addr_t *current_ip, u16_t *current_port) {
 	struct wireguard_peer *peer;
 	struct wireguard_device *device = (struct wireguard_device *)netif->state;
-	WG_LOCK(device);  // Hermes gadget patch
+	WG_LOCK(device);
 	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
 	if (result == ERR_OK) {
 		if (keypair_usable(&peer->curr_keypair) || keypair_usable(&peer->prev_keypair)) {
@@ -1093,7 +1093,7 @@ err_t wireguardif_peer_is_up(struct netif *netif, u8_t peer_index, ip_addr_t *cu
 err_t wireguardif_remove_peer(struct netif *netif, u8_t peer_index) {
 	struct wireguard_peer *peer;
 	struct wireguard_device *device = (struct wireguard_device *)netif->state;
-	WG_LOCK(device);  // Hermes gadget patch
+	WG_LOCK(device);
 	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
 	if (result == ERR_OK) {
 		crypto_zero(peer, sizeof(struct wireguard_peer));
@@ -1118,7 +1118,7 @@ void wireguardif_shutdown(struct netif *netif) {
 err_t wireguardif_update_endpoint(struct netif *netif, u8_t peer_index, const ip_addr_t *ip, u16_t port) {
 	struct wireguard_peer *peer;
 	struct wireguard_device *device = (struct wireguard_device *)netif->state;
-	WG_LOCK(device);  // Hermes gadget patch
+	WG_LOCK(device);
 	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
 	if (result == ERR_OK) {
 		peer->connect_ip = *ip;
@@ -1146,7 +1146,7 @@ err_t wireguardif_add_peer(struct netif *netif, struct wireguardif_peer *p, u8_t
 			&& (public_key_len == WIREGUARD_PUBLIC_KEY_LEN)) {
 
 		// See if the peer is already registered
-		WG_LOCK(device);  // Hermes gadget patch: the peer table
+		WG_LOCK(device);  // the peer table
 		peer = peer_lookup_by_pubkey(device, public_key);
 		if (!peer) {
 			// Not active - see if we have room to allocate a new one
@@ -1240,7 +1240,7 @@ static bool should_reset_peer(struct wireguard_peer *peer) {
 	return result;
 }
 
-// Hermes gadget patch: the timers' work, shared by wireguardif_tmr() and wireguardif_periodic().
+// The timers' work, shared by wireguardif_tmr() and wireguardif_periodic().
 // Decisions and key changes under the device lock; sends and the link change after it.
 static void wireguardif_run_timers(struct wireguard_device *device) {
 	bool link_up = false;
@@ -1502,7 +1502,7 @@ void wireguardif_force_derp_output(struct netif *netif, bool force) {
 err_t wireguardif_connect_derp(struct netif *netif, u8_t peer_index) {
 	struct wireguard_peer *peer;
 	struct wireguard_device *device = (struct wireguard_device *)netif->state;
-	WG_LOCK(device);  // Hermes gadget patch
+	WG_LOCK(device);
 	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
 	if (result == ERR_OK) {
 		// Mark peer as active so timer will initiate handshakes

@@ -1220,7 +1220,7 @@ static void parse_peers_from_map_response(tailtiny_t *ml, cJSON *root) {
                  update->online == 1 ? "yes" : update->online == 0 ? "no" : "?");
 
         /* Send to wg_mgr task via queue */
-        if (xQueueSend(ml->peer_update_queue, &update, pdMS_TO_TICKS(100)) != pdTRUE) {
+        if (ml_wg_queue_send(ml, ml->peer_update_queue, &update, pdMS_TO_TICKS(100)) != pdTRUE) {
             ESP_LOGW(TAG, "Peer update queue full, dropping %s", update->hostname);
             free(update);
         }
@@ -1250,7 +1250,7 @@ check_removed:
                      update->public_key[0], update->public_key[1],
                      update->public_key[2], update->public_key[3]);
 
-            if (xQueueSend(ml->peer_update_queue, &update, pdMS_TO_TICKS(100)) != pdTRUE) {
+            if (ml_wg_queue_send(ml, ml->peer_update_queue, &update, pdMS_TO_TICKS(100)) != pdTRUE) {
                 free(update);
             }
         }
@@ -1318,7 +1318,7 @@ check_removed:
                              update->public_key[2], update->public_key[3],
                              update->endpoint_count);
 
-                    if (xQueueSend(ml->peer_update_queue, &update, pdMS_TO_TICKS(100)) != pdTRUE) {
+                    if (ml_wg_queue_send(ml, ml->peer_update_queue, &update, pdMS_TO_TICKS(100)) != pdTRUE) {
                         free(update);
                     }
                 }
@@ -2700,6 +2700,7 @@ void ml_coord_task(void *arg) {
             /* Signal DERP I/O task to connect (connection now owned by I/O task) */
             if (!ml->derp.connected) {
                 xEventGroupSetBits(ml->events, ML_EVT_DERP_CONNECT_REQ);
+                ml_derp_wake(ml);
                 /* Wait for DERP to connect (up to 15s) before continuing */
                 ESP_LOGI(TAG, "Waiting for DERP I/O task to connect...");
                 xEventGroupWaitBits(ml->events, ML_EVT_DERP_CONNECTED,
@@ -2912,7 +2913,7 @@ void ml_coord_task(void *arg) {
                             .frame_type = 0x07,  /* NotePreferred */
                         };
                         memset(ka_item.dest_pubkey, 0, 32);
-                        if (xQueueSend(ml->derp_tx_queue, &ka_item, 0) != pdTRUE) {
+                        if (ml_derp_queue_item(ml, &ka_item, false) != pdTRUE) {
                             free(ka_data);
                         }
                     }

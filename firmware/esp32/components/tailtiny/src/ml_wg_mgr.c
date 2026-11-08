@@ -1581,6 +1581,39 @@ static void disco_periodic_probes(tailtiny_t *ml) {
  * WG Manager Task
  * ========================================================================== */
 
+/* ml_wg_notify() and the task's exit share this lock (internal RAM; the
+ * context may be in PSRAM). The notify itself runs outside it: a FreeRTOS call
+ * that may yield isn't allowed inside a critical section. */
+static portMUX_TYPE ml_wg_task_lock = portMUX_INITIALIZER_UNLOCKED;
+
+void ml_wg_notify(tailtiny_t *ml) {
+    taskENTER_CRITICAL(&ml_wg_task_lock);
+    TaskHandle_t task = ml->wg_mgr_task;
+    if (task) ml->wg_notifiers++;
+    taskEXIT_CRITICAL(&ml_wg_task_lock);
+    if (!task) return;
+    xTaskNotifyGive(task);
+    taskENTER_CRITICAL(&ml_wg_task_lock);
+    ml->wg_notifiers--;
+    taskEXIT_CRITICAL(&ml_wg_task_lock);
+}
+
+/* Every exit of the WireGuard task: clear the handle so no new notify starts,
+ * wait out the ones already holding it, then delete. */
+static void wg_mgr_exit(tailtiny_t *ml) {
+    taskENTER_CRITICAL(&ml_wg_task_lock);
+    ml->wg_mgr_task = NULL;
+    taskEXIT_CRITICAL(&ml_wg_task_lock);
+    for (;;) {
+        taskENTER_CRITICAL(&ml_wg_task_lock);
+        int busy = ml->wg_notifiers;
+        taskEXIT_CRITICAL(&ml_wg_task_lock);
+        if (!busy) break;
+        vTaskDelay(1);
+    }
+    vTaskDelete(NULL);
+}
+
 void ml_wg_mgr_task(void *arg) {
     tailtiny_t *ml = (tailtiny_t *)arg;
     ESP_LOGI(TAG, "WG Manager task started (Core %d)", xPortGetCoreID());
@@ -1602,7 +1635,7 @@ void ml_wg_mgr_task(void *arg) {
 
     if (wait_bits & ML_EVT_SHUTDOWN_REQUEST) {
         ESP_LOGI(TAG, "Shutdown requested before registration, exiting");
-        vTaskDelete(NULL);
+        wg_mgr_exit(ml);
         return;  /* Not reached */
     }
 
@@ -1718,12 +1751,11 @@ void ml_wg_mgr_task(void *arg) {
             ESP_LOGD(TAG, "disco_periodic_probes: %llu ms", (unsigned long long)dt);
         }
 
-        /* Wait up to 10 ms for the next WireGuard packet, so a burst is
-         * handled as it arrives instead of after a fixed sleep (which let the
-         * RX queue overflow under load). Idle cost is unchanged. */
-        if (xQueueReceive(ml->wg_rx_queue, &wg_pkt, pdMS_TO_TICKS(10)) == pdTRUE) {
-            process_wg_packet(ml, &wg_pkt);
-        }
+        /* Every producer for the queues above notifies this task after
+         * queueing. The queues stay the source of truth; the notification is
+         * latched, so work queued after the drain still wakes this wait. The
+         * 100 ms cap keeps timers, STUN and shutdown checks running. */
+        ulTaskNotifyTake(pdTRUE, ML_DELAY_TICKS(100));
     }
 
     /* Shutdown WireGuard interface */
@@ -1738,5 +1770,5 @@ void ml_wg_mgr_task(void *arg) {
     }
 
     ESP_LOGI(TAG, "WG Manager task exiting");
-    vTaskDelete(NULL);
+    wg_mgr_exit(ml);
 }

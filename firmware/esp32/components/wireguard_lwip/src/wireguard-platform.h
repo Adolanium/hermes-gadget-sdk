@@ -64,7 +64,7 @@ void wireguard_tai64n_now(uint8_t *output);
 // Is the system under load - i.e. should we generate cookie reply message in response to initiation messages
 bool wireguard_is_under_load();
 
-// Hermes gadget patch: a mutex for one device's state. The lwIP thread encrypts outgoing
+// A mutex for one device's state. The lwIP thread encrypts outgoing
 // packets while TailTiny's WireGuard task runs the timers and handles incoming packets, so
 // wireguardif.c holds this around keypairs, counters, handshake state and the peer table.
 // NULL when it can't be created.

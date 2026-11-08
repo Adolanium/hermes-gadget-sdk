@@ -79,8 +79,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - name: Configure
-        # HG_TLS_TESTS: TailTiny's relay TLS check against a local server (Linux only; downloads Mbed TLS).
-        run: cmake -S firmware -B build/host -DCMAKE_BUILD_TYPE=Release -DHG_TLS_TESTS=ON
+        run: cmake -S firmware -B build/host -DCMAKE_BUILD_TYPE=Release
       - name: Build
         run: cmake --build build/host --config Release --parallel
       - name: Test

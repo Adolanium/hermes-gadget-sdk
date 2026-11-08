@@ -103,6 +103,21 @@ menu "TailTiny Configuration"
             Match this to ML_H2_BUFFER_SIZE_KB unless you have a reason
             to set them differently.
 
+    config ML_DERP_VERIFY_CERT
+        bool "Verify the DERP relay's TLS certificate"
+        default y
+        depends on MBEDTLS_CERTIFICATE_BUNDLE
+        help
+            Check the DERP relay's certificate against ESP-IDF's certificate
+            bundle and the relay's host name. Tailscale's relays use Let's
+            Encrypt certificates, which the bundle covers. WireGuard already
+            encrypts what the relay carries; this stops a network in the
+            middle from posing as the relay and silently dropping or
+            delaying its traffic.
+
+            Turn it off only for a self-hosted DERP server with a certificate
+            the bundle doesn't know. Needs MBEDTLS_CERTIFICATE_BUNDLE.
+
     menu "Cellular Modem"
 
         config ML_ENABLE_CELLULAR

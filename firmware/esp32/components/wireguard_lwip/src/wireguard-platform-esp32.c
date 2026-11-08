@@ -76,7 +76,7 @@ bool wireguard_is_under_load() {
     return false;
 }
 
-// Hermes gadget patch: see wireguard-platform.h.
+// The device state lock: see wireguard-platform.h.
 void *wireguard_platform_lock_create(void) {
 	return xSemaphoreCreateMutex();
 }

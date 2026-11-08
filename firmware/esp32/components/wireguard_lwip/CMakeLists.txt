@@ -28,9 +28,6 @@ if(CONFIG_HG_TAILNET)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE
         WIREGUARD_CRYPTO_REFC=1
     )
-    # GCC 15: the protocol names (CONSTRUCTION, IDENTIFIER, LABEL_*) are byte arrays
-    # initialised from strings of exactly their length, deliberately without the NUL.
-    target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-unterminated-string-initialization)
 
     # Disable stringop-overread warning for x25519.c (false positive in GCC array bounds check)
     set_source_files_properties(

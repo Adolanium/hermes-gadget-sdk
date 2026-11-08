@@ -88,13 +88,13 @@ static void route_udp_packet(tailtiny_t *ml, uint8_t *data, size_t len,
         }
         break;
     case PKT_DISCO:
-        if (xQueueSend(ml->disco_rx_queue, &pkt, 0) != pdTRUE) {
+        if (ml_wg_queue_send(ml, ml->disco_rx_queue, &pkt, 0) != pdTRUE) {
             free(data);
             report_rx_drop("DISCO");
         }
         break;
     case PKT_WIREGUARD:
-        if (xQueueSend(ml->wg_rx_queue, &pkt, 0) != pdTRUE) {
+        if (ml_wg_queue_send(ml, ml->wg_rx_queue, &pkt, 0) != pdTRUE) {
             free(data);
             report_rx_drop("WireGuard");
         }

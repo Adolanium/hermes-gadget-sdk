@@ -211,7 +211,7 @@ struct wireguard_device {
 	// Force all peer output through DERP relay (cellular mode)
 	bool force_derp_output;
 
-	// Hermes gadget patch: guards the peers and their keypairs (wireguard-platform.h)
+	// Guards the peers and their keypairs (wireguard-platform.h)
 	void *lock;
 
 	bool valid;
