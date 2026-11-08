@@ -421,6 +421,18 @@ Failed or untested steps:
 
 Attach the report to a pull request that makes the two changes for that board and adds the tailnet to its row in the table above. Release images include it only once a board has such a report and someone other than their author has reviewed the changes to TailTiny's encryption and TLS code (`firmware/esp32/components/TAILTINY.md`, changes 2 to 4).
 
+### AMOLED-1.75C with TailTiny 3.1.0
+
+A check of the TailTiny 3.1.0 update ([#283](https://github.com/Adolanium/hermes-gadget-sdk/pull/283)) on one board, not a full report in the format above.
+
+- **Board:** the Waveshare ESP32-S3-Touch-AMOLED-1.75C from the [physical report](#waveshare-amoled-175c-physical-report).
+- **Firmware:** `firmware/tailtiny-3.1.0` at `9354e8f` (its TailTiny files are unchanged at `e24a3dc`) with the two changes above, ESP-IDF 6.1 through PlatformIO; ELF SHA-256 `1240d65c7…`. The light-sleep share comes from a second image: the same build plus local counters of the time spent in doze and in light sleep, which `main` doesn't have (ELF `3c4332ee6…`). Its TailTiny files are identical.
+- **Network:** home Wi-Fi, Tailscale's control server and relays, a key already stored on the board.
+- **Boot and registration:** `Keys loaded from NVS` (no new key needed), the Noise handshake, and registration in 88 ms. Then `DERP handshake complete` with `CONFIG_ML_DERP_VERIFY_CERT=y` and no certificate refused, `hg.tailnet: up`, and `online (paired)` 24.6 s after boot. `diag`: `tailnet.hermes.path` `direct`.
+- **Voice turn (USB):** a 4.1 s recording with 0 frames lost. The reply played at 1.00x real time with one 16 ms underrun and 0 bytes dropped. Internal RAM low point 41.4 KB; TailTiny's task stacks had 2.0 to 3.5 KB free.
+- **Idle on battery:** with the screen dark, 16 minutes on the update's image with a battery reading every 30 s (the longest step was 35 s) and no reconnect or reset. On the image with counters, 15 minutes all in doze, 12.7% of it in light sleep (114.7 s of 901.5 s, 6,629 wake-ups). An earlier image with TailTiny 3.0.2 and the patches this update drops spent 0 s in light sleep over 90 minutes on a phone hotspot. The networks differ, so this compares only roughly.
+- **Not run on this image:** a relay path, the refusal, Wi-Fi changes, OTA over the tailnet, turning it off, the two-hour battery comparison and the one-hour run.
+
 ## Support labels
 
 - **Experimental:** the port builds and passes automated checks, but no complete physical report is linked for that configuration.
