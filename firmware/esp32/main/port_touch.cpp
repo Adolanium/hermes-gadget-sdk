@@ -425,6 +425,7 @@ esp_err_t IRAM_ATTR TouchInput::on_sleep_exit(int64_t, void* arg) {
 void IRAM_ATTR TouchInput::on_int(void* arg) {
   auto* self = static_cast<TouchInput*>(arg);
   self->int_pending_ = true;
+  self->int_edges_.fetch_add(1, std::memory_order_relaxed);
   BaseType_t woken = pdFALSE;
   if (self->task_) vTaskNotifyGiveFromISR(static_cast<TaskHandle_t>(self->task_), &woken);
   if (woken) portYIELD_FROM_ISR();
@@ -458,14 +459,29 @@ void TouchInput::task(void* arg) {
   hg::Cst816Fault fault;
   TouchSample last{};
   for (;;) {
+    self->last_loop_us_.store(esp_timer_get_time(), std::memory_order_relaxed);
     TouchSample s{};
-    if (self->has_touch() && self->may_read(was_touching) && self->read_touch(s)) {
+    bool read = false, ok = false;
+    if (self->has_touch() && self->may_read(was_touching)) {
+      read = true;
+      ok = self->read_touch(s);
+      self->reads_.fetch_add(1, std::memory_order_relaxed);
+      if (ok) {
+        self->error_streak_.store(0, std::memory_order_relaxed);
+        self->last_read_us_.store(esp_timer_get_time(), std::memory_order_relaxed);
+      } else {
+        self->read_errors_.fetch_add(1, std::memory_order_relaxed);
+        self->error_streak_.fetch_add(1, std::memory_order_relaxed);
+      }
+    }
+    if (read && ok) {
       // Glass rows above the UI inset still belong to the top bar, not off-screen.
       s.y = static_cast<int16_t>(std::max(0, s.y - self->touch_.offset_y));
       fault.valid();
       // Every sample while the finger is down (gestures need the motion), plus the lift.
       if (s.touching || was_touching) {
         const bool posted = events::post(EventType::Touch, &s, sizeof(s));
+        (posted ? self->posted_ : self->post_drops_).fetch_add(1, std::memory_order_relaxed);
         // CST816: keep the delivered state until enqueue succeeds, including a lift.
         if (posted || self->touch_.controller != TouchController::Cst816) was_touching = s.touching;
       }
@@ -512,6 +528,30 @@ void TouchInput::task(void* arg) {
     const bool int_only = self->sleep_wake_armed_ && !self->key_dev_ && self->encoder_a_ == GPIO_NUM_NC;
     self->wait(!dozing ? kPollMs : int_only ? kArmedDozeWaitMs : kDozePollMs);
   }
+}
+
+hg::json::Value TouchInput::stats() const {
+  static const char* const kControllers[] = {"cst9217", "box3", "ft5x06", "cst816", "gt911", "spd2010"};
+  const int64_t now = esp_timer_get_time();
+  const auto ago_ms = [now](int64_t at) { return at ? static_cast<long long>((now - at) / 1000) : -1LL; };
+  hg::json::Value t = hg::json::Value::object();
+  if (has_touch()) {
+    t.set("controller", kControllers[static_cast<int>(touch_.controller)])
+        .set("read_on", int_gated_ ? "int" : "poll")
+        .set("reads", static_cast<unsigned>(reads_.load(std::memory_order_relaxed)))
+        .set("read_errors", static_cast<unsigned>(read_errors_.load(std::memory_order_relaxed)))
+        .set("error_streak", static_cast<unsigned>(error_streak_.load(std::memory_order_relaxed)))
+        .set("last_read_ms_ago", ago_ms(last_read_us_.load(std::memory_order_relaxed)))
+        .set("events", static_cast<unsigned>(posted_.load(std::memory_order_relaxed)))
+        .set("events_dropped", static_cast<unsigned>(post_drops_.load(std::memory_order_relaxed)));
+    if (int_gated_) {
+      t.set("int_edges", static_cast<unsigned>(int_edges_.load(std::memory_order_relaxed)))
+          .set("int_low", gpio_get_level(static_cast<gpio_num_t>(touch_.int_gpio)) == 0);
+    }
+  }
+  // The task loops at least once a second, even dozing: a larger number means it is stuck.
+  t.set("task_ms_ago", ago_ms(last_loop_us_.load(std::memory_order_relaxed)));
+  return t;
 }
 
 }  // namespace hgp

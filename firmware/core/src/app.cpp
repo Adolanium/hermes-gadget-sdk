@@ -2878,7 +2878,7 @@ std::string App::console(std::string_view raw) {
     for (const auto& k : profile_.extra_settings) keys += " " + k;
     if (profile_.tailnet)
       for (const char* k : kTailnetKeys) keys += std::string(" ") + k;
-    return "@help commands: status | diag [log] | get <key> | set <key> <value> | say <text> | talk | release | "
+    return "@help commands: status | diag [log] | log <tag | *> <level> | get <key> | set <key> <value> | say <text> | talk | release | "
            "cancel | new-session | settings [close] | wifi-setup [close] | wifi [list | add <ssid> [password] | join <ssid> | "
            "forget <ssid>] | phone [pair [close] | forget] | perf [on | off | reset | budget <us> | bench [scroll | mascot | redraw | all]] | yes | no | reconnect | forget-key | factory-reset   keys:" + keys;
   }
@@ -2912,6 +2912,17 @@ std::string App::console(std::string_view raw) {
     std::string out = recent_log();
     if (!out.empty() && out.back() != '\n') out += '\n';
     return out + "@log end";
+  }
+  if (cmd == "log") {
+    if (!on_log_level) return "@error this device has no log levels";
+    size_t ls = rest.find(' ');
+    std::string tag = rest.substr(0, ls);
+    std::string level = ls == std::string::npos ? std::string() : trim(std::string_view(rest).substr(ls + 1));
+    bool known = false;
+    for (const char* l : kLogLevels) known = known || level == l;
+    if (tag.empty() || !known) return "@error usage: log <tag | *> <none | error | warn | info | debug>";
+    if (!on_log_level(tag, level)) return "@error could not set the log level";
+    return "@ok log " + tag + " " + level;
   }
   if (cmd == "get" || cmd == "set") {
     size_t ks = rest.find(' ');

@@ -40,9 +40,36 @@
 | Symptom | What to check |
 |---|---|
 | Screen freezes while voice, Wi-Fi and touch keep working | [Save a board report](#save-a-board-report). `LCD transfer timed out` in its log means the panel's SPI transfer did not finish; the screen resumes by itself if it does. `LCD transfer failed` stops the screen until the board restarts. Restart the board and send the report with a bug report |
+| Touch stops responding | [Save a board report](#save-a-board-report) while touch is still dead. Its `touch` section tells the causes apart. A `task_ms_ago` above about 1000 means the touch task stopped running. A growing `error_streak` and an old `last_read_ms_ago` mean the touch controller stopped answering. `events_dropped`, or `events.dropped`, means the touches were read but the app's event queue was full. In `stacks`, a task's `cpu_pct` is its share of one core since the previous `diag`, so run `diag` once before you reproduce the problem and once after |
 
 ## Save a board report
 
-The [browser installer](https://adolanium.github.io/hermes-gadget-sdk/installer.html) can save a report under **Troubleshooting**, **Something else**, **Save a diagnostics report**. It includes the board status and recent log.
+Save the report while the problem is happening, before you turn the board off. A restart keeps the log, but losing power clears it.
 
-If you already use the SDK's serial tools, run `hermes-gadget diag --port COM5`, replacing `COM5` with your board's port. Attach the saved file and the steps to reproduce the problem to a [bug report](https://github.com/Adolanium/hermes-gadget-sdk/issues).
+The [browser installer](https://adolanium.github.io/hermes-gadget-sdk/installer.html) can save a report under **Troubleshooting**, **Something else**, **Save a diagnostics report**. If you already use the SDK's serial tools, run `hermes-gadget diag --port COM5`, replacing `COM5` with your board's port. Attach the saved file and the steps to reproduce the problem to a [bug report](https://github.com/Adolanium/hermes-gadget-sdk/issues).
+
+The report includes:
+
+- The board's status, memory, Wi-Fi and the parts that started.
+- Each task's free stack, state and CPU share.
+- The touch counters and the event queue.
+- The last crash, if there was one.
+- The recent log. After a panic, a watchdog or a software restart, the log starts with the lines from before that restart, under `@log previous boot, ended by <reason>`.
+
+If the app stops answering, the console still replies to `diag` for the port alone, with `"app": "not answering"`, and `diag log` still works.
+
+To add detail to the log, raise one tag's log level from the console (`hermes-gadget console --port COM5`) before you reproduce the problem. For example, use `log hg.touch debug`, or `log * warn` for less output. The levels are `none`, `error`, `warn`, `info` and `debug`. A level lasts until the board restarts.
+
+### Read a core dump
+
+When the firmware crashes, it saves a short core dump, and `diag` reports it under `crash`. The dump includes the crashed task, its program counter (`pc`) and, on the ESP32 and ESP32-S3, its backtrace. `this_build` says whether the dump came from the firmware that is running now. The next crash replaces the dump.
+
+A board updated over the air keeps the partition table it was flashed with, so `crash.state` may be `no partition`. To add the core dump partition, install the firmware over USB once. The settings stay.
+
+To turn the addresses into function names and lines, use the `firmware.elf` of the build that crashed. For a release, download it from the **firmware-elf** artifact of that release's **Release** workflow run; maintainers have access to it for 90 days. For a local build, use `.pio/build/<board>/firmware.elf`. Then run:
+
+```bash
+xtensa-esp32s3-elf-addr2line -pfiaC -e firmware.elf 0x42001234 0x42005678
+```
+
+List `pc` and the `backtrace` addresses. Use `xtensa-esp32-elf-addr2line` for the ESP32 and `riscv32-esp-elf-addr2line` for the ESP32-P4. On the P4, also pass `ra`.

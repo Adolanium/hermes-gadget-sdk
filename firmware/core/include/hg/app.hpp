@@ -293,6 +293,11 @@ class App {
   std::function<void(json::Value& report)> on_diag;
   // Recent log lines for `diag log`, oldest first. Ports that keep none leave it unset.
   std::function<std::string()> recent_log;
+  // `log <tag | *> <level>`: how much a log tag says until restart, `*` for every tag.
+  // The level is one of kLogLevels. Returns false when the port refused it. Ports
+  // without log levels leave it unset.
+  std::function<bool(const std::string& tag, const std::string& level)> on_log_level;
+  static constexpr const char* kLogLevels[] = {"none", "error", "warn", "info", "debug"};
 
   // --- introspection --------------------------------------------------------
   Screen screen() const { return model_.screen; }

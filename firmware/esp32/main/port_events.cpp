@@ -1,5 +1,6 @@
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h
 
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 
@@ -23,6 +24,9 @@ bool firmware_frame(EventType type, const void* data, size_t len) {
          *static_cast<const uint8_t*>(data) == static_cast<uint8_t>(hg::proto::Channel::Firmware);
 }
 #endif
+constexpr unsigned kDepth = 96;
+std::atomic<uint32_t> dropped{0};  // posts that found the queue full or no memory
+std::atomic<uint32_t> peak{0};     // the most events waiting at once
 
 }  // namespace
 
@@ -30,7 +34,7 @@ bool firmware_frame(EventType type, const void* data, size_t len) {
 // main task was busy draining into the speaker ring, dropping WsBinary frames
 // (audible gaps). Still cheap: an Event is a few words, and payloads live on the heap.
 void init() {
-  queue = xQueueCreate(96, sizeof(Event));
+  queue = xQueueCreate(kDepth, sizeof(Event));
 #if CONFIG_HG_BOARD_CARDPUTER_ADV
   // No PSRAM: the sender's 64 KB OTA window can exhaust internal RAM while
   // flash writes stall the app task. Keep at most four 4 KB chunks in flight
@@ -62,6 +66,7 @@ bool post(EventType type, const void* data, size_t len, uint32_t generation, Con
       if (firmware) xSemaphoreGive(firmware_slots);
 #endif
       ESP_LOGW(TAG, "out of memory for a %u byte event", static_cast<unsigned>(len));
+      dropped.fetch_add(1, std::memory_order_relaxed);
       return false;
     }
     std::memcpy(ev.data, data, len);
@@ -77,9 +82,23 @@ bool post(EventType type, const void* data, size_t len, uint32_t generation, Con
 #endif
     ESP_LOGW(TAG, "event queue full; dropping event %d", static_cast<int>(type));
     free(ev.data);
+    dropped.fetch_add(1, std::memory_order_relaxed);
     return false;
   }
+  const uint32_t waiting = uxQueueMessagesWaiting(queue);
+  uint32_t seen = peak.load(std::memory_order_relaxed);
+  while (waiting > seen && !peak.compare_exchange_weak(seen, waiting, std::memory_order_relaxed)) {
+  }
   return true;
+}
+
+hg::json::Value stats() {
+  hg::json::Value s = hg::json::Value::object();
+  s.set("waiting", queue ? static_cast<unsigned>(uxQueueMessagesWaiting(queue)) : 0u)
+      .set("peak", static_cast<unsigned>(peak.load(std::memory_order_relaxed)))
+      .set("depth", kDepth)
+      .set("dropped", static_cast<unsigned>(dropped.load(std::memory_order_relaxed)));
+  return s;
 }
 
 bool receive(Event& out, TickType_t wait) { return xQueueReceive(queue, &out, wait) == pdTRUE; }

@@ -1170,7 +1170,7 @@ The firmware is written for ESP-IDF 5.3 and later. It builds with ESP-IDF 6.1 th
 - ESP32-S3-Touch-AMOLED-1.75: 1.12 MB, otherwise the same;
 - classic ESP32 with custom pins.
 
-The flash holds two app slots (`partitions.csv`), so later firmware can arrive over the air. A board flashed with an earlier release gets the new partition table with its next USB flash. NVS stays where it was, so its settings and device key survive.
+The flash holds two app slots (`partitions.csv`), so later firmware can arrive over the air, and a 56 KB `coredump` partition in the space before them for the [last crash](troubleshooting.md#read-a-core-dump). A board flashed with an earlier release gets the new partition table with its next USB flash. NVS stays where it was, so its settings and device key survive.
 
 ## Updates over the air
 
