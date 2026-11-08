@@ -159,7 +159,8 @@ def test_tailnet_relay_certificate_is_verified():
     assert len(verify) == 1, "ml_derp.c should set the auth mode in one CONFIG_ML_DERP_VERIFY_CERT branch"
     assert "MBEDTLS_SSL_VERIFY_REQUIRED" in verify[0]
     assert "esp_crt_bundle_attach(" in verify[0]
-    assert "mbedtls_ssl_set_hostname(" in derp
+    # The call itself, not the comment that names it.
+    assert re.search(r"=\s*mbedtls_ssl_set_hostname\(&ml->derp\.ssl,\s*derp_host\)", derp)
     kconfig = (tailtiny / "Kconfig").read_text(encoding="utf-8")
     option = re.search(r"config ML_DERP_VERIFY_CERT\n(.*?)\n\s*help", kconfig, re.S)
     assert option and "default y" in option.group(1)
