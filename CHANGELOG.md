@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Hermes plugin
+
+- A connected gadget's diagnostics report no longer needs a USB cable. `hermes gadget diag <name>` on the Hermes computer, or **Save diagnostics report** in the dashboard's Gadgets tab, asks the gadget through the gateway and saves the file `hermes-gadget diag` saves, plus the gateway's last 500 Gadget log lines, so a bug report has both sides of the same minutes. It works before pairing, too. The gateway sends a new `diag` message and the device answers with the report and its recent log (up to 16 KB); the protocol stays at version 1, and older firmware doesn't answer, so its report still comes over USB. Host and simulator tests only; not yet run on a board. [Save a board report](docs/troubleshooting.md#save-a-board-report).
+
 ### Firmware
 
 - On battery with the screen dark and nothing going on (the doze that lets a light-sleep board sleep), Wi-Fi switches from minimum to maximum modem sleep once Hermes has sent nothing but its heartbeat ping for 10 s: the radio wakes every third beacon, about every 300 ms, instead of at every DTIM. A message from Hermes then waits at most that long at the access point, well inside the 20 s heartbeat and its 60 s timeout. The screen lighting, a turn, or any other message from Hermes goes back to minimum modem sleep at once, and a turn or USB keeps the radio fully awake as before. The station asks the access point for a listen interval of 3 when it joins, and each switch is logged (`hg.wifi: power save: max modem`). A **Deep Wi-Fi sleep** settings item, or `set wifi_deep_sleep off`, keeps minimum modem sleep on battery as before, for an access point that drops or delays clients in deeper sleep; it is on by default and shows on ESP32 boards that read their battery. On a Waveshare AMOLED-2.06 under light use, discharges of the same firmware with the setting on and off reached 15% within 10 minutes of each other (6 h 22 min to 6 h 32 min), so no clear battery gain was measured on that board. [Hardware verification](docs/hardware-validation.md#waveshare-amoled-206-wi-fi-max-modem-sleep-report).

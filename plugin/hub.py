@@ -743,6 +743,23 @@ class DeviceSession:
         finally:
             self._pending.pop(action_id, None)
 
+    async def request_diag(self, timeout: float = 8.0) -> dict:
+        """The device's diagnostics report and recent log: ``{"report": {...}, "log": "..."}``,
+        what ``hermes-gadget diag`` reads over USB. Raises ActionError when the device doesn't
+        answer in time, as firmware older than the ``diag`` message doesn't."""
+        diag_id = uuid.uuid4().hex[:12]
+        fut = asyncio.get_running_loop().create_future()
+        self._pending[diag_id] = fut
+        try:
+            await self.send_json(protocol.message("diag", id=diag_id))
+            return await asyncio.wait_for(fut, timeout)
+        except asyncio.TimeoutError:
+            raise ActionError(f"{self.name} did not send a diagnostics report within {timeout:.0f}s. "
+                              "Its firmware may be too old; update it, or save the report over USB "
+                              "with hermes-gadget diag.") from None
+        finally:
+            self._pending.pop(diag_id, None)
+
     async def update_firmware(self, image, progress=None) -> str:
         """Install a firmware image (``firmware.bin`` bytes or an ``ota.FirmwareImage``).
 
@@ -1198,6 +1215,15 @@ class DeviceHub:
         else:
             fut.set_exception(ActionError(str(msg.get("error") or "action failed")))
 
+    async def _h_diag(self, session: DeviceSession, msg: dict) -> None:
+        fut = session._pending.get(str(msg.get("id") or ""))
+        if fut is None or fut.done():
+            return
+        report = msg.get("report")
+        log_text = msg.get("log")
+        fut.set_result({"report": report if isinstance(report, dict) else {},
+                        "log": log_text if isinstance(log_text, str) else ""})
+
     async def _h_state(self, session: DeviceSession, msg: dict) -> None:
         sleeping = msg.get("display_sleeping")
         if isinstance(sleeping, bool) and sleeping != session.display_sleeping:
@@ -1241,6 +1267,7 @@ class DeviceHub:
         "session.new": _h_session_new,
         "prompt.reply": _h_prompt_reply,
         "action.result": _h_action_result,
+        "diag": _h_diag,
         "state": _h_state,
         "event": _h_event,
         "ping": _h_ping,

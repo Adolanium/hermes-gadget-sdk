@@ -13,6 +13,7 @@ from urllib.parse import quote
 # The browser installer: flashes a board over USB and gives it Wi-Fi and this Hermes's address.
 INSTALLER_URL = "https://adolanium.github.io/hermes-gadget-sdk/"
 PAIR_TIMEOUT_S = 300
+DIAG_TIMEOUT_S = 20.0  # the gateway's poll, then up to 8 s for the device
 
 
 def _store():
@@ -192,6 +193,27 @@ def _cmd_update(args) -> None:
     print("Still waiting. The update stays staged and installs once the gateway sees the device online.")
 
 
+def _cmd_diag(args) -> None:
+    from .desk import Desk
+
+    store = _store()
+    device_id = _match(store, args.device)
+    if device_id is None:
+        sys.exit(1)
+    desk = Desk(store.path.parent)
+    try:
+        req = desk.post(device_id, "diag")
+    except ValueError as exc:
+        sys.exit(f"Can't ask for a report: {exc}")
+    print("Asking the gateway for the report...")
+    outcome = desk.wait(req, DIAG_TIMEOUT_S)
+    if not outcome.get("ok"):
+        sys.exit(str(outcome.get("error") or "The report could not be taken."))
+    path = Path(args.out) if args.out else Path(str(outcome.get("file") or "hermes-gadget-diag.txt"))
+    path.write_text(str(outcome.get("text") or ""), encoding="utf-8")
+    print(f"Saved the report to {path}. Attach it when you open an issue.")
+
+
 def _cmd_info(args) -> None:
     extra = _gadget_extra()
     url = device_url(extra)
@@ -325,6 +347,9 @@ def setup_argparse(parser) -> None:
                         help="With --latest, install even if the device runs that version, a newer one, or an unknown one")
     update.add_argument("--no-wait", action="store_true", help="Stage it and return; the gateway installs it")
     update.add_argument("--timeout", type=float, default=600, help="Seconds to wait for the install (default 600)")
+    diag = subs.add_parser("diag", help="Save a connected gadget's diagnostics report, without a USB cable")
+    diag.add_argument("device", help="Device id or name")
+    diag.add_argument("--out", help="Where to save it (default: hermes-gadget-diag-<device>-<time>.txt here)")
     tile = subs.add_parser("tile", help="Set the status tiles the gadget dashboard shows")
     tile_subs = tile.add_subparsers(dest="tile_command")
     tile_set = tile_subs.add_parser("set", help="Add a tile or change its value")
@@ -341,7 +366,7 @@ def setup_argparse(parser) -> None:
 
 
 _COMMANDS = {"devices": _cmd_devices, "ls": _cmd_devices, "forget": _cmd_forget, "info": _cmd_info,
-             "pair": _cmd_pair, "update": _cmd_update, "tile": _cmd_tile}
+             "pair": _cmd_pair, "update": _cmd_update, "diag": _cmd_diag, "tile": _cmd_tile}
 
 
 def handle(args) -> None:

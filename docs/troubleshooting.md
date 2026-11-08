@@ -46,3 +46,11 @@
 The [browser installer](https://adolanium.github.io/hermes-gadget-sdk/installer.html) can save a report under **Troubleshooting**, **Something else**, **Save a diagnostics report**. It includes the board status and recent log.
 
 If you already use the SDK's serial tools, run `hermes-gadget diag --port COM5`, replacing `COM5` with your board's port. Attach the saved file and the steps to reproduce the problem to a [bug report](https://github.com/Adolanium/hermes-gadget-sdk/issues).
+
+A gadget that is connected to Hermes can send its report without a USB cable. On the computer that runs the Hermes gateway, run:
+
+```bash
+hermes gadget diag kitchen
+```
+
+Replace `kitchen` with the gadget's name or id from `hermes gadget devices`. The Gadgets tab of the Hermes web dashboard does the same with **Save diagnostics report**. This file also has the gateway's recent Gadget log, so it shows both sides of the same minutes. Take it right after the problem happens, before restarting the gadget: a restart clears the device's log. Firmware older than this feature doesn't answer; save its report over USB instead.

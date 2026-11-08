@@ -363,6 +363,18 @@ mac = HMAC-SHA256(key, "hermes-gadget/v1|ota|" + device_id + "|" + nonce + "|" +
 - An update that gets no data for 30 s is abandoned (`timeout`), and so is one whose connection drops.
 - The new firmware boots on probation. If it doesn't reach a server (`welcome`) within 5 minutes, or crashes first, the device goes back to the previous firmware.
 
+### Diagnostics
+
+| Message | Direction |
+|---|---|
+| `{"type": "diag", "id": "d1"}` | server → device |
+| `{"type": "diag", "id": "d1", "report": {...}, "log": "I (1234) hg: ...\n..."}` | device → server |
+
+- `report` is the object the serial console's `diag` command prints after `@diag `: firmware, connection history, recordings and what the port adds, such as memory, reset reason and task stacks. Its fields follow the firmware and are meant for people reading a bug report, not for programs.
+- `log` is the device's recent log, oldest line first, or empty when the device keeps none. A device may keep only the newest part of a long log; the reference firmware sends at most 16 KB, from the start of a line.
+- The device echoes `id` when the request has one. It answers whether or not it is paired.
+- The server waits about 8 s. Firmware from before this message ignores it, so no answer means the report has to come over USB.
+
 ### Heartbeat
 
 - The server sends `{"type": "ping", "ts": 1727950000000}` every `heartbeat_s`, and the device answers `{"type": "pong", "ts": ...}`.

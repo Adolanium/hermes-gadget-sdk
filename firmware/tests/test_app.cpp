@@ -874,6 +874,37 @@ TEST("app: diag reports the core's state plus what the port adds") {
   CHECK_EQ(v["connection"]["last_close"].as_string(), std::string("server went away"));
 }
 
+TEST("app: the hub's diag request gets the console's report and the recent log") {
+  Rig r;
+  r.bring_online(true);
+  r.fake.sent.clear();
+  r.server(R"({"type":"diag","id":"d1"})");
+  const Value* reply = r.fake.last("diag");
+  CHECK(reply != nullptr);
+  if (!reply) return;
+  CHECK_EQ((*reply)["id"].as_string(), std::string("d1"));
+  CHECK_EQ((*reply)["report"]["board"].as_string(), std::string("test-board"));
+  CHECK_EQ((*reply)["report"]["app"]["phase"].as_string(), std::string("online"));
+  CHECK_EQ((*reply)["log"].as_string(), std::string());  // this device keeps no log
+
+  r.app.on_diag = [](Value& report) { report.set("reset_reason", "task watchdog"); };
+  // A log longer than the reply carries keeps its newest lines, whole.
+  std::string log;
+  for (int i = 0; i < 2000; ++i) log += "I (" + std::to_string(i) + ") hg: line\n";
+  r.app.recent_log = [log] { return log; };
+  r.fake.sent.clear();
+  r.server(R"({"type":"diag"})");
+  reply = r.fake.last("diag");
+  CHECK(reply != nullptr);
+  if (!reply) return;
+  CHECK((*reply)["id"].is_null());
+  CHECK_EQ((*reply)["report"]["reset_reason"].as_string(), std::string("task watchdog"));
+  const std::string& got = (*reply)["log"].as_string();
+  CHECK(got.size() <= 16 * 1024);
+  CHECK(got.rfind("I (", 0) == 0);
+  CHECK(got.find("I (1999) hg: line\n") == got.size() - std::string("I (1999) hg: line\n").size());
+}
+
 namespace {
 
 // The server's side of a firmware update, as the hub runs it.

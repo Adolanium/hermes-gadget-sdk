@@ -90,7 +90,7 @@ After the restart, run `hermes gadget info` and use the new URL to update each d
 
 ## The Gadgets tab in the Hermes dashboard
 
-The plugin adds a **Gadgets** tab to the Hermes web dashboard (`hermes dashboard`). It lists every device this Hermes knows, with its board, firmware, when it was last seen, whether it is waiting to be paired, and, while the gateway runs, whether it is online and its battery. The tab is read-only: pair, rename, forget and update devices with `hermes gadget` as before, or pair from the [Desktop page](#the-gadgets-page-in-hermes-desktop).
+The plugin adds a **Gadgets** tab to the Hermes web dashboard (`hermes dashboard`). It lists every device this Hermes knows, with its board, firmware, when it was last seen, whether it is waiting to be paired, and, while the gateway runs, whether it is online and its battery. The tab changes nothing on the devices: pair, rename, forget and update them with `hermes gadget` as before, or pair from the [Desktop page](#the-gadgets-page-in-hermes-desktop). Each connected device has a **Save diagnostics report** button, which saves the same file as `hermes gadget diag` (see [Save a board report](troubleshooting.md#save-a-board-report)).
 
 It needs nothing beyond the plugin: the tab appears once the plugin is enabled (`plugins.enabled: [gadget]`) and the dashboard has been restarted, since the dashboard mounts plugin routes when it starts. Without the `dashboard/` folder the plugin works exactly as before.
 
@@ -100,7 +100,7 @@ It needs nothing beyond the plugin: the tab appears once the plugin is enabled (
 |---|---|---|
 | `devices.json` | the gateway, `hermes gadget pair` and `forget` | name, board, firmware, last seen, pending pairing. Device keys are never returned |
 | `status.json` | the running gateway | which devices are connected now, since when, and their battery readings (`battery_percent`, `battery_mv`, `charging`, `external_power`, `battery_present`); for the Desktop page, whether each is paired, its action names, and what its screen shows |
-| `desk/inbox/`, `desk/done/` | the Desktop page's routes, then the running gateway | the outcome of a card or action the page sent (see [The Gadgets page in Hermes Desktop](#the-gadgets-page-in-hermes-desktop)) |
+| `desk/inbox/`, `desk/done/` | the Desktop page's routes, the tab's diagnostics route and `hermes gadget diag`, then the running gateway | the outcome of a card or action the page sent (see [The Gadgets page in Hermes Desktop](#the-gadgets-page-in-hermes-desktop)), or a diagnostics report |
 
 The gateway replaces `status.json` in one step (a temporary file, then a rename), so a reader never sees half of it. It rewrites the file within about half a second of a device connecting or leaving, of a change of pairing or profile, of a new battery percentage or power source, and of a change to what a screen shows (listening, thinking or speaking, the words heard, the reply), and at least every 30 seconds otherwise. A voltage change alone waits for the next write. A gateway that stops writes the file with no devices online; one that dies without doing so leaves a file older than 90 seconds, which the tab treats the same way. Either way the tab says the gateway is not running and shows no online state or battery.
 
@@ -111,6 +111,7 @@ The gateway replaces `status.json` in one step (a temporary file, then a rename)
 | `POST /api/plugins/gadget/pairing/{id}/approve` | Approves the code that device is showing, through Hermes's `PairingStore`, as `hermes gadget pair` does |
 | `POST /api/plugins/gadget/devices/{id}/card?title=&text=&seconds=` | Shows a card on a connected, paired device's screen; waits up to 8 seconds for the gateway's answer |
 | `POST /api/plugins/gadget/devices/{id}/action?name=&args=` | Runs one of the actions that device advertises, with `args` as a JSON object; waits up to 18 seconds |
+| `POST /api/plugins/gadget/devices/{id}/diag` | A connected device's diagnostics report with the gateway's recent plugin log: `file` (a name to save it under) and `text`. The device needn't be paired; waits up to 15 seconds |
 | `GET /api/plugins/gadget/info` | Whether the platform is enabled and the gateway running, and the local URL a gadget on this computer connects to |
 
 The web tab uses only `/devices`. The other routes are for the Desktop page, and like every plugin route they sit behind the dashboard's login.

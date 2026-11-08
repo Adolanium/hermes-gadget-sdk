@@ -62,6 +62,7 @@ from gateway.platforms.event import MessageEvent, MessageType
 
 from . import audio as gaudio
 from . import compat, dashboard, imaging, ota, runtime, stt, textfmt
+from . import diag as gdiag
 from .desk import Desk
 from . import status as live_status
 from . import face as faces
@@ -214,6 +215,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
 
     def __init__(self, config: PlatformConfig):
         super().__init__(config=config, platform=Platform(PLATFORM_NAME))
+        gdiag.keep_host_log()  # the hub's side of a diagnostics report (desk "diag" requests)
         extra = config.extra or {}
         self._host = str(extra.get("host") or "0.0.0.0")
         port = extra.get("port")
@@ -948,6 +950,14 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         session = self._hub.get(req["device"]) if self._hub else None
         if session is None or session.closed:
             return {"ok": False, "error": "That gadget isn't connected right now."}
+        if req["kind"] == "diag":  # no pairing needed: a device that can't pair is worth a report too
+            try:
+                got = await session.request_diag()
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)[:300] or "the device didn't answer"}
+            report, when = got["report"], time.time()
+            return {"ok": True, "file": gdiag.file_name(report, when),
+                    "text": gdiag.report_text(report, got["log"], gdiag.host_log(), when)}
         if not session.paired:
             return {"ok": False, "error": f"{session.name} is waiting for pairing approval."}
         try:
