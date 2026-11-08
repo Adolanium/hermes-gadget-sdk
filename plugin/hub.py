@@ -1010,7 +1010,10 @@ class DeviceHub:
             previous = self.sessions.get(session.device_id)
             self.sessions[session.device_id] = session
             if previous is not None:
-                await previous.close("replaced by a newer connection")
+                # A newer connection from the same device means the old one is gone (it rebooted, or
+                # moved networks). Its close handshake waits on a peer that may never answer, until
+                # TCP gives up or the close times out; the welcome mustn't wait for that.
+                previous.spawn(previous.close("replaced by a newer connection"))
             session.paired = bool(await self.delegate.is_paired(session))
             if session.paired:
                 self.store.confirm(session.device_id)

@@ -37,6 +37,15 @@ bool band_in(const json::Value& v, int px, mascot::Band& out) {
 }
 
 constexpr uint32_t kBootScreenMs = 800;
+// How long ago `since` was, at `t`; 0 when `since` is later. tick() reads the clock once, and
+// a stamp it takes later in the same tick with now() (connect_now() setting phase_since_)
+// can be a few milliseconds past `t`: unsigned, that difference wrapped to ~49 days and fired
+// the timeout at once, so a connection was closed as it opened ("connect timeout") and the
+// device waited out a backoff before the next try.
+uint32_t elapsed(uint32_t t, uint32_t since) {
+  return static_cast<int32_t>(t - since) > 0 ? t - since : 0;
+}
+
 constexpr uint32_t kConnectTimeoutMs = 10000;
 constexpr uint32_t kHandshakeTimeoutMs = 10000;
 constexpr uint32_t kStableSessionMs = 30000;
@@ -2259,26 +2268,26 @@ void App::tick() {
     }
   }
 
-  if (phase_ == Phase::Connecting && !reconnect_pending_ && t - phase_since_ > kConnectTimeoutMs) {
+  if (phase_ == Phase::Connecting && !reconnect_pending_ && elapsed(t, phase_since_) > kConnectTimeoutMs) {
     hal_.transport->close();
     drop_session("connect timeout");
     update_model();
-  } else if (phase_ == Phase::Handshake && t - phase_since_ > kHandshakeTimeoutMs) {
+  } else if (phase_ == Phase::Handshake && elapsed(t, phase_since_) > kHandshakeTimeoutMs) {
     hal_.transport->close();
     drop_session("handshake timeout");
     update_model();
-  } else if (phase_ == Phase::Online && t - last_rx_ > 3 * heartbeat_ms_) {
+  } else if (phase_ == Phase::Online && elapsed(t, last_rx_) > 3 * heartbeat_ms_) {
     hal_.transport->close();
     drop_session("server silent");
     update_model();
-  } else if (!profile_pending_.empty() && t - profile_pending_at_ > kProfileReplyMs) {
+  } else if (!profile_pending_.empty() && elapsed(t, profile_pending_at_) > kProfileReplyMs) {
     // The switch may still have happened: reconnect, and the welcome says which profile answers.
     hal_.transport->close();
     drop_session("no answer to the profile switch");
     update_model();
   }
 
-  if (ota_busy() && t - ota_last_rx_ > kOtaIdleMs) {
+  if (ota_busy() && elapsed(t, ota_last_rx_) > kOtaIdleMs) {
     ota_fail("timeout", "the update stalled");
     update_model();
   }
@@ -2317,14 +2326,14 @@ void App::tick() {
       update_model();
     }
   }
-  if (mode_ == Mode::Listening && t - mode_since_ > kMaxUtteranceMs) {
+  if (mode_ == Mode::Listening && elapsed(t, mode_since_) > kMaxUtteranceMs) {
     finish_listening();
     update_model();
   }
   if (!prompt_id_.empty()) last_turn_rx_ = t;  // Hermes is waiting for the user, not stuck
   // Hermes ends every turn it starts (turn.end), and a lost connection ends it here: once
   // it has started, the device waits on (the screen lit) through a long task.
-  if (mode_ == Mode::Thinking && t - last_turn_rx_ > (turn_started_ ? kTurnTimeoutMs : kThinkingTimeoutMs)) {
+  if (mode_ == Mode::Thinking && elapsed(t, last_turn_rx_) > (turn_started_ ? kTurnTimeoutMs : kThinkingTimeoutMs)) {
     if (rec_on_) cancel_upload("timeout");  // a recording the link never finished taking
     mode_ = Mode::Idle;
     notice_ = tr(i18n::Msg::NoReplyFromHermes);
@@ -2332,7 +2341,7 @@ void App::tick() {
     update_model();
   }
   if (mode_ == Mode::Responding && !speaking()) {
-    bool settled = turn_done_ || (reply_final_ && t - last_turn_rx_ > kSettleAfterReplyMs);
+    bool settled = turn_done_ || (reply_final_ && elapsed(t, last_turn_rx_) > kSettleAfterReplyMs);
     if (settled) {
       mode_ = Mode::Idle;
       mode_since_ = t;

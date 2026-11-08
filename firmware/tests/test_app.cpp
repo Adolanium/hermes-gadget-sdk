@@ -21,7 +21,12 @@ namespace {
 struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Storage, hg::System {
   // System
   uint32_t clock = 1000;
-  uint32_t now_ms() override { return clock; }
+  uint32_t drift = 0;  // ms the clock moves on at every read, as it does on a device mid-tick
+  uint32_t now_ms() override {
+    const uint32_t c = clock;
+    clock += drift;
+    return c;
+  }
   hg::WallTime wall;  // what wall_time() reports once wall_ok holds
   bool wall_ok = false;
   bool wall_time(hg::WallTime& out) override {
@@ -7129,6 +7134,31 @@ TEST("tailnet: on, the device waits for the tunnel and says why") {
   Value st;
   CHECK(hg::json::parse(r.app.console("status").substr(8), st));
   CHECK(st["tailnet"]["on"].as_bool() && st["tailnet"]["key"].as_bool() && st["tailnet"]["up"].as_bool());
+}
+
+TEST("connect: a connection isn't timed out as it opens when the clock moves on mid-tick") {
+  // tick() reads the clock once; connect_now() stamps phase_since_ later in the same tick.
+  // On a device a few milliseconds pass in between, and the connect timeout fired at once.
+  Rig r(tailnet_profile());
+  r.fake.kv["tailnet"] = "on";
+  r.fake.kv["ts_key"] = kTsKey;
+  r.app.begin();
+  r.app.on_network(true, "wifi");
+  r.advance(5000);
+  r.fake.drift = 1;
+  r.app.on_tunnel(true);
+  r.advance(20);
+  CHECK_EQ(r.fake.connects, 1);
+  CHECK_EQ(r.fake.closes, 0);
+  Value d;
+  CHECK(hg::json::parse(r.app.console("diag").substr(6), d));
+  CHECK_EQ(d["connection"]["closes_total"].as_int(), 0);
+  CHECK(!d["connection"].has("last_close"));
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":false})");
+  r.server(R"({"type":"welcome","session":"s1","heartbeat_s":20,"paired":true})");
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.fake.connects, 1);
 }
 
 TEST("tailnet: losing the tunnel ends the session until it is back") {
