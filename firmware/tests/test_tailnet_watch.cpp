@@ -118,6 +118,106 @@ TEST("tailnet watch: a control reconnect with WireGuard down too gets the grace,
   CHECK_EQ(s.detail, std::string("Tailnet reconnecting"));
 }
 
+TEST("tailnet watch: at boot, a session with the Hermes host is up before TailTiny reports Connected") {
+  // TailTiny reports Connected once its DERP relay connects too (region choice and TLS, about
+  // 5 s on an AMOLED-1.75C), while a direct WireGuard session to the Hermes host is up seconds
+  // earlier. The connection to Hermes only needs the session.
+  TailnetWatch w;
+  auto s = w.update(0, true, {Node::Starting, false, ""});
+  CHECK(s.tell && !s.up);
+  CHECK_EQ(s.detail, std::string("Joining tailnet"));
+  s = w.update(1000, true, {Node::Starting, true, "", true});
+  CHECK(s.tell && s.up && !s.poke);
+  CHECK(w.told_up());
+  CHECK(!w.update(5000, true, {Node::Connected, true, "", true}).tell);  // nothing new once Connected
+
+  TailnetWatch reconnecting;  // the same before the first Connected, whatever the state
+  CHECK(reconnecting.update(0, true, {Node::Reconnecting, true, "", true}).up);
+
+  TailnetWatch refused;  // a registration error still wins over a session
+  s = refused.update(0, true, {Node::Starting, true, "auth key rejected", true});
+  CHECK(s.tell && !s.up);
+  CHECK_EQ(s.detail, std::string("Tailnet: auth key rejected"));
+}
+
+TEST("tailnet watch: a Hermes host off the tailnet still waits for Connected") {
+  // peer_up is true for a server that isn't at a tailnet address; that is no session.
+  TailnetWatch w;
+  auto s = w.update(0, true, {Node::Starting, true, ""});
+  CHECK(s.tell && !s.up);
+  CHECK_EQ(s.detail, std::string("Joining tailnet"));
+  CHECK(w.update(1000, true, {Node::Connected, true, ""}).up);
+}
+
+TEST("tailnet watch: after a network change, a kept session waits for Connected again") {
+  // tailtiny_rebind() keeps WireGuard's keys: a session from the old network says nothing
+  // about a path on the new one.
+  TailnetWatch w;
+  CHECK(w.update(0, true, {Node::Connected, true, "", true}).up);
+  CHECK(!w.update(1000, false, {Node::Connected, true, "", true}).up);  // Wi-Fi lost
+  w.network_changed();  // back on Wi-Fi: the port rebinds
+  auto s = w.update(2000, true, {Node::Reconnecting, true, "", true});  // old keys
+  CHECK(!s.up);
+  CHECK_EQ(s.detail, std::string("Tailnet reconnecting"));
+  CHECK(!w.update(3000, true, {Node::Starting, true, "", true}).up);
+  CHECK(w.update(4000, true, {Node::Connected, true, "", true}).up);
+
+  // A session made between two polls, then a network change, before it was ever reported.
+  TailnetWatch unseen;
+  unseen.update(0, true, {Node::Starting, false, ""});
+  unseen.network_changed();
+  CHECK(!unseen.update(1000, true, {Node::Reconnecting, true, "", true}).up);
+  CHECK(unseen.update(2000, true, {Node::Connected, true, "", true}).up);
+}
+
+TEST("tailnet watch: a network change the watch didn't see go down still ends the tunnel") {
+  // Wi-Fi lost and back between two polls: the watch never saw it down, and WireGuard kept
+  // its keys through the rebind.
+  TailnetWatch w;
+  CHECK(w.update(0, true, {Node::Connected, true, "", true}).up);
+  w.network_changed();
+  auto s = w.update(1000, true, {Node::Reconnecting, true, "", true});
+  CHECK(s.tell && !s.up);
+  CHECK_EQ(s.detail, std::string("Tailnet reconnecting"));
+  CHECK(!w.update(2000, true, {Node::Starting, true, "", true}).up);
+  s = w.update(3000, true, {Node::Connected, true, "", true});
+  CHECK(s.tell && s.up);
+}
+
+TEST("tailnet watch: on the same network, a fresh session after the grace is up again") {
+  // Up early, then WireGuard down past the grace while the control server reconnects: a
+  // new session on the same network is up again without waiting for Connected.
+  TailnetWatch w;
+  CHECK(w.update(0, true, {Node::Starting, true, "", true}).up);
+  w.update(1000, true, {Node::Reconnecting, false, "", false});
+  CHECK(!w.update(1000 + TailnetWatch::kDownGraceMs, true, {Node::Reconnecting, false, "", false}).up);
+  auto s = w.update(20000, true, {Node::Reconnecting, true, "", true});
+  CHECK(s.tell && s.up);
+}
+
+TEST("tailnet watch: up early, a session lost before Connected gets the grace without a handshake") {
+  TailnetWatch w;
+  CHECK(w.update(0, true, {Node::Starting, true, "", true}).up);
+  auto s = w.update(1000, true, {Node::Starting, false, "", false});
+  CHECK(!s.tell && s.up && !s.poke);  // no handshake asked for before Connected
+  s = w.update(1000 + TailnetWatch::kDownGraceMs - 10, true, {Node::Starting, false, "", false});
+  CHECK(!s.tell && s.up && !s.poke);
+  s = w.update(1000 + TailnetWatch::kDownGraceMs, true, {Node::Starting, false, "", false});
+  CHECK(s.tell && !s.up);
+  CHECK_EQ(s.detail, std::string("Tailnet reconnecting"));
+
+  TailnetWatch back;  // the session back within the grace: up, and the grace starts over
+  back.update(0, true, {Node::Starting, true, "", true});
+  back.update(1000, true, {Node::Starting, false, "", false});
+  CHECK(back.update(2000, true, {Node::Starting, true, "", true}).up);
+  CHECK(back.update(2000 + TailnetWatch::kDownGraceMs - 10, true, {Node::Starting, false, "", false}).up);
+
+  TailnetWatch refused;  // an error ends an early session at once
+  refused.update(0, true, {Node::Starting, true, "", true});
+  s = refused.update(1000, true, {Node::Starting, true, "auth key rejected", true});
+  CHECK(s.tell && !s.up);
+}
+
 TEST("tailnet watch: a registration refused during a reconnect ends the session at once") {
   TailnetWatch w;
   w.update(0, true, {Node::Connected, true, ""});
