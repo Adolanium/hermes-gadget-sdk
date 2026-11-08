@@ -45,13 +45,16 @@ class TailnetWatch {
 
   enum class Node : uint8_t { Starting, Connected, Reconnecting };
 
-  // What TailTiny says now: its state, whether the WireGuard session with the Hermes
-  // host is up in any state (true when Hermes isn't at a tailnet address), and why
-  // registration last failed ("" when it didn't).
+  // What TailTiny says now: its state (Connected only while it is registered), whether the WireGuard session with the Hermes
+  // host is up in any state (true when Hermes isn't at a tailnet address), why
+  // registration last failed ("" when it didn't), and whether there is an actual session
+  // with a Hermes host at a tailnet address (peer_up without the "not a tailnet address"
+  // case).
   struct Sample {
     Node node = Node::Starting;
     bool peer_up = false;
     std::string_view error;
+    bool session = false;
   };
 
   struct Step {
@@ -63,14 +66,24 @@ class TailnetWatch {
 
   Step update(uint32_t now, bool wifi_up, const Sample& s) {
     Step out;
+    // Connected after a rebind is TailTiny registered again on the new network: the port
+    // reports Connected only while TailTiny is registered, and tailtiny_rebind() clears that
+    // before it returns, so an old Connected can't follow network_changed().
+    const bool connected = s.node == Node::Connected;
+    if (connected) moved_ = false;
     bool up = false;
     std::string detail;
     if (!wifi_up) {
       detail = "Joining tailnet";
       gap_ = false;
-    } else if (s.node != Node::Connected && (!told_up_ || !s.error.empty())) {
+    } else if (!connected &&
+               (!s.error.empty() || ((!told_up_ || moved_) && !(session_ok_ && s.session)))) {
+      // Not up. A WireGuard session with the Hermes host is enough on its own: TailTiny
+      // reports Connected only once its DERP relay has connected too, seconds after a direct
+      // session can carry the connection. Not after a network change, until up again: the
+      // session TailTiny kept from the old network says nothing about a path on the new one.
       detail = !s.error.empty() ? "Tailnet: " + std::string(s.error)
-               : s.node == Node::Reconnecting ? "Tailnet reconnecting" : "Joining tailnet";
+               : s.node == Node::Reconnecting || moved_ ? "Tailnet reconnecting" : "Joining tailnet";
       gap_ = false;
     } else if (s.peer_up) {
       // Connected, or the control server's connection being replaced (Tailscale ends it
@@ -102,6 +115,7 @@ class TailnetWatch {
       told_up_ = up;
       told_detail_ = up ? std::string() : detail;
     }
+    if (up && s.session && !moved_) session_ok_ = true;  // a session seen working, not a grace
     out.up = up;
     out.detail = up ? std::string() : detail;
     return out;
@@ -109,8 +123,16 @@ class TailnetWatch {
 
   bool told_up() const { return told_ && told_up_; }
 
+  // The port rebinds TailTiny to a new network: WireGuard keeps its keys, so a session
+  // counts only once TailTiny is Connected again. Also when the watch never saw Wi-Fi go
+  // down (both events can come between two polls): the tunnel reported up is down until then.
+  void network_changed() {
+    session_ok_ = false;
+    moved_ = true;
+  }
+
  private:
-  bool told_ = false, told_up_ = false, poked_ = false, gap_ = false;
+  bool told_ = false, told_up_ = false, poked_ = false, gap_ = false, session_ok_ = true, moved_ = false;
   std::string told_detail_;
   uint32_t next_poke_ = 0, gap_since_ = 0;
 };

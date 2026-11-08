@@ -173,6 +173,7 @@ void TailnetLink::network_up() {
     start();
   } else {
     // Another network (or the same one again): new sockets, a new path to the peers.
+    watch_.network_changed();
     tailtiny_rebind(node(node_));
     next_check_ = 0;
   }
@@ -213,7 +214,11 @@ void TailnetLink::tick(uint32_t now) {
 
   hg::TailnetWatch::Sample s;
   const tailtiny_state_t state = tailtiny_get_state(ml);
-  s.node = state == ML_STATE_CONNECTED ? hg::TailnetWatch::Node::Connected
+  // Connected only while registered: tailtiny_rebind() clears ML_EVT_COORD_REGISTERED before
+  // it returns, and the coord task sets it again once registered on the new network, while
+  // its state can still read CONNECTED until it gets to the reconnect.
+  const bool registered = xEventGroupGetBits(ml->events) & ML_EVT_COORD_REGISTERED;
+  s.node = state == ML_STATE_CONNECTED && registered ? hg::TailnetWatch::Node::Connected
            : state == ML_STATE_RECONNECTING || state == ML_STATE_ERROR ? hg::TailnetWatch::Node::Reconnecting
                                                                      : hg::TailnetWatch::Node::Starting;
   // Written by TailTiny's coord task: copy what is there (at worst a mix of two reasons).
@@ -222,7 +227,8 @@ void TailnetLink::tick(uint32_t now) {
   error[sizeof(error) - 1] = '\0';
   s.error = error;
   // Asked in every state: the WireGuard session outlives a reconnect to the control server.
-  s.peer_up = !server_ip_ || ml_wg_mgr_peer_is_up(ml, server_ip_);
+  s.session = server_ip_ && ml_wg_mgr_peer_is_up(ml, server_ip_);
+  s.peer_up = !server_ip_ || s.session;
 
   const hg::TailnetWatch::Step step = watch_.update(now, wifi_up_, s);
   if (step.poke && server_ip_) {
