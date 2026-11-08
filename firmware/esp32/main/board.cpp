@@ -64,6 +64,8 @@ namespace {
 #define HG_BOARD_NAME "waveshare-esp32-p4-wifi6-touch-lcd-7b"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154
 #define HG_BOARD_NAME "waveshare-esp32s3-lcd-154"
+#elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_147
+#define HG_BOARD_NAME "esp32-s3-touch-lcd-147"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_183
 #define HG_BOARD_NAME "waveshare-esp32-s3-touch-lcd-1.83"
 #elif CONFIG_HG_BOARD_ESP32_CYD
@@ -546,6 +548,46 @@ BoardConfig make() {
   b.touch.width = b.touch.height = 360;
   b.encoder = {8, 7, true};  // knob ring: one pulse per detent, channel = direction
   b.buttons = {0, -1, -1, -1};  // BOOT also works as TALK
+  b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
+  return b;
+}
+#elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_147
+// Waveshare ESP32-S3-Touch-LCD-1.47: 172x320 ST7789 over SPI (column offset 34),
+// AXS5106L touch. No microphone, speaker or codec, so replies stay on the glass
+// and typed messages go out the USB console. Battery ADC and the microSD slot
+// stay off.
+// Pins: docs/hardware.md#waveshare-esp32-s3-touch-lcd-147
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.lcd.enabled = true;
+  b.lcd.width = 172;
+  b.lcd.height = 320;
+  b.lcd.swap_xy = false;
+  // This glass scans right to left. With mirror off, the setup text reads backwards.
+  b.lcd.mirror_x = true;
+  b.lcd.mirror_y = false;
+  b.lcd.invert = false;  // Waveshare's Arduino demo constructs this glass with IPS off
+  b.lcd.gap_x = 34;
+  b.lcd.gap_y = 0;
+  b.lcd.mosi = 39;
+  b.lcd.sclk = 38;
+  b.lcd.cs = 21;
+  b.lcd.dc = 45;
+  b.lcd.rst = 40;
+  b.lcd.backlight = 46;
+  b.i2c = {42, 41, 400000};
+  b.touch.enabled = true;
+  b.touch.ppi = 247;  // sqrt(172^2 + 320^2) / 1.47
+  b.touch.controller = TouchController::Axs5106;
+  b.touch.addr = 0x63;
+  b.touch.rst = 47;
+  b.touch.int_gpio = 48;
+  b.touch.width = 172;
+  b.touch.height = 320;
+  b.touch.mirror_x = true;  // same axis as the panel, so a tap lands on the drawn pixel
+  b.buttons = {0, -1, -1, -1};
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";
   return b;

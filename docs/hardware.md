@@ -212,6 +212,41 @@ Record the results with the [hardware checklist](hardware-validation.md#record-a
 
 References: [Waveshare documentation](https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.46), the [schematic](https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-1.46/ESP32-S3-Touch-LCD-1.46.pdf) and the [factory demo at fda89ff](https://github.com/waveshareteam/ESP32-S3-Touch-LCD-1.46/tree/fda89ff2ff32eb1bce561901225c6a36fa684237). The demo repository has no license. Pin numbers come from the wiki. The microphone part and the L/R tie to 3V3 come from the schematic. The expander address, the EXIO bit map and the backlight on-level come from the demo. Display and touch drivers are Espressif components. See [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
 
+## Waveshare ESP32-S3-Touch-LCD-1.47
+
+Board option `esp32-s3-touch-lcd-147`, for the 1.47" module: an ESP32-S3R8 (8 MB octal PSRAM) with 16 MB flash, a 172×320 panel and an AXS5106L touchscreen. **This board has no microphone, speaker or audio codec**, so it works as a text gadget: Hermes replies, cards and prompts appear on the screen and typed messages go out the USB console. Holding TALK shows that no microphone is available. Nothing needs wiring. The microSD slot and the battery ADC stay unused.
+
+The glass is a JD9853. The first image drives it with the existing ST7789 SPI path, which is how Waveshare's Arduino demo constructs this panel (172×320, column offset 34, IPS off). If the panel stays blank, the next step is a JD9853 init table, recorded with its source and license. Do not flash the 1.46 image onto this board: that one is a round 412×412 QSPI panel.
+
+| Part | Chip | Connection |
+|---|---|---|
+| Display | ST7789 path, JD9853 glass | SPI: SCK 38, MOSI 39, CS 21, DC 45, RST 40; 172×320, column offset 34, X mirrored |
+| Backlight | | GPIO 46, active high |
+| Touch | AXS5106L | I2C SDA 42, SCL 41, address 0x63, RST 47, INT 48 |
+| Button (to GND) | | TALK = BOOT (0). Swipe down cancels |
+
+**Build and flash** it with PlatformIO:
+
+```bash
+cd firmware/esp32
+pio run -e esp32-s3-touch-lcd-147 -t upload -t monitor
+```
+
+Or with `idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp32-s3-touch-lcd-147/sdkconfig.defaults" build`. The USB-C port is the S3's own USB Serial/JTAG, so flashing and the serial console (115200 baud) both use it. A 172×320 simulator profile is `sim-172x320-nospeaker`.
+
+### First flash: what to check
+
+This port is written from the Waveshare schematic and the Arduino demo's ST7789 offsets. On the first flash:
+
+1. **Boot log:** `st7789 172x320 ready` and `touch ready`. In `hermes-gadget diag` the parts line should list the display, and the `i2c` list should include `0x63`.
+2. **Screen:** the mascot is upright on the 172×320 glass, and the accents are amber, not blue. X is mirrored: without that, text reads backwards. A blank panel means the JD9853 needs its own init table, or SPI mode 3.
+3. **Touch:** a tap answers yes and a swipe down cancels. Holding the screen or BOOT reports that no microphone is available.
+4. **Text:** a paired Hermes card, prompt or notice should render on the display. A timer alarm is silent.
+
+Record the results with the [hardware checklist](hardware-validation.md#record-a-physical-test).
+
+Pin numbers: [Waveshare schematic](https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-1.47/ESP32-S3-Touch-LCD-1.47-Schematic.pdf). The column offset and the ST7789 construction come from Waveshare's Arduino demo for this board. The AXS5106L report is register 0x01, read as a stopped write of that address and then a separate read. The low nibble of the next byte is the point count, then 12-bit X and Y. The parser is in-tree; no third-party touch driver is vendored.
+
 ## Waveshare ESP32-S3-Knob-Touch-LCD-1.8
 
 Use `esp32s3-knob-touch-lcd-1.8` for the knob board: an ESP32-S3R8 with 16 MB flash and 8 MB octal PSRAM, a round 360×360 SH8601 LCD over QSPI (not the ST77916 of the 1.85C V2), CST816S touch, one PDM microphone, a rotary encoder around the screen, a DRV2605 haptic driver and a Li-ion battery with charging management.
