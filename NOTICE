@@ -314,8 +314,8 @@ that overflows the chosen version is rejected instead of encoded incorrectly).
 The full upstream license is in LICENSES/QRCode-MIT.txt.
 
 The Tailscale client in firmware/esp32/components/tailtiny/ is vendored from
-TailTiny, https://github.com/Asimmimx/tailtiny, version 3.0.2, revision
-450ad519810f0a7560306e1389c65acf2c48828c, Copyright (c) 2025-2026 Cameron
+TailTiny, https://github.com/Asimmimx/tailtiny, version 3.1.0, revision
+d1ec2ae45e252e8dc737452be0f6afe1ac2e3edb, Copyright (c) 2025-2026 Cameron
 Malone, MIT License; it derives from MicroLink by the same author. It bundles
 wireguard-lwip, https://github.com/smartalock/wireguard-lwip, vendored in
 firmware/esp32/components/wireguard_lwip/, Copyright (c) 2021 Daniel Hope

@@ -1,4 +1,4 @@
-# TailTiny, vendored: ../TAILTINY.md has the pinned commit and our patches.
+# TailTiny, vendored: ../TAILTINY.md has the pinned release and our patches.
 # Compiled only when CONFIG_HG_TAILNET is on. The requirements stay unconditional:
 # ESP-IDF resolves them before the sdkconfig exists.
 set(SRCS)
@@ -18,8 +18,7 @@ list(APPEND SRCS
     "src/nacl_box.c"
     "src/x25519.c"
     "src/ml_zerocopy.c"
-    # src/ml_cellular.c: the 4G modem driver, left out (CONFIG_ML_ENABLE_CELLULAR stays off,
-    # and the file includes driver/uart.h outside its #ifdef).
+    "src/ml_cellular.c"
     "src/ml_at_socket.c"
     "src/ml_net_switch.c"
     "src/ml_config_httpd.c"
@@ -35,13 +34,21 @@ set(REQUIRES
     esp_timer
     lwip
     mbedtls
-    espressif__cjson
     driver
-    # ESP-IDF 6 dropped UART from `driver`; ml_at_socket.c includes driver/uart.h.
+    esp_driver_gpio
     esp_driver_uart
     esp_driver_tsens
     esp_http_server
+    vfs  # eventfd that wakes the DERP task when TX/control work is queued
 )
+
+# ESP-IDF 6 no longer ships cJSON as the `json` component; it comes from the
+# component registry instead (idf_component.yml).
+if(IDF_VERSION_MAJOR GREATER_EQUAL 6)
+    list(APPEND REQUIRES espressif__cjson)
+else()
+    list(APPEND REQUIRES json)
+endif()
 
 idf_component_register(
     SRCS ${SRCS}
@@ -52,9 +59,3 @@ idf_component_register(
     PRIV_REQUIRES
         wireguard_lwip
 )
-
-if(CONFIG_HG_TAILNET)
-    # GCC 15: protocol constants (HSalsa20's sigma) are byte arrays initialised from
-    # strings of exactly their length, deliberately without the NUL.
-    target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-unterminated-string-initialization)
-endif()

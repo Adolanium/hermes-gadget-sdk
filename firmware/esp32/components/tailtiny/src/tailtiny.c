@@ -12,6 +12,9 @@
 #include "esp_timer.h"
 #include "esp_mac.h"
 #include "esp_wifi.h"
+#include "esp_vfs_eventfd.h"
+#include <unistd.h>
+#include <errno.h>
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "cJSON.h"
@@ -199,6 +202,8 @@ tailtiny_t *tailtiny_init(const tailtiny_config_t *config) {
         return NULL;
     }
 
+    ml->derp_wake_fd = -1;
+
     /* Copy config */
     ml->config = *config;
     if (ml->config.max_peers == 0) ml->config.max_peers = ML_MAX_PEERS;
@@ -324,6 +329,28 @@ tailtiny_t *tailtiny_init(const tailtiny_config_t *config) {
         tailtiny_destroy(ml);
         return NULL;
     }
+
+#if CONFIG_VFS_SUPPORT_SELECT
+    /* The eventfd VFS is process-wide: reuse it if the application already
+     * registered it (ESP_ERR_INVALID_STATE). Destroy closes only this
+     * instance's descriptor and never unregisters the VFS. */
+    const esp_vfs_eventfd_config_t event_config = ESP_VFS_EVENTD_CONFIG_DEFAULT();
+    esp_err_t event_err = esp_vfs_eventfd_register(&event_config);
+    if (event_err == ESP_OK || event_err == ESP_ERR_INVALID_STATE)
+        ml->derp_wake_fd = eventfd(0, 0);
+    if (ml->derp_wake_fd < 0) {
+        /* For example, the application registered the eventfd VFS with a
+         * small max_fds and has used them all. Not fatal: the DERP task polls
+         * as it did before, as with CONFIG_VFS_SUPPORT_SELECT off. */
+        ESP_LOGW(TAG, "No eventfd for the DERP task (%s, errno %d): it polls, light sleep limited",
+                 esp_err_to_name(event_err), errno);
+        ml->derp_wake_fd = -1;
+    }
+#else
+    /* Without VFS select() an eventfd can't be waited on with the socket;
+     * the DERP task keeps polling (derp_wake_fd stays -1). */
+    ESP_LOGW(TAG, "CONFIG_VFS_SUPPORT_SELECT is off: DERP task polls, light sleep limited");
+#endif
 
     ESP_LOGI(TAG, "TailTiny initialized (max_peers=%d)", ml->config.max_peers);
     return ml;
@@ -488,6 +515,7 @@ esp_err_t tailtiny_rebind(tailtiny_t *ml) {
      * Pending TX packets are drained but WG state is preserved. */
     xEventGroupClearBits(ml->events, ML_EVT_DERP_CONNECTED);
     xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
+    ml_derp_wake(ml);
     ESP_LOGI(TAG, "Rebind: signaled coord + DERP to reconnect");
 
     /* Step 4: Brief delay for coord/DERP to process reconnect signals */
@@ -542,6 +570,8 @@ esp_err_t tailtiny_stop(tailtiny_t *ml) {
 
     ESP_LOGI(TAG, "Stopping...");
     xEventGroupSetBits(ml->events, ML_EVT_SHUTDOWN_REQUEST);
+    ml_derp_wake(ml);
+    ml_wg_notify(ml);
 
     /* Wait for tasks to exit (they check ML_EVT_SHUTDOWN_REQUEST).
      * Tasks call vTaskDelete(NULL) to self-delete, so we must NOT call
@@ -588,6 +618,8 @@ void tailtiny_destroy(tailtiny_t *ml) {
         ml_config_httpd_deinit(ml->config_httpd);
         ml->config_httpd = NULL;
     }
+
+    if (ml->derp_wake_fd >= 0) { close(ml->derp_wake_fd); ml->derp_wake_fd = -1; }
 
     /* Delete queues */
     if (ml->derp_tx_queue) vQueueDelete(ml->derp_tx_queue);
