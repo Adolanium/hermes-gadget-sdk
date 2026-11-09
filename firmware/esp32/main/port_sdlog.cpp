@@ -32,7 +32,8 @@ constexpr size_t kRotateBytes = 512 * 1024;
 char* g_ring = nullptr;
 size_t g_cap = 0, g_head = 0, g_tail = 0;  // next byte to write / read
 size_t g_used = 0;                          // bytes currently in the ring (exact)
-size_t g_dropped_lines = 0;                 // lines lost to a full ring
+std::atomic<size_t> g_dropped_lines{0};     // lines lost to a full ring, or skipped while a flush held the ring
+sdmmc_card_t* g_card = nullptr;             // the mounted card, for unmounting after a failed write
 SemaphoreHandle_t g_lock = nullptr;
 vprintf_like_t g_next = nullptr;
 std::atomic<bool> g_capture{false};
@@ -50,7 +51,9 @@ bool ring_put(char c) {
 
 int SdLogger::hook(const char* fmt, va_list args) {
   // Like diag capture: never wait, never in an ISR, never block the console.
-  if (g_capture.load() && g_ring && !xPortInIsrContext() && xSemaphoreTake(g_lock, 0) == pdTRUE) {
+  if (g_capture.load() && g_ring && !xPortInIsrContext() && xSemaphoreTake(g_lock, 0) != pdTRUE) {
+    ++g_dropped_lines;  // a flush holds the ring: count the line, still never wait
+  } else if (g_capture.load() && g_ring && !xPortInIsrContext()) {
     va_list copy;
     va_copy(copy, args);
     int n = std::vsnprintf(g_line, sizeof(g_line), fmt, copy);
@@ -102,6 +105,7 @@ void SdLogger::mount() {
   esp_log_level_set("sdmmc_periph", ESP_LOG_WARN);
   if (err != ESP_OK) return;  // retry from the task; stay silent
   mounted_ = true;
+  g_card = card;
   ESP_LOGI(TAG, "mounted %s (%s)", kMountPoint, card->cid.name);
   open_file();
 }
@@ -122,14 +126,12 @@ void SdLogger::open_file() {
   written_ = stat(kPath, &st) == 0 ? static_cast<size_t>(st.st_size) : 0;
   const esp_app_desc_t* app = esp_app_get_description();
   std::fprintf(file_, "== hermes gadget %s on %s, IDF %s ==\n", app->version, app->project_name, app->idf_ver);
-  if (g_dropped_lines) {
-    std::fprintf(file_, "(%u log lines dropped before this file)\n", static_cast<unsigned>(g_dropped_lines));
-    g_dropped_lines = 0;  // reported once; later files start clean
+  if (const size_t dropped = g_dropped_lines.exchange(0)) {  // reported once; later files start clean
+    std::fprintf(file_, "(%u log lines dropped before this file)\n", static_cast<unsigned>(dropped));
   }
 }
 
 void SdLogger::flush() {
-  if (!g_capture.load()) return;  // the task closes the file when the setting goes off
   // Mount lives in task(), not here: probing the card every logger pass
   // would retry far more often than the 30 s budget.
   if (!file_) return;
@@ -144,8 +146,17 @@ void SdLogger::flush() {
   }
   xSemaphoreGive(g_lock);
   if (!n) return;
-  std::fwrite(drain, 1, n, file_);
-  std::fflush(file_);
+  if (std::fwrite(drain, 1, n, file_) != n || std::fflush(file_) != 0) {
+    // The card was pulled or failed: drop the stale mount so the task mounts it again
+    // when a card answers. The bytes in this batch are lost either way.
+    std::fclose(file_);
+    file_ = nullptr;
+    esp_vfs_fat_sdcard_unmount(kMountPoint, g_card);
+    g_card = nullptr;
+    mounted_ = false;
+    ESP_LOGW(TAG, "write to the card failed; unmounted, retrying the card every 30 s");
+    return;
+  }
   written_ += n;
   // Rotate while running, not just at open: a long session would otherwise
   // grow past the cap until the card fills.
@@ -167,8 +178,8 @@ void SdLogger::task(void* arg) {
     // fwrite or a double mount.
     if (!g_capture.load()) {
       if (self->file_) {
-        self->flush();
-        std::fclose(self->file_);
+        self->flush();  // drains what was captured before the setting went off
+        if (self->file_) std::fclose(self->file_);  // the flush can rotate, or drop a failed card
         self->file_ = nullptr;
       }
       was_on = false;
