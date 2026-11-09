@@ -53,13 +53,13 @@ TEST("CoreS3 camera power pulses the AW9523B reset and leaves it released") {
   CHECK(saw_low);
   CHECK(saw_high);
   CHECK_EQ(bus.get(0x58, 0x03) & 0x01, uint8_t(0x01));  // reset released at the end
-  CHECK_EQ(bus.get(0x58, 0x05) & 0x01, uint8_t(0x01));  // P1_0 left configured as an output
+  CHECK_EQ(bus.get(0x58, 0x05) & 0x01, uint8_t(0x00));  // P1_0 an output (0 in the direction register)
 }
 
 TEST("CoreS3 camera power preserves the unrelated AW9523B outputs") {
   FakeBus bus;
-  bus.seed(0x58, 0x03, 0x82);  // the begin() end state: LCD reset high, audio out
-  bus.seed(0x58, 0x05, 0x82);
+  bus.seed(0x58, 0x03, 0x82);  // the begin() end state: LCD reset and boost enable high
+  bus.seed(0x58, 0x05, 0x7c);  // P1_1 and P1_7 outputs (0), the other P1 pins inputs
   hg::CoreS3Control control(
       [&](uint8_t a, uint8_t r, uint8_t& v) { return bus.read(a, r, v); },
       [&](uint8_t a, uint8_t r, uint8_t v) { return bus.write(a, r, v); },
@@ -67,7 +67,7 @@ TEST("CoreS3 camera power preserves the unrelated AW9523B outputs") {
 
   CHECK(control.camera_power(true));
   CHECK_EQ(bus.get(0x58, 0x03) & 0x82, uint8_t(0x82));  // bit 7 and bit 1 untouched
-  CHECK_EQ(bus.get(0x58, 0x05) & 0x02, uint8_t(0x02));  // audio pin still an output
+  CHECK_EQ(bus.get(0x58, 0x05) & 0xfe, uint8_t(0x7c));  // only P1_0's direction changed
 }
 
 TEST("CoreS3 camera power off drives the reset low") {

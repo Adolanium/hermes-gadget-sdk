@@ -38,10 +38,10 @@ bool CoreS3Control::set_brightness(uint8_t percent) {
 }
 
 bool CoreS3Control::camera_power(bool on) {
-  // Drive the camera reset low, then release it for a clean start. Holding it
+  // Drive the camera reset (P1_0) low, then release it for a clean start. Holding it
   // low keeps the sensor held; unrelated P1 outputs keep their state through
-  // the masked writes.
-  if (!change(kExpander, 0x05, 0x01, 0x01) || !change(kExpander, 0x03, 0x01, 0x00)) return false;
+  // the masked writes. In the AW9523B's direction register (0x05), 0 is an output.
+  if (!change(kExpander, 0x03, 0x01, 0x00) || !change(kExpander, 0x05, 0x01, 0x00)) return false;
   if (!on) return true;
   delay_(10);
   if (!change(kExpander, 0x03, 0x01, 0x01)) return false;
