@@ -81,3 +81,29 @@ TEST("CoreS3 camera power off drives the reset low") {
   CHECK(control.camera_power(false));
   CHECK_EQ(bus.get(0x58, 0x03) & 0x01, uint8_t(0x00));
 }
+
+TEST("CoreS3 camera power turns on the camera's rails and leaves the others") {
+  FakeBus bus;
+  bus.seed(0x34, 0x90, 0x8b);  // as one board powered up: bits 0, 1, 3 and 7 on; ALDO3, BLDO1/2 off
+  bus.seed(0x34, 0x94, 0xe0);  // upper bits are not the voltage code
+  hg::CoreS3Control control(
+      [&](uint8_t a, uint8_t r, uint8_t& v) { return bus.read(a, r, v); },
+      [&](uint8_t a, uint8_t r, uint8_t v) { return bus.write(a, r, v); },
+      [](uint32_t) {});
+
+  CHECK(control.camera_power(true));
+  CHECK_EQ(bus.get(0x34, 0x90), uint8_t(0x8b | 0x34));  // ALDO3, BLDO1 and BLDO2 on; nothing else changed
+  CHECK_EQ(bus.get(0x34, 0x94), uint8_t(0xe0 | 0x1c));  // ALDO3 at 3.3 V
+}
+
+TEST("CoreS3 camera power off leaves the rails alone") {
+  FakeBus bus;
+  bus.seed(0x34, 0x90, 0x8b);
+  hg::CoreS3Control control(
+      [&](uint8_t a, uint8_t r, uint8_t& v) { return bus.read(a, r, v); },
+      [&](uint8_t a, uint8_t r, uint8_t v) { return bus.write(a, r, v); },
+      [](uint32_t) {});
+
+  CHECK(control.camera_power(false));
+  CHECK_EQ(bus.get(0x34, 0x90), uint8_t(0x8b));
+}

@@ -354,7 +354,7 @@ The display selects ILI9342C for touch firmware ID 0x10 and ILI9342E for 0x12. A
 
 Hold the screen to talk, swipe down to cancel, and hold the title for one second to open settings. GPIO 0 carries the audio clock and is not a TALK button. The hardware power and reset buttons retain their functions. The camera is the `camera.capture` action (below); the IMU, RTC, SD storage and expansion outputs are not exposed.
 
-The power adapter enables the audio supplies (ALDO1 at 1.8 V and ALDO2 at 3.3 V), the onboard boost, and peripheral reset lines. Brightness controls the DLDO1 backlight supply between 2.5 and 3.3 V; zero disables that rail. It preserves charger settings, other rail settings and USB/bus output-enable bits. Settings provide battery readings, local power-off, screen timeout and hardware checks.
+The power adapter enables the audio supplies (ALDO1 at 1.8 V and ALDO2 at 3.3 V), the onboard boost, and peripheral reset lines. The first `camera.capture` also turns on the camera ribbon's supplies (ALDO3 at 3.3 V, BLDO1 and BLDO2, as in esp-bsp's CoreS3 camera bring-up), which the camera and the proximity sensor share, before it pulses the camera enable on AW9523 P1_0. Brightness controls the DLDO1 backlight supply between 2.5 and 3.3 V; zero disables that rail. It preserves charger settings, other rail settings and USB/bus output-enable bits. Settings provide battery readings, local power-off, screen timeout and hardware checks.
 
 ```bash
 cd firmware/esp32

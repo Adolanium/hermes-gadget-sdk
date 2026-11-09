@@ -43,7 +43,8 @@ bool CoreS3Control::camera_power(bool on) {
   // #293: 0x21 missing from the diag scan and the ID read returning garbage;
   // enabling ALDO3 + BLDO1/BLDO2 restored the probe in one step, exactly like
   // esp-bsp's camera bring-up). Rails first, then the reset pulse.
-  if (!change(kPmic, 0x94, 0x1f, 0x1c) || !change(kPmic, 0x90, 0x34, 0x34)) return false;
+  // Off only holds the sensor in reset; it leaves the rails as they are.
+  if (on && (!change(kPmic, 0x94, 0x1f, 0x1c) || !change(kPmic, 0x90, 0x34, 0x34))) return false;
   if (!change(kExpander, 0x03, 0x01, 0x00) || !change(kExpander, 0x05, 0x01, 0x00)) return false;
   if (!on) return true;
   delay_(10);
