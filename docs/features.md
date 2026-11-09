@@ -145,6 +145,7 @@ The table shows what each board profile drives. In the battery column, "Voltage"
 | Spotpear ESP32-S3-1.54 muma | Touch version | Yes | Yes | Voltage | Light sleep | Smoke test |
 | Espressif ESP32-S3-BOX | Yes | Yes | Yes | No | | Not run on a board |
 | Espressif ESP32-S3-Korvo-2 | Yes | Yes | Yes | Voltage | | Not run on a board |
+| LCDWIKI ES3C28P | Yes | Yes | Output, needs a speaker | Voltage | | Partial report |
 | Espressif ESP32-S3-BOX-3 | Yes | Yes | Yes | No | | No report yet |
 | M5Stack CoreS3 | Yes | Yes | Yes | Gauge | | No report yet |
 | M5Stack StickS3 | No | Yes | Yes | Voltage | Face-down sleep | Smoke test |
