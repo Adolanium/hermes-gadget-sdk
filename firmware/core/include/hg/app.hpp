@@ -253,6 +253,9 @@ class App {
   // The `wifi_deep_sleep` setting (on by default): off, Wi-Fi never goes past minimum
   // modem sleep, for an access point that drops or delays clients in deeper sleep.
   bool wifi_deep_sleep() const { return wifi_deep_sleep_; }
+  // The `animation` setting (on by default): off, the edge ring's comet and
+  // the Updating screen's spinner stand still.
+  bool animation() const { return animation_; }
   // These run on the app task. Start returns private, on-screen instructions.
   std::function<std::string()> on_wifi_setup;
   std::function<void()> on_wifi_setup_close;
@@ -536,7 +539,7 @@ class App {
   bool lang_auto_ = false;
   std::optional<i18n::Lang> hermes_lang_;  // from the last `welcome` that named one this firmware has
   enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, TouchTalk, Profile, ProfileGrid, Microphone, Speaker, Display, Inputs,
-                              Info, Power, BatteryAlert, BatteryAlertSound, ChargingNotice, ChargingSound, ChargedNotice, ChargedSound, WifiDeepSleep, IdleTimer, TouchWake, FaceDownSleep, Clock, PowerOff, WifiSetup, Phone, Language, DoubleHome, WakeTalk, Back };
+                              Info, Power, BatteryAlert, BatteryAlertSound, ChargingNotice, ChargingSound, ChargedNotice, ChargedSound, WifiDeepSleep, IdleTimer, TouchWake, FaceDownSleep, Clock, PowerOff, WifiSetup, Phone, Language, DoubleHome, WakeTalk, Animation, Back };
   enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };
   Menu menu_ = Menu::Closed;
   // The settings list's scroll in pixels, and where it eases to. It follows the
@@ -642,6 +645,7 @@ class App {
   bool touch_wake_ = true;            // the `touch_wake` setting
   bool double_home_ = true;           // the `double_home` setting
   bool wifi_deep_sleep_ = true;       // the `wifi_deep_sleep` setting
+  bool animation_ = true;              // the `animation` setting
   bool wake_talk_ = false;            // the `wake_talk` setting
   bool touch_talk_ = true;            // the `touch_talk` setting
   bool reply_while_face_down_ = false;  // a reply arrived while dark; show it on the turn-over
