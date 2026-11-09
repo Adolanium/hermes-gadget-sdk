@@ -298,9 +298,6 @@ bool DsiDisplay::begin(const LcdConfig& cfg, const DsiPanelConfig& dsi) {
   cfg_ = cfg;
   dsi_ = dsi;
   use_dma2d_ = dsi_.use_dma2d;
-#ifdef CONFIG_HG_DSI_DISABLE_DMA2D
-  use_dma2d_ = use_dma2d_ && !CONFIG_HG_DSI_DISABLE_DMA2D;
-#endif
 
   // 1. Power the DSI PHY. Without this the bus configures cleanly and the panel
   //    stays dark, which is the single most misleading failure on this board.
@@ -439,11 +436,6 @@ bool DsiDisplay::begin(const LcdConfig& cfg, const DsiPanelConfig& dsi) {
     }
   }
 
-#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 1, 0)
-  use_dma2d_ = false;  // IDF 5 uses dpi.flags.use_dma2d and has no enable API.
-#endif
-
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 1, 0)
   if (use_dma2d_) {
     err = esp_lcd_dpi_panel_enable_dma2d(panel_);
     if (err != ESP_OK) {
@@ -462,7 +454,6 @@ bool DsiDisplay::begin(const LcdConfig& cfg, const DsiPanelConfig& dsi) {
       use_dma2d_ = false;
     }
   }
-#endif
 
   err = esp_lcd_panel_reset(panel_);
   if (err != ESP_OK) {
