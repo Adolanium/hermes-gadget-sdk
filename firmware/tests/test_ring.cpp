@@ -229,6 +229,37 @@ TEST("ring: speaking is an amber comet nine degrees a frame, and a silent respon
       if (p.in_band(x, y) && (x < ox || x >= ox + side)) CHECK_EQ(p.at(x, y), p.bg());
 }
 
+TEST("ring: with the comet setting off, thinking, responding, boot and connecting show no ring") {
+  for (Screen screen : {Screen::Thinking, Screen::Responding, Screen::Boot, Screen::Connecting}) {
+    Panel p(466, 466);
+    hg::UiModel m = ring_model(screen, 6);
+    m.ring_comet = false;
+    m.speaking = true;
+    m.headline = "Thinking";
+    p.ui.render(m);
+    CHECK_EQ(p.at(456, 233), p.bg());  // 3 o'clock: where a comet head would be
+    const int ox = p.square_origin(), side = p.ui.area().width;
+    for (int y = 0; y < p.h; ++y)
+      for (int x = 0; x < p.w; ++x)
+        if (p.in_band(x, y) && (x < ox || x >= ox + side)) CHECK_EQ(p.at(x, y), p.bg());
+  }
+}
+
+TEST("updating: with blinking off, the Updating screen stands still between frames") {
+  Panel p(466, 466);
+  hg::UiModel m = ring_model(Screen::Updating, 6);
+  m.ota_blink = false;
+  m.headline = "Updating";
+  p.ui.render(m);
+  std::vector<std::vector<uint16_t>> first(p.h, std::vector<uint16_t>(p.w));
+  for (int y = 0; y < p.h; ++y)
+    for (int x = 0; x < p.w; ++x) first[y][x] = p.at(x, y);
+  m.frame = 20;
+  p.ui.render(m);
+  for (int y = 0; y < p.h; ++y)
+    for (int x = 0; x < p.w; ++x) CHECK_EQ(p.at(x, y), first[y][x]);
+}
+
 TEST("ring: boot and connecting show the amber comet") {
   for (Screen screen : {Screen::Boot, Screen::Connecting}) {
     Panel p(466, 466);

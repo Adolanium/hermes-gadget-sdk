@@ -21,6 +21,8 @@
 
 - The Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C drives its speaker amplifier from the port, and every board whose port drives the amplifier now turns it on while the DAC is still muted and mutes before turning it off, with 20 ms to settle each way: the 3.4C, the AMOLED-1.75 and 1.75C, the AMOLED-2.06, the AMOLED-2.16, the LCD-1.85C V2 and the P4 7B. On the 3.4C only, the ES8311's DAC also ramps its volume on mute and unmute. Both aim at the pop when playback starts and stops. Built; not yet heard on any board, including the 3.4C. Contributed by @rahlquist.
 
+- Two display settings, both on by default: **Ring animation** turns the edge ring's comet off (the ring stays dark while Hermes thinks, speaks, boots or connects), and **Update blinking** keeps the Updating screen still while a firmware update installs instead of blinking its spinner and dots. Both are in the settings menu and the console (`set comet_animation off`, `set ota_blink off`). Contributed by @rahlquist.
+
 ### Hermes plugin
 
 - **A device that reconnects is welcomed at once.** After a device rebooted or changed networks, its old connection still looked open. The new connection closed the old one and waited for that close before sending the welcome, and the old connection's peer is gone, so the wait lasted until TCP gave up or the device's new network stack reset it. That took 0.07 to 3 s per reconnect on an AMOLED-1.75C over the tailnet, and in the meantime the pairing check sent `paired` and the dashboard before the welcome. The old connection now closes in the background. Contributed by Antonio Lourenco (@tozes).

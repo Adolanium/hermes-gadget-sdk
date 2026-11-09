@@ -192,12 +192,12 @@ EdgeRing edge_ring(const UiModel& m) {
     return r;
   }
   switch (m.screen) {
-    case Screen::Thinking: comet(24, kBlue); break;
+    case Screen::Thinking: if (m.ring_comet) comet(24, kBlue); break;
     case Screen::Responding:
-      if (m.speaking) comet(40, kAccent);
+      if (m.speaking && m.ring_comet) comet(40, kAccent);
       break;
     case Screen::Boot:
-    case Screen::Connecting: comet(24, kAccent); break;
+    case Screen::Connecting: if (m.ring_comet) comet(24, kAccent); break;
     default: break;
   }
   return r;
@@ -264,7 +264,11 @@ uint32_t hero_anim_key(const UiModel& m) {
     case Screen::Listening: h.val(m.frame % 3).val(m.level / 20); break;
     case Screen::Thinking:
     case Screen::Connecting:
-    case Screen::Updating: h.val((m.frame / 2) % 4); break;
+      h.val((m.frame / 2) % 4);
+      break;
+    case Screen::Updating:
+      if (m.ota_blink) h.val((m.frame / 2) % 4);
+      break;
     case Screen::Responding: h.val((m.frame / 2) % 3); break;
     default: break;
   }
@@ -809,8 +813,14 @@ void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
   switch (m.screen) {
     case Screen::Boot:
     case Screen::Connecting:
-    case Screen::Updating:
       spinner(kAccent);
+      break;
+    case Screen::Updating:
+      if (m.ota_blink) spinner(kAccent);
+      else {
+        c.ring(cx, cy, r, s + 1, kAccent);
+        c.fill_circle(cx, cy, r / 3, kAccentDim);
+      }
       break;
     case Screen::Thinking:
       spinner(kBlue);
@@ -1587,12 +1597,12 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
       c.arc(cx, cy, r, stroke, dir, col);
     }
   };
-  auto dots = [&](uint16_t on, uint16_t dim) {
+  auto dots = [&](uint16_t on, uint16_t dim, bool animate = true) {
     int r = std::max(2, size / 30);
     int gap = 3 * r;
     int tx = mx + size * a.head_top_right.x / 1000;
     int ty = my + size * a.head_top_right.y / 1000;
-    int active = static_cast<int>((m.frame / 2) % 4);
+    int active = animate ? static_cast<int>((m.frame / 2) % 4) : -1;
     for (int i = 0; i < 3; ++i) {
       c.fill_circle(tx + i * gap, ty - i * gap / 2, r, i == active ? on : dim);
     }
@@ -1612,8 +1622,8 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
       }
       break;
     case Screen::Thinking: dots(kBlue, kBlueDim); break;
-    case Screen::Connecting:
-    case Screen::Updating: dots(kAccent, kAccentDim); break;
+    case Screen::Connecting: dots(kAccent, kAccentDim); break;
+    case Screen::Updating: dots(kAccent, kAccentDim, m.ota_blink); break;
     default: break;
   }
 
