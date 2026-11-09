@@ -44,13 +44,17 @@ struct CoreS3ProbeGpio {
     }
     return true;
   }
-  void cs(bool high) { gpio_set_level(cs_pin, high); }
-  void dc(bool high) { gpio_set_level(dc_pin, high); }
-  void sclk(bool high) { gpio_set_level(clk_pin, high); }
-  void data(bool high) { gpio_set_level(data_pin, high); }
-  void input(bool enabled) { gpio_set_direction(data_pin, enabled ? GPIO_MODE_INPUT : GPIO_MODE_OUTPUT); }
+  void cs(bool high) { record(gpio_set_level(cs_pin, high)); }
+  void dc(bool high) { record(gpio_set_level(dc_pin, high)); }
+  void sclk(bool high) { record(gpio_set_level(clk_pin, high)); }
+  void data(bool high) { record(gpio_set_level(data_pin, high)); }
+  void input(bool enabled) { record(gpio_set_direction(data_pin, enabled ? GPIO_MODE_INPUT : GPIO_MODE_OUTPUT)); }
   bool sample() { return gpio_get_level(data_pin); }
   void delay() { esp_rom_delay_us(1); }
+  bool ok() const { return valid_; }
+ private:
+  void record(esp_err_t error) { valid_ = (error == ESP_OK) && valid_; }
+  bool valid_ = true;
 };
 
 const char* TAG = "hg.lcd";

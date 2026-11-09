@@ -34,6 +34,15 @@ if(HG_BUILD_TESTS)
   endif()
   add_test(NAME hg_core_tests COMMAND hg_core_tests)
 
+  # Compile the real board factory: source-pattern checks cannot catch a
+  # missing color-order setting inherited from LcdConfig's default.
+  add_executable(hg_cores3_board_tests tests/main.cpp tests/test_cores3_board.cpp esp32/main/board.cpp)
+  target_include_directories(hg_cores3_board_tests PRIVATE tests/cores3 esp32/main drivers)
+  if(MSVC)
+    target_compile_options(hg_cores3_board_tests PRIVATE /utf-8)
+  endif()
+  add_test(NAME hg_cores3_board_tests COMMAND hg_cores3_board_tests)
+
   # The CJK font's tests, against a core built with it (docs/cjk.md), whatever HG_CJK_FONT says.
   hg_core_library(hg_core_cjk ON)
   add_executable(hg_cjk_tests tests/main.cpp tests/test_cjk.cpp)

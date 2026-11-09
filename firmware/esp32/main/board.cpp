@@ -854,6 +854,7 @@ BoardConfig make() {
   b.lcd.mirror_x = false;
   b.lcd.mirror_y = false;
   b.lcd.invert = true;
+  b.lcd.bgr = true;  // CoreS3 BSP display.h: LCD_RGB_ELEMENT_ORDER_BGR
   b.lcd.mosi = 37;
   b.lcd.sclk = 36;
   b.lcd.cs = 3;

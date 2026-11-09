@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "check.hpp"
@@ -45,6 +46,7 @@ struct WireGpio {
     return (raw >> (7 - samples++)) & 1;
   }
   void delay() {}
+  bool ok() const { return true; }
 };
 
 struct RegisterPanelIo {
@@ -63,6 +65,85 @@ struct RegisterPanelIo {
     value = cmd == 0xdd ? dd : cmd == 0xcb ? cb : index == 2 ? id_high : id_low;
     return calls++ != fail_at;
   }
+};
+
+// Model the LCD side of the GPIO wire, not the driver's indexed-read API.
+// Commands are decoded on rising edges. The dummy clock consumes bit 7;
+// the LCD releases SDA after bit 0, so the following sample reads high.
+struct PanelGpio {
+  enum class Panel { C, E, Absent };
+  explicit PanelGpio(Panel panel) : panel(panel) {}
+  Panel panel;
+  bool selected = false, clock_high = false, dc_high = false, reading = false, data_bit = false;
+  bool healthy = true, unlocked = false;
+  int operations = 0, fail_at = -1, read_clocks = 0, samples = 0, unlocks = 0;
+  uint8_t byte = 0, command = 0, index = 0, register_value = 0xff;
+  uint8_t dd_register = 0, cb_register = 0;
+  unsigned bits = 0;
+  std::vector<uint8_t> parameters;
+  std::vector<std::pair<uint8_t, uint8_t>> reads;
+
+  void operation() { if (operations++ == fail_at) healthy = false; }
+  bool ok() const { return healthy; }
+  void cs(bool high) {
+    operation();
+    if (!high) { byte = 0; bits = 0; }
+    selected = !high;
+  }
+  void dc(bool high) { operation(); dc_high = high; }
+  void data(bool high) { operation(); data_bit = high; }
+  void input(bool enabled) {
+    operation();
+    if (enabled) {
+      CHECK(selected && dc_high && !clock_high);
+      reads.emplace_back(command, index);
+      read_clocks = samples = 0;
+      register_value = 0xff;
+      if (panel == Panel::E && index == 1 && (command == 0xdd || command == 0xcb))
+        register_value = command == 0xdd ? dd_register : cb_register;
+      if (panel == Panel::C && unlocked && command == 0xd3)
+        register_value = index == 2 ? 0x93 : index == 3 ? 0x42 : 0xff;
+    } else if (reading) {
+      CHECK(!selected);  // never drive SDA while the LCD is still selected
+    }
+    reading = enabled;
+  }
+  void sclk(bool high) {
+    operation();
+    if (high && !clock_high && selected) {
+      if (reading) {
+        ++read_clocks;
+      } else {
+        byte = static_cast<uint8_t>((byte << 1) | data_bit);
+        if (++bits == 8) {
+          if (!dc_high) {
+            command = byte;
+            parameters.clear();
+          } else {
+            parameters.push_back(byte);
+            if (command == 0xd9) index = byte == 0 ? 0 : (byte & 0xf0) == 0x10 ? byte & 0x0f : 0xff;
+            if (panel == Panel::E && command == 0xdd) dd_register = byte;
+            if (panel == Panel::E && command == 0xcb) cb_register = byte;
+            if (command == 0xc8 && parameters == std::vector<uint8_t>({0xff, 0x93, 0x42})) {
+              unlocked = true;
+              ++unlocks;
+            }
+          }
+          bits = 0;
+          byte = 0;
+        }
+      }
+    }
+    clock_high = high;
+  }
+  bool sample() {
+    CHECK(selected && reading && dc_high && !clock_high);
+    CHECK_EQ(read_clocks, samples + 1);
+    ++samples;
+    return read_clocks >= 1 && read_clocks <= 7
+        ? ((register_value >> (7 - read_clocks)) & 1) : true;
+  }
+  void delay() {}
 };
 }
 
@@ -151,4 +232,57 @@ TEST("CoreS3 all unknown touch firmware values require LCD evidence") {
 TEST("CoreS3 an unrecognized touch firmware is not a panel identity") {
   PanelIo io;
   CHECK(hg::cores3_panel(0x05, io) == hg::CoreS3Panel::Unknown);
+}
+
+TEST("CoreS3 identifies C through the complete GPIO probe") {
+  PanelGpio gpio(PanelGpio::Panel::C);
+  hg::CoreS3PanelWire<PanelGpio> wire(gpio);
+  CHECK(hg::cores3_panel(0x05, wire) == hg::CoreS3Panel::C);
+  CHECK_EQ(wire.id_high, 0x13);
+  CHECK_EQ(wire.id_low, 0x42);
+  CHECK_EQ(gpio.unlocks, 1);
+  CHECK((gpio.reads == std::vector<std::pair<uint8_t, uint8_t>>{{0xdd, 1}, {0xcb, 1}, {0xd3, 2}, {0xd3, 3}}));
+  CHECK(!gpio.selected && !gpio.reading && !gpio.clock_high);
+  CHECK_EQ(gpio.index, 0);
+}
+
+TEST("CoreS3 identifies E through GPIO without the C unlock") {
+  PanelGpio gpio(PanelGpio::Panel::E);
+  hg::CoreS3PanelWire<PanelGpio> wire(gpio);
+  CHECK(hg::cores3_panel(0x05, wire) == hg::CoreS3Panel::E);
+  CHECK_EQ(gpio.unlocks, 0);
+  CHECK((gpio.reads == std::vector<std::pair<uint8_t, uint8_t>>{{0xdd, 1}, {0xcb, 1}}));
+  CHECK(!gpio.selected && !gpio.reading && !gpio.clock_high);
+  CHECK_EQ(gpio.index, 0);
+}
+
+TEST("CoreS3 an absent LCD stays unknown through GPIO") {
+  PanelGpio gpio(PanelGpio::Panel::Absent);
+  hg::CoreS3PanelWire<PanelGpio> wire(gpio);
+  CHECK(hg::cores3_panel(0x05, wire) == hg::CoreS3Panel::Unknown);
+  CHECK(!gpio.selected && !gpio.reading && !gpio.clock_high);
+  CHECK_EQ(gpio.index, 0);
+}
+
+TEST("CoreS3 known touch hints never drive the GPIO probe") {
+  PanelGpio gpio(PanelGpio::Panel::Absent);
+  hg::CoreS3PanelWire<PanelGpio> wire(gpio);
+  CHECK(hg::cores3_panel(0x10, wire) == hg::CoreS3Panel::C);
+  CHECK(hg::cores3_panel(0x12, wire) == hg::CoreS3Panel::E);
+  CHECK_EQ(gpio.operations, 0);
+}
+
+TEST("CoreS3 GPIO failures cannot select a panel despite a matching signature") {
+  for (auto panel : {PanelGpio::Panel::C, PanelGpio::Panel::E}) {
+    PanelGpio reference(panel);
+    hg::CoreS3PanelWire<PanelGpio> good(reference);
+    CHECK(hg::cores3_panel(0x05, good) != hg::CoreS3Panel::Unknown);
+    for (int fail = 0; fail < reference.operations; ++fail) {
+      PanelGpio gpio(panel);
+      gpio.fail_at = fail;
+      hg::CoreS3PanelWire<PanelGpio> wire(gpio);
+      CHECK(hg::cores3_panel(0x05, wire) == hg::CoreS3Panel::Unknown);
+      CHECK(!gpio.selected && !gpio.reading && !gpio.clock_high);
+    }
+  }
 }

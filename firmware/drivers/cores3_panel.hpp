@@ -41,6 +41,7 @@ class CoreS3PanelWire {
  public:
   explicit CoreS3PanelWire(GPIO& gpio) : gpio_(gpio) {}
   bool write(uint8_t cmd, const uint8_t* data, unsigned size) {
+    if (!gpio_.ok()) return false;
     gpio_.input(false);
     gpio_.cs(false);
     gpio_.dc(false);
@@ -50,11 +51,11 @@ class CoreS3PanelWire {
     gpio_.dc(false);
     send(0);  // M5GFX closes probe writes with NOP before raising CS.
     gpio_.cs(true);
-    return true;
+    return gpio_.ok();
   }
   bool read(uint8_t cmd, uint8_t index, uint8_t& value) {
     const uint8_t select = 0x10 | index;
-    write(0xd9, &select, 1);
+    if (!write(0xd9, &select, 1)) return false;
     gpio_.cs(false);
     gpio_.dc(false);
     send(cmd);
@@ -74,6 +75,9 @@ class CoreS3PanelWire {
     gpio_.input(false);
     gpio_.dc(false);
     send(0);  // M5GFX clocks the read's closing NOP with CS already high.
+    // Always attempt deselection/direction cleanup, but never use a sample
+    // after the GPIO backend reports a failed level or direction change.
+    if (!gpio_.ok()) return false;
     value = (raw >> 1) & 0x7f;
     if (cmd == 0xdd) dd = value;
     if (cmd == 0xcb) cb = value;
