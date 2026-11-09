@@ -12,6 +12,8 @@
 #include <string>
 #include <string_view>
 
+#include "hg/camera.hpp"
+
 namespace hg {
 
 enum class LogLevel : uint8_t { Debug, Info, Warn, Error };
@@ -206,6 +208,7 @@ struct Hal {
   AudioDecoder* speaker_decoder = nullptr;  // optional compressed speaker audio
   Updater* updater = nullptr;
   Power* power = nullptr;
+  Camera* camera = nullptr;  // optional; only camera-capable boards set it
 };
 
 }  // namespace hg
