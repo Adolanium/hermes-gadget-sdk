@@ -466,8 +466,8 @@ A check of the GC0308 camera port on one board, not a full report in the format 
 - **Board:** M5Stack CoreS3 (K128), ILI9342C panel.
 - **Firmware:** `main` with the camera port, built with ESP-IDF 6.1 (`espressif/idf:v6.1`) and the CoreS3 defaults, flashed with `esptool` over USB.
 - **Capture:** the gateway ran `camera.capture` and saved a 640×480 PNG (174,689 bytes) under `~/.hermes/gadgetpix/`. The image is upright, the colours are right (RGB byte order confirmed correct), and it is not mirrored: the frame shows a person at a desk, a shelf behind, and coloured LED lighting, matching the real scene.
-- **Timing and memory:** the first capture after boot includes sensor init at about 15 s of uptime; repeat captures reuse the running pipeline and return within roughly a second. `diag` before the first capture reported 6,280,412 PSRAM bytes free, and 5,665,888 after the camera was running — the VGA RGB565 frame buffer accounts for the 614,400-byte difference.
-- **During development:** the first init attempt panicked with an `IntegerDivideByZero` in `ll_cam_config` because `xclk_freq_hz` was left at 0 while the LCD_CAM divider needs the sensor's clock rate; setting it to 20 MHz fixed it. A repeat-capture bug (the init-once flag was set before a successful init rather than after a failed one) was caught by the host tests.
+- **Timing and memory:** the first capture after boot includes sensor init at about 15 s of uptime. Repeat captures have not been run on the current code, which starts the camera once and reuses it. `diag` before the first capture reported 6,280,412 PSRAM bytes free, and 5,665,888 after the camera was running — the VGA RGB565 frame buffer accounts for the 614,400-byte difference.
+- **During development:** the first init attempt panicked with an `IntegerDivideByZero` in `ll_cam_config` because `xclk_freq_hz` was left at 0 while the LCD_CAM divider needs the sensor's clock rate; setting it to 20 MHz fixed it.
 - **Not checked:** captures in low light against auto-exposure convergence, captures while a reply is playing, battery-powered capture, and the rest of the checklist.
 
 ## Support labels

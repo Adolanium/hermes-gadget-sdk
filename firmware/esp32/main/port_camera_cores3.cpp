@@ -21,7 +21,8 @@ namespace {
 constexpr const char* TAG = "hg.camera";
 constexpr int kSccbPort = 0;  // hgp::i2c::bus() installs the shared bus here
 
-bool s_init_attempted = false;
+bool s_init_attempted = false;  // esp_camera_init() runs once per boot
+bool s_ready = false;
 
 bool begin_camera() {
   camera_config_t config = {};
@@ -74,15 +75,19 @@ bool CameraCapture::capture_rgb565(i2c_master_bus_handle_t sccb_bus, std::vector
     error = "camera SCCB bus is unavailable";
     return false;
   }
-  if (s_init_attempted) {
-    error = "camera initialization failed earlier; restart the gadget after checking the GC0308 camera";
-    return false;
-  }
-
-  if (!begin_camera()) {
+  if (!s_ready) {
+    // A second esp_camera_init() fails its probe (the driver is already set up) and then
+    // tears the running camera down, so the camera is started once and reused after.
+    if (s_init_attempted) {
+      error = "camera initialization failed earlier; restart the gadget after checking the GC0308 camera";
+      return false;
+    }
     s_init_attempted = true;
-    error = "GC0308 initialization failed; restart the gadget after checking the camera";
-    return false;
+    if (!begin_camera()) {
+      error = "GC0308 initialization failed; restart the gadget after checking the camera";
+      return false;
+    }
+    s_ready = true;
   }
 
   camera_fb_t* fb = esp_camera_fb_get();

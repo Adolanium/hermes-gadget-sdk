@@ -185,11 +185,16 @@ void add_camera_action(hg::App& app, i2c_master_bus_handle_t sccb_bus) {
   camera.handler = [sccb_bus](const hg::json::Value&, hg::json::Value& result, std::string& error) {
     std::vector<uint8_t> pixels;
     uint16_t width = 0, height = 0;
-    // The camera's power/reset line lives on the AW9523B; release it before
-    // the first capture and leave it up for the sensor's lifetime.
-    if (!g_cores3.camera_power(true)) {
-      error = "camera power/reset line failed";
-      return false;
+    // The camera's power/reset line lives on the AW9523B; release it once, before
+    // the first capture, and leave it up for the sensor's lifetime. Pulsing it again
+    // would reset the running sensor's registers under the driver.
+    static bool powered = false;
+    if (!powered) {
+      if (!g_cores3.camera_power(true)) {
+        error = "camera power/reset line failed";
+        return false;
+      }
+      powered = true;
     }
     if (!cores3_camera.capture_rgb565(sccb_bus, pixels, width, height, error)) return false;
     if (pixels.size() > 640u * 512u * 2u) {
