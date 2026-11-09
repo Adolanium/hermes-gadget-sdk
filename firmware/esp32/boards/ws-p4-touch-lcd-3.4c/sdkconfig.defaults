@@ -53,10 +53,6 @@ CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y
 
 CONFIG_HG_BOARD_WS_P4_TOUCH_LCD_3_4C=y
 
-# The discrete JMH6936 bridge used on the 3.4C shares the IDF 5 MIPI-DSI
-# transport path but not the CrowPanel DMA2D scanout support.
-CONFIG_HG_DSI_DISABLE_DMA2D=y
-
 # This board can exhaust early internal DRAM when REGDMA sleep-clock retention
 # links are allocated alongside esp-hosted and PSRAM setup; it never light-sleeps.
 CONFIG_PM_SLEEP_CLK_ICG_ENABLE=n
