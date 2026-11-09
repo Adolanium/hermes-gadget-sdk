@@ -38,4 +38,8 @@ bool CoreS3Board::camera_power(bool on) {
   return control_ && control_->camera_power(on);
 }
 
+bool CoreS3Board::camera_rails_off() {
+  return control_ && control_->camera_rails_off();
+}
+
 }  // namespace hgp

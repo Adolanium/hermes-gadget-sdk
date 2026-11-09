@@ -34,7 +34,7 @@ Firmware builds and simulator tests check software behavior. A physical verifica
 | Espressif ESP32-S3-BOX | ST7789 320×240, BGR, both axes mirrored; TT21100 touch and BOOT. Mute on GPIO 1 is left to the hardware circuit | ES7210 microphones (MIC1 and MIC2) and ES8311 onboard speaker | USB power; screen timeout. ICM-42607-P unused | Experimental; firmware builds; not run on a board; full checklist not completed |
 | Espressif ESP32-S3-Korvo-2 with LCD sub-board (V3.0 or V3.1 main board, ESP32-S3-Korvo-2-LCD V1.0) | ILI9341 320×240, BGR, both axes mirrored, stock initialization; GT911 or TT21100 touch, X mirrored. ADC buttons unused | ES7210 microphones (MIC1 and MIC2) and ES8311 onboard speaker | TCA9554 enable, reset and backlight; battery voltage on GPIO 6 (divider of four, not measured); no charge pin and no software power-off. Camera, microSD and LEDs unused | Experimental; firmware builds; not run on a board; full checklist not completed |
 | Espressif ESP32-S3-BOX-3 | ST7789/TT21100 or ILI9342/GT911, detected through I2C; BOOT and touch gestures | ES7210 microphones and ES8311 onboard speaker | USB power; screen timeout | Experimental; physical report not recorded for either panel revision |
-| M5Stack CoreS3 (K128) | ILI9342C/E 320×240, detected through touch firmware; FT6336 gestures | ES7210 microphones and AW88298 speaker; **GC0308 camera** via the `camera.capture` action | AXP2101 readings, backlight and local power-off; AW9523 reset/boost control | Experimental; [speaker volume check](#m5stack-cores3-speaker-volume-check) and [camera capture check](#m5stack-cores3-camera-capture-check) on an ILI9342C unit; physical report not recorded for either panel revision |
+| M5Stack CoreS3 (K128) | ILI9342C/E 320×240, detected through touch firmware; FT6336 gestures | ES7210 microphones and AW88298 speaker; **GC0308 camera** via the `camera.capture` action and a [camera mode check](#m5stack-cores3-camera-mode-check) | AXP2101 readings, backlight and local power-off; AW9523 reset/boost control | Experimental; [speaker volume check](#m5stack-cores3-speaker-volume-check), [camera capture check](#m5stack-cores3-camera-capture-check) and [camera mode check](#m5stack-cores3-camera-mode-check) on an ILI9342C unit; physical report not recorded for either panel revision |
 | M5Stack StickS3 (ESP32-S3-PICO-1-N8R8) | ST7789P3 240×135 landscape; KEY1 (TALK) and KEY2 (CANCEL) | One ES8311 for speaker and microphone; AW8737 amplifier enabled through the M5PM1 | M5PM1 LCD rail and amplifier switching; battery voltage (percent from the uncalibrated voltage curve), USB presence, active-low charge status and PM1 shutdown; BMI270 face-down sleep | Experimental; owner smoke test on one unit on USB power with commit `db847c8` (ESP-IDF 6.1): `diag` lists display st7789, microphone es8311, speaker es8311 and I2C devices 0x18, 0x68, 0x6e; display upright with correct colors and no edge stripe; Wi-Fi setup; voice turns through a Hermes gateway (microphone capture and spoken replies); KEY2 cancels a reply. With the battery and motion build on the same unit, on USB: `status` reported 3572 mV, charging and external power; the BMI270 loaded its image and read screen up z +1004, picture upright y +973, right edge up x +1013 and face down z -998 mg, so the axes need no remapping; with `face_down_sleep on`, lying face down reported `face_down` and darkened the screen. Off USB, the owner reports the Battery and power page working on battery power (not charging), and settings **Power off** shutting the device down. On battery, after either settings **Power off** or a double click on the power button, a single click on the power button powered the device back on. Re-checked after rebasing onto `main`, with commit `4358b3d`: `diag` parts, I2C and motion as above, 4134 mV charging on USB, voice turns, KEY2 cancelling a reply, and face-down sleep. Replies in Chinese do not show, as on every board: the font and the reply charset are Latin-1. The device was admitted by the gateway's allow settings, so the pairing-code flow, screen timeout and OTA are not verified; full checklist not completed |
 | LilyGO T-Display-S3 (SKU/Version H587; PCB revision 1.2) | ST7789 320×170 over 8-bit i80; BOOT and Button2 | No onboard audio | Battery divider; no fuel gauge; GPIO15 powers the panel rail, not device shutdown | Experimental; physical smoke check only (screen ready/replies, Wi-Fi, online pairing); full physical checklist not completed; hardware-verified status not claimed |
 | Elecrow CrowPanel 2.1-inch HMI (ESP32-S3R8, 16 MB flash) | ST7701 480×480 RGB round panel; CST-family touch, rotary encoder, encoder button on PCF8574 | No onboard audio | USB power; screen timeout | Experimental; physical smoke check only (panel bring-up, brightness scale, Wi-Fi, online pairing, serial console); touch coordinates and encoder direction not physically verified |
@@ -470,6 +470,67 @@ A check of the GC0308 camera port on one board, not a full report in the format 
 - **During development:** the first init attempt panicked with an `IntegerDivideByZero` in `ll_cam_config` because `xclk_freq_hz` was left at 0 while the LCD_CAM divider needs the sensor's clock rate; setting it to 20 MHz fixed it.
 - **Camera rail found:** the ribbon (camera + proximity) shares a 3.3 V rail this port never switched on — with ALDO3/BLDO1/BLDO2 off, the diag scan missed 0x21 and 0x23 entirely and the GC0308 ID read returned garbage (`ESP_ERR_NOT_SUPPORTED`); an instrumented run logged `0x90=8b` before, then `id=0x9b` right after setting ALDO3 (`0x94` = `0x1C`) and OR-ing `0x34` into `0x90`, matching esp-bsp's CoreS3 camera bring-up. `camera_power()` now sets those rails before its first reset pulse.
 - **Not checked:** captures in low light against auto-exposure convergence, captures while a reply is playing, battery-powered capture, and the rest of the checklist.
+
+## M5Stack CoreS3 camera mode check
+
+The settings menu's **Camera** item — the live view, the countdown capture and
+leaving (#294, PR 1) — on the same ILI9342C unit as the
+[camera capture check](#m5stack-cores3-camera-capture-check). Run by the
+contributor with the serial console (entry, capture and leaving by hand).
+
+- **Firmware:** the `cores3-camera-mode` branch at commit `1bc96b7`, built with ESP-IDF 6.1
+  (`espressif/idf:v6.1`) and the CoreS3 defaults, flashed over USB into the
+  `ota_0` slot.
+- **Entry:** the settings menu's **Camera** item, reached by touch (hold the
+  title → drag to the item → tap) and with `camera` on the console; both open
+  the live view. Opening starts the pipeline — the rails, the CAM_RST pulse
+  and the driver — and the first frames flowed within about **270 ms** of the
+  command (probe and init logs at 21.497–21.777 s of uptime). A board whose
+  port has no camera, whose panel has no whole-panel framebuffer, or whose
+  start failed keeps the item out of the menu.
+- **Live view:** the VGA stream blitted straight into the panel rows between
+  the bars at the app's ~10 fps cap. Frame-timing counters measured 10.0
+  renders a second while the live view ran (`perf`'s renders; the preview's own
+  frames flush outside the Ui's counted bands, so they appear as idle renders).
+- **Mirroring:** the preview is **mirrored left-to-right** and the captured photo
+  is not: the live view moves the way the hand aimed at it moves, and the
+  capture — the held photo and the gateway's PNG — reads printed text the
+  right way round. Checked by aiming by hand and comparing the capture.
+- **Capture:** a tap starts the 3-2-1 countdown (a large number over the live
+  view) and captures. The photo, scaled and centred, holds until the next tap
+  (retake: the live view comes back first) or a swipe down. It is held in memory only:
+  a retake or leaving the mode discards it, and nothing is saved or sent. `diag`'s free
+  PSRAM: 6,280,372 bytes with the pipeline not running (boot idle — **the
+  boot pays nothing for the camera**), 5,051,408 while the live view ran, and
+  4,428,792 with the 614,400-byte photo held. Leaving returned to 6,280,388
+  and a later start to 5,051,396 — every intermediate allocation comes back.
+- **Leaving:** a swipe down exits at once; 60 s with no touch does too
+  (`camera mode left after 60 s with no touch` in the log). Closing the mode —
+  and, while the mode is closed, 60 s after the last `camera.capture` — stops the pipeline
+  (`camera pipeline stopped` in the log at 60 s after the capture, tick-timed):
+  the driver's frame buffers go back to PSRAM, the sensor is held in reset and
+  the ribbon's supplies go off. The screen never dimmed while the live view
+  ran.
+- **Start/stop cycles:** two open/close cycles and two `camera.capture` calls
+  spaced more than 60 s apart ran on this build: each start (mode open or
+  capture) reached the first frame in about 270 ms, and the later stop returned
+  the PSRAM to boot-idle (5,051,396 → 6,280,388 with the 60 s stop landed at
+  exactly the capture's stamp + 60 s).
+- **Residual:** the capture moment stalls the app task for about 100 ms (the
+  614 KB copy and the photo's blit), so a touch inside that window can drop a
+  sample or two. The preview never waits on the driver — every draw is gated on
+  `esp_camera_available_frames()`, since `esp_camera_fb_get` blocks up to 4 s on
+  an empty queue and starved the event queue (touch samples dropped, gestures
+  missed) until it was gated. The AXP2101 keeps its registers across the ESP32's
+  restarts, so rails left up by an interrupted stop stay up until the next
+  start's `camera_power(true)` refreshes them (masked writes, no harm).
+- **A driver finding:** switching the sensor to QVGA for the live view does not
+  work on this driver — `esp32-camera` queues only frames as large as its fb
+  allocation (`cam_hal: FB-SIZE: 153600 != 614400`, and no frame arrives), so
+  the mode runs the VGA pipeline and blits it scaled instead of restarting or
+  re-configuring frame sizes. The pipeline starts on demand and stops with the
+  mode (or, with the mode closed, 60 s after the last capture); `camera.capture`
+  reuses it as before.
 
 ## Support labels
 

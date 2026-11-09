@@ -322,6 +322,7 @@ const char* screen_name(Screen s) {
     case Screen::Prompt: return "prompt";
     case Screen::Updating: return "updating";
     case Screen::Settings: return "settings";
+    case Screen::Camera: return "camera";
     case Screen::Setup: return "setup";
     case Screen::Dashboard: return "dashboard";
     case Screen::Profiles: return "profiles";
@@ -655,8 +656,9 @@ void Ui::draw_frame(const UiModel& m) {
       hash_[i] = 0;
       continue;
     }
-    // An image owns the area between the bars; the app draws and flushes it.
-    if (m.screen == Screen::Image && (i == 1 || i == 2)) {
+    // An image owns the area between the bars; the app draws and flushes it. The
+    // camera screen does too (the port paints the live view there; see App::camera_draw).
+    if ((m.screen == Screen::Image || m.screen == Screen::Camera) && (i == 1 || i == 2)) {
       hash_[i] = 0;
       continue;
     }
@@ -872,6 +874,7 @@ void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
       break;
     }
     case Screen::Image:
+    case Screen::Camera:  // the area between the bars belongs to the camera/App; see draw_frame
     case Screen::Settings:
     case Screen::Setup:
     case Screen::Profiles:
@@ -1248,6 +1251,7 @@ constexpr uint8_t kSettingIcons[][8] = {
     {0x0C, 0x18, 0x30, 0x7E, 0x0C, 0x18, 0x30, 0x00},  // Bolt
     {0x00, 0x01, 0x03, 0x86, 0xCC, 0x78, 0x30, 0x00},  // Check
     {0xDB, 0xDB, 0x00, 0xDB, 0xDB, 0x00, 0xDB, 0xDB},  // Grid
+    {0x18, 0x7E, 0x81, 0xBD, 0xA5, 0x81, 0x7E, 0x18},  // Camera
 };
 
 void draw_icon(Canvas& c, int x, int y, SettingRow::Icon icon, int scale, uint16_t color) {

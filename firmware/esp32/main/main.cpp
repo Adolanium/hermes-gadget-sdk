@@ -178,6 +178,40 @@ void add_camera_action(hg::App& app, i2c_master_bus_handle_t sccb_bus) {
   app.add_action(std::move(camera));
 }
 #elif CONFIG_HG_BOARD_CORES3
+// The Camera HAL's start/stop bookkeeping. The pipeline starts on demand (the
+// camera mode opening, or a capture) and stops when it leaves, or 60 s after
+// the last capture — a feature most sessions won't use need not pay for PSRAM
+// and sensor power the whole boot. A start that fails latches for the boot:
+// the Camera item hides and captures report the latch.
+static uint32_t camera_use_ms = 0;  // the last start or capture: the 60 s stop counts from it
+
+static bool ensure_camera_run() {
+  if (hgp::camera_hal_running()) return true;
+  if (hgp::camera_hal_start_failed()) return false;
+  if (!g_cores3.camera_power(true)) {
+    // camera_power(true) puts the rails up before it pulses the expander, so a
+    // mid-way failure can leave the ribbon powered: down as far as the bus
+    // answers, then report the failed start either way.
+    g_cores3.camera_power(false);
+    g_cores3.camera_rails_off();
+    return false;
+  }
+  if (!hgp::camera_hal_begin()) {
+    // A start that got as far as powering up leaves the camera powered down.
+    g_cores3.camera_power(false);
+    g_cores3.camera_rails_off();
+    return false;
+  }
+  camera_use_ms = xTaskGetTickCount();
+  return true;
+}
+
+static void stop_camera() {
+  hgp::camera_hal_stop();       // the driver's frame buffers go back to PSRAM
+  g_cores3.camera_power(false); // the sensor is held in reset
+  g_cores3.camera_rails_off();  // and the ribbon's supplies go off
+}
+
 void add_camera_action(hg::App& app, i2c_master_bus_handle_t sccb_bus) {
   static hgp::CameraCapture cores3_camera;
   hg::Action camera;
@@ -187,18 +221,9 @@ void add_camera_action(hg::App& app, i2c_master_bus_handle_t sccb_bus) {
   camera.handler = [sccb_bus](const hg::json::Value&, hg::json::Value& result, std::string& error) {
     std::vector<uint8_t> pixels;
     uint16_t width = 0, height = 0;
-    // The camera's power/reset line lives on the AW9523B; release it once, before
-    // the first capture, and leave it up for the sensor's lifetime. Pulsing it again
-    // would reset the running sensor's registers under the driver.
-    static bool powered = false;
-    if (!powered) {
-      if (!g_cores3.camera_power(true)) {
-        error = "camera power/reset line failed";
-        return false;
-      }
-      powered = true;
-    }
+    if (!hgp::camera_hal_running()) ensure_camera_run();
     if (!cores3_camera.capture_rgb565(sccb_bus, pixels, width, height, error)) return false;
+    camera_use_ms = xTaskGetTickCount();  // a capture keeps the pipeline up for its 60 s
     if (pixels.size() > 640u * 512u * 2u) {
       error = "captured image exceeds the action-result limit";
       return false;
@@ -453,6 +478,15 @@ extern "C" void app_main(void) {
   } else
 #endif
   if (board.speaker.enabled && g_speaker.begin(board.speaker)) hal.speaker = &g_speaker;
+#if CONFIG_HG_BOARD_CORES3
+  // The CoreS3's GC0308: the camera HAL rides the panel once the display is up.
+  // The pipeline starts on demand (the camera mode opening, or a capture) and
+  // stops after, so the boot pays nothing for a feature most sessions skip.
+  if (hal.display != nullptr) {
+    hgp::camera_hal_set_display(hal.display);
+    hal.camera = hgp::camera_hal();
+  }
+#endif
   if (board.axp2101 && g_power.begin(i2c_bus)) {
     hal.power = &g_power;
     if (board.axp_power_key) g_power.use_power_key();
@@ -691,6 +725,26 @@ extern "C" void app_main(void) {
 #endif
     if (g_gestures) g_gestures->tick(g_system.now_ms());
     app.tick();
+#if CONFIG_HG_BOARD_CORES3
+    // The camera pipeline's lifecycle: start when the camera mode opens, stop
+    // when it leaves, and stop 60 s after the last capture (the mode, when a
+    // capture ran on its own). A start that fails closes the mode and hides
+    // the Camera item for the rest of the boot.
+    static bool camera_mode_was = false;
+    const bool camera_mode_now = app.camera_open();
+    if (camera_mode_now != camera_mode_was) {
+      camera_mode_was = camera_mode_now;
+      if (camera_mode_now) {
+        ensure_camera_run();  // a failed start closes the mode below on the next pass
+        if (!hgp::camera_hal_running()) app.close_camera();  // the item hides; the menu comes back
+      } else {
+        stop_camera();
+      }
+    } else if (!camera_mode_now && hgp::camera_hal_running() &&
+               xTaskGetTickCount() - camera_use_ms >= pdMS_TO_TICKS(60000)) {
+      stop_camera();
+    }
+#endif
 #if !CONFIG_HG_BOARD_ESP32_CYD
     // The motion task keeps the latest sample; poll it about every 100 ms instead
     // of letting 10 Hz events fill the queue. Only new reads go to the app, so a

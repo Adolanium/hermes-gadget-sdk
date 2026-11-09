@@ -179,6 +179,20 @@ class App {
   void settings_drag(int x, int y);
   void settings_tap(int x, int y);
   void settings_lift();
+  // The camera (the CoreS3's GC0308, boards whose port sets hal.camera): the settings
+  // menu's Camera item opens it. With the live view up, a tap starts a three-second
+  // countdown and captures; the photo stays on screen until the next tap (retake) or
+  // a swipe down (CANCEL, which leaves); 60 s with no input leaves too, and the
+  // screen never dims while the camera is out. Hold to talk is off here: a tap is
+  // the only trigger.
+  bool open_camera();
+  void close_camera();
+  bool camera_open() const { return camera_open_; }
+  // Touch: a tap anywhere on the camera screen is the trigger. True only while the
+  // camera screen is up and a tap can act (TouchGestures routes it here instead of
+  // to TALK).
+  bool camera_tap_live() const { return camera_open_; }
+  void camera_tap();
   // Hermes profiles: which one answers this device. Switching asks the server; the
   // device keeps a profile only once Hermes confirms it, and asks again only after an answer.
   bool next_agent_profile();
@@ -545,7 +559,9 @@ class App {
   bool lang_auto_ = false;
   std::optional<i18n::Lang> hermes_lang_;  // from the last `welcome` that named one this firmware has
   enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, TouchTalk, Profile, ProfileGrid, Microphone, Speaker, Display, Inputs,
-                              Info, Power, BatteryAlert, BatteryAlertSound, ChargingNotice, ChargingSound, ChargedNotice, ChargedSound, WifiDeepSleep, IdleTimer, TouchWake, FaceDownSleep, Clock, PowerOff, WifiSetup, Phone, Language, DoubleHome, WakeTalk, Animation, SdLog, Back };
+                              Camera, Info, Power, BatteryAlert, BatteryAlertSound, ChargingNotice, ChargingSound, ChargedNotice, ChargedSound,
+                              WifiDeepSleep, IdleTimer, TouchWake, FaceDownSleep, Clock, PowerOff, WifiSetup, Phone, Language, DoubleHome,
+                              WakeTalk, Animation, SdLog, Back };
   enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };
   Menu menu_ = Menu::Closed;
   // The settings list's scroll in pixels, and where it eases to. It follows the
@@ -564,6 +580,21 @@ class App {
   // An item's name and text, in `m`'s detail and body (the model's own for the selected item), and its row.
   void settings_item(Menu item, UiModel& m) const;
   SettingRow settings_row(Menu item, const std::string& label, const std::string& body) const;
+  // Camera mode (app_camera.cpp): the state, the countdown, the photo, and the
+  // draw step that rides the app's render tick (preview at the frame rate, the
+  // countdown number over it, the photo once).
+  void camera_draw();
+  void camera_model();
+  void camera_tick();
+  void camera_capture();  // the countdown fired: one still; failure goes back to the live view
+  enum class CameraState : uint8_t { Preview, Countdown, Shot };
+  bool camera_open_ = false;
+  CameraState camera_state_ = CameraState::Preview;
+  Countdown camera_countdown_;
+  Camera::Still camera_shot_;  // the photo on screen; empty while there is none
+  bool camera_shot_drawn_ = false;
+  uint32_t camera_touch_at_ = 0, camera_frame_at_ = 0;
+  bool camera_frame_due_ = false;  // draw the next preview frame now, whatever camera_frame_at_ says
   HardwareCheck hardware_check_ = HardwareCheck::None;
   std::string check_result_;
   std::string wifi_setup_text_;

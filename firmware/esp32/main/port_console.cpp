@@ -43,7 +43,7 @@ int run(int argc, char** argv) {
 }  // namespace
 
 void begin() {
-  static const char* const kCommands[] = {"help",      "status", "diag",   "get",         "set",       "say",
+  static const char* const kCommands[] = {"help",      "status", "diag",   "get",         "set",       "say",       "camera",
                                           "talk",      "release", "cancel", "new-session", "reconnect", "forget-key",
                                           "factory-reset", "settings", "wifi-setup", "wifi", "phone", "perf"};
   for (const char* name : kCommands) {

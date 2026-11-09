@@ -13,7 +13,7 @@ bool App::settings_hold_live() const {
 }
 
 bool App::settings_title_hit(int x, int y) const {
-  return ui_ && settings_hold_live() && ui_->title_hit(x, y);
+  return ui_ && settings_hold_live() && !camera_open_ && ui_->title_hit(x, y);
 }
 
 // Steps over the items this board can't offer.
@@ -40,6 +40,10 @@ bool App::menu_offered(Menu item) const {
     case Menu::PowerOff: return hal_.power && hal_.power->can_power_off();
     case Menu::WifiSetup: return static_cast<bool>(on_wifi_setup);
     case Menu::Phone: return static_cast<bool>(on_phone_pair);
+    case Menu::Camera:
+      // A camera screen draws into a whole-panel framebuffer, as an image does.
+      return hal_.camera != nullptr && hal_.camera->available() && hal_.display != nullptr &&
+             hal_.display->framebuffer_rows() == 0;
     case Menu::Closed: return false;
     default: return true;
   }
@@ -248,6 +252,9 @@ void App::settings_input(Button button, bool pressed) {
         console(std::string("set battery_display ") + kNext[static_cast<int>(battery_display_)]);
       }
       break;
+    case Menu::Camera:
+      open_camera();
+      break;
     case Menu::Info:
     case Menu::Closed: break;
   }
@@ -262,7 +269,7 @@ void App::settings_tick() {
     settings_scroll_ += d > 0 ? (d + 1) / 2 : (d - 1) / 2;
     update_model();
   }
-  if (talk_held_ && cancel_held_ && !settings_chord_fired_ &&
+  if (talk_held_ && cancel_held_ && !settings_chord_fired_ && !camera_open_ &&
       now() - talk_down_at_ >= 1000 && now() - cancel_down_at_ >= 1000) {
     if (open_settings()) {
       settings_chord_fired_ = true;
@@ -342,6 +349,7 @@ SettingRow App::settings_row(Menu item, const std::string& label, const std::str
     case Menu::Speaker: row.icon = Icon::Note; row.kind = Kind::Action; break;
     case Menu::Display: row.icon = Icon::Screen; row.kind = Kind::Action; break;
     case Menu::Inputs: row.icon = Icon::Keys; row.kind = Kind::Action; break;
+    case Menu::Camera: row.icon = Icon::Camera; row.kind = Kind::Action; break;
     case Menu::Info: row.icon = Icon::Info; row.kind = Kind::Action; break;
     case Menu::Power:
       row.icon = Icon::Battery;
@@ -514,6 +522,10 @@ void App::settings_item(Menu item, UiModel& m) const {
     case Menu::Inputs:
       m.detail = tr(Msg::InputCheck);
       m.body = tr(Msg::InputCheckIntro);
+      break;
+    case Menu::Camera:
+      m.detail = tr(Msg::Camera);
+      m.body = tr(Msg::CameraIntro);
       break;
     case Menu::Info:
       m.detail = tr(Msg::DeviceInfo);

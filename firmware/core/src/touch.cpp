@@ -46,6 +46,7 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
       case State::Picker: app_.profile_tap(x0_, y0_); break;
       case State::List: app_.settings_tap(x0_, y0_); break;
       case State::ListDrag: app_.settings_lift(); break;
+      case State::Camera: app_.camera_tap(); break;
       case State::Side:  // a sideways swipe: travel enough, and more sideways than down or up
         if (std::abs(dx_) >= cfg_.swipe_px && std::abs(dx_) > 2 * std::abs(dy_)) {
           if (in_picker_) app_.profile_page_step(dx_ < 0 ? 1 : -1);  // the next page comes in from the right
@@ -71,6 +72,7 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
     state_ = app_.profile_picker_open() ? State::Picker
               : !from_clock_ && app_.settings_title_hit(x, y) ? State::Settings
               : app_.settings_list_live() ? State::List
+              : app_.camera_tap_live() ? State::Camera
               : State::Pending;
     if (state_ == State::List) app_.settings_press(x, y);
     on_name_ = !from_clock_ && state_ == State::Pending && app_.profile_name_hit(x, y);
@@ -105,6 +107,15 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
       }
       break;
     case State::ListDrag: app_.settings_drag(x, y); break;
+    case State::Camera:  // tap to act; a swipe down leaves (or cancels the countdown)
+      if (swiped_down) {
+        state_ = State::Swipe;
+        press(Button::Cancel);
+      } else if (dy < 0 || (std::abs(dx) >= std::abs(dy) && std::abs(dx) > cfg_.slop_px)) {
+        // Moving up or sideways before a clear down-swipe forms: never a swipe.
+        state_ = State::Ignored;
+      }
+      break;
     case State::Side:
       dx_ = dx, dy_ = dy;
       break;

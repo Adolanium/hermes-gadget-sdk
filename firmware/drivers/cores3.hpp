@@ -21,6 +21,10 @@ class CoreS3Control {
   // Drive it low so the sensor is held, then release it; unrelated P1 outputs
   // keep their state through the masked writes.
   bool camera_power(bool on);
+  // The camera's own rails off: ALDO3 (the camera's 3.3 V, register 0x94) and
+  // the ALDO3/BLDO1/BLDO2 enable bits camera_power(true) set. Everything else
+  // on those registers — the amp's and microphones' rails — stays as it is.
+  bool camera_rails_off();
 
  private:
   bool change(uint8_t address, uint8_t reg, uint8_t mask, uint8_t value);

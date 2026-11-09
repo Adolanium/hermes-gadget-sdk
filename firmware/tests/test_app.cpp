@@ -214,13 +214,46 @@ struct FakeUpdater : hg::Updater {
   }
 };
 
+// The camera-capable boards' hal.camera: a fake the camera-mode tests drive.
+struct FakeCamera final : hg::Camera {
+  bool available_ = true;
+  bool capture_fails = false;
+  unsigned previews = 0, captures = 0;
+  uint16_t last_x = 0, last_y = 0, last_w = 0, last_h = 0;
+  bool available() const override { return available_; }
+  bool draw_preview(uint16_t x, uint16_t y, uint16_t w, uint16_t h) override {
+    last_x = x;
+    last_y = y;
+    last_w = w;
+    last_h = h;
+    ++previews;
+    return true;
+  }
+  bool capture(Still& out, std::string& error) override {
+    if (capture_fails) {
+      error = "no sensor";
+      return false;
+    }
+    out.width = 640;
+    out.height = 480;
+    out.pixels.assign(640u * 480u * 2u, 0xAB);
+    ++captures;
+    return true;
+  }
+};
+
 struct Rig {
   FakeHal fake;
+  FakeCamera camera;  // every rig's hal.camera; Rig(profile, false) makes it a board without one
   hg::Hal hal = fake.hal();
   hg::App app;
 
-  explicit Rig(const std::string& server = "ws://hermes.local:8765/gadget") : app(hal, profile(server)) {}
-  explicit Rig(hg::DeviceProfile p) : app(hal, std::move(p)) {}
+  explicit Rig(const std::string& server = "ws://hermes.local:8765/gadget") : app(hal, profile(server)) {
+    hal.camera = &camera;
+  }
+  explicit Rig(hg::DeviceProfile p, bool with_camera = true) : app(hal, std::move(p)) {
+    if (with_camera) hal.camera = &camera;
+  }
 
   // A board whose port feeds App::on_motion: it can sleep face down.
   static hg::DeviceProfile motion_profile() {
@@ -2883,7 +2916,7 @@ TEST("power: failed readings replace stale data and shutdown requires a second l
   CHECK(status["power"]["battery_mv"].is_null());
   CHECK((*r.fake.last("state"))["sensors"]["battery_mv"].is_null());
   r.app.open_settings();
-  for (int i = 0; i < 17; ++i) r.app.console("cancel");  // the Clock face item sits before Power off
+  for (int i = 0; i < 18; ++i) r.app.console("cancel");  // the Camera item and the Clock face sit before Power off
   CHECK_EQ(r.app.model().detail, std::string("Power off"));
   r.app.console("talk"); r.app.console("release");
   CHECK_EQ(battery.shutdowns, 0);
@@ -3999,7 +4032,7 @@ TEST("battery estimate: Power-page selection uses the display value and changes 
   r.bring_online(true);
   r.app.console("set battery_estimate liion");
   CHECK(r.app.open_settings());
-  for (int i = 0; i < 8; ++i) r.app.console("cancel");
+  for (int i = 0; i < 9; ++i) r.app.console("cancel");  // Camera sits before Info and Power
   r.app.console("talk"); r.app.console("release");
   CHECK_EQ(r.fake.kv["battery_display"], std::string("icon"));
   CHECK_EQ(int(r.app.model().battery), 50);
@@ -4101,7 +4134,7 @@ TEST("battery indicator: off by default, follows readings once chosen, and each 
   CHECK_EQ(int(r.app.model().battery), -1);
   // Each select on the battery page moves to the next style, saves it, and stays on the page.
   r.app.open_settings();
-  for (int i = 0; i < 8; ++i) r.app.console("cancel");
+  for (int i = 0; i < 9; ++i) r.app.console("cancel");  // Camera sits before Info and Power
   CHECK_EQ(r.app.model().detail, std::string("Battery and power"));
   CHECK(r.app.model().body.find("Indicator: Off\nTALK to change") != std::string::npos);  // a button board
   struct Step { const char* saved; const char* shown; bool icon, text; };
@@ -4131,7 +4164,7 @@ TEST("battery indicator: the battery page offers it only when a percentage can a
   r.hal.power = &battery;
   r.bring_online(true);
   r.app.open_settings();
-  for (int i = 0; i < 8; ++i) r.app.console("cancel");
+  for (int i = 0; i < 9; ++i) r.app.console("cancel");  // Camera sits before Info and Power
   CHECK_EQ(r.app.model().detail, std::string("Battery and power"));
   for (const auto& reading : {std::optional<hg::PowerStatus>{},                                      // no readings
                               std::optional<hg::PowerStatus>{hg::PowerStatus{false, std::nullopt, 0, false, true}},  // no battery
@@ -4159,7 +4192,7 @@ TEST("battery indicator: touch screens say tap") {
   r.hal.power = &battery;
   r.bring_online(true);
   r.app.open_settings();
-  for (int i = 0; i < 8; ++i) r.app.console("cancel");
+  for (int i = 0; i < 9; ++i) r.app.console("cancel");  // Camera sits before Info and Power
   CHECK_EQ(r.app.model().detail, std::string("Battery and power"));
   CHECK(r.app.model().body.find("Indicator: Off\nTap to change") != std::string::npos);
 }
@@ -9048,4 +9081,223 @@ TEST("recording buffer: once its audio.end goes, the Thinking timeout is the sho
   }
   CHECK(!r.app.in_turn());
   CHECK_EQ(r.app.model().detail, std::string("No reply from Hermes"));
+}
+
+// The camera mode: the settings menu's Camera item riding hg::Camera (CoreS3, #294 PR 1).
+namespace {
+void cam_tap(Rig& r, hg::TouchGestures& touch) {
+  touch.update(true, 160, 120, r.fake.clock);
+  r.advance(30);
+  touch.update(false, 0, 0, r.fake.clock);
+  r.advance(30);
+}
+}  // namespace
+
+TEST("camera: the settings item opens the mode; a tap counts down, captures once, and the photo holds") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 24 && r.app.model().detail != "Camera"; ++i) r.app.on_button(hg::Button::Down, true);
+  CHECK_EQ(r.app.model().detail, std::string("Camera"));
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.camera_open());
+  CHECK(!r.app.settings_open());
+  CHECK(r.app.screen() == hg::Screen::Camera);
+  CHECK_EQ(r.app.model().hint, std::string("Tap to take a photo"));
+
+  // The live view draws into the rows between the bars, at the app's frame rate.
+  const unsigned previews_before = r.camera.previews;
+  r.advance(150);
+  CHECK(r.camera.previews > previews_before);
+  hg::Ui ui(r.fake);
+  const hg::UiLayout& l = ui.layout();
+  CHECK_EQ(r.camera.last_x, uint16_t(0));
+  CHECK_EQ(r.camera.last_y, uint16_t(l.main_y));
+  CHECK_EQ(r.camera.last_w, uint16_t(r.fake.width));
+  CHECK_EQ(r.camera.last_h, uint16_t(l.main_h));
+
+  hg::TouchGestures touch(r.app);
+  cam_tap(r, touch);
+  CHECK_EQ(r.app.model().hint, std::string("Hold still"));
+  CHECK(!r.fake.mic_on);  // hold-to-talk is off here
+  CHECK(r.fake.last("audio.start") == nullptr);
+  r.advance(3100);  // three seconds, then the capture
+  CHECK_EQ(r.camera.captures, 1u);
+  CHECK_EQ(r.app.model().hint, std::string("Tap to retake"));
+  // The photo itself is on the panel, fitted and centred between the bars.
+  CHECK_EQ(r.fake.fb[static_cast<size_t>((l.main_y + l.main_h / 2) * 320 + 160)], uint16_t(0xABAB));
+  const unsigned previews_on_shot = r.camera.previews;
+  r.advance(200);
+  CHECK_EQ(r.camera.previews, previews_on_shot);  // the live view pauses behind it
+
+  cam_tap(r, touch);  // retake: the live view comes back first
+  CHECK_EQ(r.app.model().hint, std::string("Tap to take a photo"));
+  r.advance(150);
+  CHECK(r.camera.previews > previews_on_shot);
+  cam_tap(r, touch);  // and the next tap counts down again
+  CHECK_EQ(r.app.model().hint, std::string("Hold still"));
+  r.advance(3100);
+  CHECK_EQ(r.camera.captures, 2u);
+}
+
+TEST("camera: the live view still draws after 24.8 days of uptime") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  r.fake.clock += 0x80000000u;  // past 2^31 ms: now() - 0 no longer reads as a positive int32
+  r.app.tick();
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 24 && r.app.model().detail != "Camera"; ++i) r.app.on_button(hg::Button::Down, true);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.camera_open());
+  const unsigned previews_before = r.camera.previews;
+  r.advance(150);
+  CHECK(r.camera.previews > previews_before);
+}
+
+TEST("camera: a tap during the countdown takes the live view back without capturing") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("camera"), std::string("@ok camera"));
+  hg::TouchGestures touch(r.app);
+  cam_tap(r, touch);
+  CHECK_EQ(r.app.model().hint, std::string("Hold still"));
+  r.advance(1200);
+  cam_tap(r, touch);
+  CHECK_EQ(r.app.model().hint, std::string("Tap to take a photo"));
+  r.advance(3100);
+  CHECK_EQ(r.camera.captures, 0u);
+  CHECK(r.app.camera_open());  // it waits for the next tap
+}
+
+TEST("camera: a swipe down leaves the mode, like CANCEL on any other screen") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  r.app.console("camera");
+  CHECK(r.app.camera_open());
+  hg::TouchGestures touch(r.app);
+  touch.update(true, 160, 120, r.fake.clock);
+  r.advance(30);
+  touch.update(true, 164, 220, r.fake.clock);  // 100 down, 4 sideways: a swipe, not a tap
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(!r.app.camera_open());
+  CHECK(r.app.screen() == hg::Screen::Ready);
+}
+
+TEST("camera: a swipe that grows past the tap slop over several samples still leaves") {
+  // Real panels deliver the finger travel in 20 ms steps (the FT6336 logged a
+  // 19 px step, then 37, then 86): the state must keep listening through them
+  // until a clear down-swipe forms. Sending the gesture to Ignored at the first
+  // px of travel is what made swipes do nothing on hardware.
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  r.app.console("camera");
+  hg::TouchGestures touch(r.app);
+  touch.update(true, 160, 120, r.fake.clock);
+  r.advance(40);
+  touch.update(true, 153, 139, r.fake.clock);  // past the tap slop, only 19 px down
+  r.advance(40);
+  touch.update(true, 146, 191, r.fake.clock);  // 71 px down, still more down than sideways
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(!r.app.camera_open());
+  CHECK(r.app.screen() == hg::Screen::Ready);
+}
+
+TEST("camera: holding the screen never records, and its lift is still a tap") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  r.app.console("camera");
+  hg::TouchGestures touch(r.app);
+  touch.update(true, 160, 120, r.fake.clock);
+  r.advance(600);
+  touch.tick(r.fake.clock);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.fake.last("audio.start") == nullptr);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK_EQ(r.app.model().hint, std::string("Hold still"));
+  r.advance(3100);
+  CHECK_EQ(r.camera.captures, 1u);
+}
+
+TEST("camera: the screen stays lit while the live view runs, and 60 s with no touch leaves") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  CHECK_EQ(r.app.console("camera"), std::string("@ok camera"));
+  CHECK_EQ(r.fake.brightness, 100);
+  for (uint32_t t = 0; t < 31000; t += 10000) {  // past where an idle screen dimmed and slept
+    r.server(R"({"type":"ping","ts":1})");
+    r.advance(10000);
+  }
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.camera_open());
+  for (uint32_t t = 0; t < 30000; t += 10000) {  // ...and 60 s since the last touch leaves
+    r.server(R"({"type":"ping","ts":1})");
+    r.advance(10000);
+  }
+  CHECK(!r.app.camera_open());
+  CHECK(r.app.screen() == hg::Screen::Ready);
+}
+
+TEST("camera: a failed capture says so and goes back to the live view") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  r.app.console("camera");
+  r.camera.capture_fails = true;
+  hg::TouchGestures touch(r.app);
+  cam_tap(r, touch);
+  r.advance(3100);
+  CHECK_EQ(r.camera.captures, 0u);
+  CHECK(r.app.camera_open());
+  CHECK_EQ(r.app.model().hint, std::string("The camera didn't take a photo"));
+  r.advance(3000);  // the flash fades
+  CHECK_EQ(r.app.model().hint, std::string("Tap to take a photo"));
+  r.camera.capture_fails = false;
+  cam_tap(r, touch);
+  r.advance(3100);
+  CHECK_EQ(r.camera.captures, 1u);
+  CHECK_EQ(r.app.model().hint, std::string("Tap to retake"));
+}
+
+TEST("camera: a TALK key press is the trigger too, and boards without a camera never offer the item") {
+  hg::DeviceProfile p = Rig::profile("ws://hermes.local:8765/gadget");
+  p.talk_key = true;
+  p.talk_label = "BOOT";
+  Rig r(p);
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("camera"), std::string("@ok camera"));
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK_EQ(r.app.model().hint, std::string("Hold still"));
+  CHECK(!r.fake.mic_on);
+  r.app.on_button(hg::Button::Talk, false);
+  r.advance(3100);
+  CHECK_EQ(r.camera.captures, 1u);
+
+  Rig none(Rig::profile("ws://hermes.local:8765/gadget"), /*with_camera=*/false);
+  none.bring_online(true);
+  CHECK(none.app.open_settings());
+  for (int i = 0; i < 40; ++i) {
+    none.app.on_button(hg::Button::Down, true);
+    CHECK(none.app.model().detail != std::string("Camera"));
+  }
+  none.app.close_settings();
+  CHECK(none.app.console("camera").rfind("@error", 0) == 0);
+}
+
+TEST("camera: a card Hermes sends waits until the mode leaves, and what asks to take the screen gets it") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  r.app.console("camera");
+  r.server(R"({"type":"display","title":"Card","body":"milk","ttl_s":0})");
+  CHECK(r.app.screen() == hg::Screen::Camera);
+  r.app.console("camera close");
+  CHECK(!r.app.camera_open());
+  CHECK(r.app.screen() == hg::Screen::Card);
+
+  r.app.console("camera");
+  r.server(R"({"type":"prompt","id":"q","title":"Allow?","text":"rm -rf build"})");
+  CHECK(!r.app.camera_open());  // a question takes the screen, as it takes it from settings
+  CHECK(r.app.screen() == hg::Screen::Prompt);
 }

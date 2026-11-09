@@ -717,11 +717,27 @@ class CoreS3Board {
   void set_backlight(uint8_t percent);
   // The GC0308's power/reset line: AW9523B P1_0, routed through CoreS3Control.
   bool camera_power(bool on);
+  // The camera ribbon's power supplies down (the counterpart of camera_power(true)'s
+  // rails), leaving everything else on the same PMIC registers as it is.
+  bool camera_rails_off();
 
  private:
   i2c_master_dev_handle_t pmic_ = nullptr, expander_ = nullptr;
   std::unique_ptr<hg::CoreS3Control> control_;
 };
+
+// The CoreS3's hg::Camera implementation (port_camera_cores3.cpp). camera_hal()
+// returns nullptr on any other board; camera_hal_set_display() gives it the
+// panel for the live preview (call once after the display is up). The pipeline
+// starts on demand — camera_hal_begin() runs after the board's camera rails and
+// reset pulse — and camera_hal_stop() is its counterpart. A failed start
+// latches for the boot (camera_hal_start_failed(), and available() goes false).
+hg::Camera* camera_hal();
+void camera_hal_set_display(hg::Display* display);
+bool camera_hal_begin();
+bool camera_hal_running();
+bool camera_hal_start_failed();
+void camera_hal_stop();
 
 // The M5PM1's rails, amplifier and battery. Hal::power once begin() succeeded.
 class StickS3Board final : public hg::Power {
