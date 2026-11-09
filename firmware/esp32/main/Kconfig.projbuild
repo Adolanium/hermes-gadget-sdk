@@ -1,5 +1,12 @@
 menu "Hermes Gadget"
 
+    config HG_DSI_DISABLE_DMA2D
+        bool "Disable DSI DMA2D blits on this board"
+        default n
+        help
+            Use the CPU copy path for MIPI-DSI panels whose bridge does not
+            support the ESP32-P4 DMA2D scanout path.
+
     menu "Defaults (overridable from the serial console)"
         config HG_DEFAULT_NAME
             string "Device name"

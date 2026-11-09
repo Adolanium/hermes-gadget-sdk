@@ -53,7 +53,7 @@ dependencies:
     version: "2.0.2"
     rules:
       - if: target in [esp32p4]
-  # ST7123 MIPI-DSI. 1.0.2 is the ESP-IDF 6 build. No board selects it yet.
+  # ST7123 MIPI-DSI used by the P4 profile that selects it.
   espressif/esp_lcd_st7123:
     version: "1.0.2"
     rules:
