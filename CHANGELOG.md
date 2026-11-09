@@ -4,6 +4,8 @@
 
 ### Firmware
 
+- The M5Stack CoreS3's speaker plays at full volume. The port reserved 15 dB of the AW88298's gain, which the codec driver subtracted from every volume, so 100 played near −11 dB, about a fifth of full volume by ear. The reserve is gone, so 100 reaches the amplifier's 0 dB, the level M5Stack's own driver uses on the CoreS3. Checked by ear on a CoreS3: loud at 100, with no audible distortion over several replies ([speaker volume check](docs/hardware-validation.md#m5stack-cores3-speaker-volume-check)). Fixes #289. Reported and tested by @james-see.
+
 - On the tailnet, the gadget connects to Hermes as soon as its WireGuard session with the Hermes computer is up, instead of waiting until TailTiny also reports itself connected. TailTiny does that only after its DERP relay connects, whose TLS handshake alone took about 2.7 s on an AMOLED-1.75C. After a Wi-Fi change it still waits for TailTiny to be registered again on the new network, since WireGuard keeps the old network's session. A Hermes computer that isn't at a tailnet address waits as before. Contributed by Antonio Lourenco (@tozes).
 
 - The Waveshare AMOLED-2.16 (SKU 33969) has a partial physical report on the 0.5.0 release image, from a second unit: pairing, a real Wi-Fi network, a complete voice turn with a spoken reply and the `speaker.volume` action ran on the board; touch accuracy, the PWR key, OTA, persistence and battery were not checked, so the port stays experimental. A board that shows nothing after an `esptool` write needs a power cycle to start ([hardware](docs/hardware.md#esp32-s3-touch-amoled-216), [report](docs/hardware-validation.md#waveshare-amoled-216-partial-physical-report)). Contributed by @swissly.
