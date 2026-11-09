@@ -13,6 +13,11 @@ dependencies:
       - if: target in [esp32p4]
   # ES8311 / ES7210 / AW88298 codecs on boards that use them
   espressif/esp_codec_dev: "~1.5"
+  # M5Stack CoreS3: the GC0308 camera over the S3 DVP backend of esp32-camera.
+  espressif/esp32-camera:
+    version: "2.1.8"
+    rules:
+      - if: target in [esp32s3]
   # Opus reply audio: Xiph libopus (BSD-3-Clause) packaged for ESP-IDF
   78/esp-opus: "~1.0.5"
   espressif/esp_lcd_st77916: "~2.0.2"

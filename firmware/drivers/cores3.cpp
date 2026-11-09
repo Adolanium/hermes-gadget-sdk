@@ -37,4 +37,16 @@ bool CoreS3Control::set_brightness(uint8_t percent) {
   return change(kPmic, 0x99, 0x1f, code) && change(kPmic, 0x90, 0x80, 0x80);
 }
 
+bool CoreS3Control::camera_power(bool on) {
+  // Drive the camera reset low, then release it for a clean start. Holding it
+  // low keeps the sensor held; unrelated P1 outputs keep their state through
+  // the masked writes.
+  if (!change(kExpander, 0x05, 0x01, 0x01) || !change(kExpander, 0x03, 0x01, 0x00)) return false;
+  if (!on) return true;
+  delay_(10);
+  if (!change(kExpander, 0x03, 0x01, 0x01)) return false;
+  delay_(100);  // the sensor's own power-up before SCCB traffic
+  return true;
+}
+
 }  // namespace hg
