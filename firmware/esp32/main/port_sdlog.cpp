@@ -159,7 +159,7 @@ void SdLogger::flush() {
 void SdLogger::task(void* arg) {
   auto* self = static_cast<SdLogger*>(arg);
   uint32_t last = 0;
-  self->mount();  // try once immediately; later retries wait 30 s
+  bool was_on = false;
   while (true) {
     vTaskDelay(pdMS_TO_TICKS(500));
     // The task owns the file: it opens, closes, mounts and rotates, so the
@@ -171,14 +171,20 @@ void SdLogger::task(void* arg) {
         std::fclose(self->file_);
         self->file_ = nullptr;
       }
+      was_on = false;
       continue;
     }
-    self->flush();
-    // Retry the mount about every 30 s until a card shows up.
-    if (!self->mounted_ && xTaskGetTickCount() - last > pdMS_TO_TICKS(30000)) {
+    // Switched on: try the card now, not at the next 30 s mark. Still mounted from
+    // before it was switched off: reopen the file mount() opened then.
+    const bool just_on = !was_on;
+    was_on = true;
+    if (!self->mounted_ && (just_on || xTaskGetTickCount() - last > pdMS_TO_TICKS(30000))) {
       last = xTaskGetTickCount();
-      self->mount();
+      self->mount();  // retried about every 30 s until a card shows up
+    } else if (just_on && self->mounted_ && !self->file_) {
+      self->open_file();
     }
+    self->flush();
   }
 }
 
