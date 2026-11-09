@@ -4,7 +4,7 @@
 
 ### Firmware
 
-- The M5Stack CoreS3's speaker plays at full volume. The port reserved 15 dB of the AW88298's gain, which the codec driver subtracted from every volume, so 100 played near −11 dB, about a fifth of full volume by ear. The reserve is gone; the amplifier's own AGC limits the speaker, as in M5Stack's driver, which runs it at 0 dB. Checked by ear on a CoreS3: loud at 100, with no audible distortion over several replies ([speaker volume check](docs/hardware-validation.md#m5stack-cores3-speaker-volume-check)). Fixes #289. Reported and tested by @james-see.
+- The M5Stack CoreS3's speaker plays at full volume. The port reserved 15 dB of the AW88298's gain, which the codec driver subtracted from every volume, so 100 played near −11 dB, about a fifth of full volume by ear. The reserve is gone, so 100 reaches the amplifier's 0 dB, the level M5Stack's own driver uses on the CoreS3. Checked by ear on a CoreS3: loud at 100, with no audible distortion over several replies ([speaker volume check](docs/hardware-validation.md#m5stack-cores3-speaker-volume-check)). Fixes #289. Reported and tested by @james-see.
 
 - On the tailnet, the gadget connects to Hermes as soon as its WireGuard session with the Hermes computer is up, instead of waiting until TailTiny also reports itself connected. TailTiny does that only after its DERP relay connects, whose TLS handshake alone took about 2.7 s on an AMOLED-1.75C. After a Wi-Fi change it still waits for TailTiny to be registered again on the new network, since WireGuard keeps the old network's session. A Hermes computer that isn't at a tailnet address waits as before. Contributed by Antonio Lourenco (@tozes).
 

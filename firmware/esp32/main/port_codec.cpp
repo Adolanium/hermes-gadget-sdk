@@ -127,9 +127,10 @@ bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus)
     amp.ctrl_if = dac.ctrl_if;
     amp.gpio_if = gpio_if;
     // No reserve: the driver subtracts the hardware gain from every volume, and 15 dB here (about
-    // 11.4 dB net, with the 3.3 V/5 V default) held 100% near -11 dB. The AW88298's own AGC
-    // (HOLPTH 0x64 in every volume write) limits the speaker, and M5Unified runs this amplifier
-    // at 0 dB (HAGCCFG4 0x0064) on the CoreS3. Checked by ear on a CoreS3 (issue #289).
+    // 11.4 dB net, with the 3.3 V/5 V default) held 100% near -11 dB. M5Unified runs this
+    // amplifier at 0 dB (HAGCCFG4 0x0064) on the CoreS3. The driver leaves the AW88298's AGC off
+    // (HAGCE=0), so nothing limits the level beyond the volume itself. Checked by ear on a
+    // CoreS3, with no audible distortion at 100 (issue #289).
     amp.hw_gain.pa_gain = 0;
     out_cfg.codec_if = aw88298_codec_new(&amp);
   } else if (cfg.speaker == SpeakerCodec::Es8388) {
