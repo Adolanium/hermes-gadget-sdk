@@ -108,8 +108,8 @@ namespace hg::i18n {
   X(WakeTalkOn,             "On\n{0} lights the dark screen and records.") \
   X(WakeTalkOff,            "Off\n{0} only lights the dark screen.") \
   X(Animation,             "Animation") \
-  X(AnimationOn,            "On\nThe ring and the busy screens move.") \
-  X(AnimationOff,           "Off\nThe ring and the busy screens stand still.") \
+  X(AnimationOn,            "On\nThe ring and the Updating screen move.") \
+  X(AnimationOff,           "Off\nThe ring and the Updating screen stand still.") \
   X(FaceDownSleep,          "Face-down sleep") \
   X(FaceDownSleepOn,        "On\nFace down, the screen sleeps and Hermes stays quiet.") \
   X(FaceDownSleepOff,       "Off\nSelect to sleep when the gadget lies face down.") \
