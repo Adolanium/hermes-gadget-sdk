@@ -49,7 +49,7 @@ bool App::open_camera() {
   camera_shot_ = {};
   camera_shot_drawn_ = false;
   camera_touch_at_ = now();
-  camera_frame_at_ = 0;  // the first frame goes out with this very pass
+  camera_frame_due_ = true;  // the first frame goes out with this very pass
   ui_->invalidate();
   update_model();
   return true;
@@ -85,7 +85,7 @@ void App::camera_tap() {
       camera_state_ = CameraState::Preview;
       camera_shot_ = {};
       camera_shot_drawn_ = false;
-      camera_frame_at_ = 0;
+      camera_frame_due_ = true;
       break;
   }
   update_model();
@@ -122,7 +122,7 @@ void App::camera_capture() {
   } else {
     log(LogLevel::Warn, "camera capture failed: " + error);
     camera_state_ = CameraState::Preview;
-    camera_frame_at_ = 0;
+    camera_frame_due_ = true;
     set_hint_flash(tr(i18n::Msg::CameraFailed));
   }
   update_model();
@@ -153,7 +153,9 @@ void App::camera_draw() {
     ui_->flush(l.main_y, l.main_y + l.main_h);
     return;
   }
-  if (static_cast<int32_t>(now() - camera_frame_at_) < static_cast<int32_t>(kCameraFrameMs)) return;
+  // A flag, not camera_frame_at_ = 0: past 2^31 ms of uptime (24.8 days), now() - 0 reads
+  // as negative and the live view would never draw again.
+  if (!camera_frame_due_ && now() - camera_frame_at_ < kCameraFrameMs) return;
   // No frame this call: leave the panel as it is and try again on the next one.
   // Drawing the countdown digit over a stale frame would ghost it into the next
   // digit's shape, and a failed draw should not spend the frame budget.
@@ -161,6 +163,7 @@ void App::camera_draw() {
                                  static_cast<uint16_t>(l.main_h)))
     return;
   camera_frame_at_ = now();
+  camera_frame_due_ = false;
   if (camera_state_ != CameraState::Countdown) return;
   // The big number stays over every new frame: an outlined digit, centred.
   const int scale = 3;

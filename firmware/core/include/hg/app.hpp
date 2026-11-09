@@ -594,6 +594,7 @@ class App {
   Camera::Still camera_shot_;  // the photo on screen; empty while there is none
   bool camera_shot_drawn_ = false;
   uint32_t camera_touch_at_ = 0, camera_frame_at_ = 0;
+  bool camera_frame_due_ = false;  // draw the next preview frame now, whatever camera_frame_at_ says
   HardwareCheck hardware_check_ = HardwareCheck::None;
   std::string check_result_;
   std::string wifi_setup_text_;

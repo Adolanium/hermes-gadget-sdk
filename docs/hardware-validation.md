@@ -492,20 +492,21 @@ contributor with the serial console (entry, capture and leaving by hand).
   the bars at the app's ~10 fps cap. Frame-timing counters measured 10.0
   renders a second while the live view ran (`perf`'s renders; the preview's own
   frames flush outside the Ui's counted bands, so they appear as idle renders).
-- **Mirroring:** the preview is **mirrored left-to-right** and the saved photo
+- **Mirroring:** the preview is **mirrored left-to-right** and the captured photo
   is not: the live view moves the way the hand aimed at it moves, and the
   capture — the held photo and the gateway's PNG — reads printed text the
   right way round. Checked by aiming by hand and comparing the capture.
 - **Capture:** a tap starts the 3-2-1 countdown (a large number over the live
   view) and captures. The photo, scaled and centred, holds until the next tap
-  (retake: the live view comes back first) or a swipe down. `diag`'s free
+  (retake: the live view comes back first) or a swipe down. It is held in memory only:
+  a retake or leaving the mode discards it, and nothing is saved or sent. `diag`'s free
   PSRAM: 6,280,372 bytes with the pipeline not running (boot idle — **the
   boot pays nothing for the camera**), 5,051,408 while the live view ran, and
   4,428,792 with the 614,400-byte photo held. Leaving returned to 6,280,388
   and a later start to 5,051,396 — every intermediate allocation comes back.
 - **Leaving:** a swipe down exits at once; 60 s with no touch does too
   (`camera mode left after 60 s with no touch` in the log). Closing the mode —
-  and 60 s after the last `camera.capture` — stops the pipeline
+  and, while the mode is closed, 60 s after the last `camera.capture` — stops the pipeline
   (`camera pipeline stopped` in the log at 60 s after the capture, tick-timed):
   the driver's frame buffers go back to PSRAM, the sensor is held in reset and
   the ribbon's supplies go off. The screen never dimmed while the live view
@@ -528,7 +529,8 @@ contributor with the serial console (entry, capture and leaving by hand).
   allocation (`cam_hal: FB-SIZE: 153600 != 614400`, and no frame arrives), so
   the mode runs the VGA pipeline and blits it scaled instead of restarting or
   re-configuring frame sizes. The pipeline starts on demand and stops with the
-  mode (or 60 s after the last capture); `camera.capture` reuses it as before.
+  mode (or, with the mode closed, 60 s after the last capture); `camera.capture`
+  reuses it as before.
 
 ## Support labels
 

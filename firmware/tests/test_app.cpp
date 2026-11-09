@@ -9141,6 +9141,21 @@ TEST("camera: the settings item opens the mode; a tap counts down, captures once
   CHECK_EQ(r.camera.captures, 2u);
 }
 
+TEST("camera: the live view still draws after 24.8 days of uptime") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  r.fake.clock += 0x80000000u;  // past 2^31 ms: now() - 0 no longer reads as a positive int32
+  r.app.tick();
+  CHECK(r.app.open_settings());
+  for (int i = 0; i < 24 && r.app.model().detail != "Camera"; ++i) r.app.on_button(hg::Button::Down, true);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.app.camera_open());
+  const unsigned previews_before = r.camera.previews;
+  r.advance(150);
+  CHECK(r.camera.previews > previews_before);
+}
+
 TEST("camera: a tap during the countdown takes the live view back without capturing") {
   Rig r(Rig::touch_profile());
   r.bring_online(true);
