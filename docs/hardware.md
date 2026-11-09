@@ -340,7 +340,7 @@ References: [Espressif hardware overview](https://github.com/espressif/esp-box/b
 
 ## M5Stack CoreS3
 
-Use `m5stack-cores3` for the CoreS3 K128 with 16 MB flash and 8 MB **quad** PSRAM. Core, Core2 and CoreS3 SE are not covered by this profile. The port is experimental for both LCD revisions; physical reports remain outstanding.
+Use `m5stack-cores3` for the CoreS3 K128 with 16 MB flash and 8 MB **quad** PSRAM. Core, Core2 and CoreS3 SE are not covered by this profile. The port is experimental for both LCD revisions; a [camera capture check](hardware-validation.md#m5stack-cores3-camera-capture-check) covers one ILI9342C unit, but full physical reports remain outstanding.
 
 | Part | Connection |
 |---|---|
@@ -352,9 +352,9 @@ Use `m5stack-cores3` for the CoreS3 K128 with 16 MB flash and 8 MB **quad** PSRA
 
 The display selects ILI9342C for touch firmware ID 0x10 and ILI9342E for 0x12. An unrecognized ID leaves the display unavailable and logs an error. M5Stack changed the LCD to ILI9342E in August 2026, so record the panel revision with test results.
 
-Hold the screen to talk, swipe down to cancel, and hold the title for one second to open settings. GPIO 0 carries the audio clock and is not a TALK button. The hardware power and reset buttons retain their functions. Camera, IMU, RTC, SD storage and expansion outputs are not exposed.
+Hold the screen to talk, swipe down to cancel, and hold the title for one second to open settings. GPIO 0 carries the audio clock and is not a TALK button. The hardware power and reset buttons retain their functions. The camera is the `camera.capture` action (below); the IMU, RTC, SD storage and expansion outputs are not exposed.
 
-The power adapter enables the audio supplies (ALDO1 at 1.8 V and ALDO2 at 3.3 V), the onboard boost, and peripheral reset lines. Brightness controls the DLDO1 backlight supply between 2.5 and 3.3 V; zero disables that rail. It preserves charger settings, other rail settings and USB/bus output-enable bits. Settings provide battery readings, local power-off, screen timeout and hardware checks.
+The power adapter enables the audio supplies (ALDO1 at 1.8 V and ALDO2 at 3.3 V), the onboard boost, and peripheral reset lines. The first `camera.capture` also turns on the camera ribbon's supplies (ALDO3 at 3.3 V, BLDO1 and BLDO2, as in esp-bsp's CoreS3 camera bring-up), which the camera and the proximity sensor share, before it pulses the camera enable on AW9523 P1_0. Brightness controls the DLDO1 backlight supply between 2.5 and 3.3 V; zero disables that rail. It preserves charger settings, other rail settings and USB/bus output-enable bits. Settings provide battery readings, local power-off, screen timeout and hardware checks.
 
 ```bash
 cd firmware/esp32
@@ -362,6 +362,29 @@ pio run -e m5stack-cores3 -t upload -t monitor
 ```
 
 For ESP-IDF, use `SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/m5stack-cores3/sdkconfig.defaults"` with a separate build directory and sdkconfig. Use the USB-C data port for flashing and the console. To enter download mode, hold RESET for about three seconds until the green indicator lights. Phone Wi-Fi setup, pairing and OTA use the standard ESP32 flows.
+
+### Camera (GC0308)
+
+The CoreS3's GC0308 camera (0.3 MP VGA, on the same ribbon cable as the
+LTR-553ALS-WA proximity sensor) is available as a `camera.capture` action. The
+adapter drives the sensor's power/reset over AW9523B P1_0, the SCCB hangs off
+the internal I2C bus (AXP2101 and AW9523 share it), and the DVP pins come
+straight from M5Stack's CoreS3 camera table:
+
+| GC0308 pin | ESP32-S3 GPIO |
+|---|---|
+| SCCB SIOC | 11 |
+| SCCB SIOD | 12 |
+| XCLK | **none** — the sensor runs from its on-board 20 MHz crystal, so the port never generates XCLK (the LCD_CAM divider still needs the rate) |
+| VSYNC | 46 |
+| HREF | 38 |
+| PCLK | 45 |
+| D0–D7 | 39, 40, 41, 42, 15, 16, 48, 47 |
+| CAM_RST | AW9523B P1_0 |
+
+Captures are 640×480 tightly packed RGB565, byte-swapped on-device to the
+little-endian layout the gateway documents; the frame buffer lives in PSRAM.
+The driver is [esp32-camera](https://github.com/espressif/esp32-camera).
 
 Before relying on the port, run the [physical checklist](hardware-validation.md), including all touch corners, LCD colors, microphone level, speaker playback and interruption, backlight range, USB recovery, and battery shutdown/wake. Test USB and battery power separately.
 
@@ -1235,7 +1258,7 @@ A device refused for a gateway route has `"unpaired_reason": "routed"` in `statu
 | `forget-key` | New device identity on next boot (re-enrollment and re-pairing) |
 | `factory-reset` | Erase the device key and all settings |
 
-The keys are `name`, `server`, `token`, `talk_mode` (`hold` or `tap`), `touch_talk` (`on` or `off`; touchscreens with a TALK button, see [Touch to talk](using-gadget.md#device-settings-and-hardware-checks)), `volume`, `brightness`, `screen_timeout` (0..3600 seconds, 0 disables it), `clock` (0 or 5..3600 seconds of rest before the resting clock shows; 0, the default, turns it off), `time_format` (`12h` or `24h`, the clock face), `timezone` (a POSIX TZ string such as `CET-1CEST,M3.5.0,M10.5.0/3`; the default `UTC0`; ESP32 boards), `battery_display` (`icon`, `percentage`, `both` or `off`), `wifi_deep_sleep` (`on`, the default, or `off`; see [Deep Wi-Fi sleep](using-gadget.md#device-settings-and-hardware-checks)), `sd_log` (`on` or `off`, off by default; boards with a microSD slot, see [SD card logging](using-gadget.md#device-settings-and-hardware-checks)), `language` (`en`, `es`, or `auto` to follow Hermes; see [Language](using-gadget.md#language)), `wifi_ssid` and `wifi_pass`. Firmware built with [tailnet support](tailnet.md) adds `tailnet` (`on` or `off`) and `ts_key` (a Tailscale auth key; `get` shows `<set>`). The [device settings menu](using-gadget.md#device-settings-and-hardware-checks) saves volume, brightness, talk mode, touch to talk, battery indicator, screen timeout, clock face and language without a console.
+The keys are `name`, `server`, `token`, `talk_mode` (`hold` or `tap`), `touch_talk` (`on` or `off`; touchscreens with a TALK button, see [Touch to talk](using-gadget.md#device-settings-and-hardware-checks)), `volume`, `brightness`, `screen_timeout` (0..3600 seconds, 0 disables it), `clock` (0 or 5..3600 seconds of rest before the resting clock shows; 0, the default, turns it off), `time_format` (`12h` or `24h`, the clock face), `timezone` (a POSIX TZ string such as `CET-1CEST,M3.5.0,M10.5.0/3`; the default `UTC0`; ESP32 boards), `battery_display` (`icon`, `percentage`, `both` or `off`), `wifi_deep_sleep` (`on`, the default, or `off`; see [Deep Wi-Fi sleep](using-gadget.md#device-settings-and-hardware-checks)), `animation` (`on`, the default, or `off`; see [Animation](using-gadget.md#device-settings-and-hardware-checks)), `sd_log` (`on` or `off`, off by default; boards with a microSD slot, see [SD card logging](using-gadget.md#device-settings-and-hardware-checks)), `language` (`en`, `es`, or `auto` to follow Hermes; see [Language](using-gadget.md#language)), `wifi_ssid` and `wifi_pass`. Firmware built with [tailnet support](tailnet.md) adds `tailnet` (`on` or `off`) and `ts_key` (a Tailscale auth key; `get` shows `<set>`). The [device settings menu](using-gadget.md#device-settings-and-hardware-checks) saves volume, brightness, talk mode, touch to talk, battery indicator, screen timeout, clock face and language without a console.
 
 In the `diag` report, `i2c` lists the addresses that answered, such as `0x18`. A probe can time out while another task uses the bus, so the scan tries each address up to three times. An address that times out on every try appears as `timeout at 0x19`, and the scan continues. Four such addresses in a row end the scan with `bus stuck at` the first of them, such as `bus stuck at 0x08`. That usually means a device or a short holds SDA or SCL low.
 
