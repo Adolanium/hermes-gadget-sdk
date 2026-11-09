@@ -2,6 +2,7 @@
 // core (hg::App) and runs the app loop on the main task.
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h
 #include "port_cardputer.hpp"
+#include "port_sdlog.hpp"
 
 #include <cstring>
 #include <utility>
@@ -86,6 +87,7 @@ hgp::TailnetLink g_tailnet;
 #endif
 hgp::Buttons g_buttons;
 hgp::Wifi g_wifi;
+hgp::SdLogger g_sdlog;
 #if CONFIG_HG_BOARD_WS_P4_TOUCH_LCD_7B
 hgp::CameraCapture g_camera;
 #endif
@@ -339,6 +341,10 @@ extern "C" void app_main(void) {
   hgp::events::init();
   ESP_ERROR_CHECK(g_storage.begin() ? ESP_OK : ESP_FAIL);
   const hgp::BoardConfig& board = hgp::board_config();
+  // SD log mirror: starts disabled and syncs to the stored sd_log setting
+  // below (off by default), so no file appears until it is switched on.
+  // Boards without a slot stay silent.
+  g_sdlog.begin(board.sd, false);
   power_rails_on(board);
   // A board whose amplifier hangs off the chip's own DAC (the CYD's SC8002B on
   // GPIO26) gets three boot beeps: they show the amplifier and speaker work
@@ -578,6 +584,7 @@ extern "C" void app_main(void) {
   }
   if (hal.speaker == &g_codec_speaker) profile.speaker_rate = hgp::CodecAudio::kRate;
   profile.tailnet = hgp::TailnetLink::supported();
+  profile.sd_log = board.sd.enabled;
 #endif
 
 #if CONFIG_HG_BOARD_ESP32_CYD
@@ -602,6 +609,7 @@ extern "C" void app_main(void) {
     if (key == "timezone") g_time.apply_timezone(g_storage);
 #if !CONFIG_HG_BOARD_ESP32_CYD
     if (key == "touch_wake") g_touch.set_wakes(app.touch_wake());
+    if (key == "sd_log") g_sdlog.set_enabled(app.sd_log());
     if (key == "name" && hgp::board_config().bluetooth) g_phone.set_name(device_name());
     if (key == "tailnet" || key == "ts_key") g_tailnet.settings_changed();
 #endif
@@ -641,6 +649,7 @@ extern "C" void app_main(void) {
   };
 #endif
   app.begin();
+  g_sdlog.set_enabled(app.sd_log());  // the stored setting wins over the default
 #if !CONFIG_HG_BOARD_ESP32_CYD
   g_touch.set_wakes(app.touch_wake());
 #endif

@@ -1335,6 +1335,8 @@ BoardConfig make() {
   b.codec.dac_mclk = true;
   b.codec.rmnm_mics = false;
   b.codec.es7210_mics = 0x03;
+  // microSD slot (SDIO 3.0, 4-bit): Waveshare's XC pinout.
+  b.sd = {true, 43, 44, 39, 40, 41, 42};
   // Wi-Fi via C6 over SDIO (standard P4 function board pins).
   b.buttons = {0, -1, -1, -1};
   b.talk_label = "BOOT";

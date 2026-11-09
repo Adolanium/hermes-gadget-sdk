@@ -110,6 +110,9 @@ namespace hg::i18n {
   X(Animation,             "Animation") \
   X(AnimationOn,            "On\nThe ring and the Updating screen move.") \
   X(AnimationOff,           "Off\nThe ring and the Updating screen stand still.") \
+  X(SdLog,                  "SD card logging") \
+  X(SdLogOn,                "On\nThe log is copied to hermes.log on the microSD card.") \
+  X(SdLogOff,               "Off\nNothing is written to the microSD card.") \
   X(FaceDownSleep,          "Face-down sleep") \
   X(FaceDownSleepOn,        "On\nFace down, the screen sleeps and Hermes stays quiet.") \
   X(FaceDownSleepOff,       "Off\nSelect to sleep when the gadget lies face down.") \

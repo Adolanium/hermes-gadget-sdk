@@ -80,6 +80,9 @@ struct DeviceProfile {
   // `ts_key` (the auth key, a secret) settings. With `tailnet on` the device waits for the port's
   // on_tunnel(true) before it connects to Hermes.
   bool tailnet = false;
+  // The board has a microSD slot the port logs to (the `sd_log` setting).
+  // Boards without one hide the setting; the port's SdLogger stays off.
+  bool sd_log = false;
   // Faces in colour too: begin() takes px*px*2 bytes for one (72 KB at 192 px) from this, and free()
   // releases them. Without it, or when it returns null, the board offers one-colour faces.
   void* (*colour_face_alloc)(size_t) = nullptr;
@@ -256,6 +259,9 @@ class App {
   // The `animation` setting (on by default): off, the edge ring's comet and
   // the Updating screen's spinner stand still.
   bool animation() const { return animation_; }
+  // The `sd_log` setting (off by default): the device log is mirrored to the
+  // microSD card (/sdcard/hermes.log) when one is present.
+  bool sd_log() const { return sd_log_; }
   // These run on the app task. Start returns private, on-screen instructions.
   std::function<std::string()> on_wifi_setup;
   std::function<void()> on_wifi_setup_close;
@@ -539,7 +545,7 @@ class App {
   bool lang_auto_ = false;
   std::optional<i18n::Lang> hermes_lang_;  // from the last `welcome` that named one this firmware has
   enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, TouchTalk, Profile, ProfileGrid, Microphone, Speaker, Display, Inputs,
-                              Info, Power, BatteryAlert, BatteryAlertSound, ChargingNotice, ChargingSound, ChargedNotice, ChargedSound, WifiDeepSleep, IdleTimer, TouchWake, FaceDownSleep, Clock, PowerOff, WifiSetup, Phone, Language, DoubleHome, WakeTalk, Animation, Back };
+                              Info, Power, BatteryAlert, BatteryAlertSound, ChargingNotice, ChargingSound, ChargedNotice, ChargedSound, WifiDeepSleep, IdleTimer, TouchWake, FaceDownSleep, Clock, PowerOff, WifiSetup, Phone, Language, DoubleHome, WakeTalk, Animation, SdLog, Back };
   enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };
   Menu menu_ = Menu::Closed;
   // The settings list's scroll in pixels, and where it eases to. It follows the
@@ -646,6 +652,7 @@ class App {
   bool double_home_ = true;           // the `double_home` setting
   bool wifi_deep_sleep_ = true;       // the `wifi_deep_sleep` setting
   bool animation_ = true;              // the `animation` setting
+  bool sd_log_ = false;                // the `sd_log` setting
   bool wake_talk_ = false;            // the `wake_talk` setting
   bool touch_talk_ = true;            // the `touch_talk` setting
   bool reply_while_face_down_ = false;  // a reply arrived while dark; show it on the turn-over
