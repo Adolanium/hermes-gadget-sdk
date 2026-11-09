@@ -24,12 +24,15 @@
 #include "hg/hal.hpp"
 
 namespace hgp {
+namespace {  // this file's state; the HAL functions below are the interface
 
 constexpr const char* TAG = "hg.camera";
 constexpr int kSccbPort = 0;  // hgp::i2c::bus() installs the shared bus here
 
 bool s_ready = false;         // the pipeline is running (started on demand)
 bool s_start_failed = false;  // a start attempt failed this boot: the item hides until restart
+
+}  // namespace
 
 bool begin_camera() {
   if (s_ready) return true;

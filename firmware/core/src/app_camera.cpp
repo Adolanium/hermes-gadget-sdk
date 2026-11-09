@@ -136,6 +136,11 @@ void App::camera_draw() {
   const int w = ui_->area().width;
   if (camera_state_ == CameraState::Shot) {
     if (camera_shot_drawn_ || camera_shot_.pixels.empty()) return;
+    // A still whose size doesn't match its pixels (a port bug) is not drawn: the
+    // scaling below divides by the size and reads rows by it.
+    if (camera_shot_.width == 0 || camera_shot_.height == 0 ||
+        camera_shot_.pixels.size() < static_cast<size_t>(camera_shot_.width) * camera_shot_.height * 2u)
+      return;
     camera_shot_drawn_ = true;
     Canvas c = ui_->canvas();
     c.set_clip_rows(l.main_y, l.main_y + l.main_h);
