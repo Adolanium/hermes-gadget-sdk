@@ -1302,7 +1302,8 @@ BoardConfig make() {
   b.lcd.dsi.dpi_clock_mhz = 80;
   b.lcd.dsi.ldo_channel = 3;
   b.lcd.dsi.ldo_voltage_mv = 2500;
-  b.lcd.dsi.use_dma2d = true;
+  // CPU copies, not DMA2D: the configuration the 3.4C rev 1.3 booted and drew with (#292).
+  b.lcd.dsi.use_dma2d = false;
   b.lcd.dsi.hsync_pulse_width = 20;
   b.lcd.dsi.hsync_back_porch = 20;
   b.lcd.dsi.hsync_front_porch = 40;
