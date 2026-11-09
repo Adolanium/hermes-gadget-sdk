@@ -447,6 +447,13 @@ extern "C" void app_main(void) {
   } else
 #endif
   if (board.speaker.enabled && g_speaker.begin(board.speaker)) hal.speaker = &g_speaker;
+#if CONFIG_HG_BOARD_CORES3
+  // The CoreS3's GC0308: the camera HAL rides the panel once the display is up.
+  if (hal.display != nullptr) {
+    hgp::camera_hal_set_display(hal.display);
+    hal.camera = hgp::camera_hal();
+  }
+#endif
   if (board.axp2101 && g_power.begin(i2c_bus)) {
     hal.power = &g_power;
     if (board.axp_power_key) g_power.use_power_key();

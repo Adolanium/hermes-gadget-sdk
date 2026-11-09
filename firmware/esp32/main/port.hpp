@@ -723,6 +723,12 @@ class CoreS3Board {
   std::unique_ptr<hg::CoreS3Control> control_;
 };
 
+// The CoreS3's hg::Camera implementation (port_camera_cores3.cpp). camera_hal()
+// returns nullptr on any other board; camera_hal_set_display() gives it the
+// panel for the live preview (call once after the display is up).
+hg::Camera* camera_hal();
+void camera_hal_set_display(hg::Display* display);
+
 // The M5PM1's rails, amplifier and battery. Hal::power once begin() succeeded.
 class StickS3Board final : public hg::Power {
  public:
