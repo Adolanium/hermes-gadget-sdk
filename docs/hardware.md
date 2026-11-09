@@ -20,11 +20,13 @@ Most board sections below give an `esptool.py ... read_flash` line that saves th
 pio pkg exec -p tool-esptoolpy -- esptool.py --chip esp32s3 read_flash 0 0x1000000 my-board-factory.bin
 ```
 
-Or install esptool with `pip install esptool` and run the lines as written. esptool 5 warns that `esptool.py` and `read_flash` are older names, and runs them.
+Or install esptool with `pip install esptool` and run the lines as written. esptool 5 warns that `esptool.py` and `read_flash` are older names, and runs them. The Cardputer ADV line is written for esptool 5 (`esptool ... read-flash`); through PlatformIO's esptool 4, write it as `pio pkg exec -p tool-esptoolpy -- esptool.py --chip esp32s3 --port /dev/ttyACM0 read_flash 0 ALL original-cardputer-adv.bin`.
 
 The default speed is slow: on an ES3C28P's USB port a 16 MB read took 24 minutes. Adding `-b 921600` before `read_flash` made it about seven times faster.
 
-Before flashing, check that the `.bin` has the board's full flash size: 16,777,216 bytes for `0x1000000` (16 MB), 8,388,608 bytes for `0x800000` (8 MB), and for `ALL` the size esptool reports for the detected flash. `ls -l` shows it. A shorter file is not a backup; read the flash again.
+Before flashing, check that a full-flash backup has the board's full flash size: 16,777,216 bytes for `0x1000000` (16 MB), 8,388,608 bytes for `0x800000` (8 MB), and for `ALL` the size esptool reports for the detected flash. `ls -l` shows it. A shorter file is not a backup; read the flash again. A line that reads one partition instead (the AIPI Lite's `read_flash 0x9000 16384`) gives a file of exactly that length.
+
+Keep backups private. A factory image can hold the vendor's service credentials (the AIPI Lite's does), and an image read after setup holds your Wi-Fi password and the device's key. Save them in a folder only you can read, and don't commit, upload or share them.
 
 ## ESP32-S3 breadboard
 
