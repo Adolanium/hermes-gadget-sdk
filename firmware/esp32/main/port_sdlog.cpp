@@ -178,11 +178,13 @@ void SdLogger::task(void* arg) {
     // before it was switched off: reopen the file mount() opened then.
     const bool just_on = !was_on;
     was_on = true;
-    if (!self->mounted_ && (just_on || xTaskGetTickCount() - last > pdMS_TO_TICKS(30000))) {
+    const bool due = just_on || xTaskGetTickCount() - last > pdMS_TO_TICKS(30000);
+    if (!self->mounted_ && due) {
       last = xTaskGetTickCount();
       self->mount();  // retried about every 30 s until a card shows up
-    } else if (just_on && self->mounted_ && !self->file_) {
-      self->open_file();
+    } else if (self->mounted_ && !self->file_ && due) {
+      last = xTaskGetTickCount();
+      self->open_file();  // retried about every 30 s if the open failed
     }
     self->flush();
   }
