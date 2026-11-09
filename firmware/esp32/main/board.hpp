@@ -306,6 +306,13 @@ struct LatchPowerConfig {
   int key = -1;
 };
 
+// A microSD slot wired for 4-bit SDIO (port_sdlog.cpp mirrors the device log
+// to /sdcard/hermes.log). Pins are -1 when the board has no slot.
+struct SdConfig {
+  bool enabled = false;
+  int clk = -1, cmd = -1, d0 = -1, d1 = -1, d2 = -1, d3 = -1;
+};
+
 struct BoardConfig {
   const char* name;
   LcdConfig lcd;
@@ -346,6 +353,7 @@ struct BoardConfig {
   // docs/hardware-validation.md#tailnet.
   bool tailnet = false;
   LatchPowerConfig latch_power;
+  SdConfig sd;  // a microSD slot wired for logging (port_sdlog.cpp)
   int status_led = -1;
   // A speaker driven by the chip's own DAC, with no I2S and no codec: the pin the
   // board's amplifier input hangs off (25 = DAC channel 0, 26 = DAC channel 1),
