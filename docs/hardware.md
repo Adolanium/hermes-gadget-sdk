@@ -354,7 +354,7 @@ The display selects ILI9342C for touch firmware ID 0x10 and ILI9342E for 0x12. A
 
 Hold the screen to talk, swipe down to cancel, and hold the title for one second to open settings. GPIO 0 carries the audio clock and is not a TALK button. The hardware power and reset buttons retain their functions. The camera is the `camera.capture` action and a local **camera mode** (the settings menu's **Camera** item, below); the IMU, RTC, SD storage and expansion outputs are not exposed.
 
-The power adapter enables the audio supplies (ALDO1 at 1.8 V and ALDO2 at 3.3 V), the onboard boost, and peripheral reset lines. Camera start-up turns on the camera ribbon's supplies (ALDO3 at 3.3 V, BLDO1 and BLDO2, as in esp-bsp's CoreS3 camera bring-up), which the camera and the proximity sensor share, and pulses the camera enable on AW9523 P1_0 at boot, once — the pipeline then keeps running for the camera mode. Brightness controls the DLDO1 backlight supply between 2.5 and 3.3 V; zero disables that rail. It preserves charger settings, other rail settings and USB/bus output-enable bits. Settings provide battery readings, local power-off, screen timeout and hardware checks.
+The power adapter enables the audio supplies (ALDO1 at 1.8 V and ALDO2 at 3.3 V), the onboard boost, and peripheral reset lines. Camera start-up turns on the camera ribbon's supplies (ALDO3 at 3.3 V, BLDO1 and BLDO2, as in esp-bsp's CoreS3 camera bring-up), which the camera and the proximity sensor share, pulses the camera enable on AW9523 P1_0, and starts the pipeline — when the camera mode opens or the first capture arrives, not at boot; see [Camera (GC0308)](#camera-gc0308) for the start/stop lifecycle. Brightness controls the DLDO1 backlight supply between 2.5 and 3.3 V; zero disables that rail. It preserves charger settings, other rail settings and USB/bus output-enable bits. Settings provide battery readings, local power-off, screen timeout and hardware checks.
 
 ```bash
 cd firmware/esp32
@@ -389,14 +389,23 @@ The driver is [esp32-camera](https://github.com/espressif/esp32-camera).
 The camera also has a **camera mode**: the settings menu's **Camera** item
 (shown only on boards whose port provides a camera) opens the device's own
 camera screen. The live view is the VGA stream blitted straight into the panel
-rows between the bars at about 10 fps — the mode keeps the capture pipeline's
-frame size, because the driver queues only frames as large as its frame-buffer
-allocation. A tap starts a three-second countdown (a large number over the live
-view) and captures; the photo stays on screen until the next tap (retake: the
-live view comes back first) or a swipe down leaves. The screen never dims while
-the camera is out, and the mode leaves itself after 60 s with no touch. The
-photo stays on the device. On a board without touch, `camera` on the serial
-console opens it and `camera close` leaves.
+rows between the bars at about 10 fps, **mirrored left-to-right** like a
+phone's front camera so the view moves the way a hand aimed at it moves — the
+saved photo and the `camera.capture` action keep the sensor's own handedness.
+The mode keeps the capture pipeline's frame size, because the driver queues
+only frames as large as its frame-buffer allocation. A tap starts a 3-second
+countdown (a large number over the live view) and captures; the photo stays on
+screen until the next tap (retake: the live view comes back first) or a swipe
+down leaves. The screen never dims while the camera is out, and the mode
+leaves itself after 60 s with no touch.
+
+The pipeline starts when the camera mode opens or the first `camera.capture`
+arrives, and stops when the mode closes, or 60 s after the last capture: the
+driver's frame buffers go back to PSRAM, the sensor is held in reset, and the
+ribbon's supplies (ALDO3 at 3.3 V, BLDO1 and BLDO2) go off. A start that fails
+hides the Camera item and refuses captures until the next restart. On a board
+without touch, `camera` on the serial console opens the mode and `camera
+close` leaves.
 
 Before relying on the port, run the [physical checklist](hardware-validation.md), including all touch corners, LCD colors, microphone level, speaker playback and interruption, backlight range, USB recovery, and battery shutdown/wake. Test USB and battery power separately.
 

@@ -42,7 +42,7 @@ bool CoreS3Control::camera_power(bool on) {
   // enable — with the rail off the sensor never answers its probe (found on
   // #293: 0x21 missing from the diag scan and the ID read returning garbage;
   // enabling ALDO3 + BLDO1/BLDO2 restored the probe in one step, exactly like
-  // esp-bsp's camera bring-up). Rails first, then the reset pulse.
+  // esp-bsp's CoreS3 camera bring-up). Rails first, then the reset pulse.
   // Off only holds the sensor in reset; it leaves the rails as they are.
   if (on && (!change(kPmic, 0x94, 0x1f, 0x1c) || !change(kPmic, 0x90, 0x34, 0x34))) return false;
   if (!change(kExpander, 0x03, 0x01, 0x00) || !change(kExpander, 0x05, 0x01, 0x00)) return false;
@@ -51,6 +51,15 @@ bool CoreS3Control::camera_power(bool on) {
   if (!change(kExpander, 0x03, 0x01, 0x01)) return false;
   delay_(100);  // the sensor's own power-up before SCCB traffic
   return true;
+}
+
+bool CoreS3Control::camera_rails_off() {
+  // Stopping the camera pipeline (the camera mode closes; 60 s pass after the
+  // last capture): the ribbon's power goes off so the sensor and the proximity
+  // sensor draw nothing. Only what camera_power(true) put up comes down; every
+  // other bit of 0x90 (the amp, the microphones) and every other rail stays.
+  if (!change(kPmic, 0x94, 0x1f, 0x00)) return false;
+  return change(kPmic, 0x90, 0x34, 0x00);
 }
 
 }  // namespace hg

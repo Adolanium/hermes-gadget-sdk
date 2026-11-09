@@ -483,37 +483,52 @@ contributor with the serial console (entry, capture and leaving by hand).
   `ota_0` slot.
 - **Entry:** the settings menu's **Camera** item, reached by touch (hold the
   title → drag to the item → tap) and with `camera` on the console; both open
-  the live view immediately. A board whose port has no camera, or whose panel
-  has no whole-panel framebuffer, keeps the item out of the menu.
+  the live view. Opening starts the pipeline — the rails, the CAM_RST pulse
+  and the driver — and the first frames flowed within about **270 ms** of the
+  command (probe and init logs at 21.497–21.777 s of uptime). A board whose
+  port has no camera, whose panel has no whole-panel framebuffer, or whose
+  start failed keeps the item out of the menu.
 - **Live view:** the VGA stream blitted straight into the panel rows between
   the bars at the app's ~10 fps cap. Frame-timing counters measured 10.0
   renders a second while the live view ran (`perf`'s renders; the preview's own
   frames flush outside the Ui's counted bands, so they appear as idle renders).
-  The preview is **not mirrored** — it shows the same handedness the saved
-  photo has.
+- **Mirroring:** the preview is **mirrored left-to-right** and the saved photo
+  is not: the live view moves the way the hand aimed at it moves, and the
+  capture — the held photo and the gateway's PNG — reads printed text the
+  right way round. Checked by aiming by hand and comparing the capture.
 - **Capture:** a tap starts the 3-2-1 countdown (a large number over the live
   view) and captures. The photo, scaled and centred, holds until the next tap
   (retake: the live view comes back first) or a swipe down. `diag`'s free
-  PSRAM: 5,051,408 bytes while the live view ran, 4,428,792 with the
-  614,400-byte photo held, and back to 5,051,400 after the mode left — the
-  still returns on both the retake and leaving. From boot, the running pipeline
-  holds its VGA frame buffers (5,051,420 free), so previews allocate nothing.
+  PSRAM: 6,280,372 bytes with the pipeline not running (boot idle — **the
+  boot pays nothing for the camera**), 5,051,408 while the live view ran, and
+  4,428,792 with the 614,400-byte photo held. Leaving returned to 6,280,388
+  and a later start to 5,051,396 — every intermediate allocation comes back.
 - **Leaving:** a swipe down exits at once; 60 s with no touch does too
-  (`camera mode left after 60 s with no touch` in the log). The screen never
-  dimmed while the live view ran.
+  (`camera mode left after 60 s with no touch` in the log). Closing the mode —
+  and 60 s after the last `camera.capture` — stops the pipeline
+  (`camera pipeline stopped` in the log at 60 s after the capture, tick-timed):
+  the driver's frame buffers go back to PSRAM, the sensor is held in reset and
+  the ribbon's supplies go off. The screen never dimmed while the live view
+  ran.
+- **Start/stop cycles:** two open/close cycles and two `camera.capture` calls
+  spaced more than 60 s apart ran on this build: each start (mode open or
+  capture) reached the first frame in about 270 ms, and the later stop returned
+  the PSRAM to boot-idle (5,051,396 → 6,280,388 with the 60 s stop landed at
+  exactly the capture's stamp + 60 s).
 - **Residual:** the capture moment stalls the app task for about 100 ms (the
   614 KB copy and the photo's blit), so a touch inside that window can drop a
   sample or two. The preview never waits on the driver — every draw is gated on
   `esp_camera_available_frames()`, since `esp_camera_fb_get` blocks up to 4 s on
   an empty queue and starved the event queue (touch samples dropped, gestures
-  missed) until it was gated.
+  missed) until it was gated. The AXP2101 keeps its registers across the ESP32's
+  restarts, so rails left up by an interrupted stop stay up until the next
+  start's `camera_power(true)` refreshes them (masked writes, no harm).
 - **A driver finding:** switching the sensor to QVGA for the live view does not
   work on this driver — `esp32-camera` queues only frames as large as its fb
   allocation (`cam_hal: FB-SIZE: 153600 != 614400`, and no frame arrives), so
   the mode runs the VGA pipeline and blits it scaled instead of restarting or
-  re-configuring frame sizes. The pipeline is initialised once at boot
-  (rails, CAM_RST and the driver start together there); `camera.capture` reuses
-  it as before.
+  re-configuring frame sizes. The pipeline starts on demand and stops with the
+  mode (or 60 s after the last capture); `camera.capture` reuses it as before.
 
 ## Support labels
 

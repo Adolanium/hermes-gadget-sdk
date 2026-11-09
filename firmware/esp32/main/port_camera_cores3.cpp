@@ -28,8 +28,8 @@ namespace hgp {
 constexpr const char* TAG = "hg.camera";
 constexpr int kSccbPort = 0;  // hgp::i2c::bus() installs the shared bus here
 
-bool s_init_attempted = false;  // esp_camera_init() runs once per boot
-bool s_ready = false;           // init succeeded; captures reuse the pipeline
+bool s_ready = false;         // the pipeline is running (started on demand)
+bool s_start_failed = false;  // a start attempt failed this boot: the item hides until restart
 
 bool begin_camera() {
   if (s_ready) return true;
@@ -77,21 +77,14 @@ bool begin_camera() {
 
 bool CameraCapture::capture_rgb565(i2c_master_bus_handle_t sccb_bus, std::vector<uint8_t>& image,
                                    uint16_t& width, uint16_t& height, std::string& error) {
-  if (!sccb_bus) {
-    error = "camera SCCB bus is unavailable";
-    return false;
-  }
+  (void)sccb_bus;  // the SCCB bus comes up with the pipeline; the driver holds its device
   if (!s_ready) {
-    if (s_init_attempted) {
+    if (s_start_failed) {
       error = "camera initialization failed earlier; restart the gadget after checking the GC0308 camera";
-      return false;
+    } else {
+      error = "camera is not running";
     }
-    s_init_attempted = true;
-    if (!begin_camera()) {
-      error = "GC0308 initialization failed; restart the gadget after checking the camera";
-      return false;
-    }
-    s_ready = true;
+    return false;
   }
 
   camera_fb_t* fb = esp_camera_fb_get();
@@ -135,18 +128,22 @@ void blit_preview(const uint8_t* source, uint32_t source_width, uint32_t source_
   uint16_t* framebuffer = display.framebuffer();
   if (framebuffer == nullptr || w == 0 || h == 0) return;
   if (x + w > info.width || y + h > info.height) return;
-  // The sensor sends each pixel's high byte first, which is exactly the byte
-  // order a panel that wants big-endian RGB565 (this CoreS3's) takes, so the raw
-  // pairs go out as they are; a little-endian framebuffer gets each pair swapped
-  // as it is copied. The core draws the captured photo through a Canvas, which
-  // applies the same byte order from the little-endian layout capture() returns.
+  // The preview is mirrored horizontally, like a phone's front camera: the lens
+  // faces the user, and the view moving the way the hand moves is what aiming
+  // takes. The captured photo and the `camera.capture` action keep the sensor's
+  // handedness — only this blit flips. The sensor sends the high byte first,
+  // which is the byte order a big-endian RGB565 panel (this CoreS3's) takes, so
+  // the raw pairs go out as they are; a little-endian framebuffer gets each
+  // pair swapped as it is copied. The core draws the captured photo through a
+  // Canvas, which applies the same byte order from the little-endian layout
+  // capture() returns.
   const bool be = info.swap_bytes;
   for (uint16_t row = 0; row < h; ++row) {
     const uint32_t source_y = (static_cast<uint64_t>(row) * source_height) / h;
     const uint8_t* src = source + source_y * source_width * 2;
     uint16_t* dst = framebuffer + static_cast<uint32_t>(y + row) * info.width + x;
     for (uint16_t col = 0; col < w; ++col) {
-      const uint32_t source_x = (static_cast<uint64_t>(col) * source_width) / w;
+      const uint32_t source_x = source_width - 1 - (static_cast<uint64_t>(col) * source_width) / w;
       const uint16_t raw = static_cast<uint16_t>(src[source_x * 2 + 1] << 8 | src[source_x * 2]);
       dst[col] = be ? raw : static_cast<uint16_t>(raw >> 8 | raw << 8);
     }
@@ -158,7 +155,11 @@ class CoreS3CameraHal final : public hg::Camera {
  public:
   void set_display(hg::Display* display) { display_ = display; }
 
-  bool available() const override { return s_ready; }
+  bool available() const override {
+    // The board has a camera, and its first start either succeeded or has not
+    // been tried yet; a failed start hides the settings item for the boot.
+    return !s_start_failed;
+  }
 
   bool draw_preview(uint16_t x, uint16_t y, uint16_t w, uint16_t h) override {
     if (display_ == nullptr || !s_ready || w == 0 || h == 0) return false;
@@ -184,7 +185,8 @@ class CoreS3CameraHal final : public hg::Camera {
 
   bool capture(Still& out, std::string& error) override {
     if (!s_ready) {
-      error = "camera is not running";
+      error = s_start_failed ? "camera initialization failed earlier; restart the gadget after checking the GC0308 camera"
+                             : "camera is not running";
       return false;
     }
     camera_fb_t* fb = esp_camera_fb_get();
@@ -218,16 +220,37 @@ hg::Camera* camera_hal() { return &g_cores3_camera_hal; }
 
 void camera_hal_set_display(hg::Display* display) { g_cores3_camera_hal.set_display(display); }
 
-// Started at boot once the board's camera rails and reset line are up, so the
-// camera mode's settings item and preview are ready without a capture first;
-// the capture action then reuses the running pipeline. Once per boot.
+// The pipeline starts on demand — when the camera mode opens or a capture
+// arrives — and the caller powers the camera's rails and reset pulse first.
+// A failed start latches for the boot (available() goes false). The board's
+// board class owns the AW9523/PMIC writes; this only runs esp_camera.
 bool camera_hal_begin() {
   if (s_ready) return true;
-  if (s_init_attempted) return false;  // a failed start stays failed until restart
-  s_init_attempted = true;
-  if (!begin_camera()) return false;
+  if (s_start_failed) return false;
+  if (!begin_camera()) {
+    s_start_failed = true;
+    return false;
+  }
   s_ready = true;
   return true;
+}
+
+bool camera_hal_running() { return s_ready; }
+
+bool camera_hal_start_failed() { return s_start_failed; }
+
+// The counterpart to a start, called after esp_camera_init has stopped: the
+// caller then drops the camera's reset pulse low and the rails off. The
+// next start runs the rails, the reset pulse and esp_camera_init again.
+void camera_hal_stop() {
+  if (!s_ready) return;
+  const esp_err_t err = esp_camera_deinit();
+  s_ready = false;
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "camera deinit failed: %s (the next start re-inits anyway)", esp_err_to_name(err));
+  } else {
+    ESP_LOGI(TAG, "camera pipeline stopped");
+  }
 }
 
 }  // namespace hgp

@@ -96,6 +96,20 @@ TEST("CoreS3 camera power turns on the camera's rails and leaves the others") {
   CHECK_EQ(bus.get(0x34, 0x94), uint8_t(0xe0 | 0x1c));  // ALDO3 at 3.3 V
 }
 
+TEST("CoreS3 camera rails off takes down only the camera's own rails") {
+  FakeBus bus;
+  bus.seed(0x34, 0x90, 0x8b | 0x34);  // the amp, the microphones and the camera's rails, as a start leaves them
+  bus.seed(0x34, 0x94, 0xe0 | 0x1c);  // ALDO3 at 3.3 V
+  hg::CoreS3Control control(
+      [&](uint8_t a, uint8_t r, uint8_t& v) { return bus.read(a, r, v); },
+      [&](uint8_t a, uint8_t r, uint8_t v) { return bus.write(a, r, v); },
+      [](uint32_t) {});
+
+  CHECK(control.camera_rails_off());
+  CHECK_EQ(bus.get(0x34, 0x90), uint8_t(0x8b));  // ALDO3, BLDO1 and BLDO2 off; the amp and microphones stay
+  CHECK_EQ(bus.get(0x34, 0x94), uint8_t(0xe0));   // ALDO3 at 0 V; the other rail voltage codes untouched
+}
+
 TEST("CoreS3 camera power off leaves the rails alone") {
   FakeBus bus;
   bus.seed(0x34, 0x90, 0x8b);
