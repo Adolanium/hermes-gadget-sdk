@@ -315,7 +315,7 @@ Results and limitations are recorded in the
   - A second image, built with its WebSocket pointed at an unreachable address (a local test edit, reverted), booted from `ota_0` and never reached Hermes. At 300.9 s it logged `the new firmware didn't reach Hermes within 5 minutes; going back to the previous one`, rebooted into the previous firmware from `ota_1`, and was online and paired 3.8 s later with its settings.
   - Both runs used the fork's 4 MB app slots, larger than the 1984 KB slots of this profile's release images.
 - **Two-hour session:** repeated voice turns over two hours, with no resets or audio failures.
-- **Not verified:** the battery percentage (the default Li-ion estimate; no measured curve), an unapproved device's actions, phone setup with a wrong password, its cancellation and its ten-minute expiry, and each step on this branch's own default-table build rather than the fork's.
+- **Not verified:** the battery percentage (`set battery_estimate liion`, the rough Li-ion voltage estimate; no measured curve), an unapproved device's actions, phone setup with a wrong password, its cancellation and its ten-minute expiry, and each step on this branch's own default-table build rather than the fork's.
 - **Sanitized diagnostics:** the fields quoted above only. No network name, address, token or key is included.
 
 The port stays experimental.

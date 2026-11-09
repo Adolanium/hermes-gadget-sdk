@@ -328,6 +328,12 @@ The panel runs in portrait with X mirrored, the usual ILI9341 portrait setting: 
 
 Hold the screen or BOOT to talk and swipe down to cancel. RESET is CHIP_PU. The RGB LED on GPIO 42 has a built-in control IC, so the plain `led.set` action does not drive it and it stays off. The microSD slot (SDIO on GPIO 38 to 41, 47 and 48), the UART header and the extension pins (GPIO 2, 3, 14 and 21) are unused.
 
+Back up the factory image before the first flash:
+
+```bash
+esptool.py --chip esp32s3 read_flash 0 0x1000000 lcdwiki-es3c28p-factory.bin
+```
+
 ```bash
 cd firmware/esp32
 pio run -e lcdwiki-es3c28p -t upload -t monitor
@@ -335,13 +341,7 @@ pio run -e lcdwiki-es3c28p -t upload -t monitor
 
 The USB-C port handles flashing and the serial console. Hold BOOT, press and release RESET, then release BOOT to force download mode. For ESP-IDF, use `SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/lcdwiki-es3c28p/sdkconfig.defaults"` with a separate build directory and sdkconfig. Phone setup, pairing and OTA use the same flows as the other ESP32 boards.
 
-Back up the factory image before the first flash:
-
-```bash
-esptool.py --chip esp32s3 read_flash 0 0x1000000 lcdwiki-es3c28p-factory.bin
-```
-
-On a good boot the panel logs `ili9341 240x320 ready`. Run the [hardware checklist](hardware-validation.md) first for orientation and colors, then touch alignment at the four corners, the speaker (no sound means check the amplifier enable on GPIO 1), the microphone, the battery reading and Wi-Fi setup. The battery percentage uses the default Li-ion estimate. No measured curve is claimed.
+On a good boot the panel logs `ili9341 240x320 ready`. Run the [hardware checklist](hardware-validation.md) first for orientation and colors, then touch alignment at the four corners, the speaker (no sound means check the amplifier enable on GPIO 1), the microphone, the battery reading and Wi-Fi setup. The board reports the battery as a voltage only: with a single-cell 3.7 V Li-ion battery fitted, `set battery_estimate liion` turns on a rough percentage ([battery indicator](using-gadget.md#device-settings-and-hardware-checks)). No measured curve is claimed.
 
 References: the LCDWIKI ES3C28P & ES3N28P product specification sheet V1.0 (2025-06-14), for the pin mapping, the FT6336G address and the active-low amplifier enable; and [xiaozhi-esp32's `freenove-esp32s3-display-2.8-lcd` board](https://github.com/78/xiaozhi-esp32/tree/d91d6824309d12df5fc3db5edf8145ee829135d7/main/boards/freenove-esp32s3-display-2.8-lcd) at commit `d91d6824309d12df5fc3db5edf8145ee829135d7` (MIT), for the ES8311 codec, the inverted amplifier enable, color inversion, BGR order, the SPI clock and the battery divider. The source of those facts is listed in [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
 
