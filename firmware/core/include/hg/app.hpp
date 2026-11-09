@@ -80,6 +80,9 @@ struct DeviceProfile {
   // `ts_key` (the auth key, a secret) settings. With `tailnet on` the device waits for the port's
   // on_tunnel(true) before it connects to Hermes.
   bool tailnet = false;
+  // The board has a microSD slot the port logs to (the `sd_log` setting).
+  // Boards without one hide the setting; the port's SdLogger stays off.
+  bool sd_log = false;
   // Faces in colour too: begin() takes px*px*2 bytes for one (72 KB at 192 px) from this, and free()
   // releases them. Without it, or when it returns null, the board offers one-colour faces.
   void* (*colour_face_alloc)(size_t) = nullptr;
@@ -253,7 +256,7 @@ class App {
   // The `wifi_deep_sleep` setting (on by default): off, Wi-Fi never goes past minimum
   // modem sleep, for an access point that drops or delays clients in deeper sleep.
   bool wifi_deep_sleep() const { return wifi_deep_sleep_; }
-  // The `sd_log` setting (on by default): the device log is mirrored to the
+  // The `sd_log` setting (off by default): the device log is mirrored to the
   // microSD card (/sdcard/hermes.log) when one is present.
   bool sd_log() const { return sd_log_; }
   // These run on the app task. Start returns private, on-screen instructions.
@@ -645,7 +648,7 @@ class App {
   bool touch_wake_ = true;            // the `touch_wake` setting
   bool double_home_ = true;           // the `double_home` setting
   bool wifi_deep_sleep_ = true;       // the `wifi_deep_sleep` setting
-  bool sd_log_ = true;                 // the `sd_log` setting
+  bool sd_log_ = false;                // the `sd_log` setting
   bool wake_talk_ = false;            // the `wake_talk` setting
   bool touch_talk_ = true;            // the `touch_talk` setting
   bool reply_while_face_down_ = false;  // a reply arrived while dark; show it on the turn-over

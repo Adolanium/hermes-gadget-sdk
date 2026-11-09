@@ -108,7 +108,7 @@ namespace hg::i18n {
   X(WakeTalkOn,             "On\n{0} lights the dark screen and records.") \
   X(WakeTalkOff,            "Off\n{0} only lights the dark screen.") \
   X(SdLog,                  "SD card logging") \
-  X(SdLogOn,                "On\nThe device log is written to the microSD card when one is present.") \
+  X(SdLogOn,                "On\nThe log is copied to hermes.log on the microSD card.") \
   X(SdLogOff,               "Off\nNothing is written to the microSD card.") \
   X(FaceDownSleep,          "Face-down sleep") \
   X(FaceDownSleepOn,        "On\nFace down, the screen sleeps and Hermes stays quiet.") \

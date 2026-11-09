@@ -252,7 +252,7 @@ void App::load_settings() {
   wake_talk_ = setting("wake_talk", "off") == "on";
   touch_talk_ = !profile_.talk_key || setting("touch_talk", "on") != "off";
   wifi_deep_sleep_ = setting("wifi_deep_sleep", "on") != "off";
-  sd_log_ = setting("sd_log", "on") != "off";
+  sd_log_ = setting("sd_log", "off") == "on";
   {
     const int grid = std::atoi(setting("profile_grid", "9").c_str());
     profile_grid_ = static_cast<uint8_t>(grid == 4 || grid == 6 || grid == 16 ? grid : 9);

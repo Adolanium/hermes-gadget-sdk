@@ -307,9 +307,10 @@ extern "C" void app_main(void) {
   hgp::events::init();
   ESP_ERROR_CHECK(g_storage.begin() ? ESP_OK : ESP_FAIL);
   const hgp::BoardConfig& board = hgp::board_config();
-  // SD log mirror, on by default (the sd_log setting syncs below, once the
-  // App has loaded it); boards without a slot stay silent.
-  g_sdlog.begin(board.sd, true);
+  // SD log mirror: starts disabled and syncs to the stored sd_log setting
+  // below (off by default), so no file appears until it is switched on.
+  // Boards without a slot stay silent.
+  g_sdlog.begin(board.sd, false);
   power_rails_on(board);
   // A board whose amplifier hangs off the chip's own DAC (the CYD's SC8002B on
   // GPIO26) gets three boot beeps: they show the amplifier and speaker work
@@ -549,6 +550,7 @@ extern "C" void app_main(void) {
   }
   if (hal.speaker == &g_codec_speaker) profile.speaker_rate = hgp::CodecAudio::kRate;
   profile.tailnet = hgp::TailnetLink::supported();
+  profile.sd_log = board.sd.enabled;
 #endif
 
 #if CONFIG_HG_BOARD_ESP32_CYD

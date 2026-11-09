@@ -4,7 +4,7 @@
 
 ### Firmware
 
-- A new **SD card logging** setting, on by default (`set sd_log off`): the device log is mirrored to `/sdcard/hermes.log` on a FAT32 microSD card when one is present, rotating past 512 KB. Cards that are inserted later start logging without a reboot, and a missing or unreadable card never blocks boot. The Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C profile wires its SDIO 3.0 slot (CLK 43, CMD 44, D0-D3 39-42). Built for ESP32-P4; not yet run on a board. Contributed by @rahlquist.
+- A new **SD card logging** setting, off by default (`set sd_log on`): with it on, the device log is copied to `hermes.log` on a FAT32 microSD card when one is present, rotating past 512 KB. Cards that are inserted later start logging without a reboot, and a missing or unreadable card never blocks boot. The Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C profile wires its SDIO 3.0 slot (CLK 43, CMD 44, D0-D3 39-42) on SDMMC slot 0, leaving slot 1 to the C6 companion's SDIO link. Built for ESP32-P4; on that board a FAT32 card mounts, logs, and Wi-Fi connects behind it. Contributed by @rahlquist.
 
 - The M5Stack CoreS3's speaker plays at full volume. The port reserved 15 dB of the AW88298's gain, which the codec driver subtracted from every volume, so 100 played near −11 dB, about a fifth of full volume by ear. The reserve is gone, so 100 reaches the amplifier's 0 dB, the level M5Stack's own driver uses on the CoreS3. Checked by ear on a CoreS3: loud at 100, with no audible distortion over several replies ([speaker volume check](docs/hardware-validation.md#m5stack-cores3-speaker-volume-check)). Fixes #289. Reported and tested by @james-see.
 

@@ -30,10 +30,9 @@ class SdLogger {
   static void task(void* arg);
 
   SdConfig sd_;
-  bool enabled_ = true;
   bool mounted_ = false;
   FILE* file_ = nullptr;
-  int dropped_ = 0;  // lines lost to a full ring, for the boot header of the next file
+  size_t written_ = 0;  // bytes in the current file, for rotation mid-session
 };
 
 }  // namespace hgp

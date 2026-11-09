@@ -3,6 +3,7 @@
 #include "port_sdlog.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -30,41 +31,42 @@ constexpr size_t kRotateBytes = 512 * 1024;
 
 char* g_ring = nullptr;
 size_t g_cap = 0, g_head = 0, g_tail = 0;  // next byte to write / read
-bool g_wrapped = false;
+size_t g_used = 0;                          // bytes currently in the ring (exact)
+size_t g_dropped_lines = 0;                 // lines lost to a full ring
 SemaphoreHandle_t g_lock = nullptr;
 vprintf_like_t g_next = nullptr;
-volatile bool g_capture = false;
+std::atomic<bool> g_capture{false};
 char g_line[kLineBytes];
 
-void ring_put(char c) {
-  if (g_head == g_cap) return;  // full: drop, counted by the caller
+bool ring_put(char c) {
+  if (g_used == g_cap) return false;  // full: drop, counted by the caller
   g_ring[g_head] = c;
-  if (++g_head == g_cap) {
-    g_head = 0;
-    g_wrapped = true;
-  }
-}
-
-size_t ring_left() {
-  return g_wrapped ? g_cap : g_head - g_tail;
+  if (++g_head == g_cap) g_head = 0;
+  ++g_used;
+  return true;
 }
 
 }  // namespace
 
 int SdLogger::hook(const char* fmt, va_list args) {
   // Like diag capture: never wait, never in an ISR, never block the console.
-  if (g_capture && g_ring && !xPortInIsrContext() && xSemaphoreTake(g_lock, 0) == pdTRUE) {
+  if (g_capture.load() && g_ring && !xPortInIsrContext() && xSemaphoreTake(g_lock, 0) == pdTRUE) {
     va_list copy;
     va_copy(copy, args);
     int n = std::vsnprintf(g_line, sizeof(g_line), fmt, copy);
     va_end(copy);
     if (n > 0) {
       size_t len = std::min(static_cast<size_t>(n), sizeof(g_line) - 1);
+      bool dropped = false;
+      bool escape = false;  // drop colour codes
       for (size_t i = 0; i < len; ++i) {
-        if (g_head == g_cap) break;  // ring full: the rest of the line is dropped
-        ring_put(g_line[i]);
+        char c = g_line[i];
+        if (c == '\x1b') escape = true;
+        else if (escape) escape = c != 'm';
+        else if (!ring_put(c)) dropped = true;
       }
-      if (len < static_cast<size_t>(n) && g_head != g_cap) ring_put('\n');
+      if (dropped) ++g_dropped_lines;
+      else if (len < static_cast<size_t>(n)) ring_put('\n');  // truncated lines still end
     }
     xSemaphoreGive(g_lock);
   }
@@ -72,7 +74,7 @@ int SdLogger::hook(const char* fmt, va_list args) {
 }
 
 void SdLogger::mount() {
-  if (mounted_ || !enabled_) return;
+  if (mounted_ || !g_capture.load()) return;
   // Slot 0 for the card: slot 1 carries the C6 companion's SDIO link
   // (CONFIG_ESP_HOSTED_SDIO_SLOT_1), and SDMMC_HOST_DEFAULT() also picks 1.
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
@@ -89,11 +91,16 @@ void SdLogger::mount() {
   esp_vfs_fat_sdmmc_mount_config_t mount_cfg = {};
   mount_cfg.format_if_mount_failed = false;  // never format the user's card
   mount_cfg.max_files = 2;
+  // No card is the common case: keep IDF's sdmmc tags quiet around the attempt.
+  esp_log_level_set("sdmmc_cmd", ESP_LOG_NONE);
+  esp_log_level_set("sdmmc_sd", ESP_LOG_NONE);
+  esp_log_level_set("sdmmc_periph", ESP_LOG_NONE);
   sdmmc_card_t* card = nullptr;
-  if (esp_vfs_fat_sdmmc_mount(kMountPoint, &host, &slot, &mount_cfg, &card) != ESP_OK) {
-    // No card, or not FAT32: stay silent and retry from the flush task.
-    return;
-  }
+  const esp_err_t err = esp_vfs_fat_sdmmc_mount(kMountPoint, &host, &slot, &mount_cfg, &card);
+  esp_log_level_set("sdmmc_cmd", ESP_LOG_WARN);
+  esp_log_level_set("sdmmc_sd", ESP_LOG_WARN);
+  esp_log_level_set("sdmmc_periph", ESP_LOG_WARN);
+  if (err != ESP_OK) return;  // retry from the task; stay silent
   mounted_ = true;
   ESP_LOGI(TAG, "mounted %s (%s)", kMountPoint, card->cid.name);
   open_file();
@@ -111,37 +118,37 @@ void SdLogger::open_file() {
     ESP_LOGW(TAG, "could not open %s; logging stays in RAM only", kPath);
     return;
   }
+  written_ = 0;
   const esp_app_desc_t* app = esp_app_get_description();
   std::fprintf(file_, "== hermes gadget %s on %s, IDF %s ==\n", app->version, app->project_name, app->idf_ver);
-  if (dropped_) std::fprintf(file_, "(%d log lines dropped before this file)\n", dropped_);
+  if (g_dropped_lines) std::fprintf(file_, "(%u log lines dropped before this file)\n",
+                                     static_cast<unsigned>(g_dropped_lines));
 }
 
 void SdLogger::flush() {
-  if (!enabled_) return;
+  if (!g_capture.load()) return;  // the task closes the file when the setting goes off
   if (!mounted_) mount();
   if (!file_) return;
   if (xSemaphoreTake(g_lock, portMAX_DELAY) != pdTRUE) return;
   // Drain a snapshot of the ring; the hook keeps appending behind it.
   static char drain[kRingBytes];
   size_t n = 0;
-  while (g_tail != g_head || g_wrapped) {
-    if (n == sizeof(drain)) break;
+  while (g_used && n < sizeof(drain)) {
     drain[n++] = g_ring[g_tail];
     g_tail = (g_tail + 1) % g_cap;
-    if (g_tail == g_head) {
-      g_wrapped = false;
-      break;
-    }
-    if (!g_wrapped && g_tail == g_head) break;
-  }
-  if (g_wrapped) {  // lapped: the oldest bytes are gone either way
-    g_tail = g_head;
-    g_wrapped = false;
+    --g_used;
   }
   xSemaphoreGive(g_lock);
-  if (n) {
-    std::fwrite(drain, 1, n, file_);
-    std::fflush(file_);
+  if (!n) return;
+  std::fwrite(drain, 1, n, file_);
+  std::fflush(file_);
+  written_ += n;
+  // Rotate while running, not just at open: a long session would otherwise
+  // grow past the cap until the card fills.
+  if (written_ > kRotateBytes) {
+    std::fclose(file_);
+    file_ = nullptr;
+    open_file();
   }
 }
 
@@ -150,6 +157,17 @@ void SdLogger::task(void* arg) {
   uint32_t last = 0;
   while (true) {
     vTaskDelay(pdMS_TO_TICKS(500));
+    // The task owns the file: it opens, closes, mounts and rotates, so the
+    // app task's set_enabled() only flips the flag and can never race an
+    // fwrite or a double mount.
+    if (!g_capture.load()) {
+      if (self->file_) {
+        self->flush();
+        std::fclose(self->file_);
+        self->file_ = nullptr;
+      }
+      continue;
+    }
     self->flush();
     // Retry the mount about every 30 s until a card shows up.
     if (!self->mounted_ && xTaskGetTickCount() - last > pdMS_TO_TICKS(30000)) {
@@ -161,8 +179,7 @@ void SdLogger::task(void* arg) {
 
 void SdLogger::begin(const SdConfig& sd, bool enabled) {
   sd_ = sd;
-  enabled_ = enabled;
-  if (!sd_.enabled) return;
+  if (!sd_.enabled) return;  // no slot: no hook, no task, nothing
   size_t cap = heap_caps_get_total_size(MALLOC_CAP_SPIRAM) ? kRingBytes : kRingBytes / 2;
   g_ring = static_cast<char*>(heap_caps_malloc(cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (!g_ring) g_ring = static_cast<char*>(heap_caps_malloc(cap, MALLOC_CAP_8BIT));
@@ -174,26 +191,16 @@ void SdLogger::begin(const SdConfig& sd, bool enabled) {
   }
   g_cap = cap;
   g_next = esp_log_set_vprintf(&SdLogger::hook);
-  g_capture = enabled_;
-  mount();
+  g_capture.store(enabled);
   xTaskCreate(&SdLogger::task, "sdlog", 3072, this, 2, nullptr);
-  if (enabled_) ESP_LOGI(TAG, "SD logging on");
+  if (enabled) ESP_LOGI(TAG, "SD logging on");
   else ESP_LOGI(TAG, "SD logging off (sd_log setting)");
 }
 
 void SdLogger::set_enabled(bool enabled) {
-  if (enabled_ == enabled) return;
-  enabled_ = enabled;
-  g_capture = enabled_;
-  if (!enabled_ && file_) {
-    flush();
-    std::fclose(file_);
-    file_ = nullptr;
-  } else if (enabled_) {
-    mount();
-    open_file();
-  }
-  if (enabled_) ESP_LOGI(TAG, "SD logging on");
+  // Flag only: the sdlog task opens, closes, mounts and flushes.
+  if (g_capture.exchange(enabled) == enabled) return;
+  if (enabled) ESP_LOGI(TAG, "SD logging on");
   else ESP_LOGI(TAG, "SD logging off");
 }
 

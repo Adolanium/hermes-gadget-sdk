@@ -95,7 +95,7 @@ const Entry kSpanish[] = {
     {Msg::WakeTalkOn, "Activado\n{0} enciende la pantalla apagada y graba."},
     {Msg::WakeTalkOff, "Desactivado\n{0} solo enciende la pantalla apagada."},
     {Msg::SdLog, "Registro en tarjeta SD"},
-    {Msg::SdLogOn, "Activado\nEl registro del dispositivo se escribe en la tarjeta microSD cuando está presente."},
+    {Msg::SdLogOn, "Activado\nEl registro se copia a hermes.log en la tarjeta microSD."},
     {Msg::SdLogOff, "Desactivado\nNo se escribe nada en la tarjeta microSD."},
     {Msg::FaceDownSleep, "Reposo boca abajo"},
     {Msg::FaceDownSleepOn, "Activado\nBoca abajo, la pantalla se apaga y Hermes guarda silencio."},

@@ -33,7 +33,7 @@ bool App::menu_offered(Menu item) const {
     case Menu::TouchWake: return profile_.touch_screen && profile_.wake_key && hal_.display != nullptr;
     case Menu::DoubleHome: return profile_.talk_key;
     case Menu::WakeTalk: return profile_.talk_key && hal_.mic != nullptr && hal_.display != nullptr;
-    case Menu::SdLog: return hal_.display != nullptr;
+    case Menu::SdLog: return profile_.sd_log && hal_.display != nullptr;
     case Menu::FaceDownSleep: return can_sleep_face_down();
     case Menu::Clock: return hal_.display != nullptr;
     case Menu::PowerOff: return hal_.power && hal_.power->can_power_off();
