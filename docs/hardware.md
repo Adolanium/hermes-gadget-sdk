@@ -340,7 +340,7 @@ References: [Espressif hardware overview](https://github.com/espressif/esp-box/b
 
 ## M5Stack CoreS3
 
-Use `m5stack-cores3` for the CoreS3 K128 with 16 MB flash and 8 MB **quad** PSRAM. Core, Core2 and CoreS3 SE are not covered by this profile. The port is experimental for both LCD revisions; physical reports remain outstanding.
+Use `m5stack-cores3` for the CoreS3 K128 with 16 MB flash and 8 MB **quad** PSRAM. Core, Core2 and CoreS3 SE are not covered by this profile. The port is experimental for both LCD revisions; a [camera capture check](hardware-validation.md#m5stack-cores3-camera-capture-check) covers one ILI9342C unit, but full physical reports remain outstanding.
 
 | Part | Connection |
 |---|---|
@@ -352,9 +352,9 @@ Use `m5stack-cores3` for the CoreS3 K128 with 16 MB flash and 8 MB **quad** PSRA
 
 The display selects ILI9342C for touch firmware ID 0x10 and ILI9342E for 0x12. An unrecognized ID leaves the display unavailable and logs an error. M5Stack changed the LCD to ILI9342E in August 2026, so record the panel revision with test results.
 
-Hold the screen to talk, swipe down to cancel, and hold the title for one second to open settings. GPIO 0 carries the audio clock and is not a TALK button. The hardware power and reset buttons retain their functions. Camera, IMU, RTC, SD storage and expansion outputs are not exposed.
+Hold the screen to talk, swipe down to cancel, and hold the title for one second to open settings. GPIO 0 carries the audio clock and is not a TALK button. The hardware power and reset buttons retain their functions. The camera is the `camera.capture` action (below); the IMU, RTC, SD storage and expansion outputs are not exposed.
 
-The power adapter enables the audio supplies (ALDO1 at 1.8 V and ALDO2 at 3.3 V), the onboard boost, and peripheral reset lines. Brightness controls the DLDO1 backlight supply between 2.5 and 3.3 V; zero disables that rail. It preserves charger settings, other rail settings and USB/bus output-enable bits. Settings provide battery readings, local power-off, screen timeout and hardware checks.
+The power adapter enables the audio supplies (ALDO1 at 1.8 V and ALDO2 at 3.3 V), the onboard boost, and peripheral reset lines. The first `camera.capture` also turns on the camera ribbon's supplies (ALDO3 at 3.3 V, BLDO1 and BLDO2, as in esp-bsp's CoreS3 camera bring-up), which the camera and the proximity sensor share, before it pulses the camera enable on AW9523 P1_0. Brightness controls the DLDO1 backlight supply between 2.5 and 3.3 V; zero disables that rail. It preserves charger settings, other rail settings and USB/bus output-enable bits. Settings provide battery readings, local power-off, screen timeout and hardware checks.
 
 ```bash
 cd firmware/esp32
@@ -362,6 +362,29 @@ pio run -e m5stack-cores3 -t upload -t monitor
 ```
 
 For ESP-IDF, use `SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/m5stack-cores3/sdkconfig.defaults"` with a separate build directory and sdkconfig. Use the USB-C data port for flashing and the console. To enter download mode, hold RESET for about three seconds until the green indicator lights. Phone Wi-Fi setup, pairing and OTA use the standard ESP32 flows.
+
+### Camera (GC0308)
+
+The CoreS3's GC0308 camera (0.3 MP VGA, on the same ribbon cable as the
+LTR-553ALS-WA proximity sensor) is available as a `camera.capture` action. The
+adapter drives the sensor's power/reset over AW9523B P1_0, the SCCB hangs off
+the internal I2C bus (AXP2101 and AW9523 share it), and the DVP pins come
+straight from M5Stack's CoreS3 camera table:
+
+| GC0308 pin | ESP32-S3 GPIO |
+|---|---|
+| SCCB SIOC | 11 |
+| SCCB SIOD | 12 |
+| XCLK | **none** — the sensor runs from its on-board 20 MHz crystal, so the port never generates XCLK (the LCD_CAM divider still needs the rate) |
+| VSYNC | 46 |
+| HREF | 38 |
+| PCLK | 45 |
+| D0–D7 | 39, 40, 41, 42, 15, 16, 48, 47 |
+| CAM_RST | AW9523B P1_0 |
+
+Captures are 640×480 tightly packed RGB565, byte-swapped on-device to the
+little-endian layout the gateway documents; the frame buffer lives in PSRAM.
+The driver is [esp32-camera](https://github.com/espressif/esp32-camera).
 
 Before relying on the port, run the [physical checklist](hardware-validation.md), including all touch corners, LCD colors, microphone level, speaker playback and interruption, backlight range, USB recovery, and battery shutdown/wake. Test USB and battery power separately.
 
