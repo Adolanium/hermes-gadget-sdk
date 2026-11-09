@@ -43,4 +43,18 @@ inline bool downsample_rgb565(const uint8_t* source, size_t source_size,
   return true;
 }
 
+// Swap the bytes of packed little-endian RGB565 pixels in place. DVP sensors
+// such as the CoreS3's GC0308 transfer the high byte of each 16-bit pixel
+// first, so the frame buffer arrives byte-swapped relative to the format the
+// gateway expects.
+inline bool swap_rgb565_bytes(uint8_t* pixels, size_t byte_count) {
+  if (!pixels || byte_count == 0 || byte_count % 2 != 0) return false;
+  for (size_t i = 0; i + 1 < byte_count; i += 2) {
+    const uint8_t first = pixels[i];
+    pixels[i] = pixels[i + 1];
+    pixels[i + 1] = first;
+  }
+  return true;
+}
+
 }  // namespace hgp
