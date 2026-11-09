@@ -118,16 +118,20 @@ void SdLogger::open_file() {
     ESP_LOGW(TAG, "could not open %s; logging stays in RAM only", kPath);
     return;
   }
-  written_ = 0;
+  // The rotation cap counts the whole file, not just this session's bytes.
+  written_ = stat(kPath, &st) == 0 ? static_cast<size_t>(st.st_size) : 0;
   const esp_app_desc_t* app = esp_app_get_description();
   std::fprintf(file_, "== hermes gadget %s on %s, IDF %s ==\n", app->version, app->project_name, app->idf_ver);
-  if (g_dropped_lines) std::fprintf(file_, "(%u log lines dropped before this file)\n",
-                                     static_cast<unsigned>(g_dropped_lines));
+  if (g_dropped_lines) {
+    std::fprintf(file_, "(%u log lines dropped before this file)\n", static_cast<unsigned>(g_dropped_lines));
+    g_dropped_lines = 0;  // reported once; later files start clean
+  }
 }
 
 void SdLogger::flush() {
   if (!g_capture.load()) return;  // the task closes the file when the setting goes off
-  if (!mounted_) mount();
+  // Mount lives in task(), not here: probing the card every logger pass
+  // would retry far more often than the 30 s budget.
   if (!file_) return;
   if (xSemaphoreTake(g_lock, portMAX_DELAY) != pdTRUE) return;
   // Drain a snapshot of the ring; the hook keeps appending behind it.
@@ -155,6 +159,7 @@ void SdLogger::flush() {
 void SdLogger::task(void* arg) {
   auto* self = static_cast<SdLogger*>(arg);
   uint32_t last = 0;
+  self->mount();  // try once immediately; later retries wait 30 s
   while (true) {
     vTaskDelay(pdMS_TO_TICKS(500));
     // The task owns the file: it opens, closes, mounts and rotates, so the
