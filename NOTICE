@@ -118,6 +118,12 @@ spotpear/sp-esp32-s3-1.54-muma board,
 https://github.com/78/xiaozhi-esp32/tree/d91d6824309d12df5fc3db5edf8145ee829135d7/main/boards/spotpear/sp-esp32-s3-1.54-muma,
 MIT License. Only these hardware facts are used.
 
+The LCDWIKI ES3C28P codec, amplifier polarity, panel settings and battery
+divider in firmware/esp32/main/board.cpp follow xiaozhi-esp32's
+freenove-esp32s3-display-2.8-lcd board,
+https://github.com/78/xiaozhi-esp32/tree/d91d6824309d12df5fc3db5edf8145ee829135d7/main/boards/freenove-esp32s3-display-2.8-lcd,
+MIT License. Only these hardware facts are used. No vendor source is copied.
+
 The Waveshare ESP32-S3-Touch-LCD-1.83 pin numbers in
 firmware/esp32/main/board.cpp follow Waveshare's esp32_s3_touch_lcd_1_83
 board support package,

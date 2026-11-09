@@ -311,6 +311,40 @@ On a good boot the panel logs `ili9341 320x240 ready` and the expander logs `exp
 
 References: Espressif's [Korvo-2 BSP](https://github.com/espressif/esp-bsp/tree/67f41a169401d1f23e827188dd08fb351cb0febe/bsp/esp32_s3_korvo_2) at commit `67f41a169401d1f23e827188dd08fb351cb0febe` (Apache 2.0), the [Korvo-2 product page](https://www.espressif.com/en/dev-board/esp32-s3-korvo-2-en) (16 MB flash and 8 MB PSRAM), and the [Korvo-2-LCD user guide](https://docs.espressif.com/projects/esp-adf/en/latest/multimedia-boards/dev-boards/user-guide-esp32-s3-korvo-2-lcd.html). Pin numbers, the ILI9341 mirror, BGR color order, the touch X mirror and the expander levels come from that package. The source of those facts is listed in [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
 
+## LCDWIKI ES3C28P
+
+Use `lcdwiki-es3c28p` for the LCDWIKI ES3C28P (Shenzhen QDtech, spec sheet CR2025-MI6872 V1.0): a 2.8 inch IPS display module with an ESP32-S3, 16 MB QSPI flash and 8 MB octal PSRAM. Freenove's ESP32-S3 2.8 inch display uses the same pin map. The ES3N28P is the same board without the touchscreen and has no profile. This port is experimental, with a [physical report](hardware-validation.md#lcdwiki-es3c28p-physical-report) on one unit.
+
+| Part | Connection |
+|---|---|
+| ILI9341V 240×320 IPS | SPI MOSI 11, clock 12, CS 10, DC 46 (MISO 13 unused). Reset is CHIP_PU, shared with the ESP32-S3. Backlight 45, active high |
+| FT6336G touch | I2C 0x38, reset 18, interrupt 17 |
+| I2C | SDA 16, SCL 15, 400 kHz. Shared by the touch controller, the codec and the 4-pin I2C header |
+| ES8311 speaker and microphone | MCLK 4, BCLK 5, WS 7, DOUT 8, DIN 6. The onboard MEMS microphone goes into the ES8311's ADC |
+| Speaker amplifier | Enable on GPIO 1, active low, held low from boot as a power rail. 1.25 mm 2-pin speaker jack, up to 1.5 W at 8 Ω or 2 W at 4 Ω |
+| Battery | GPIO 9 (ADC1 channel 8), 200 kΩ/200 kΩ divider. 3.7 V Li-polymer on a 1.25 mm 2-pin jack. No charge pin and no software power-off |
+
+The panel runs in portrait with X mirrored, the usual ILI9341 portrait setting: upstream runs it in landscape with only the axis swap, so the unflagged scan is a mirror image. Portrait keeps the touch controller's own axes, because the FT5x06 touch path applies no swap or mirror; on the tested unit touch lines up with the picture up to the edges and corners. If it lands mirrored on another unit, the profile alone cannot correct it. Color order is BGR and color inversion is on, as in upstream's setup. The SPI clock is 20 MHz, as upstream uses. To preview the layout, run `hermes-gadget sim --board sim-240x320`.
+
+Hold the screen or BOOT to talk and swipe down to cancel. RESET is CHIP_PU. The RGB LED on GPIO 42 has a built-in control IC, so the plain `led.set` action does not drive it and it stays off. The microSD slot (SDIO on GPIO 38 to 41, 47 and 48), the UART header and the extension pins (GPIO 2, 3, 14 and 21) are unused.
+
+Back up the factory image before the first flash:
+
+```bash
+esptool.py --chip esp32s3 read_flash 0 0x1000000 lcdwiki-es3c28p-factory.bin
+```
+
+```bash
+cd firmware/esp32
+pio run -e lcdwiki-es3c28p -t upload -t monitor
+```
+
+The USB-C port handles flashing and the serial console. Hold BOOT, press and release RESET, then release BOOT to force download mode. For ESP-IDF, use `SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/lcdwiki-es3c28p/sdkconfig.defaults"` with a separate build directory and sdkconfig. Phone setup, pairing and OTA use the same flows as the other ESP32 boards.
+
+On a good boot the panel logs `ili9341 240x320 ready`. Run the [hardware checklist](hardware-validation.md) first for orientation and colors, then touch alignment at the four corners, the speaker (no sound means check the amplifier enable on GPIO 1), the microphone, the battery reading and Wi-Fi setup. The board reports the battery as a voltage only: with a single-cell 3.7 V Li-ion battery fitted, `set battery_estimate liion` turns on a rough percentage ([battery indicator](using-gadget.md#device-settings-and-hardware-checks)). No measured curve is claimed.
+
+References: the LCDWIKI ES3C28P & ES3N28P product specification sheet V1.0 (2025-06-14), for the pin mapping, the FT6336G address and the active-low amplifier enable; and [xiaozhi-esp32's `freenove-esp32s3-display-2.8-lcd` board](https://github.com/78/xiaozhi-esp32/tree/d91d6824309d12df5fc3db5edf8145ee829135d7/main/boards/freenove-esp32s3-display-2.8-lcd) at commit `d91d6824309d12df5fc3db5edf8145ee829135d7` (MIT), for the ES8311 codec, the inverted amplifier enable, color inversion, BGR order, the SPI clock and the battery divider. The source of those facts is listed in [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
+
 ## ESP32-S3-BOX-3
 
 Use `esp32-s3-box-3` for Espressif's BOX-3 with 16 MB flash and 16 MB octal PSRAM. The [original BOX](#esp32-s3-box) has its own profile. BOX-Lite needs a different profile. This port is experimental, with no physical report recorded.

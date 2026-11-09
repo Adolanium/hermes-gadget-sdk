@@ -36,6 +36,8 @@ namespace {
 #define HG_BOARD_NAME "esp32-s3-box"
 #elif CONFIG_HG_BOARD_ESP32S3_KORVO_2
 #define HG_BOARD_NAME "esp32-s3-korvo-2"
+#elif CONFIG_HG_BOARD_LCDWIKI_ES3C28P
+#define HG_BOARD_NAME "lcdwiki-es3c28p"
 #elif CONFIG_HG_BOARD_CORES3
 #define HG_BOARD_NAME "m5stack-cores3"
 #elif CONFIG_HG_BOARD_STICKS3
@@ -768,6 +770,71 @@ BoardConfig make() {
   b.cancel_label = "Swipe down";
   // GPIO 6 is ADC1 channel 5. The divider is 4. No charge pin and no latch.
   b.latch_power = {true, 6, -1, -1, -1, 4};
+  b.latch_power.power_off_supported = false;
+  b.latch_power.usb_external_power = true;
+  return b;
+}
+#elif CONFIG_HG_BOARD_LCDWIKI_ES3C28P
+// LCDWIKI ES3C28P (QDtech): 2.8" 240x320 IPS ILI9341V over SPI, FT6336G touch,
+// one ES8311 for the speaker and the analog MEMS microphone. 16 MB QSPI flash,
+// 8 MB octal PSRAM. The touch, the codec and the I2C header share one bus.
+// Freenove's ESP32-S3 2.8" display uses the same pin map. The panel's reset is
+// CHIP_PU, shared with the ESP32-S3, so it has no GPIO. The RGB LED on GPIO 42
+// is an addressable part, not a plain GPIO LED, so it stays off.
+// Pins: docs/hardware.md#lcdwiki-es3c28p
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  // GPIO 1 enables the speaker amplifier, active low. CodecAudioConfig::pa is
+  // active high, so hold it low from boot as a rail: the amplifier stays on,
+  // as it does on boards whose pa goes through esp_codec_dev.
+  b.power_rails[0] = {1, false};
+  b.power_rails_settle_ms = 10;
+  // Portrait, so touch needs no axis swap (the FT5x06 path applies no swap or
+  // mirror). Upstream runs landscape with swap_xy alone, so the unflagged scan is
+  // a reflection: portrait needs mirror_x (the usual ILI9341 MX | BGR).
+  b.lcd.enabled = true;
+  b.lcd.controller = LcdController::Ili9341;
+  b.lcd.width = 240;
+  b.lcd.height = 320;
+  b.lcd.swap_xy = false;
+  b.lcd.mirror_x = true;
+  b.lcd.mirror_y = false;
+  b.lcd.invert = true;  // IPS glass; upstream inverts too
+  b.lcd.bgr = true;
+  b.lcd.mosi = 11;
+  b.lcd.sclk = 12;
+  b.lcd.cs = 10;
+  b.lcd.dc = 46;
+  b.lcd.rst = -1;
+  b.lcd.backlight = 45;
+  b.lcd.spi_mhz = 20;  // upstream's clock for this panel
+  b.i2c = {16, 15, 400000};
+  b.codec.enabled = true;
+  b.codec.mclk = 4;
+  b.codec.bclk = 5;
+  b.codec.ws = 7;
+  b.codec.dout = 8;
+  b.codec.din = 6;
+  b.codec.pa = -1;  // see power_rails above
+  b.codec.mic = MicCodec::Es8311;
+  // Measured on the board: at the default 24 dB, speech peaked near -40 dBFS
+  // (RMS about -53 dBFS) over a -78 dBFS floor, so a loopback was inaudible.
+  // 42 dB is the ES8311's top ADC scale step.
+  b.codec.mic_gain_db = 42.0f;
+  b.touch.enabled = true;
+  b.touch.controller = TouchController::Ft5x06;
+  b.touch.addr = 0x38;
+  b.touch.rst = 18;
+  b.touch.int_gpio = 17;
+  b.touch.width = 240;
+  b.touch.height = 320;
+  b.touch.ppi = 143;  // 240x320 across a 2.8 inch diagonal
+  b.buttons = {0, -1, -1, -1};  // BOOT
+  b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
+  // GPIO 9 is ADC1 channel 8, behind a 200k/200k divider. No charge pin and no latch.
+  b.latch_power = {true, 9, -1, -1, -1, 2};
   b.latch_power.power_off_supported = false;
   b.latch_power.usb_external_power = true;
   return b;
