@@ -36,6 +36,7 @@ enum class Screen : uint8_t {
   Prompt,  // a yes/no question from Hermes, answered with the buttons
   Updating,  // installing a firmware update
   Settings,
+  Camera,     // the device's own camera: a live view, a countdown, and the photo (App::open_camera)
   Setup,
   Dashboard,  // Hermes's sessions and the user's status tiles (docs/protocol.md#dashboard)
   Profiles,   // the Hermes profiles to choose from: a grid of `dash` (name, id), the page from item `scroll`
@@ -64,7 +65,7 @@ struct DashRow {
 struct SettingRow {
   enum class Kind : uint8_t { Value, Toggle, Slider, Action };
   enum class Icon : uint8_t { Volume, Sun, Talk, Person, Mic, Note, Screen, Keys, Info, Battery, Timer, Touch,
-                              FaceDown, Clock, Power, Wifi, Phone, Globe, Back, Bell, Bolt, Check, Grid };
+                              FaceDown, Clock, Power, Wifi, Phone, Globe, Back, Bell, Bolt, Check, Grid, Camera };
   std::string label, value;  // Value: the text at the right; Slider: its percentage
   Icon icon = Icon::Info;
   Kind kind = Kind::Value;

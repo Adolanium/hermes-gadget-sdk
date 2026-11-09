@@ -56,7 +56,6 @@ TEST("fake camera serves a capture and a preview of the configured size") {
       ++captures;
       return true;
     }
-    bool previewing() const override { return preview_draws > 0; }
 
     uint16_t last_x = 0, last_y = 0, last_w = 0, last_h = 0;
     unsigned preview_draws = 0;
@@ -74,7 +73,6 @@ TEST("fake camera serves a capture and a preview of the configured size") {
   CHECK_EQ(cam.last_y, uint16_t(20));
   CHECK_EQ(cam.last_w, uint16_t(320));
   CHECK_EQ(cam.last_h, uint16_t(240));
-  CHECK(cam.previewing());
 
   hg::Camera::Still still;
   CHECK(cam.capture(still, cam_err));
@@ -84,7 +82,11 @@ TEST("fake camera serves a capture and a preview of the configured size") {
   CHECK_EQ(still.pixels.size(), size_t(640u * 480u * 2u));
 
   cam.draw_fails = true;
+  cam.preview_draws = 0;
   CHECK(!cam.draw_preview(0, 0, 320, 240));
+  CHECK_EQ(cam.preview_draws, 1u);
   cam.capture_fails = true;
+  CHECK_EQ(cam.captures, 1u);
   CHECK(!cam.capture(still, cam_err));
+  CHECK(!cam_err.empty());
 }

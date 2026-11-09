@@ -176,6 +176,18 @@ void add_camera_action(hg::App& app, i2c_master_bus_handle_t sccb_bus) {
   app.add_action(std::move(camera));
 }
 #elif CONFIG_HG_BOARD_CORES3
+// The camera's power/reset line lives on the AW9523B; release it once, before
+// the first camera use, and leave it up for the sensor's lifetime. Pulsing it
+// again would reset the running sensor's registers under the driver. Boot goes
+// first; an action call then only reports a boot that never got there.
+bool ensure_camera_powered() {
+  static bool powered = false;
+  if (powered) return true;
+  if (!g_cores3.camera_power(true)) return false;
+  powered = true;
+  return true;
+}
+
 void add_camera_action(hg::App& app, i2c_master_bus_handle_t sccb_bus) {
   static hgp::CameraCapture cores3_camera;
   hg::Action camera;
@@ -185,16 +197,9 @@ void add_camera_action(hg::App& app, i2c_master_bus_handle_t sccb_bus) {
   camera.handler = [sccb_bus](const hg::json::Value&, hg::json::Value& result, std::string& error) {
     std::vector<uint8_t> pixels;
     uint16_t width = 0, height = 0;
-    // The camera's power/reset line lives on the AW9523B; release it once, before
-    // the first capture, and leave it up for the sensor's lifetime. Pulsing it again
-    // would reset the running sensor's registers under the driver.
-    static bool powered = false;
-    if (!powered) {
-      if (!g_cores3.camera_power(true)) {
-        error = "camera power/reset line failed";
-        return false;
-      }
-      powered = true;
+    if (!ensure_camera_powered()) {
+      error = "camera power/reset line failed";
+      return false;
     }
     if (!cores3_camera.capture_rgb565(sccb_bus, pixels, width, height, error)) return false;
     if (pixels.size() > 640u * 512u * 2u) {
@@ -449,9 +454,14 @@ extern "C" void app_main(void) {
   if (board.speaker.enabled && g_speaker.begin(board.speaker)) hal.speaker = &g_speaker;
 #if CONFIG_HG_BOARD_CORES3
   // The CoreS3's GC0308: the camera HAL rides the panel once the display is up.
+  // The camera mode wants the sensor running from boot, so the rails and reset
+  // pulse go out here, and the driver starts at once; a board whose camera is
+  // missing just keeps the Camera item out of the settings menu.
   if (hal.display != nullptr) {
     hgp::camera_hal_set_display(hal.display);
     hal.camera = hgp::camera_hal();
+    if (ensure_camera_powered()) hgp::camera_hal_begin();
+    else ESP_LOGW("hg.camera", "camera rails or reset line failed; the camera stays unavailable");
   }
 #endif
   if (board.axp2101 && g_power.begin(i2c_bus)) {

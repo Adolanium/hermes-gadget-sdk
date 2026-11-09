@@ -138,7 +138,7 @@ bool App::menu_open() const { return overlay_ == Overlay::Profiles || overlay_ =
 // so the screen timeout and the resting clock can both ask.
 bool App::screen_busy() const {
   return mode_ != Mode::Idle || speaking() || talk_held_ || cancel_held_ || prompt_showing() ||
-         !wifi_setup_text_.empty() || phone_pairing_ || ota_busy() || ota_ == Ota::Restarting ||
+         !wifi_setup_text_.empty() || phone_pairing_ || camera_open_ || ota_busy() || ota_ == Ota::Restarting ||
          (overlay_ != Overlay::None && !menu_open()) || battery_alert_;
 }
 

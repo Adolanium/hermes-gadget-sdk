@@ -120,35 +120,35 @@ bool CameraCapture::capture_rgb565(i2c_master_bus_handle_t sccb_bus, std::vector
 }
 
 // ---------------------------------------------------------------------------
-// hg::Camera for the CoreS3 camera screen (#294): the frame size is switched
-// between VGA (captures) and QVGA (the live preview) on the one camera
-// instance, and frames are drawn straight into the panel framebuffer. The
-// core's camera screen calls draw_preview from its render step at a capped
-// rate.
+// hg::Camera for the CoreS3 camera screen (#294): the one camera instance runs
+// at VGA and stays there — the sensor's frame buffers are allocated at VGA, and
+// esp32-camera drops any frame smaller than its fb allocation, so switching to
+// QVGA for the live view on the same instance yields no frames (found on
+// hardware: every preview frame warned `cam_hal: FB-SIZE: 153600 != 614400`
+// and none was queued). draw_preview instead blits each VGA frame scaled
+// straight into the panel's window, which the capture path already uses.
 // ---------------------------------------------------------------------------
-
-bool ensure_framesize(framesize_t wanted) {
-  sensor_t* sensor = esp_camera_sensor_get();
-  if (sensor == nullptr) return false;
-  if (sensor->status.framesize != wanted) {
-    if (sensor->set_framesize(sensor, wanted) != 0) return false;
-    vTaskDelay(pdMS_TO_TICKS(120));  // let the sensor reconfigure and settle
-  }
-  return true;
-}
 
 void blit_preview(const uint8_t* source, uint32_t source_width, uint32_t source_height,
                   hg::Display& display, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+  const hg::DisplayInfo info = display.info();
   uint16_t* framebuffer = display.framebuffer();
-  if (framebuffer == nullptr) return;
-  if (x + w > display.info().width || y + h > display.info().height) return;
+  if (framebuffer == nullptr || w == 0 || h == 0) return;
+  if (x + w > info.width || y + h > info.height) return;
+  // The sensor sends each pixel's high byte first, which is exactly the byte
+  // order a panel that wants big-endian RGB565 (this CoreS3's) takes, so the raw
+  // pairs go out as they are; a little-endian framebuffer gets each pair swapped
+  // as it is copied. The core draws the captured photo through a Canvas, which
+  // applies the same byte order from the little-endian layout capture() returns.
+  const bool be = info.swap_bytes;
   for (uint16_t row = 0; row < h; ++row) {
     const uint32_t source_y = (static_cast<uint64_t>(row) * source_height) / h;
     const uint8_t* src = source + source_y * source_width * 2;
-    uint16_t* dst = framebuffer + static_cast<uint32_t>(y + row) * display.info().width + x;
+    uint16_t* dst = framebuffer + static_cast<uint32_t>(y + row) * info.width + x;
     for (uint16_t col = 0; col < w; ++col) {
       const uint32_t source_x = (static_cast<uint64_t>(col) * source_width) / w;
-      dst[col] = static_cast<uint16_t>(src[source_x * 2] | (src[source_x * 2 + 1] << 8));
+      const uint16_t raw = static_cast<uint16_t>(src[source_x * 2 + 1] << 8 | src[source_x * 2]);
+      dst[col] = be ? raw : static_cast<uint16_t>(raw >> 8 | raw << 8);
     }
   }
   display.flush(y, y + h);
@@ -161,24 +161,29 @@ class CoreS3CameraHal final : public hg::Camera {
   bool available() const override { return s_ready; }
 
   bool draw_preview(uint16_t x, uint16_t y, uint16_t w, uint16_t h) override {
-    if (display_ == nullptr || !s_ready || !ensure_framesize(FRAMESIZE_QVGA)) return false;
-    if (w == 0 || h == 0) return false;
+    if (display_ == nullptr || !s_ready || w == 0 || h == 0) return false;
+    // Single-threaded: never wait on the driver. esp_camera_fb_get blocks up to
+    // 4 s on an empty queue, which stalls the whole app and drops touch input;
+    // the sensor outpaces the preview's ~10 fps cap, so an empty queue this tick
+    // just means the next one draws.
+    if (!esp_camera_available_frames()) return false;
     camera_fb_t* fb = esp_camera_fb_get();
     if (fb == nullptr) return false;
     if (fb->len != static_cast<size_t>(fb->width) * fb->height * 2) {
       esp_camera_fb_return(fb);
       return false;
     }
-    std::vector<uint8_t> frame(fb->buf, fb->buf + fb->len);
     const uint16_t fw = fb->width, fh = fb->height;
+    // The frame is painted before it goes back to the driver: no copy, and no
+    // per-frame scratch buffer, at the preview's ~10 fps. The VGA frame scales
+    // into whatever window the core gives.
+    blit_preview(fb->buf, fw, fh, *display_, x, y, w, h);
     esp_camera_fb_return(fb);
-    swap_rgb565_bytes(frame.data(), frame.size());
-    blit_preview(frame.data(), fw, fh, *display_, x, y, w, h);
     return true;
   }
 
   bool capture(Still& out, std::string& error) override {
-    if (!s_ready || !ensure_framesize(FRAMESIZE_VGA)) {
+    if (!s_ready) {
       error = "camera is not running";
       return false;
     }
@@ -203,8 +208,6 @@ class CoreS3CameraHal final : public hg::Camera {
     return true;
   }
 
-  bool previewing() const override { return s_ready && display_ != nullptr; }
-
  private:
   hg::Display* display_ = nullptr;
 };
@@ -214,5 +217,17 @@ CoreS3CameraHal g_cores3_camera_hal;
 hg::Camera* camera_hal() { return &g_cores3_camera_hal; }
 
 void camera_hal_set_display(hg::Display* display) { g_cores3_camera_hal.set_display(display); }
+
+// Started at boot once the board's camera rails and reset line are up, so the
+// camera mode's settings item and preview are ready without a capture first;
+// the capture action then reuses the running pipeline. Once per boot.
+bool camera_hal_begin() {
+  if (s_ready) return true;
+  if (s_init_attempted) return false;  // a failed start stays failed until restart
+  s_init_attempted = true;
+  if (!begin_camera()) return false;
+  s_ready = true;
+  return true;
+}
 
 }  // namespace hgp

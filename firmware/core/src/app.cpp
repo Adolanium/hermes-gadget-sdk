@@ -1563,6 +1563,24 @@ void App::on_button(Button button, bool pressed, bool touch) {
     update_model();
     return;
   }
+  // The camera screen owns the input: a tap (a TALK key press too) is the trigger,
+  // a swipe down's CANCEL release leaves. Nothing records here.
+  if (camera_open_) {
+    if (button == Button::Cancel) {
+      if (pressed) {
+        cancel_held_ = true;
+        cancel_down_at_ = now();
+        cancel_long_fired_ = false;
+        camera_touch_at_ = now();
+      } else if (cancel_held_) {
+        cancel_held_ = false;
+        if (!cancel_long_fired_) close_camera();
+      }
+      return;
+    }
+    if (button == Button::Talk && pressed) camera_tap();
+    return;
+  }
   switch (button) {
     case Button::Talk:
       if (pressed) {
@@ -1744,6 +1762,7 @@ void App::cancel_listening(std::string_view why) {
 
 void App::go_home() {
   wake_display();
+  close_camera();
   if (mode_ == Mode::Listening) cancel_listening("cancelled");
   if (rec_on_) cancel_upload("cancelled");  // a finished recording still uploading goes with the turn
   // Leaving the bot stops it: a reply on its way, or one the first press talked over.
@@ -1856,6 +1875,7 @@ void App::start_new_session() {
   if (rec_on_) cancel_upload("new session");
   stop_playback();
   dismiss_overlay();
+  close_camera();
   clear_prompt();
   send(proto::message("session.new"));
   reply_.clear();
@@ -2246,6 +2266,7 @@ void App::tick() {
   motion_tick();
   clock_tick();
   settings_tick();
+  camera_tick();
   phone_tick();
 
   if (phase_ == Phase::Boot && static_cast<int32_t>(t - boot_until_) >= 0) {
@@ -2363,7 +2384,7 @@ void App::tick() {
     notice_until_ = 0;
     update_model();
   }
-  if (cancel_held_ && !talk_held_ && !settings_open() && !cancel_long_fired_ && !prompt_showing()) {
+  if (cancel_held_ && !talk_held_ && !settings_open() && !cancel_long_fired_ && !prompt_showing() && !camera_open_) {
     uint32_t held = t - cancel_down_at_;
     if (held >= kNewSessionHoldMs) {
       cancel_long_fired_ = true;
@@ -2559,6 +2580,14 @@ void App::update_model() {
     m.detail = tr(level ? Msg::Charging : Msg::UsbPower);
     m.face_battery = level ? static_cast<int8_t>(std::min<int>(*percent, 100)) : int8_t(-1);
     m.hint.clear();
+    if (!display_sleeping_) render(m);
+    return;
+  } else if (camera_open_) {
+    // The camera owns the rows between the bars: the draw step paints the live
+    // view (and the countdown number over it) straight to them, and the photo
+    // once. The Ui still draws the bars, and the alerts above cover the screen.
+    camera_draw();
+    camera_model();
     if (!display_sleeping_) render(m);
     return;
   } else if (!fatal_.empty()) {
@@ -2890,7 +2919,7 @@ std::string App::console(std::string_view raw) {
     if (profile_.tailnet)
       for (const char* k : kTailnetKeys) keys += std::string(" ") + k;
     return "@help commands: status | diag [log] | get <key> | set <key> <value> | say <text> | talk | release | "
-           "cancel | new-session | settings [close] | wifi-setup [close] | wifi [list | add <ssid> [password] | join <ssid> | "
+           "cancel | new-session | camera [close] | settings [close] | wifi-setup [close] | wifi [list | add <ssid> [password] | join <ssid> | "
            "forget <ssid>] | phone [pair [close] | forget] | perf [on | off | reset | budget <us> | bench [scroll | mascot | redraw | all]] | yes | no | reconnect | forget-key | factory-reset   keys:" + keys;
   }
   if (cmd == "status") return "@status " + status_json();
@@ -2915,6 +2944,10 @@ std::string App::console(std::string_view raw) {
   if (cmd == "settings") {
     if (rest == "close") { close_settings(); return "@ok settings closed"; }
     return open_settings() ? "@ok settings" : "@error settings unavailable during a prompt or update";
+  }
+  if (cmd == "camera") {
+    if (rest == "close") { close_camera(); return "@ok camera closed"; }
+    return open_camera() ? "@ok camera" : "@error camera unavailable (no camera, or during a prompt, update or pairing)";
   }
   if (cmd == "perf") return perf_command(rest);
   if (cmd == "diag" && rest.empty()) return diag_report();

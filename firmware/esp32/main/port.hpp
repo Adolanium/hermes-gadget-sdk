@@ -725,9 +725,12 @@ class CoreS3Board {
 
 // The CoreS3's hg::Camera implementation (port_camera_cores3.cpp). camera_hal()
 // returns nullptr on any other board; camera_hal_set_display() gives it the
-// panel for the live preview (call once after the display is up).
+// panel for the live preview (call once after the display is up). The camera
+// mode needs the sensor running from boot: camera_hal_begin() starts the driver
+// once the board's camera rails and reset line are up, once per boot.
 hg::Camera* camera_hal();
 void camera_hal_set_display(hg::Display* display);
+bool camera_hal_begin();
 
 // The M5PM1's rails, amplifier and battery. Hal::power once begin() succeeded.
 class StickS3Board final : public hg::Power {
