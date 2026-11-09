@@ -33,6 +33,7 @@ bool App::menu_offered(Menu item) const {
     case Menu::TouchWake: return profile_.touch_screen && profile_.wake_key && hal_.display != nullptr;
     case Menu::DoubleHome: return profile_.talk_key;
     case Menu::WakeTalk: return profile_.talk_key && hal_.mic != nullptr && hal_.display != nullptr;
+    case Menu::Animation: return hal_.display != nullptr;
     case Menu::FaceDownSleep: return can_sleep_face_down();
     case Menu::Clock: return hal_.display != nullptr;
     case Menu::PowerOff: return hal_.power && hal_.power->can_power_off();
@@ -205,6 +206,9 @@ void App::settings_input(Button button, bool pressed) {
     case Menu::WakeTalk:
       console(wake_talk_ ? "set wake_talk off" : "set wake_talk on");
       break;
+    case Menu::Animation:
+      console(animation_ ? "set animation off" : "set animation on");
+      break;
     case Menu::FaceDownSleep:
       console(face_down_sleep_ ? "set face_down_sleep off" : "set face_down_sleep on");
       break;
@@ -358,6 +362,7 @@ SettingRow App::settings_row(Menu item, const std::string& label, const std::str
     case Menu::Language: row.icon = Icon::Globe; break;
     case Menu::DoubleHome: row.icon = Icon::Back; row.kind = Kind::Toggle; row.level = double_home_; break;
     case Menu::WakeTalk: row.icon = Icon::Talk; row.kind = Kind::Toggle; row.level = wake_talk_; break;
+    case Menu::Animation: row.icon = Icon::Screen; row.kind = Kind::Toggle; row.level = animation_; break;
     case Menu::Back: row.icon = Icon::Back; row.kind = Kind::Action; break;
     case Menu::Closed: break;
   }
@@ -589,6 +594,10 @@ void App::settings_item(Menu item, UiModel& m) const {
     case Menu::WakeTalk:
       m.detail = tr(Msg::WakeTalk);
       m.body = tr(wake_talk_ ? Msg::WakeTalkOn : Msg::WakeTalkOff, {control(profile_.talk_label)});
+      break;
+    case Menu::Animation:
+      m.detail = tr(Msg::Animation);
+      m.body = tr(animation_ ? Msg::AnimationOn : Msg::AnimationOff);
       break;
     case Menu::FaceDownSleep:
       m.detail = tr(Msg::FaceDownSleep);

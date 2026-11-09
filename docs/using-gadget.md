@@ -127,6 +127,7 @@ Select **Back to Hermes** to leave.
 | Full battery sound | Boards with a power driver and a speaker: chime once per charge when the battery is full; off by default |
 | Deep Wi-Fi sleep | ESP32 boards that read their battery: choose whether Wi-Fi sleeps deeper on battery with the screen dark; on by default (see below) |
 | Screen timeout | Choose always on, 30, 60, 120, or 300 seconds |
+| Animation | Boards with a display: choose whether the edge ring's comet and the Updating screen move; on by default. Off keeps them still; a timer's arc and the update's progress still show |
 | Touch wakes screen | Touchscreens with a button that can wake the screen: choose whether a touch lights the dark screen; on by default |
 | Face-down sleep | Boards with a motion sensor: sleep and stay quiet while the gadget lies on its screen; off by default |
 | Clock face | Boards with a display: choose Off (the default), 30 seconds, 1, 2, or 5 minutes of rest before a resting clock shows |
