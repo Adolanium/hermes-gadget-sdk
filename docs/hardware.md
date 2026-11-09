@@ -391,7 +391,8 @@ The camera also has a **camera mode**: the settings menu's **Camera** item
 camera screen. The live view is the VGA stream blitted straight into the panel
 rows between the bars at about 10 fps, **mirrored left-to-right** like a
 phone's front camera so the view moves the way a hand aimed at it moves — the
-saved photo and the `camera.capture` action keep the sensor's own handedness.
+held photo (it lives only in the mode's memory, discarded on retake or
+leaving) and the `camera.capture` action keep the sensor's own handedness.
 The mode keeps the capture pipeline's frame size, because the driver queues
 only frames as large as its frame-buffer allocation. A tap starts a 3-second
 countdown (a large number over the live view) and captures; the photo stays on
@@ -400,12 +401,13 @@ down leaves. The screen never dims while the camera is out, and the mode
 leaves itself after 60 s with no touch.
 
 The pipeline starts when the camera mode opens or the first `camera.capture`
-arrives, and stops when the mode closes, or 60 s after the last capture: the
-driver's frame buffers go back to PSRAM, the sensor is held in reset, and the
-ribbon's supplies (ALDO3 at 3.3 V, BLDO1 and BLDO2) go off. A start that fails
-hides the Camera item and refuses captures until the next restart. On a board
-without touch, `camera` on the serial console opens the mode and `camera
-close` leaves.
+arrives, and stops — while the camera mode is closed — when it leaves, or 60 s
+after the last capture (an open mode stays up; closing it stops the pipeline
+at once): the driver's frame buffers go back to PSRAM, the sensor is held in
+reset, and the ribbon's supplies (ALDO3 at 3.3 V, BLDO1 and BLDO2) go off. A
+start that fails hides the Camera item and refuses captures until the next
+restart. On a board without touch, `camera` on the serial console opens the
+mode and `camera close` leaves.
 
 Before relying on the port, run the [physical checklist](hardware-validation.md), including all touch corners, LCD colors, microphone level, speaker playback and interruption, backlight range, USB recovery, and battery shutdown/wake. Test USB and battery power separately.
 

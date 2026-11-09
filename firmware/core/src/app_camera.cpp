@@ -154,9 +154,13 @@ void App::camera_draw() {
     return;
   }
   if (static_cast<int32_t>(now() - camera_frame_at_) < static_cast<int32_t>(kCameraFrameMs)) return;
+  // No frame this call: leave the panel as it is and try again on the next one.
+  // Drawing the countdown digit over a stale frame would ghost it into the next
+  // digit's shape, and a failed draw should not spend the frame budget.
+  if (!hal_.camera->draw_preview(0, static_cast<uint16_t>(l.main_y), static_cast<uint16_t>(w),
+                                 static_cast<uint16_t>(l.main_h)))
+    return;
   camera_frame_at_ = now();
-  hal_.camera->draw_preview(0, static_cast<uint16_t>(l.main_y), static_cast<uint16_t>(w),
-                            static_cast<uint16_t>(l.main_h));
   if (camera_state_ != CameraState::Countdown) return;
   // The big number stays over every new frame: an outlined digit, centred.
   const int scale = 3;

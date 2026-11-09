@@ -186,7 +186,14 @@ static uint32_t camera_use_ms = 0;  // the last start or capture: the 60 s stop 
 static bool ensure_camera_run() {
   if (hgp::camera_hal_running()) return true;
   if (hgp::camera_hal_start_failed()) return false;
-  if (!g_cores3.camera_power(true)) return false;  // the rails, then the reset pulse
+  if (!g_cores3.camera_power(true)) {
+    // camera_power(true) puts the rails up before it pulses the expander, so a
+    // mid-way failure can leave the ribbon powered: down as far as the bus
+    // answers, then report the failed start either way.
+    g_cores3.camera_power(false);
+    g_cores3.camera_rails_off();
+    return false;
+  }
   if (!hgp::camera_hal_begin()) {
     // A start that got as far as powering up leaves the camera powered down.
     g_cores3.camera_power(false);

@@ -478,7 +478,7 @@ leaving (#294, PR 1) — on the same ILI9342C unit as the
 [camera capture check](#m5stack-cores3-camera-capture-check). Run by the
 contributor with the serial console (entry, capture and leaving by hand).
 
-- **Firmware:** the `cores3-camera-mode` branch, built with ESP-IDF 6.1
+- **Firmware:** the `cores3-camera-mode` branch at commit `1bc96b7`, built with ESP-IDF 6.1
   (`espressif/idf:v6.1`) and the CoreS3 defaults, flashed over USB into the
   `ota_0` slot.
 - **Entry:** the settings menu's **Camera** item, reached by touch (hold the
