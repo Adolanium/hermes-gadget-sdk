@@ -37,6 +37,10 @@
 
 - **A device that reconnects is welcomed at once.** After a device rebooted or changed networks, its old connection still looked open. The new connection closed the old one and waited for that close before sending the welcome, and the old connection's peer is gone, so the wait lasted until TCP gave up or the device's new network stack reset it. That took 0.07 to 3 s per reconnect on an AMOLED-1.75C over the tailnet, and in the meantime the pairing check sent `paired` and the dashboard before the welcome. The old connection now closes in the background. Contributed by Antonio Lourenco (@tozes).
 
+### Hardware and setup
+
+- The hardware guide says once how to run the boards' factory-backup lines when PlatformIO is the only install (`pio pkg exec -p tool-esptoolpy -- esptool.py ...`, or `pip install esptool`), to check that the backup has the full flash size before flashing, and that `-b 921600` makes the read about seven times faster. [Back up the factory firmware](docs/hardware.md#back-up-the-factory-firmware). Contributed by @mathbatistela.
+
 ## 0.5.0
 
 Hermes Gadget 0.5.0 adds a **Gadgets** page to the Hermes desktop app: a gadget that runs in the window, pairing with one click, a live copy of each device's screen, and buttons to send a card or run a device action. Profile faces come in colour on boards with PSRAM, and they blink and talk. The screen shows Russian, and Chinese as a build option. On boards with PSRAM a recording survives a lost connection, and larger network buffers keep the microphone up on slow links such as a phone hotspot. Eight experimental board profiles arrive: the M5Stack StickS3, the Waveshare ESP32-P4-WIFI6-Touch-LCD-7B with camera capture, the Waveshare ESP32-S3-Touch-AMOLED-1.32 and 1.43C, the Waveshare ESP32-S3-Touch-LCD-1.83 and 1.46, the original Espressif ESP32-S3-BOX and the ESP32-S3-Korvo-2. Details by area follow.

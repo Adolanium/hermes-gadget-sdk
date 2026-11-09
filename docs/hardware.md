@@ -12,6 +12,22 @@ Start with [Supported hardware](supported-hardware.md) for a board comparison, t
 - **Speaker (optional):** an I2S class-D amplifier (MAX98357A) and a 4–8 Ω speaker.
 - **Buttons:** at least one (TALK). The DevKit's BOOT button works; a second button for CANCEL is recommended.
 
+## Back up the factory firmware
+
+Most board sections below give an `esptool.py ... read_flash` line that saves the board's factory firmware before its first flash. PlatformIO's own esptool is not on the shell path, so with PlatformIO as the only install, run the line through it with the same arguments:
+
+```bash
+pio pkg exec -p tool-esptoolpy -- esptool.py --chip esp32s3 read_flash 0 0x1000000 my-board-factory.bin
+```
+
+Or install esptool with `pip install esptool` and run the lines as written. esptool 5 warns that `esptool.py` and `read_flash` are older names, and runs them. The Cardputer ADV line is written for esptool 5 (`esptool ... read-flash`); through PlatformIO's esptool 4, write it as `pio pkg exec -p tool-esptoolpy -- esptool.py --chip esp32s3 --port /dev/ttyACM0 read_flash 0 ALL original-cardputer-adv.bin`.
+
+The default speed is slow: on an ES3C28P's USB port a 16 MB read took 24 minutes. Adding `-b 921600` before `read_flash` made it about seven times faster.
+
+Before flashing, check that a full-flash backup has the board's full flash size: 16,777,216 bytes for `0x1000000` (16 MB), 8,388,608 bytes for `0x800000` (8 MB), and for `ALL` the size esptool reports for the detected flash. `ls -l` shows it. A shorter file is not a backup; read the flash again. A line that reads one partition instead (the AIPI Lite's `read_flash 0x9000 16384`) gives a file of exactly that length.
+
+Keep backups private. A factory image can hold the vendor's service credentials (the AIPI Lite's does), and an image read after setup holds your Wi-Fi password and the device's key. Save them in a folder only you can read, and don't commit, upload or share them.
+
 ## ESP32-S3 breadboard
 
 Board option `esp32s3-breadboard`, for an ESP32-S3-DevKitC-1 N8R8 and the modules above.
