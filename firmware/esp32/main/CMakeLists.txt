@@ -10,11 +10,10 @@ set(HG_RGB_REQUIRES)
 if(IDF_TARGET STREQUAL "esp32p4")
     list(APPEND HG_P4_SOURCES
         "port_dsi.cpp"
-        "port_audio_p4.cpp")
-    list(APPEND HG_P4_REQUIRES esp_lcd_jd9365)
-    if(CONFIG_HG_BOARD_CROWPANEL_P4_101 OR CONFIG_HG_BOARD_WS_P4_TOUCH_LCD_3_4C)
-        list(APPEND HG_P4_SOURCES "port_power_p4.cpp" "../../drivers/stc8_battery.cpp")
-    endif()
+        "port_audio_p4.cpp"
+        "port_power_p4.cpp"
+        "../../drivers/stc8_battery.cpp")
+    list(APPEND HG_P4_REQUIRES esp_lcd_ek79007 esp_lcd_st7123 esp_lcd_jd9365)
     if(CONFIG_HG_BOARD_WS_P4_TOUCH_LCD_7B)
         list(APPEND HG_P4_SOURCES "port_camera.cpp")
         list(APPEND HG_P4_REQUIRES esp_video)
