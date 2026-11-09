@@ -38,9 +38,12 @@ bool CoreS3Control::set_brightness(uint8_t percent) {
 }
 
 bool CoreS3Control::camera_power(bool on) {
-  // Drive the camera reset (P1_0) low, then release it for a clean start. Holding it
-  // low keeps the sensor held; unrelated P1 outputs keep their state through
-  // the masked writes. In the AW9523B's direction register (0x05), 0 is an output.
+  // The camera sits on ALDO3 at 3.3 V (register 0x94), which begin() does not
+  // enable — with the rail off the sensor never answers its probe (found on
+  // #293: 0x21 missing from the diag scan and the ID read returning garbage;
+  // enabling ALDO3 + BLDO1/BLDO2 restored the probe in one step, exactly like
+  // esp-bsp's camera bring-up). Rails first, then the reset pulse.
+  if (!change(kPmic, 0x94, 0x1f, 0x1c) || !change(kPmic, 0x90, 0x34, 0x34)) return false;
   if (!change(kExpander, 0x03, 0x01, 0x00) || !change(kExpander, 0x05, 0x01, 0x00)) return false;
   if (!on) return true;
   delay_(10);
