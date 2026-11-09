@@ -715,6 +715,8 @@ class CoreS3Board {
  public:
   bool begin(i2c_master_bus_handle_t bus);
   void set_backlight(uint8_t percent);
+  // The GC0308's power/reset line: AW9523B P1_0, routed through CoreS3Control.
+  bool camera_power(bool on);
 
  private:
   i2c_master_dev_handle_t pmic_ = nullptr, expander_ = nullptr;
