@@ -133,8 +133,7 @@ struct UiModel {
   // The round panel's edge ring: while recording, thousandths of the recording limit used
   // so far; while updating, of the firmware image received (1000 while restarting). -1: none.
   int16_t progress_permille = -1;
-  bool ring_comet = true;  // the `comet_animation` setting: the edge ring's comet shows
-  bool ota_blink = true;   // the `ota_blink` setting: the Updating screen blinks
+  bool animate = true;     // the `animation` setting: the ring's comet and the Updating screen move
   bool flash = false;  // Screen::Alarm: the green half of a beep cycle
   // Screen::Clock: the time and the date as the app formats them, and the minute
   // that picks the burn-in shift. The face's text changes once a minute; on a round

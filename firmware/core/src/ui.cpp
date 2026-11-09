@@ -192,12 +192,12 @@ EdgeRing edge_ring(const UiModel& m) {
     return r;
   }
   switch (m.screen) {
-    case Screen::Thinking: if (m.ring_comet) comet(24, kBlue); break;
+    case Screen::Thinking: if (m.animate) comet(24, kBlue); break;
     case Screen::Responding:
-      if (m.speaking && m.ring_comet) comet(40, kAccent);
+      if (m.speaking && m.animate) comet(40, kAccent);
       break;
     case Screen::Boot:
-    case Screen::Connecting: if (m.ring_comet) comet(24, kAccent); break;
+    case Screen::Connecting: if (m.animate) comet(24, kAccent); break;
     default: break;
   }
   return r;
@@ -239,6 +239,8 @@ int tri(uint32_t frame, int period) {
 }
 
 mascot::Frame mascot_frame(const UiModel& m) {
+  // With animation off the Updating mascot never blinks, so the screen stands still.
+  if (m.screen == Screen::Updating && !m.animate) return mascot::Frame::Idle;
   mascot::Frame f = m.frame % 45 < 2 ? mascot::Frame::Blink : mascot::Frame::Idle;  // blink every ~4.5 s
   if (m.screen == Screen::Responding && m.speaking) f = (m.frame / 2) % 2 ? mascot::Frame::Talk : mascot::Frame::Idle;
   const bool still = m.face && m.face->rgb565 && !m.face->band(f).rows;  // a colour face without that frame
@@ -267,7 +269,7 @@ uint32_t hero_anim_key(const UiModel& m) {
       h.val((m.frame / 2) % 4);
       break;
     case Screen::Updating:
-      if (m.ota_blink) h.val((m.frame / 2) % 4);
+      if (m.animate) h.val((m.frame / 2) % 4);
       break;
     case Screen::Responding: h.val((m.frame / 2) % 3); break;
     default: break;
@@ -816,7 +818,7 @@ void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
       spinner(kAccent);
       break;
     case Screen::Updating:
-      if (m.ota_blink) spinner(kAccent);
+      if (m.animate) spinner(kAccent);
       else {
         c.ring(cx, cy, r, s + 1, kAccent);
         c.fill_circle(cx, cy, r / 3, kAccentDim);
@@ -1623,7 +1625,7 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
       break;
     case Screen::Thinking: dots(kBlue, kBlueDim); break;
     case Screen::Connecting: dots(kAccent, kAccentDim); break;
-    case Screen::Updating: dots(kAccent, kAccentDim, m.ota_blink); break;
+    case Screen::Updating: dots(kAccent, kAccentDim, m.animate); break;
     default: break;
   }
 
