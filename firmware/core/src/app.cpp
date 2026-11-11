@@ -192,7 +192,8 @@ const App::Route App::kRoutes[] = {
     {"prompt.close", &App::h_prompt_close}, {"ota.offer", &App::h_ota_offer},
     {"ota.begin", &App::h_ota_begin},     {"ota.end", &App::h_ota_end},
     {"ota.abort", &App::h_ota_abort},     {"dashboard", &App::h_dashboard},
-    {"profile", &App::h_profile},         {"face", &App::h_face},
+    {"profile", &App::h_profile},         {"profiles", &App::h_profiles},
+    {"face", &App::h_face},
     {"face.start", &App::h_face_start},   {"face.end", &App::h_face_end},
     {"face.thumb", &App::h_face_thumb},   {"face.thumb.start", &App::h_face_thumb_start},
     {"face.thumb.end", &App::h_face_thumb_end},
@@ -757,28 +758,52 @@ void App::h_welcome(const json::Value& m) {
   // The held face stays only if the welcome names it, paired (else revoked, or a new route: the mascot).
   if (face_ && (!paired_ || m["face"].as_string() != face_->hash)) face_.reset();
   log(LogLevel::Info, paired_ ? "online (paired)" : "online (waiting for pairing approval)");
+  // Thumbnails go with pairing, like the face, and with the profiles no longer offered.
+  thumb_in_.reset();
+  set_agent_roster(m["profiles"]);
+  if (m["profile"].is_string()) set_agent_profile(m["profile"].as_string());
+  profile_pending_.clear();  // the welcome says which profile answers
+  // A freshly installed firmware has reached Hermes, so it can take the next update: keep it.
+  if (hal_.updater && hal_.updater->pending_verify()) {
+    hal_.updater->confirm();
+    log(LogLevel::Info, "new firmware " + profile_.firmware + " reached Hermes; keeping it");
+  }
+}
+
+void App::set_agent_roster(const json::Value& profiles) {
   agent_profiles_.clear();
-  for (const auto& p : m["profiles"].elements()) {
+  for (const auto& p : profiles.elements()) {
     if (agent_profiles_.size() >= kMaxProfiles) break;
     const std::string& id = p["id"].as_string();
     if (id.empty()) continue;
     const std::string& name = p["name"].as_string();
     agent_profiles_.push_back({id, (name.empty() ? id : name).substr(0, 24)});
   }
-  if (m["profile"].is_string()) set_agent_profile(m["profile"].as_string());
-  profile_pending_.clear();  // the welcome says which profile answers
-  // Thumbnails go with pairing, like the face, and with the profiles no longer offered.
-  thumb_in_.reset();
   for (size_t i = 0; i < thumb_slots_.size(); ++i) {
     bool offered = false;
     for (const auto& p : agent_profiles_) offered = offered || p.id == thumb_slots_[i].id;
     if (!paired_ || !offered) drop_thumb(i);
   }
-  // A freshly installed firmware has reached Hermes, so it can take the next update: keep it.
-  if (hal_.updater && hal_.updater->pending_verify()) {
-    hal_.updater->confirm();
-    log(LogLevel::Info, "new firmware " + profile_.firmware + " reached Hermes; keeping it");
+}
+
+// Hermes's offered profiles changed while the device is connected (one created, deleted or taken off the
+// offer): the new list replaces the welcome's. An open grid redraws in place, on the same page while it
+// still has cells, else on the last one; with nothing left to switch to it closes. The profile answering
+// the device is not changed here: Hermes sends `profile` for that.
+void App::h_profiles(const json::Value& m) {
+  if (phase_ != Phase::Online || !m["profiles"].is_array()) return;
+  set_agent_roster(m["profiles"]);
+  if (profile_picker_open()) {
+    if (agent_profiles_.size() < 2) {
+      dismiss_overlay();
+    } else {
+      update_model();
+      const int per = ui_ ? ui_->profile_per_page(model_) : 0;
+      const int cells = static_cast<int>(model_.dash.size());
+      if (per > 0 && profile_page_ >= cells) profile_page_ = (cells - 1) / per * per;
+    }
   }
+  update_model();
 }
 
 void App::h_profile(const json::Value& m) {

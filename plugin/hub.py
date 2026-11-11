@@ -309,8 +309,9 @@ class DeviceSession:
         self._pending: dict[str, asyncio.Future] = {}
         self._tasks: set[asyncio.Task] = set()
         self._face_task: asyncio.Task | None = None  # update_face(): at most one, ended with the session
-        # The profiles the welcome offered, and the thumbnails the device holds for them (profile -> hash):
-        # what it named in hello, until the welcome says which it keeps.
+        # The profiles last offered (by the welcome or a `profiles` message), and the thumbnails the device
+        # holds for them (profile -> hash): what it named in hello, until the welcome says which it keeps.
+        self.roster: list[dict] = []
         self.roster_ids: list[str] = []
         held = hello.get("thumbs")
         self.thumb_hashes: dict[str, str] = {
@@ -495,6 +496,15 @@ class DeviceSession:
 
     async def close_prompt(self, prompt_id: str) -> None:
         await self.send_json(protocol.message("prompt.close", id=prompt_id))
+
+    async def send_profiles(self, roster: list[dict], offered: "set[str] | None" = None) -> None:
+        """The offered profiles changed since the welcome: send the new list (docs/protocol.md#profiles),
+        and bring the thumbnails along, new profiles' sent and removed ones' forgotten."""
+        self.roster = list(roster)
+        self.roster_ids = [str(p["id"]) for p in roster if isinstance(p, dict) and p.get("id")][:MAX_THUMBS]
+        self.thumb_hashes = {k: v for k, v in self.thumb_hashes.items() if k in self.roster_ids}
+        await self.send_json(protocol.message("profiles", profiles=self.roster))
+        self.update_thumbs(offered)
 
     async def send_profile(self, error: str | None = None) -> None:
         profile, before = self.profile, self.device_profile
@@ -1046,6 +1056,7 @@ class DeviceHub:
                 welcome["language"] = language
             if roster:
                 welcome.update(profile=session.profile, profiles=roster)
+                session.roster = list(roster)
                 session.roster_ids = [str(p["id"]) for p in roster if isinstance(p, dict) and p.get("id")][:MAX_THUMBS]
             if (isinstance(face, ProfileFace) and session.paired and hello.get("face") == face.hash
                     and session.device_profile == named and face.valid()):
