@@ -1694,6 +1694,7 @@ def test_a_bot_chat_request_switches_the_device_and_sends_the_resume_from_it(liv
     rig = live_rig
     rig.adapter._virtual_profiles = virtual
     rig.approve()
+    rig.approve("ops")  # ops answers the device; see the next test for a profile that hasn't approved it
     queue = botchat.BotChatQueue(rig.adapter._store.path.parent)
     with rig.connect({"profiles": True}):
         session = rig.adapter.hub.get(rig.device)
@@ -1704,10 +1705,12 @@ def test_a_bot_chat_request_switches_the_device_and_sends_the_resume_from_it(liv
         chat_id = f"{rig.device}~ops" if virtual else rig.device
         assert [(e.source.chat_id, e.source.profile, e.source.user_id) for e in sent] == [(chat_id, "ops", rig.device)]
         assert queue.pending() == []
-        assert queue.status(rig.device) | {"at": 0} == {"state": "sent", "profile": "ops", "chat_id": chat_id, "at": 0}
+        assert queue.status(rig.device) | {"at": 0} == {
+            "id": queue.status(rig.device)["id"], "state": "sent", "profile": "ops", "chat_id": chat_id, "at": 0}
 
 
 def test_a_bot_chat_request_waits_for_the_device_and_expires(live_rig):
+    """An offline device's request waits, and fails once it is older than the request lifetime."""
     import time as _time
 
     from hermes_gadget_plugin import botchat
@@ -1726,6 +1729,7 @@ def test_a_bot_chat_request_waits_for_the_device_and_expires(live_rig):
 
 
 def test_a_bot_chat_request_for_a_profile_the_device_cannot_use_fails(live_rig):
+    """A profile the device may not switch to fails without sending anything."""
     from hermes_gadget_plugin import botchat
 
     rig = live_rig
@@ -1737,3 +1741,119 @@ def test_a_bot_chat_request_for_a_profile_the_device_cannot_use_fails(live_rig):
         assert queue.status(rig.device) == {**queue.status(rig.device), "state": "failed"}
         assert "cannot switch to nosuch" in queue.status(rig.device)["error"]
         assert not [e for e in rig.events if e.text == botchat.RESUME_COMMAND]
+
+
+def _bot_chat_rig(rig):
+    """A paired, switching device connected to the live rig, and the bot-chat queue."""
+    from hermes_gadget_plugin import botchat
+
+    rig.approve()
+    return botchat.BotChatQueue(rig.adapter._store.path.parent)
+
+
+def _resumes(rig):
+    from hermes_gadget_plugin import botchat
+
+    return [e for e in rig.events if e.text == botchat.RESUME_COMMAND]
+
+
+@pytest.mark.parametrize("profile", ["default", "ops"])
+def test_a_bot_chat_request_waits_while_a_turn_runs_even_on_the_same_profile(live_rig, profile):
+    """Hermes refuses /resume during a turn, so the request waits for an idle device, whether or not the
+    device must switch first."""
+    rig = live_rig
+    queue = _bot_chat_rig(rig)
+    with rig.connect({"profiles": True}):
+        session = rig.adapter.hub.get(rig.device)
+        if profile != "default":
+            assert rig.run(rig.adapter.select_profile(session, profile)) is None
+        rig.adapter._turns[rig.device] = "t1"  # a turn is running
+        queue.request(rig.device, profile)
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+        assert queue.pending() == [rig.device] and queue.status(rig.device) is None and not _resumes(rig)
+        rig.adapter._turns.pop(rig.device)  # the turn ends: the next pass sends it
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+        assert queue.pending() == [] and queue.status(rig.device)["state"] == "sent" and len(_resumes(rig)) == 1
+
+
+def test_a_bot_chat_request_fails_when_the_device_leaves_the_profile_during_the_switch(live_rig, monkeypatch):
+    """While the switch is announced, the device can pick another profile: the resume must not move that
+    other profile's Bot Chat."""
+    rig = live_rig
+    queue = _bot_chat_rig(rig)
+    with rig.connect({"profiles": True}):
+        session = rig.adapter.hub.get(rig.device)
+        sent = session.send_profile
+
+        async def moved_on(*args, **kw):
+            await sent(*args, **kw)
+            session.profile = "default"  # the device switched back meanwhile
+
+        monkeypatch.setattr(session, "send_profile", moved_on)
+        queue.request(rig.device, "ops")
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+        assert queue.status(rig.device)["state"] == "failed" and "left ops" in queue.status(rig.device)["error"]
+        assert not _resumes(rig) and queue.pending() == []
+
+
+def test_a_bot_chat_request_fails_when_the_plugin_drops_the_resume(live_rig, monkeypatch):
+    """The default profile revokes the device during the switch: _forward drops the resume, and the
+    request says so instead of reporting it sent."""
+    rig = live_rig
+    queue = _bot_chat_rig(rig)
+    with rig.connect({"profiles": True}):
+        session = rig.adapter.hub.get(rig.device)
+        sent = session.send_profile
+
+        async def revoked(*args, **kw):
+            await sent(*args, **kw)
+            rig.runner.pairing_store.revoke("gadget", rig.device)
+
+        monkeypatch.setattr(session, "send_profile", revoked)
+        queue.request(rig.device, "ops")
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+        status = queue.status(rig.device)
+        assert status["state"] == "failed" and "no longer trusts" in status["error"]
+        assert not _resumes(rig)
+
+
+def test_a_newer_bot_chat_request_is_neither_dropped_nor_reported_for_by_an_older_one(live_rig, monkeypatch):
+    """A second run replaces the request while the first is being served: the first leaves it, and its
+    report, alone; the next pass serves the second."""
+    rig = live_rig
+    queue = _bot_chat_rig(rig)
+    with rig.connect({"profiles": True}):
+        session = rig.adapter.hub.get(rig.device)
+        sent = session.send_profile
+        newer = []
+
+        async def replaced(*args, **kw):
+            await sent(*args, **kw)
+            newer.append(queue.request(rig.device, "ops"))
+
+        monkeypatch.setattr(session, "send_profile", replaced)
+        queue.request(rig.device, "ops")
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+        assert queue.pending() == [rig.device] and queue.load(rig.device)["id"] == newer[0]
+        assert queue.status(rig.device) is None and not _resumes(rig)
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))  # on ops already: no switch this time
+        assert queue.status(rig.device)["id"] == newer[0] and queue.status(rig.device)["state"] == "sent"
+
+
+def test_a_bot_chat_request_fails_on_a_virtual_chat_the_profile_has_not_approved(live_rig):
+    """On a virtual chat the gateway's check answers for the target profile: until ops approves the
+    device, Hermes would take the resume for a stranger's message, so the request fails and says how
+    to approve it, without sending anything."""
+    rig = live_rig
+    rig.adapter._virtual_profiles = True
+    queue = _bot_chat_rig(rig)
+    with rig.connect({"profiles": True}):
+        queue.request(rig.device, "ops")
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+        status = queue.status(rig.device)
+        assert status["state"] == "failed" and "ops hasn't approved this gadget" in status["error"]
+        assert "hermes -p ops pairing list" in status["error"] and not _resumes(rig)
+        rig.approve("ops")
+        queue.request(rig.device, "ops")
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+        assert queue.status(rig.device)["state"] == "sent" and len(_resumes(rig)) == 1

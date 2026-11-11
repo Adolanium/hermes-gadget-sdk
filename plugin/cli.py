@@ -194,6 +194,7 @@ def _cmd_update(args) -> None:
 
 def _cmd_bot_chat(args) -> None:
     """Put a gadget in a profile's Bot Chat, where that profile can message the other Bots."""
+    from . import status as live_status
     from .botchat import BOT_CHAT_TITLE, REQUEST_TTL_S, VIRTUAL_HINT, BotChatQueue, bot_chat_row
 
     store = _store()
@@ -231,17 +232,24 @@ def _cmd_bot_chat(args) -> None:
                      f"platforms.gadget.extra.profiles (or set profiles: all). {VIRTUAL_HINT}")
     virtual = str(extra.get("profile_mode") or "").strip().lower() == "virtual" and profile != "default"
     expected = f"{device_id}~{profile}" if virtual else device_id
-    if row.get("source") == "gadget" and row.get("chat_id") == expected:
+    # Already there only when the Bot Chat is on the device's chat for that profile AND the device is on
+    # that profile now (the gateway's live status): a device that moved on is switched back.
+    live = live_status.read(store.path.parent)["devices"].get(device_id) or {}
+    if row.get("source") == "gadget" and row.get("chat_id") == expected and live.get("profile") == profile:
         print(f"{name} is already in {profile}'s {BOT_CHAT_TITLE}.")
         return
 
     queue = BotChatQueue(store.path.parent)
-    queue.request(device_id, profile)
-    print(f"Asked the gateway to move {profile}'s {BOT_CHAT_TITLE} onto {name}. "
-          f"It runs once {name} is online; Ctrl+C stops waiting.")
+    request_id = queue.request(device_id, profile)
+    print(f"Asked the gateway to move {profile}'s {BOT_CHAT_TITLE} onto {name}. It runs once {name} is "
+          f"online and idle; this waits {int(args.timeout)} s, and the gateway keeps the request for "
+          f"{REQUEST_TTL_S // 60} minutes. Ctrl+C stops waiting.")
     deadline, chat_id = time.monotonic() + args.timeout, None
     while time.monotonic() < deadline:
         status = queue.status(device_id) or {}
+        if status.get("id") != request_id:  # nothing yet, or another run's report
+            time.sleep(1)
+            continue
         if status.get("state") == "failed":
             sys.exit(f"It didn't work: {status.get('error')}")
         if status.get("state") == "sent":
@@ -254,9 +262,12 @@ def _cmd_bot_chat(args) -> None:
                 return
         time.sleep(1)
     if chat_id is None:
-        sys.exit(f"{name} didn't come online in time; the request stays for {REQUEST_TTL_S // 60} minutes.")
+        sys.exit(f"Stopped waiting: {name} wasn't online and idle within {int(args.timeout)} s. The gateway "
+                 f"keeps the request for {REQUEST_TTL_S // 60} minutes; run the command again to see "
+                 f"whether it went through.")
     sys.exit(f"The command reached {name}, but {profile}'s {BOT_CHAT_TITLE} didn't move. The reply on the gadget "
-             f"says why; 'hermes logs' has the gateway's side.")
+             f"says why; often {profile} hasn't approved the gadget yet (hermes -p {profile} pairing list). "
+             f"'hermes logs' has the gateway's side.")
 
 
 def _cmd_info(args) -> None:
