@@ -313,6 +313,8 @@ class DeviceSession:
         # holds for them (profile -> hash): what it named in hello, until the welcome says which it keeps.
         self.roster: list[dict] = []
         self.roster_ids: list[str] = []
+        self.welcomed = False   # the welcome is out: a `profiles` push before it would be ignored
+        self._roster_gen = 0    # bumped by each `profiles` push: a thumbnail started before it is stale
         held = hello.get("thumbs")
         self.thumb_hashes: dict[str, str] = {
             str(k): v for k, v in held.items() if isinstance(v, str) and 0 < len(v) <= 64
@@ -502,6 +504,7 @@ class DeviceSession:
         and bring the thumbnails along, new profiles' sent and removed ones' forgotten."""
         self.roster = list(roster)
         self.roster_ids = [str(p["id"]) for p in roster if isinstance(p, dict) and p.get("id")][:MAX_THUMBS]
+        self._roster_gen += 1
         self.thumb_hashes = {k: v for k, v in self.thumb_hashes.items() if k in self.roster_ids}
         await self.send_json(protocol.message("profiles", profiles=self.roster))
         self.update_thumbs(offered)
@@ -628,8 +631,9 @@ class DeviceSession:
                     self._thumb_failed[profile] = digest
                     log.warning("no thumbnail of %s for %s: %d bytes, not %d", profile, self.device_id, len(data), px * px * 2)
                     continue
-                if not self.current() or not self.paired:
-                    continue
+                if not self.current() or not self.paired or profile not in self.roster_ids:
+                    continue  # gone, or no longer offered while its picture loaded
+                gen = self._roster_gen
                 self.thumb_hashes.pop(profile, None)  # until the last message is out
                 stream = self._next_stream()
                 await self.send_json(protocol.message(
@@ -637,8 +641,13 @@ class DeviceSession:
                     format="rgb565"))
                 await self._send_chunks(protocol.CHANNEL_FACE, stream, data)
                 await self.send_json(protocol.message("face.thumb.end", stream=stream))
-                if self.paired:  # an unpaired device dropped it, and the hub forgot it
+                # An unpaired device dropped it, and the hub forgot it. A `profiles` push during the
+                # transfer may have taken the profile away (the device refuses the picture), so only a
+                # transfer that ran under one unchanged list counts as delivered.
+                if self.paired and gen == self._roster_gen and profile in self.roster_ids:
                     self.thumb_hashes[profile] = digest
+                else:
+                    self._thumbs_dirty = True  # look again with the list as it is now
 
     async def show_card(self, title: str, body: str, ttl_s: float = 15) -> bool:
         """Show a card. False when it is held until the screen lights up."""
@@ -1062,6 +1071,7 @@ class DeviceHub:
                     and session.device_profile == named and face.valid()):
                 welcome["face"] = face.hash
             await session.send_json(protocol.message("welcome", **welcome))
+            session.welcomed = True
             session.unpaired_reason = None  # the welcome clears it on the device; on_ready sends it again
             session.face_hash = welcome.get("face")  # the welcome keeps that face, or drops the device's
             session.update_face(face, looked_up)  # after the welcome's send, which may let the state change

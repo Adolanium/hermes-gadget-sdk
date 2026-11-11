@@ -466,7 +466,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         since the welcome or the last push: a profile created, deleted, parked or taken off the offer
         reaches the device within a pass of the pairing watch, without a reconnect."""
         sessions = [s for s in self._hub.sessions.values()
-                    if s.caps.get("profiles") is True and s.paired and not s.closed]
+                    if s.caps.get("profiles") is True and s.paired and not s.closed and s.welcomed]
         if not sessions:
             return
         roster = await asyncio.to_thread(self._offered_roster)
