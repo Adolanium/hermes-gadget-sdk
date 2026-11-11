@@ -433,7 +433,14 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         """Profiles devices may switch to (the default one first): those ``extra.profiles`` names, or all
         with ``all``, that this multiplexed gateway serves (parked and standalone ones are not).
         Empty when switching is off, and for a ``session`` that a gadget route sends somewhere."""
-        if not self._switching_on() or (session is not None and self._routed(session)):
+        if session is not None and self._routed(session):
+            return []
+        return self._offered_roster() or []
+
+    def _offered_roster(self) -> Optional[List[Dict[str, str]]]:
+        """The roster a switching device is offered now; None when Hermes's profiles can't be read (an
+        older Hermes, a profile tree it cannot read), which a roster push takes as "unknown", not empty."""
+        if not self._switching_on():
             return []
         try:
             from agent.secret_scope import is_multiplex_active
@@ -443,13 +450,38 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 return []
             served = {name for name, _home in profiles_to_serve(True)}
             infos = list_profiles(lazy_skill_count=True)
-        except Exception as exc:  # an older Hermes, or a profile tree it cannot read: no switching
-            logger.warning("[%s] cannot list Hermes profiles: %s", self.name, exc)
-            return []
+        except Exception as exc:  # said once: the pairing watch asks every few seconds
+            if not getattr(self, "_roster_unreadable", False):
+                logger.warning("[%s] cannot list Hermes profiles: %s", self.name, exc)
+            self._roster_unreadable = True
+            return None
+        self._roster_unreadable = False
         if not self._offer_all:
             served &= self._offered | {"default"}
         roster = [{"id": p.name, "name": _profile_label(p)[:24]} for p in infos if p.name in served]
         return sorted(roster, key=lambda p: p["id"] != "default")
+
+    async def _push_rosters(self) -> None:
+        """Send `profiles` to each connected, paired device that takes it and whose offered list changed
+        since the welcome or the last push: a profile created, deleted, parked or taken off the offer
+        reaches the device within a pass of the pairing watch, without a reconnect."""
+        sessions = [s for s in self._hub.sessions.values()
+                    if s.caps.get("profiles") is True and s.paired and not s.closed and s.welcomed]
+        if not sessions:
+            return
+        roster = await asyncio.to_thread(self._offered_roster)
+        if roster is None:
+            return
+        offered = {p["id"] for p in roster}
+        for session in sessions:
+            mine = [] if self._routed(session) else roster
+            if mine == session.roster or self._hub.get(session.device_id) is not session or session.closed:
+                continue
+            try:
+                await session.send_profiles(mine, offered or None)
+                logger.info("[%s] %s now offered: %s", self.name, session.device_id, [p["id"] for p in mine])
+            except Exception as exc:
+                logger.debug("[%s] roster push to %s failed: %s", self.name, session.device_id, exc)
 
     def _busy(self, device_id: str) -> bool:
         """A turn or an unexpired question the adapter knows of. A convenience, not a guarantee:
@@ -794,7 +826,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         return served
 
     async def _watch_pairing(self) -> None:
-        """Mirror pairing approvals and revocations onto connected devices."""
+        """Mirror pairing approvals and revocations onto connected devices, and changes to the profiles
+        they are offered."""
         while True:
             await asyncio.sleep(PAIRING_POLL_S)
             if not self._hub:
@@ -805,6 +838,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                     served = await self._sync_pairing(session, served)
                 except Exception as exc:
                     logger.debug("[%s] pairing sync failed for %s: %s", self.name, session.device_id, exc)
+            await self._push_rosters()
             if self._virtual_routes or self._virtual_owned:
                 try:
                     if served is None:
