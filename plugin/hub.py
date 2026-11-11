@@ -506,6 +506,8 @@ class DeviceSession:
         self.roster_ids = [str(p["id"]) for p in roster if isinstance(p, dict) and p.get("id")][:MAX_THUMBS]
         self._roster_gen += 1
         self.thumb_hashes = {k: v for k, v in self.thumb_hashes.items() if k in self.roster_ids}
+        # A profile offered again gets a fresh try at its picture, even one that failed to load before.
+        self._thumb_failed = {k: v for k, v in self._thumb_failed.items() if k in self.roster_ids}
         await self.send_json(protocol.message("profiles", profiles=self.roster))
         self.update_thumbs(offered)
 
@@ -623,12 +625,13 @@ class DeviceSession:
                         continue
                     data = await asyncio.to_thread(thumb.load)
                 except Exception as exc:  # an unreadable picture leaves what the device shows, once per hash
-                    if digest:
+                    if digest and profile in self.roster_ids:
                         self._thumb_failed[profile] = digest
                     log.warning("no thumbnail of %s for %s: %s", profile, self.device_id, exc)
                     continue
                 if len(data) != px * px * 2:
-                    self._thumb_failed[profile] = digest
+                    if profile in self.roster_ids:
+                        self._thumb_failed[profile] = digest
                     log.warning("no thumbnail of %s for %s: %d bytes, not %d", profile, self.device_id, len(data), px * px * 2)
                     continue
                 if not self.current() or not self.paired or profile not in self.roster_ids:
