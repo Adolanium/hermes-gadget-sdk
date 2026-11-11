@@ -807,6 +807,42 @@ def test_virtual_mode_drops_the_routes_of_profiles_no_longer_offered(routing_rig
     assert len(runner.config.profile_routes) == 1
 
 
+def test_virtual_mode_never_removes_a_route_it_did_not_add(routing_rig):
+    # An administrator's route for the same chat serves it, and the cleanup leaves it in place.
+    from gateway.profile_routing import ProfileRoute
+
+    runner, adapter, home = routing_rig
+    adapter._virtual_profiles = True
+    admin = ProfileRoute(name="admin", platform="gadget", profile="ops", chat_id=f"{DEVICE}~ops")
+    runner.config.profile_routes.append(admin)
+    source = adapter._source(_session("ops"))
+    assert source.chat_id == f"{DEVICE}~ops"
+    assert runner.config.profile_routes == [admin]  # no second route added
+    adapter._prune_virtual_routes({"default"})
+    assert runner.config.profile_routes == [admin]
+
+
+def test_virtual_mode_does_not_count_a_disabled_or_foreign_route(routing_rig):
+    # A disabled route is not one Hermes uses, so the adapter adds its own; a route sending the chat to
+    # another profile is the administrator's choice, so the pick falls back to the stamp.
+    from gateway.profile_routing import ProfileRoute
+
+    runner, adapter, home = routing_rig
+    adapter._virtual_profiles = True
+    off = ProfileRoute(name="off", platform="gadget", profile="ops", chat_id=f"{DEVICE}~ops", enabled=False)
+    runner.config.profile_routes.append(off)
+    source = adapter._source(_session("ops"))
+    assert source.chat_id == f"{DEVICE}~ops"
+    assert [r.name for r in runner.config.profile_routes if r.enabled] == [f"gadget-virtual-{DEVICE}~ops"]
+
+    runner.config.profile_routes[:] = [
+        ProfileRoute(name="elsewhere", platform="gadget", profile="default", chat_id=f"{DEVICE}~ops")]
+    adapter._virtual_routes.clear()
+    adapter._virtual_owned.clear()
+    source = adapter._source(_session("ops"))
+    assert (source.chat_id, source.profile) == (DEVICE, "ops")  # the stamp, as without virtual mode
+
+
 def test_without_virtual_mode_the_pick_stamps_the_devices_own_chat(routing_rig):
     runner, adapter, home = routing_rig
     source = adapter._source(_session("ops"))
