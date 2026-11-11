@@ -195,7 +195,7 @@ const App::Route App::kRoutes[] = {
     {"profile", &App::h_profile},         {"face", &App::h_face},
     {"face.start", &App::h_face_start},   {"face.end", &App::h_face_end},
     {"face.thumb", &App::h_face_thumb},   {"face.thumb.start", &App::h_face_thumb_start},
-    {"face.thumb.end", &App::h_face_thumb_end},
+    {"face.thumb.end", &App::h_face_thumb_end}, {"diag", &App::h_diag},
 };
 
 App::App(Hal& hal, DeviceProfile profile) : hal_(hal), profile_(std::move(profile)) {}
@@ -1465,6 +1465,23 @@ void App::h_ping(const json::Value& m) {
   json::Value pong = proto::message("pong");
   pong.set("ts", m["ts"]);
   send(pong);
+}
+
+// The hub asks for the diagnostics report, so a user can save one without a USB cable. A log
+// longer than kDiagLogBytes keeps its newest part, from the start of a line.
+void App::h_diag(const json::Value& m) {
+  constexpr size_t kDiagLogBytes = 16 * 1024;
+  json::Value out = proto::message("diag");
+  if (m["id"].is_string()) out.set("id", m["id"]);
+  out.set("report", diag_value());
+  std::string text = recent_log ? recent_log() : std::string();
+  if (text.size() > kDiagLogBytes) {
+    const size_t cut = text.size() - kDiagLogBytes;
+    const size_t nl = text.find('\n', cut);
+    text.erase(0, nl == std::string::npos ? cut : nl + 1);
+  }
+  out.set("log", text);
+  send(out);
 }
 
 void App::h_notice(const json::Value& m) {
@@ -2856,7 +2873,7 @@ json::Value App::status_value() const {
   return s;
 }
 
-std::string App::diag_report() {
+json::Value App::diag_value() {
   json::Value r = json::Value::object();
   r.set("device_id", device_id_).set("board", profile_.board).set("firmware", profile_.firmware);
   json::Value conn = json::Value::object();
@@ -2888,8 +2905,10 @@ std::string App::diag_report() {
   r.set("app", status_value());
   if (frame_stats_) r.set("frames", frame_stats_->to_json());
   if (on_diag) on_diag(r);
-  return "@diag " + r.dump();
+  return r;
 }
+
+std::string App::diag_report() { return "@diag " + diag_value().dump(); }
 
 bool App::known_setting(std::string_view key) const {
   for (const char* k : kSettingKeys) {

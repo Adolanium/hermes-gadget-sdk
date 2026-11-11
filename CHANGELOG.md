@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Hermes plugin
+
+- A connected gadget's diagnostics report no longer needs a USB cable. `hermes gadget diag <name>` on the Hermes computer, or **Save diagnostics report** in the dashboard's Gadgets tab, asks the gadget through the gateway and saves the file `hermes-gadget diag` saves, plus the gateway's last 500 Gadget log lines, so a bug report has both sides of the same minutes. It works before pairing, too. The gateway sends a new `diag` message and the device answers with the report and its recent log (up to 16 KB); the protocol stays at version 1, and older firmware doesn't answer, so its report still comes over USB. Host and simulator tests only; not yet run on a board. [Save a board report](docs/troubleshooting.md#save-a-board-report).
+
 ### Firmware
 
 - New board profile `lcdwiki-es3c28p`, experimental, for the LCDWIKI ES3C28P (also sold as Freenove's ESP32-S3 2.8 inch display): a 2.8 inch 240×320 ILI9341V IPS panel over SPI in portrait (X mirrored), FT6336G touch, and one ES8311 for the onboard MEMS microphone and the speaker output. 16 MB flash and 8 MB octal PSRAM. Hold the screen or BOOT to talk; a swipe down cancels. The amplifier enable on GPIO 1 is active low, so it is held on from boot as a power rail. GPIO 9 reads the cell through a divider of two. There is no charge pin and no software power-off. The addressable RGB LED, the microSD slot and the extension pins are unused. Adds a `sim-240x320` simulator profile. [Physical report](docs/hardware-validation.md#lcdwiki-es3c28p-physical-report) on one unit, from a local build of this profile with an extra display overlay and 4 MB OTA slots. [Hardware](docs/hardware.md#lcdwiki-es3c28p). Contributed by @mathbatistela.

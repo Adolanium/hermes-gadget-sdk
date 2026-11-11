@@ -359,6 +359,7 @@ class App {
   void h_image_end(const json::Value& m);
   void h_action(const json::Value& m);
   void h_ping(const json::Value& m);
+  void h_diag(const json::Value& m);
   void h_notice(const json::Value& m);
   void h_error(const json::Value& m);
   void h_prompt(const json::Value& m);
@@ -420,6 +421,8 @@ class App {
   bool clock_blocked() const;
   void clock_tick();
   json::Value status_value() const;
+  // The diagnostics report: the console's `diag` prints it, and the hub's `diag` request gets it.
+  json::Value diag_value();
   std::string diag_report();
   // frame timing (app_perf.cpp)
   std::string perf_command(std::string_view args);

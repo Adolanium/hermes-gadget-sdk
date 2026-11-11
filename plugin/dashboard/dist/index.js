@@ -10,9 +10,12 @@
   var API = "/api/plugins/gadget";
   var latestRequest = 0;
   var activeRequest = null;
-  function devicesUrl() {
+  function apiUrl(path) {
     const profile = new URLSearchParams(window.location.search).get("profile");
-    return profile ? `${API}/devices?profile=${encodeURIComponent(profile)}` : `${API}/devices`;
+    return profile ? `${API}${path}?profile=${encodeURIComponent(profile)}` : `${API}${path}`;
+  }
+  function devicesUrl() {
+    return apiUrl("/devices");
   }
   var REFRESH_MS = 1e4;
   var REQUEST_TIMEOUT_MS = 15e3;
@@ -48,9 +51,30 @@
     const since = typeof gateway.updated_at === "number" ? ` Its last report was ${when(gateway.updated_at)}.` : "";
     return /* @__PURE__ */ React.createElement("p", { className: "text-sm text-muted-foreground" }, "The gateway is not running, or has not reported yet, so online state and battery are unknown.", since, " ", "Start it with ", /* @__PURE__ */ React.createElement("code", null, "hermes gateway run"), ".");
   }
+  function SaveReport({ device }) {
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState("");
+    const save = useCallback(() => {
+      setBusy(true);
+      setError("");
+      SDK.fetchJSON(apiUrl(`/devices/${encodeURIComponent(device.id)}/diag`), { method: "POST" }).then((r) => {
+        if (!r || !r.ok) throw new Error(r && r.error || "The report could not be taken");
+        const url = URL.createObjectURL(new Blob([r.text], { type: "text/plain" }));
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = r.file || "hermes-gadget-diag.txt";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1e3);
+      }).catch((e) => setError(errorText(e))).finally(() => setBusy(false));
+    }, [device.id]);
+    if (!device.online) return null;
+    return /* @__PURE__ */ React.createElement("div", { className: "flex flex-col gap-1" }, /* @__PURE__ */ React.createElement(Button, { variant: "outline", size: "sm", onClick: save, disabled: busy }, busy ? "Asking the device..." : "Save diagnostics report"), error && /* @__PURE__ */ React.createElement("span", { className: "text-xs text-destructive" }, error));
+  }
   function DeviceTable({ devices }) {
     const cell = "px-3 py-2 text-left align-top";
-    return /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto" }, /* @__PURE__ */ React.createElement("table", { className: "w-full text-sm" }, /* @__PURE__ */ React.createElement("thead", { className: "text-xs uppercase text-muted-foreground" }, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { className: cell }, "Device"), /* @__PURE__ */ React.createElement("th", { className: cell }, "Status"), /* @__PURE__ */ React.createElement("th", { className: cell }, "Battery"), /* @__PURE__ */ React.createElement("th", { className: cell }, "Board"), /* @__PURE__ */ React.createElement("th", { className: cell }, "Firmware"), /* @__PURE__ */ React.createElement("th", { className: cell }, "Last seen"))), /* @__PURE__ */ React.createElement("tbody", null, devices.map((d) => /* @__PURE__ */ React.createElement("tr", { key: d.id, className: "border-t border-border" }, /* @__PURE__ */ React.createElement("td", { className: cell }, /* @__PURE__ */ React.createElement("div", { className: "font-medium" }, d.name || d.id), /* @__PURE__ */ React.createElement("div", { className: "font-mono text-xs text-muted-foreground" }, d.id)), /* @__PURE__ */ React.createElement("td", { className: cell }, /* @__PURE__ */ React.createElement(Status, { device: d })), /* @__PURE__ */ React.createElement("td", { className: cell }, /* @__PURE__ */ React.createElement(Battery, { battery: d.online ? d.battery : null })), /* @__PURE__ */ React.createElement("td", { className: cell }, d.board || "-"), /* @__PURE__ */ React.createElement("td", { className: cell + " font-mono" }, d.firmware || "-"), /* @__PURE__ */ React.createElement("td", { className: cell, title: fullDate(d.online ? d.connected_at : d.last_seen) }, d.online ? "now" : when(d.last_seen)))))));
+    return /* @__PURE__ */ React.createElement("div", { className: "overflow-x-auto" }, /* @__PURE__ */ React.createElement("table", { className: "w-full text-sm" }, /* @__PURE__ */ React.createElement("thead", { className: "text-xs uppercase text-muted-foreground" }, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { className: cell }, "Device"), /* @__PURE__ */ React.createElement("th", { className: cell }, "Status"), /* @__PURE__ */ React.createElement("th", { className: cell }, "Battery"), /* @__PURE__ */ React.createElement("th", { className: cell }, "Board"), /* @__PURE__ */ React.createElement("th", { className: cell }, "Firmware"), /* @__PURE__ */ React.createElement("th", { className: cell }, "Last seen"), /* @__PURE__ */ React.createElement("th", { className: cell }, /* @__PURE__ */ React.createElement("span", { className: "sr-only" }, "Report")))), /* @__PURE__ */ React.createElement("tbody", null, devices.map((d) => /* @__PURE__ */ React.createElement("tr", { key: d.id, className: "border-t border-border" }, /* @__PURE__ */ React.createElement("td", { className: cell }, /* @__PURE__ */ React.createElement("div", { className: "font-medium" }, d.name || d.id), /* @__PURE__ */ React.createElement("div", { className: "font-mono text-xs text-muted-foreground" }, d.id)), /* @__PURE__ */ React.createElement("td", { className: cell }, /* @__PURE__ */ React.createElement(Status, { device: d })), /* @__PURE__ */ React.createElement("td", { className: cell }, /* @__PURE__ */ React.createElement(Battery, { battery: d.online ? d.battery : null })), /* @__PURE__ */ React.createElement("td", { className: cell }, d.board || "-"), /* @__PURE__ */ React.createElement("td", { className: cell + " font-mono" }, d.firmware || "-"), /* @__PURE__ */ React.createElement("td", { className: cell, title: fullDate(d.online ? d.connected_at : d.last_seen) }, d.online ? "now" : when(d.last_seen)), /* @__PURE__ */ React.createElement("td", { className: cell }, /* @__PURE__ */ React.createElement(SaveReport, { device: d })))))));
   }
   function GadgetsPage() {
     const [data, setData] = useState(null);

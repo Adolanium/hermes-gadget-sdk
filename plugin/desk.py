@@ -4,6 +4,7 @@ The Desktop page's backend (``dashboard/plugin_api.py``) runs in another process
 which holds the device connections. It writes a request file to ``desk/inbox/``; the gateway's
 watcher sends it to the device and writes the outcome to ``desk/done/``, which the backend reads
 back. The same file-based handoff the firmware update queue and the dashboard tiles use.
+``hermes gadget diag`` and the dashboard tab's diagnostics button post ``diag`` requests here too.
 
 Requests are small JSON objects, bounded in size and number, and expire if no gateway picks them
 up: a page never waits on a gateway that is not running.
@@ -20,7 +21,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-KINDS = ("card", "action")
+KINDS = ("card", "action", "diag")
 MAX_PENDING = 32
 EXPIRE_S = 30.0  # a request no gateway picked up in this long is dropped
 RESULT_KEEP_S = 120.0
@@ -76,7 +77,7 @@ class Desk:
             except (TypeError, ValueError):
                 seconds = 20
             req.update(title=title, text=text, seconds=seconds)
-        else:
+        elif kind == "action":
             action = str(fields.get("action") or "")
             if not _ACTION.match(action):
                 raise ValueError("unknown action")

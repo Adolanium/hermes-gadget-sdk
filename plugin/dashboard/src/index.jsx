@@ -1,4 +1,5 @@
-// The Gadgets tab of the Hermes web dashboard: the devices this Hermes knows, read-only.
+// The Gadgets tab of the Hermes web dashboard: the devices this Hermes knows, and a diagnostics
+// report from each connected one.
 //
 // Source of dist/index.js. Build it with `npm run build:dashboard-tab` in site/ (esbuild, React
 // from the dashboard's plugin SDK, IIFE output); site's `npm test` fails when dist/index.js is
@@ -18,9 +19,13 @@ const API = "/api/plugins/gadget";
 let latestRequest = 0;  // the number of the last /devices request the tab made
 let activeRequest = null;  // the AbortController of the request in flight, cancelled on leaving the tab
 
-function devicesUrl() {
+function apiUrl(path) {
   const profile = new URLSearchParams(window.location.search).get("profile");
-  return profile ? `${API}/devices?profile=${encodeURIComponent(profile)}` : `${API}/devices`;
+  return profile ? `${API}${path}?profile=${encodeURIComponent(profile)}` : `${API}${path}`;
+}
+
+function devicesUrl() {
+  return apiUrl("/devices");
 }
 const REFRESH_MS = 10000;
 // The SDK's fetch has no timeout: a request that never answers would stop the polling for good.
@@ -71,6 +76,40 @@ function GatewayNote({ gateway, count }) {
   );
 }
 
+// Saves a connected device's diagnostics report, with the gateway's recent log, as a text file:
+// what `hermes gadget diag` saves, for a bug report.
+function SaveReport({ device }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const save = useCallback(() => {
+    setBusy(true);
+    setError("");
+    SDK.fetchJSON(apiUrl(`/devices/${encodeURIComponent(device.id)}/diag`), { method: "POST" })
+      .then((r) => {
+        if (!r || !r.ok) throw new Error((r && r.error) || "The report could not be taken");
+        const url = URL.createObjectURL(new Blob([r.text], { type: "text/plain" }));
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = r.file || "hermes-gadget-diag.txt";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      })
+      .catch((e) => setError(errorText(e)))
+      .finally(() => setBusy(false));
+  }, [device.id]);
+  if (!device.online) return null;
+  return (
+    <div className="flex flex-col gap-1">
+      <Button variant="outline" size="sm" onClick={save} disabled={busy}>
+        {busy ? "Asking the device..." : "Save diagnostics report"}
+      </Button>
+      {error && <span className="text-xs text-destructive">{error}</span>}
+    </div>
+  );
+}
+
 function DeviceTable({ devices }) {
   const cell = "px-3 py-2 text-left align-top";
   return (
@@ -84,6 +123,7 @@ function DeviceTable({ devices }) {
             <th className={cell}>Board</th>
             <th className={cell}>Firmware</th>
             <th className={cell}>Last seen</th>
+            <th className={cell}><span className="sr-only">Report</span></th>
           </tr>
         </thead>
         <tbody>
@@ -100,6 +140,7 @@ function DeviceTable({ devices }) {
               <td className={cell} title={fullDate(d.online ? d.connected_at : d.last_seen)}>
                 {d.online ? "now" : when(d.last_seen)}
               </td>
+              <td className={cell}><SaveReport device={d} /></td>
             </tr>
           ))}
         </tbody>

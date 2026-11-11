@@ -8,8 +8,8 @@ already share, in the plugin's data directory, and never calls into the gateway:
 - ``devices.json`` (``store.DeviceStore``): every known device, its board, firmware and last contact;
 - ``status.json`` (``status``): which devices are connected now and their battery, written by the
   running gateway, with what each screen shows (the Desktop page's mirrors);
-- ``desk/`` (``desk.Desk``): cards and device actions the Desktop page sends, which the running
-  gateway carries to the device and answers.
+- ``desk/`` (``desk.Desk``): cards and device actions the Desktop page sends, and diagnostics
+  reports the Gadgets tab saves, which the running gateway carries to the device and answers.
 
 Pairing approval goes through Hermes's own pairing store, as ``hermes gadget pair`` does.
 
@@ -175,6 +175,17 @@ def action(device_id: str, name: str, args: str = "{}") -> dict[str, Any]:
     except ValueError as exc:
         return _error(str(exc))
     return desk.wait(req, 18.0)
+
+
+@router.post("/devices/{device_id}/diag")
+def diag(device_id: str) -> dict[str, Any]:
+    """A connected device's diagnostics report with the gateway's recent log, as a file's name and text."""
+    desk = Desk(_data_dir())
+    try:
+        req = desk.post(device_id, "diag")
+    except ValueError as exc:
+        return _error(str(exc))
+    return desk.wait(req, 15.0)
 
 
 @router.get("/info")
