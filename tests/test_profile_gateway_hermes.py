@@ -843,6 +843,21 @@ def test_virtual_mode_does_not_count_a_disabled_or_foreign_route(routing_rig):
     assert (source.chat_id, source.profile) == (DEVICE, "ops")  # the stamp, as without virtual mode
 
 
+def test_virtual_mode_still_removes_its_route_after_an_administrator_overrides_it(routing_rig):
+    from gateway.profile_routing import ProfileRoute
+
+    runner, adapter, home = routing_rig
+    adapter._virtual_profiles = True
+    adapter._source(_session("ops"))  # the adapter adds its route
+    override = ProfileRoute(name="override", platform="gadget", profile="default", chat_id=f"{DEVICE}~ops",
+                            user_id=DEVICE)  # more specific: it wins
+    runner.config.profile_routes.append(override)
+    source = adapter._source(_session("ops"))
+    assert source.chat_id == DEVICE  # the stamp
+    adapter._prune_virtual_routes({"default"})  # ops leaves the roster
+    assert runner.config.profile_routes == [override]  # the adapter's route is gone, the override stays
+
+
 def test_without_virtual_mode_the_pick_stamps_the_devices_own_chat(routing_rig):
     runner, adapter, home = routing_rig
     source = adapter._source(_session("ops"))

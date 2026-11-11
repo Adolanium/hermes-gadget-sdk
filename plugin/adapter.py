@@ -407,7 +407,9 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if not served:  # a roster Hermes could not give drops nothing
             return
         offered = served if self._offer_all else served & ((self._offered or set()) | {"default"})
-        stale = {c for c in self._virtual_routes if c.split(VIRTUAL_SEP, 1)[1] not in offered}
+        # The adapter's own routes too, for chats an administrator's route has since taken over.
+        tracked = self._virtual_routes | set(self._virtual_owned)
+        stale = {c for c in tracked if c.split(VIRTUAL_SEP, 1)[1] not in offered}
         if not stale:
             return
         routes = getattr(getattr(getattr(self, "gateway_runner", None), "config", None), "profile_routes", None)
@@ -803,7 +805,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                     served = await self._sync_pairing(session, served)
                 except Exception as exc:
                     logger.debug("[%s] pairing sync failed for %s: %s", self.name, session.device_id, exc)
-            if self._virtual_routes:
+            if self._virtual_routes or self._virtual_owned:
                 try:
                     if served is None:
                         served = {p["id"] for p in await asyncio.to_thread(self.profiles)}
