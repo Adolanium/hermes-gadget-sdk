@@ -192,6 +192,73 @@ def _cmd_update(args) -> None:
     print("Still waiting. The update stays staged and installs once the gateway sees the device online.")
 
 
+def _cmd_bot_chat(args) -> None:
+    """Put a gadget in a profile's Bot Chat, where that profile can message the other Bots."""
+    from .botchat import BOT_CHAT_TITLE, REQUEST_TTL_S, VIRTUAL_HINT, BotChatQueue, bot_chat_row
+
+    store = _store()
+    device_id = _match(store, args.device)
+    if device_id is None:
+        sys.exit(1)
+    name = store.devices()[device_id].get("name") or device_id
+    profile = args.profile
+    extra = _gadget_extra()
+    try:
+        from hermes_cli.profiles import get_profile_dir
+
+        home = Path(get_profile_dir(profile))
+    except Exception as exc:
+        sys.exit(f"Can't find profile {profile!r}: {exc}")
+    if not home.is_dir():
+        sys.exit(f"There is no profile {profile!r}. See: hermes profile list")
+    row = bot_chat_row(home / "state.db")
+    if row is None:
+        sys.exit(f"Profile {profile!r} has no {BOT_CHAT_TITLE!r} yet. Add it as a Bot in Hermes Desktop's Bots pane, or "
+                 f"run: hermes -p {profile} chat -c \"{BOT_CHAT_TITLE}\" --create-if-missing")
+    admins = {str(a).strip() for a in (extra.get("allow_admin_from") or []) if str(a).strip()}
+    if device_id not in admins:
+        sys.exit(f"Hermes lets a gadget take over a Bot Chat only when the gadget is an admin of the gadget "
+                 f"platform. Add it in the default profile's config.yaml, then restart the gateway:\n\n"
+                 f"  platforms:\n    gadget:\n      extra:\n        allow_admin_from: [{device_id}]\n\n"
+                 f"With that list set, other gadgets keep only /help and /whoami; add "
+                 f"user_allowed_commands: [new, stop] so they can still start a new conversation.")
+    if profile != "default":
+        offered = extra.get("profiles")
+        offers = (isinstance(offered, str) and offered.strip().lower() == "all") or (
+            isinstance(offered, list) and profile in {str(p).strip() for p in offered})
+        if not offers:
+            sys.exit(f"{name} can only talk to {profile!r} when the gadget offers it: add it to "
+                     f"platforms.gadget.extra.profiles (or set profiles: all). {VIRTUAL_HINT}")
+    virtual = str(extra.get("profile_mode") or "").strip().lower() == "virtual" and profile != "default"
+    expected = f"{device_id}~{profile}" if virtual else device_id
+    if row.get("source") == "gadget" and row.get("chat_id") == expected:
+        print(f"{name} is already in {profile}'s {BOT_CHAT_TITLE}.")
+        return
+
+    queue = BotChatQueue(store.path.parent)
+    queue.request(device_id, profile)
+    print(f"Asked the gateway to move {profile}'s {BOT_CHAT_TITLE} onto {name}. "
+          f"It runs once {name} is online; Ctrl+C stops waiting.")
+    deadline, chat_id = time.monotonic() + args.timeout, None
+    while time.monotonic() < deadline:
+        status = queue.status(device_id) or {}
+        if status.get("state") == "failed":
+            sys.exit(f"It didn't work: {status.get('error')}")
+        if status.get("state") == "sent":
+            chat_id = status.get("chat_id")
+            row = bot_chat_row(home / "state.db") or {}
+            if row.get("chat_id") == chat_id and row.get("source") == "gadget":
+                print(f"Done: {name} on {profile} now talks in {profile}'s {BOT_CHAT_TITLE}. Ask it to talk to "
+                      f"the other Bots, e.g. \"ask the others what they think\". Hermes Desktop shows the same "
+                      f"conversation.")
+                return
+        time.sleep(1)
+    if chat_id is None:
+        sys.exit(f"{name} didn't come online in time; the request stays for {REQUEST_TTL_S // 60} minutes.")
+    sys.exit(f"The command reached {name}, but {profile}'s {BOT_CHAT_TITLE} didn't move. The reply on the gadget "
+             f"says why; 'hermes logs' has the gateway's side.")
+
+
 def _cmd_info(args) -> None:
     extra = _gadget_extra()
     url = device_url(extra)
@@ -325,6 +392,11 @@ def setup_argparse(parser) -> None:
                         help="With --latest, install even if the device runs that version, a newer one, or an unknown one")
     update.add_argument("--no-wait", action="store_true", help="Stage it and return; the gateway installs it")
     update.add_argument("--timeout", type=float, default=600, help="Seconds to wait for the install (default 600)")
+    bot = subs.add_parser("bot-chat", help="Put a gadget in a profile's Bot Chat, so that profile can message "
+                                           "the other Bots (Hermes Bot Mode)")
+    bot.add_argument("device", help="Device id or name")
+    bot.add_argument("profile", nargs="?", default="default", help="The profile that leads (default: default)")
+    bot.add_argument("--timeout", type=float, default=60, help="Seconds to wait for the result (default 60)")
     tile = subs.add_parser("tile", help="Set the status tiles the gadget dashboard shows")
     tile_subs = tile.add_subparsers(dest="tile_command")
     tile_set = tile_subs.add_parser("set", help="Add a tile or change its value")
@@ -341,7 +413,7 @@ def setup_argparse(parser) -> None:
 
 
 _COMMANDS = {"devices": _cmd_devices, "ls": _cmd_devices, "forget": _cmd_forget, "info": _cmd_info,
-             "pair": _cmd_pair, "update": _cmd_update, "tile": _cmd_tile}
+             "pair": _cmd_pair, "update": _cmd_update, "tile": _cmd_tile, "bot-chat": _cmd_bot_chat}
 
 
 def handle(args) -> None:

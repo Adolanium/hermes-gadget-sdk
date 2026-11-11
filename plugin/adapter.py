@@ -61,7 +61,7 @@ from gateway.platforms.base import (
 from gateway.platforms.event import MessageEvent, MessageType
 
 from . import audio as gaudio
-from . import compat, dashboard, imaging, ota, runtime, stt, textfmt
+from . import botchat, compat, dashboard, imaging, ota, runtime, stt, textfmt
 from .desk import Desk
 from . import status as live_status
 from . import face as faces
@@ -892,16 +892,54 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     async def _watch_updates(self) -> None:
         """Install firmware staged with 'hermes gadget update' once its device is online."""
         queue = ota.UpdateQueue(self._store.path.parent)
+        bot_chats = botchat.BotChatQueue(self._store.path.parent)
         while True:
             await asyncio.sleep(UPDATE_POLL_S)
             if not self._hub:
                 continue
+            for device_id in bot_chats.pending():
+                try:
+                    await self._serve_bot_chat(bot_chats, device_id)
+                except Exception as exc:  # one bad request must not stop updates or the others
+                    bot_chats.drop(device_id)
+                    bot_chats.report(device_id, state="failed", error=str(exc))
+                    logger.warning("[%s] bot-chat request for %s failed", self.name, device_id, exc_info=True)
             for device_id in queue.pending():
                 session = self._hub.get(device_id)
                 running = self._installing.get(device_id)
                 if session is None or session.closed or (running and not running.done()):
                     continue
                 self._installing[device_id] = session.spawn(self._install_staged(queue, session))
+
+    async def _serve_bot_chat(self, queue: "botchat.BotChatQueue", device_id: str) -> None:
+        """Run one 'hermes gadget bot-chat' request: switch the device to the profile, then send
+        ``/resume --all Bot Chat`` from it, so Hermes moves that profile's Bot Chat onto its chat.
+        Hermes decides whether the device may (an admin of this platform); the CLI checks the result."""
+        request = queue.load(device_id)
+        if request is None:
+            queue.drop(device_id)
+            return
+        if time.time() - float(request.get("requested_at") or 0) > botchat.REQUEST_TTL_S:
+            queue.drop(device_id)
+            queue.report(device_id, state="failed", error="the device did not come online in time")
+            return
+        session = self._hub.get(device_id) if self._hub else None
+        if session is None or session.closed or not session.paired:
+            return  # waits for the device, until the request expires
+        profile = request["profile"]
+        if session.profile != profile:
+            error = await self.select_profile(session, profile)
+            if error is not None:
+                queue.drop(device_id)
+                queue.report(device_id, state="failed", error=f"cannot switch to {profile}: {error}")
+                return
+            await session.send_profile()
+        source_chat = self._source(session).chat_id
+        queue.drop(device_id)
+        await self._forward(session, self._event(session, "botchat", botchat.RESUME_COMMAND,
+                                                 message_type=MessageType.TEXT))
+        queue.report(device_id, state="sent", profile=profile, chat_id=source_chat)
+        logger.info("[%s] sent %r from %s on profile %s", self.name, botchat.RESUME_COMMAND, device_id, profile)
 
     async def _install_staged(self, queue: ota.UpdateQueue, session: DeviceSession) -> None:
         staged = queue.load(session.device_id)

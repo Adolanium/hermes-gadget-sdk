@@ -233,6 +233,7 @@ These work on current Hermes and are covered by `tests/test_adapter_hermes.py` a
 5. **Self-confirming `/new`** reads `tools.slash_confirm.get_pending()` to check that the pending confirmation is for the `new` command. It relies on the runner registering a confirmation before it calls `send_slash_confirm`, which Hermes does on purpose so that fast button presses can't race it. If that changes, the device simply asks.
 6. **Question text** is cut down from Hermes's chat-formatted confirmation by dropping the bullet-list and italic paragraphs. A different layout only means a longer question.
 7. **Dashboard session state** comes from plugin hooks, which are a public API: `pre_llm_call` (busy), `on_session_end` (idle), `pre_approval_request` and `post_approval_response` (waiting), and `on_session_finalize` and `on_session_reset` (gone). It relies on `session_id` in their keyword arguments. The approval hooks carry it only when Hermes binds the approval to a session; an approval without one doesn't show as waiting. Hermes loads a copy of the plugin per profile, and a profile's hooks see only that profile's sessions. A device that switches profiles also gets the sessions of each offered profile that has the plugin enabled ([profile switching](#running-against-a-profile-or-a-multiplexed-gateway)).
+8. **`hermes gadget bot-chat`** sends `/resume --all Bot Chat` as the device and reads the profile's `state.db` (the `sessions` row titled `Bot Chat`) to see that it moved. It relies on Hermes's documented Bot Mode rule that the canonical session is the one titled exactly `Bot Chat`, and on `/resume --all` being allowed to admins listed in `allow_admin_from`.
 
 ## Suggested upstream changes (optional; nothing here blocks the SDK)
 
@@ -307,3 +308,25 @@ Tried with three devices routed to three profiles on one gateway: the turns from
 ### Profile switching and profile routes
 
 `gateway.profile_routes` and `profiles` do different jobs. A route pins one device to one profile, chosen on the host. The plugin offers a routed device no profiles, so its settings have no **Hermes profile** item, and it keeps the routed profile's pairing. `profiles` lets every device without a route pick its own profile, from the ones you list. To let a routed device switch, remove its route; it then needs approval in the default profile. The reverse doesn't work: once a device has switched, it answers to the default profile for good, and a route added for it later makes the plugin refuse it. The device shows "Refused by a route" and its device ID in place of a pairing code, its `status` has `"unpaired_reason": "routed"`, and the gateway log says so too. Hermes reads the routed profile's approval for a routed device, so the plugin cannot check the default profile's until Hermes offers a public per-profile check ([NousResearch/hermes-agent#143892](https://github.com/NousResearch/hermes-agent/issues/143892)). Remove the route and restart the gateway to let it in again; if the default profile no longer approves it either, it goes back to pairing.
+
+### A gadget that talks to the other Bots
+
+With Hermes Bot Mode, a profile's canonical **Bot Chat** session gets the `message_agent` tool: the agent there can message the other Bots and hears their answers when they come. Hermes Desktop shows those messages in each Bot's chat. A gadget's conversation is a session of its own, so by default it has no `message_agent`. `hermes gadget bot-chat` moves a profile's Bot Chat onto a gadget, so that profile leads from the device: ask it "ask Nick and Nora what they think" and it messages them, then says what they answered. The conversation is the same one Hermes Desktop shows for that Bot, from either side.
+
+1. **Bots.** Make the profiles Bots in Hermes Desktop's Bots pane, which creates each one's Bot Chat. Without Desktop, run `hermes -p <profile> chat -c "Bot Chat" --create-if-missing` for each, and put `ui_meta: {hermes-bots: {}}` in one profile's `profile.yaml` ([Bot Mode](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/bot-mode.md)).
+2. **Make the gadget an admin of the gadget platform.** Hermes lets a chat take over a session from another surface only for an admin (`/resume --all`). In the default profile's `config.yaml`:
+
+   ```yaml
+   platforms:
+     gadget:
+       extra:
+         allow_admin_from: [hg-0a0eab5baf3b217d]   # the leading gadget, from `hermes gadget devices`
+         user_allowed_commands: [new, stop]        # other gadgets keep "new conversation" and "stop"
+   ```
+
+   Once `allow_admin_from` is set, gadgets not on it may run only `/help`, `/whoami` and the commands in `user_allowed_commands`. Gadgets send `/new` themselves when CANCEL is held, so keep `new` there. Restart the gateway.
+3. **Run it:** `hermes gadget bot-chat <device> [profile]`, with `default` when no profile is named. The gateway switches the device to that profile if it isn't there, sends `/resume --all Bot Chat` from it, and the command waits until the profile's Bot Chat is on the device's chat. It works over the network: no USB console. A profile other than the default one must be offered to the gadget (`profiles`), and on Hermes without `validate_native_profile_route` it also needs `profile_mode: virtual`.
+
+The command refuses before it asks the gateway when the profile has no Bot Chat, the gadget is not on `allow_admin_from`, or the profile isn't offered, and it prints what to change. A request for a device that is offline waits for it for 10 minutes. Run it again for each profile that should lead on that gadget; a profile's Bot Chat follows the last chat that took it, so opening it from Hermes Desktop afterwards continues the same conversation.
+
+A Bot added later needs nothing on the gadget: `message_agent` checks its target against the Bots Hermes has at the time, and the Bot Chat's teammate list is rebuilt when the Bots change.

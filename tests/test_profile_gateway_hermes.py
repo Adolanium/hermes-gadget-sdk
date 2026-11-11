@@ -1683,3 +1683,57 @@ def test_a_connection_replaced_while_it_waits_leaves_the_newest_one_following_it
 
     sent, later = asyncio.run(main())
     assert sent == [first, later]
+
+
+@pytest.mark.parametrize("virtual", [False, True], ids=["stamp", "virtual"])
+def test_a_bot_chat_request_switches_the_device_and_sends_the_resume_from_it(live_rig, virtual):
+    # hermes gadget bot-chat: the gateway puts the device on the profile, then sends /resume --all Bot Chat
+    # as the device, in the chat that profile's turns use; Hermes decides whether the device may.
+    from hermes_gadget_plugin import botchat
+
+    rig = live_rig
+    rig.adapter._virtual_profiles = virtual
+    rig.approve()
+    queue = botchat.BotChatQueue(rig.adapter._store.path.parent)
+    with rig.connect({"profiles": True}):
+        session = rig.adapter.hub.get(rig.device)
+        queue.request(rig.device, "ops")
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+        assert session.profile == "ops"
+        sent = [e for e in rig.events if e.text == botchat.RESUME_COMMAND]
+        chat_id = f"{rig.device}~ops" if virtual else rig.device
+        assert [(e.source.chat_id, e.source.profile, e.source.user_id) for e in sent] == [(chat_id, "ops", rig.device)]
+        assert queue.pending() == []
+        assert queue.status(rig.device) | {"at": 0} == {"state": "sent", "profile": "ops", "chat_id": chat_id, "at": 0}
+
+
+def test_a_bot_chat_request_waits_for_the_device_and_expires(live_rig):
+    import time as _time
+
+    from hermes_gadget_plugin import botchat
+
+    rig = live_rig
+    queue = botchat.BotChatQueue(rig.adapter._store.path.parent)
+    queue.request(rig.device, "ops")
+    rig.run(rig.adapter._serve_bot_chat(queue, rig.device))  # not connected: it waits
+    assert queue.pending() == [rig.device] and queue.status(rig.device) is None
+    request = queue.load(rig.device)
+    queue._write(queue._path(rig.device, ".json"),
+                 {**request, "requested_at": _time.time() - botchat.REQUEST_TTL_S - 1})
+    rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+    assert queue.pending() == [] and queue.status(rig.device)["state"] == "failed"
+    assert not [e for e in rig.events if e.text == botchat.RESUME_COMMAND]
+
+
+def test_a_bot_chat_request_for_a_profile_the_device_cannot_use_fails(live_rig):
+    from hermes_gadget_plugin import botchat
+
+    rig = live_rig
+    rig.approve()
+    queue = botchat.BotChatQueue(rig.adapter._store.path.parent)
+    with rig.connect({"profiles": True}):
+        queue.request(rig.device, "nosuch")
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+        assert queue.status(rig.device) == {**queue.status(rig.device), "state": "failed"}
+        assert "cannot switch to nosuch" in queue.status(rig.device)["error"]
+        assert not [e for e in rig.events if e.text == botchat.RESUME_COMMAND]
