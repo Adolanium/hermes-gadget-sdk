@@ -754,6 +754,117 @@ def test_an_unknown_profile_falls_back_to_the_launch_home(routing_rig):
     assert identity.runtime_home == home
 
 
+def test_virtual_mode_gives_each_picked_profile_its_own_routed_chat(routing_rig):
+    # profile_mode: virtual. The pick becomes the chat <device>~ops, which a route the plugin adds sends to
+    # ops: Hermes resolves it like any routed chat, with no validate_native_profile_route hook.
+    from gateway.session_identity import resolve_identity
+
+    runner, adapter, home = routing_rig
+    adapter._virtual_profiles = True
+    session = _session("ops")
+    source = adapter._source(session)
+    assert (source.chat_id, source.user_id, source.profile) == (f"{DEVICE}~ops", DEVICE, "ops")
+    assert [(r.chat_id, r.profile) for r in runner.config.profile_routes] == [(f"{DEVICE}~ops", "ops")]
+    identity = resolve_identity(source, runner=runner, adapter=adapter)
+    assert (identity.transport_profile, identity.runtime_profile) == ("default", "ops")
+    assert identity.runtime_home == home / "profiles" / "ops"
+    assert runner._delivery_adapter_for(source) is adapter
+    # Its own conversation, apart from the device's default one.
+    default_source = adapter._source(_session("default"))
+    assert (default_source.chat_id, default_source.profile) == (DEVICE, "default")
+    assert runner._session_key_for_source(source) != runner._session_key_for_source(default_source)
+    # Another message adds no second route; replies to the virtual chat find the device.
+    adapter._source(session)
+    assert len(runner.config.profile_routes) == 1
+    assert adapter._device_id(f"{DEVICE}~ops") == DEVICE and adapter._device_id(DEVICE) == DEVICE
+
+
+def test_virtual_mode_keeps_the_owner_check_on_the_device_itself(routing_rig):
+    # The added route names the virtual chat only, so the default profile still answers for the device.
+    from gateway.config import Platform
+
+    runner, adapter, home = routing_rig
+    adapter._virtual_profiles = True
+    adapter.set_authorization_check(runner._make_adapter_auth_check(Platform("gadget")))
+    default = runner.pairing_store
+    default.approve_code("gadget", default.generate_code("gadget", DEVICE, "Kitchen"))
+    adapter._source(_session("ops"))
+    assert adapter._owner_trusts(DEVICE) is True
+    assert not adapter._routed(_session("default"))  # the device still switches
+
+
+def test_virtual_mode_drops_the_routes_of_profiles_no_longer_offered(routing_rig):
+    runner, adapter, home = routing_rig
+    adapter._virtual_profiles = True
+    adapter._source(_session("ops"))
+    adapter._prune_virtual_routes(set())  # a roster Hermes could not give drops nothing
+    assert len(runner.config.profile_routes) == 1
+    adapter._prune_virtual_routes({"default", "ops"})
+    assert len(runner.config.profile_routes) == 1
+    adapter._prune_virtual_routes({"default"})  # ops deleted, parked or taken off the list
+    assert runner.config.profile_routes == [] and adapter._virtual_routes == set()
+    adapter._source(_session("ops"))  # offered again: the route comes back with the next message
+    assert len(runner.config.profile_routes) == 1
+
+
+def test_virtual_mode_never_removes_a_route_it_did_not_add(routing_rig):
+    # An administrator's route for the same chat serves it, and the cleanup leaves it in place.
+    from gateway.profile_routing import ProfileRoute
+
+    runner, adapter, home = routing_rig
+    adapter._virtual_profiles = True
+    admin = ProfileRoute(name="admin", platform="gadget", profile="ops", chat_id=f"{DEVICE}~ops")
+    runner.config.profile_routes.append(admin)
+    source = adapter._source(_session("ops"))
+    assert source.chat_id == f"{DEVICE}~ops"
+    assert runner.config.profile_routes == [admin]  # no second route added
+    adapter._prune_virtual_routes({"default"})
+    assert runner.config.profile_routes == [admin]
+
+
+def test_virtual_mode_does_not_count_a_disabled_or_foreign_route(routing_rig):
+    # A disabled route is not one Hermes uses, so the adapter adds its own; a route sending the chat to
+    # another profile is the administrator's choice, so the pick falls back to the stamp.
+    from gateway.profile_routing import ProfileRoute
+
+    runner, adapter, home = routing_rig
+    adapter._virtual_profiles = True
+    off = ProfileRoute(name="off", platform="gadget", profile="ops", chat_id=f"{DEVICE}~ops", enabled=False)
+    runner.config.profile_routes.append(off)
+    source = adapter._source(_session("ops"))
+    assert source.chat_id == f"{DEVICE}~ops"
+    assert [r.name for r in runner.config.profile_routes if r.enabled] == [f"gadget-virtual-{DEVICE}~ops"]
+
+    runner.config.profile_routes[:] = [
+        ProfileRoute(name="elsewhere", platform="gadget", profile="default", chat_id=f"{DEVICE}~ops")]
+    adapter._virtual_routes.clear()
+    adapter._virtual_owned.clear()
+    source = adapter._source(_session("ops"))
+    assert (source.chat_id, source.profile) == (DEVICE, "ops")  # the stamp, as without virtual mode
+
+
+def test_virtual_mode_still_removes_its_route_after_an_administrator_overrides_it(routing_rig):
+    from gateway.profile_routing import ProfileRoute
+
+    runner, adapter, home = routing_rig
+    adapter._virtual_profiles = True
+    adapter._source(_session("ops"))  # the adapter adds its route
+    override = ProfileRoute(name="override", platform="gadget", profile="default", chat_id=f"{DEVICE}~ops",
+                            user_id=DEVICE)  # more specific: it wins
+    runner.config.profile_routes.append(override)
+    source = adapter._source(_session("ops"))
+    assert source.chat_id == DEVICE  # the stamp
+    adapter._prune_virtual_routes({"default"})  # ops leaves the roster
+    assert runner.config.profile_routes == [override]  # the adapter's route is gone, the override stays
+
+
+def test_without_virtual_mode_the_pick_stamps_the_devices_own_chat(routing_rig):
+    runner, adapter, home = routing_rig
+    source = adapter._source(_session("ops"))
+    assert (source.chat_id, source.profile) == (DEVICE, "ops")
+    assert runner.config.profile_routes == []
+
+
 class _RawDevice:
     """A device speaking the handshake by hand, so a test chooses exactly what it claims in hello."""
 

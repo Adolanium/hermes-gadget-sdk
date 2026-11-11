@@ -211,7 +211,8 @@ def two_profile_gateway(tmp_path, request):
     for where in (home, ops):
         shutil.copytree(REPO / "plugin", where / "plugins" / "gadget", ignore=shutil.ignore_patterns("__pycache__"))
     config = CONFIG.format(api=api_port, gadget=gadget_port).replace(
-        "      unauthorized_dm_behavior: pair\n", "      unauthorized_dm_behavior: pair\n      profiles: all\n")
+        "      unauthorized_dm_behavior: pair\n", "      unauthorized_dm_behavior: pair\n      profiles: all\n"
+        + ("      profile_mode: virtual\n" if getattr(request, "param", None) == "virtual" else ""))
     (home / "config.yaml").write_text(config + "gateway:\n  multiplex_profiles: true\n", encoding="utf-8")
     (ops / "config.yaml").write_text(OPS_CONFIG.format(api=api_port), encoding="utf-8")
     (home / FACE_FILE).write_bytes(_face("default"))
@@ -241,6 +242,10 @@ def two_profile_gateway(tmp_path, request):
             proc.kill()
 
 
+# "stamp" marks the device's own chat with the picked profile, which Hermes versions with native session
+# admission accept only through validate_native_profile_route (NousResearch/hermes-agent#147690); "virtual"
+# gives each picked profile its own routed chat, which they accept as it is.
+@pytest.mark.parametrize("two_profile_gateway", ["stamp", "virtual"], indirect=True)
 def test_a_device_switches_to_a_second_profile_and_that_profile_answers(two_profile_gateway, make_sim):
     from hermes_gadget_plugin.face import ProfileFace
 

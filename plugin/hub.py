@@ -820,7 +820,8 @@ class DeviceSession:
 
     def prompt_context(self) -> str:
         """Stable per-device context for the model (only changes if the device does)."""
-        parts = [f'The user is speaking through the gadget "{self.name}" (board {self.board}, id {self.device_id}).']
+        parts = [f'The user is speaking through the gadget "{self.name}" (board {self.board}, id {self.device_id}). '
+                 'That is the device\'s name, not yours: keep your own name and identity.']
         disp = self.display
         if disp.get("text_cols") and disp.get("text_rows"):
             parts.append(
