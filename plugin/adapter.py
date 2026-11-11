@@ -73,6 +73,7 @@ logger = logging.getLogger(__name__)
 
 PLATFORM_NAME = "gadget"
 MAX_MESSAGE_LENGTH = 4000
+VIRTUAL_SEP = "~"             # <device>~<profile>: a device's chat with a non-default profile (profile_mode: virtual)
 PAIRING_TTL_S = 3600          # mirrors Hermes's pairing-code lifetime
 PAIRING_POLL_S = 2.0
 # A profile's changed face or avatar files are read for its thumbnail once they have held still this long.
@@ -235,6 +236,11 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._offer_all = isinstance(offered, str) and offered.strip().lower() == "all"
         self._offered: Optional[set] = None if offered is None or self._offer_all else {
             str(p).strip() for p in (offered if isinstance(offered, list) else []) if str(p).strip()}
+        # "virtual": a device talking to another profile becomes its own chat, ``<device>~<profile>``, that a
+        # ``gateway.profile_routes`` entry the plugin adds at run time sends to that profile. Hermes then
+        # admits it like any routed chat, so no core hook is needed, and each profile keeps its own sessions.
+        self._virtual_profiles = str(extra.get("profile_mode") or "").strip().lower() == "virtual"
+        self._virtual_routes: set = set()  # chat ids this adapter has added a route for
         # The language `welcome` names for devices left on auto: Hermes's own unless set here.
         self._language = str(extra.get("language") or "auto").strip().lower() or "auto"
         # The language gadget recordings are transcribed in, whichever profile answers; None = its STT settings.
@@ -348,8 +354,52 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     def loop(self) -> Optional[asyncio.AbstractEventLoop]:
         return self._loop
 
+    @staticmethod
+    def _device_id(chat_id: str) -> str:
+        """The device behind a chat id: itself, or the device part of a virtual ``<device>~<profile>``."""
+        return str(chat_id).split(VIRTUAL_SEP, 1)[0]
+
     def _session(self, chat_id: str) -> Optional[DeviceSession]:
-        return self._hub.get(str(chat_id)) if self._hub else None
+        return self._hub.get(self._device_id(chat_id)) if self._hub else None
+
+    def _virtual_chat(self, device_id: str, profile: str) -> Optional[str]:
+        """The virtual chat for a device's talk with a non-default profile, its route added if missing.
+        None when the gateway's route list cannot be reached: the caller falls back to the stamp."""
+        chat_id = f"{device_id}{VIRTUAL_SEP}{profile}"
+        if chat_id in self._virtual_routes:
+            return chat_id
+        config = getattr(getattr(self, "gateway_runner", None), "config", None)
+        routes = getattr(config, "profile_routes", None)
+        if routes is None:
+            return None
+        try:
+            from gateway.profile_routing import ProfileRoute
+        except ImportError:
+            return None
+        if not any(getattr(r, "chat_id", None) == chat_id and getattr(r, "platform", None) == self.platform.value
+                   for r in routes):
+            routes.append(ProfileRoute(name=f"gadget-virtual-{chat_id}", platform=self.platform.value,
+                                       profile=profile, chat_id=chat_id))
+            routes.sort(key=lambda r: r.specificity, reverse=True)
+            logger.info("[%s] routed virtual chat %s to profile %s", self.name, chat_id, profile)
+        self._virtual_routes.add(chat_id)
+        return chat_id
+
+    def _prune_virtual_routes(self, served: set) -> None:
+        """Drop the routes this adapter added for profiles no longer served or offered (deleted, parked,
+        taken off ``profiles``). Devices on such a profile are sent back to the default one meanwhile."""
+        if not served:  # a roster Hermes could not give drops nothing
+            return
+        offered = served if self._offer_all else served & ((self._offered or set()) | {"default"})
+        stale = {c for c in self._virtual_routes if c.split(VIRTUAL_SEP, 1)[1] not in offered}
+        if not stale:
+            return
+        routes = getattr(getattr(getattr(self, "gateway_runner", None), "config", None), "profile_routes", None)
+        if routes is not None:
+            routes[:] = [r for r in routes if not (getattr(r, "chat_id", None) in stale
+                                                   and getattr(r, "platform", None) == self.platform.value)]
+        self._virtual_routes -= stale
+        logger.info("[%s] dropped virtual routes for profiles no longer offered: %s", self.name, sorted(stale))
 
     # -- pairing --------------------------------------------------------------------
 
@@ -736,6 +786,13 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                     served = await self._sync_pairing(session, served)
                 except Exception as exc:
                     logger.debug("[%s] pairing sync failed for %s: %s", self.name, session.device_id, exc)
+            if self._virtual_routes:
+                try:
+                    if served is None:
+                        served = {p["id"] for p in await asyncio.to_thread(self.profiles)}
+                    self._prune_virtual_routes(served)
+                except Exception as exc:
+                    logger.debug("[%s] virtual route cleanup failed: %s", self.name, exc)
 
     # -- dashboard ----------------------------------------------------------------------
 
@@ -1006,6 +1063,13 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             user_id=session.device_id, user_name=session.name)
 
     def _source(self, session: DeviceSession):
+        if (self._virtual_profiles and session.profile not in (None, "default")
+                and self._switches(session)):
+            chat_id = self._virtual_chat(session.device_id, session.profile)
+            if chat_id is not None:  # the route stamps source.profile; Hermes admits it as routed
+                return self.build_source(
+                    chat_id=chat_id, chat_name=f"{session.name} · {session.profile}", chat_type="dm",
+                    user_id=session.device_id, user_name=session.name)
         source = self._routed_source(session)
         if self._switches(session):
             source.profile = session.profile  # a multiplexed gateway runs the turn under this profile
@@ -1098,7 +1162,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         await session.turn_start(turn)
 
     async def on_processing_complete(self, event: MessageEvent, outcome) -> None:
-        turn = self._turns.pop(str(event.source.chat_id), None) or event.message_id or ""
+        turn = self._turns.pop(self._device_id(event.source.chat_id), None) or event.message_id or ""
         session = self._session(event.source.chat_id)
         if session is None or not session.paired:
             return
