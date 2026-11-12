@@ -47,6 +47,59 @@ def test_the_queue_keeps_one_request_per_device_and_its_report(tmp_path):
         queue.request("../../etc", "ops")
 
 
+def test_writes_use_their_own_temporary_file_and_leave_none_behind(tmp_path, monkeypatch):
+    """Two runs writing one device's request at once each go through a temporary file of their own."""
+    queue = botchat.BotChatQueue(tmp_path)
+    temps = []
+    real = botchat.tempfile.mkstemp
+
+    def mkstemp(**kw):
+        fd, name = real(**kw)
+        temps.append(name)
+        return fd, name
+
+    monkeypatch.setattr(botchat.tempfile, "mkstemp", mkstemp)
+    queue.request(DEVICE_ID, "ops")
+    queue.request(DEVICE_ID, "ops")
+    queue.report(DEVICE_ID, id="x", state="sent")
+    assert len(set(temps)) == 3
+    assert sorted(p.name for p in queue.dir.iterdir()) == [f"{DEVICE_ID}.json", f"{DEVICE_ID}.status.json"]
+
+
+def test_a_request_written_while_an_older_one_is_dropped_survives(tmp_path, monkeypatch):
+    """The id check and the removal are one step: a run that replaces the request after the gateway
+    took the file keeps its request, and a file that wasn't the gateway's goes back, unless a newer one
+    has taken the name since."""
+    queue = botchat.BotChatQueue(tmp_path)
+    real_loads = botchat.json.loads
+    newer = []
+
+    def loads_then_another_run_writes(text, *a, **kw):  # the gateway has taken the file and is reading it
+        data = real_loads(text, *a, **kw)
+        if not newer:
+            newer.append(queue.request(DEVICE_ID, "ops"))
+        return data
+
+    first = queue.request(DEVICE_ID, "ops")
+    monkeypatch.setattr(botchat.json, "loads", loads_then_another_run_writes)
+    assert queue.drop(DEVICE_ID, first)  # the gateway removes the one it served...
+    monkeypatch.setattr(botchat.json, "loads", real_loads)
+    assert queue.load(DEVICE_ID)["id"] == newer[0]  # ...and the newer run's request is still there
+
+    newer.clear()
+    monkeypatch.setattr(botchat.json, "loads", loads_then_another_run_writes)
+    assert not queue.drop(DEVICE_ID, first)  # holds another request: not removed...
+    monkeypatch.setattr(botchat.json, "loads", real_loads)
+    assert queue.load(DEVICE_ID)["id"] == newer[0]  # ...and the older one doesn't overwrite the newest
+
+    stale = queue.load(DEVICE_ID)["id"]
+    queue.request(DEVICE_ID, "default")
+    current = queue.load(DEVICE_ID)["id"]
+    assert not queue.drop(DEVICE_ID, stale)  # put back as it was
+    assert queue.load(DEVICE_ID)["id"] == current
+    assert sorted(p.name for p in queue.dir.iterdir()) == [f"{DEVICE_ID}.json"]
+
+
 def test_bot_chat_row_reads_the_canonical_session(tmp_path):
     """The row titled Bot Chat, read only; none when the store or the row is missing."""
     assert botchat.bot_chat_row(tmp_path / "missing.db") is None

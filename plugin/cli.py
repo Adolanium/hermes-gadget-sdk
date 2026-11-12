@@ -263,8 +263,8 @@ def _cmd_bot_chat(args) -> None:
         time.sleep(1)
     if chat_id is None:
         sys.exit(f"Stopped waiting: {name} wasn't online and idle within {int(args.timeout)} s. The gateway "
-                 f"keeps the request for {REQUEST_TTL_S // 60} minutes; run the command again to see "
-                 f"whether it went through.")
+                 f"still serves the request when it is, until {REQUEST_TTL_S // 60} minutes after this run began; "
+                 f"running the command again replaces it with a new attempt.")
     sys.exit(f"The command reached {name}, but {profile}'s {BOT_CHAT_TITLE} didn't move. The reply on the gadget "
              f"says why; often {profile} hasn't approved the gadget yet (hermes -p {profile} pairing list). "
              f"'hermes logs' has the gateway's side.")

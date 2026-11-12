@@ -898,13 +898,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             if not self._hub:
                 continue
             for device_id in bot_chats.pending():
-                try:
-                    await self._serve_bot_chat(bot_chats, device_id)
-                except Exception as exc:  # one bad request must not stop updates or the others
-                    request_id = (bot_chats.load(device_id) or {}).get("id")
-                    if bot_chats.drop(device_id, request_id):
-                        bot_chats.report(device_id, id=request_id, state="failed", error=str(exc))
-                    logger.warning("[%s] bot-chat request for %s failed", self.name, device_id, exc_info=True)
+                await self._serve_bot_chat_guarded(bot_chats, device_id)
             for device_id in queue.pending():
                 session = self._hub.get(device_id)
                 running = self._installing.get(device_id)
@@ -912,14 +906,36 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                     continue
                 self._installing[device_id] = session.spawn(self._install_staged(queue, session))
 
-    async def _serve_bot_chat(self, queue: "botchat.BotChatQueue", device_id: str) -> None:
-        """Run one 'hermes gadget bot-chat' request: switch the device to the profile, then send
-        ``/resume --all Bot Chat`` from it, so Hermes moves that profile's Bot Chat onto its chat.
-        Hermes decides whether the device may (an admin of this platform); the CLI checks the result."""
-        request = queue.load(device_id)
+    async def _serve_bot_chat_guarded(self, queue: "botchat.BotChatQueue", device_id: str) -> None:
+        """Serve the device's request without ever raising: the update watcher runs this, and must keep
+        serving firmware updates and the other requests whatever one request, or the data dir, does."""
+        request = None
+        try:
+            request = queue.load(device_id)
+            await self._serve_bot_chat(queue, device_id, request)
+        except Exception as exc:
+            logger.warning("[%s] bot-chat request for %s failed", self.name, device_id, exc_info=True)
+            # Fail only the request that raised: one a newer run wrote meanwhile stays pending. The
+            # data dir may be what failed, so recording the failure only logs if it fails too.
+            try:
+                request_id = (request or {}).get("id")
+                if request is not None and queue.drop(device_id, request_id):
+                    queue.report(device_id, id=request_id, state="failed", error=str(exc))
+            except Exception:
+                logger.warning("[%s] could not record the bot-chat failure for %s", self.name, device_id,
+                               exc_info=True)
+
+    async def _serve_bot_chat(self, queue: "botchat.BotChatQueue", device_id: str,
+                              request: Optional[dict] = None) -> None:
+        """Run one 'hermes gadget bot-chat' request (``request``, or the one in ``queue``): switch the
+        device to the profile, then send ``/resume --all Bot Chat`` from it, so Hermes moves that
+        profile's Bot Chat onto its chat. Hermes decides whether the device may (an admin of this
+        platform); the CLI checks the result."""
         if request is None:
-            queue.drop(device_id)
-            return
+            request = queue.load(device_id)
+            if request is None:
+                queue.drop(device_id)
+                return
         request_id = request.get("id")
 
         def fail(error: str) -> None:

@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -45,11 +46,17 @@ class BotChatQueue:
         return self.dir / f"{device_id}{suffix}"
 
     def _write(self, path: Path, data: dict) -> None:
-        """Replace ``path`` atomically."""
+        """Replace ``path`` atomically, through a temporary file of this write's own (two runs of the
+        command may write the same device's request at once)."""
         self.dir.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(json.dumps(data), encoding="utf-8")
-        os.replace(tmp, path)
+        fd, tmp = tempfile.mkstemp(dir=self.dir, prefix=f".{path.name}.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(json.dumps(data))
+            os.replace(tmp, path)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
 
     def request(self, device_id: str, profile: str) -> str:
         """Queue a request (replacing any other for the device) and return its id."""
@@ -74,14 +81,34 @@ class BotChatQueue:
         return data if isinstance(data, dict) and isinstance(data.get("profile"), str) else None
 
     def drop(self, device_id: str, request_id: Optional[str] = None) -> bool:
-        """Remove the device's request; with ``request_id``, only while the file still holds that one
-        (a newer run may have replaced it). True when it was removed."""
-        if request_id is not None:
-            current = self.load(device_id)
-            if current is None or current.get("id") != request_id:
-                return False
-        self._path(device_id, ".json").unlink(missing_ok=True)
-        return True
+        """Remove the device's request; with ``request_id``, only if the file holds that one (a newer
+        run may have replaced it). True when it was removed.
+
+        The check and the removal are one step: the file is first renamed to a name of this call's own,
+        so a request written meanwhile lands on the usual name and is never the one removed. A file that
+        turns out to hold another request goes back, unless a newer one has taken its place since."""
+        path = self._path(device_id, ".json")
+        if request_id is None:
+            path.unlink(missing_ok=True)
+            return True
+        taken = path.with_name(f".{path.name}.{uuid.uuid4().hex}.taken")
+        try:
+            os.replace(path, taken)
+        except FileNotFoundError:
+            return False
+        try:
+            data = json.loads(taken.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = None
+        if isinstance(data, dict) and data.get("id") == request_id:
+            taken.unlink(missing_ok=True)
+            return True
+        try:
+            os.link(taken, path)  # put it back; fails if a newer request already took the name
+        except FileExistsError:
+            pass
+        taken.unlink(missing_ok=True)
+        return False
 
     def report(self, device_id: str, **status) -> None:
         """Write what the gateway did with a request, its ``id`` among the fields."""

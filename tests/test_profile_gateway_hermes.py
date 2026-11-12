@@ -1857,3 +1857,46 @@ def test_a_bot_chat_request_fails_on_a_virtual_chat_the_profile_has_not_approved
         queue.request(rig.device, "ops")
         rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
         assert queue.status(rig.device)["state"] == "sent" and len(_resumes(rig)) == 1
+
+
+def test_the_update_watcher_survives_a_bot_chat_failure_it_cannot_record(live_rig, monkeypatch):
+    """A request that raises, on a data dir where the failure can't be written either, is logged: the
+    watcher that also installs firmware updates keeps running."""
+    rig = live_rig
+    queue = _bot_chat_rig(rig)
+
+    async def boom(*args, **kw):
+        raise RuntimeError("switch exploded")
+
+    def full_disk(*args, **kw):
+        raise OSError(28, "No space left on device")
+
+    with rig.connect({"profiles": True}):
+        monkeypatch.setattr(rig.adapter, "_serve_bot_chat", boom)
+        monkeypatch.setattr(queue, "report", full_disk)
+        queue.request(rig.device, "ops")
+        rig.run(rig.adapter._serve_bot_chat_guarded(queue, rig.device))  # no exception
+        assert queue.pending() == [] and not _resumes(rig)
+
+
+def test_a_bot_chat_failure_is_reported_for_the_request_that_raised_only(live_rig, monkeypatch):
+    """Request A raises after another run wrote B: A's error is not put on B, and B stays pending."""
+    rig = live_rig
+    queue = _bot_chat_rig(rig)
+    with rig.connect({"profiles": True}):
+        session = rig.adapter.hub.get(rig.device)
+        sent = session.send_profile
+        newer = []
+
+        async def replaced_then_boom(*args, **kw):
+            newer.append(queue.request(rig.device, "ops"))
+            raise RuntimeError("switch exploded")
+
+        monkeypatch.setattr(session, "send_profile", replaced_then_boom)
+        queue.request(rig.device, "ops")
+        rig.run(rig.adapter._serve_bot_chat_guarded(queue, rig.device))
+        assert queue.pending() == [rig.device] and queue.load(rig.device)["id"] == newer[0]
+        assert queue.status(rig.device) is None and not _resumes(rig)
+        monkeypatch.setattr(session, "send_profile", sent)
+        rig.run(rig.adapter._serve_bot_chat_guarded(queue, rig.device))  # on ops already: B goes out
+        assert queue.status(rig.device)["id"] == newer[0] and queue.status(rig.device)["state"] == "sent"
