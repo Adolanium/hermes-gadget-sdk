@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstring>
 
+#include "cores3_panel.hpp"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "driver/spi_master.h"
@@ -14,6 +15,7 @@
 #include "esp_lcd_panel_st7789.h"
 #include "esp_lcd_spd2010.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
 #include "panel_box3.hpp"
 #include "panel_sh8601.hpp"
 #include "panel_cores3.hpp"
@@ -24,6 +26,36 @@
 
 namespace hgp {
 namespace {
+
+// GPIO probe runs only before spi_bus_initialize(), on CoreS3's unknown touch
+// firmware path. Rendering still uses the hardware SPI/DMA driver below.
+struct CoreS3ProbeGpio {
+  gpio_num_t cs_pin, dc_pin, clk_pin, data_pin;
+  explicit CoreS3ProbeGpio(const LcdConfig& cfg)
+      : cs_pin(static_cast<gpio_num_t>(cfg.cs)), dc_pin(static_cast<gpio_num_t>(cfg.dc)),
+        clk_pin(static_cast<gpio_num_t>(cfg.sclk)), data_pin(static_cast<gpio_num_t>(cfg.mosi)) {}
+  bool begin() {
+    for (gpio_num_t pin : {cs_pin, dc_pin, clk_pin, data_pin}) {
+      if (!GPIO_IS_VALID_OUTPUT_GPIO(pin)) return false;
+    }
+    for (gpio_num_t pin : {cs_pin, dc_pin, clk_pin, data_pin}) {
+      if (gpio_set_level(pin, pin == cs_pin) != ESP_OK ||
+          gpio_set_direction(pin, GPIO_MODE_OUTPUT) != ESP_OK) return false;
+    }
+    return true;
+  }
+  void cs(bool high) { record(gpio_set_level(cs_pin, high)); }
+  void dc(bool high) { record(gpio_set_level(dc_pin, high)); }
+  void sclk(bool high) { record(gpio_set_level(clk_pin, high)); }
+  void data(bool high) { record(gpio_set_level(data_pin, high)); }
+  void input(bool enabled) { record(gpio_set_direction(data_pin, enabled ? GPIO_MODE_INPUT : GPIO_MODE_OUTPUT)); }
+  bool sample() { return gpio_get_level(data_pin); }
+  void delay() { esp_rom_delay_us(1); }
+  bool ok() const { return valid_; }
+ private:
+  void record(esp_err_t error) { valid_ = (error == ESP_OK) && valid_; }
+  bool valid_ = true;
+};
 
 const char* TAG = "hg.lcd";
 constexpr spi_host_device_t kHost = SPI2_HOST;
@@ -110,12 +142,23 @@ bool SpiDisplay::begin(const LcdConfig& cfg, i2c_master_bus_handle_t i2c_bus) {
       vTaskDelay(pdMS_TO_TICKS(20));
     }
     i2c_master_bus_rm_device(touch);
+    CoreS3ProbeGpio gpio(cfg);
+    hg::CoreS3PanelWire<CoreS3ProbeGpio> wire(gpio);
     if (!detected) {
-      ESP_LOGE(TAG, "unknown CoreS3 panel revision (touch firmware 0x%02x)", version);
+      ESP_LOGW(TAG, "CoreS3 touch firmware 0x%02x does not identify the LCD; probing panel", version);
+      if (!gpio.begin()) return false;
+    }
+    // A failed touch transaction must never promote a stale 0x10/0x12 value.
+    const auto revision = hg::cores3_panel(detected ? version : 0, wire);
+    if (!detected) {
+      ESP_LOGI(TAG, "CoreS3 LCD read-back DD:%02x CB:%02x ID4:%02x%02x", wire.dd, wire.cb, wire.id_high, wire.id_low);
+    }
+    if (revision == hg::CoreS3Panel::Unknown) {
+      ESP_LOGE(TAG, "unknown CoreS3 LCD; refusing guessed initialization");
       return false;
     }
     ili9341 = true;
-    cores3_e = version == 0x12;
+    cores3_e = revision == hg::CoreS3Panel::E;
     controller_name_ = cores3_e ? "ili9342e" : "ili9342c";
   }
   frame_rows_ = cfg.height;
