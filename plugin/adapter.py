@@ -61,7 +61,7 @@ from gateway.platforms.base import (
 from gateway.platforms.event import MessageEvent, MessageType
 
 from . import audio as gaudio
-from . import compat, dashboard, imaging, ota, runtime, stt, textfmt
+from . import botchat, compat, dashboard, imaging, ota, runtime, stt, textfmt
 from .desk import Desk
 from . import status as live_status
 from . import face as faces
@@ -926,16 +926,110 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     async def _watch_updates(self) -> None:
         """Install firmware staged with 'hermes gadget update' once its device is online."""
         queue = ota.UpdateQueue(self._store.path.parent)
+        bot_chats = botchat.BotChatQueue(self._store.path.parent)
         while True:
             await asyncio.sleep(UPDATE_POLL_S)
             if not self._hub:
                 continue
+            for device_id in bot_chats.pending():
+                await self._serve_bot_chat_guarded(bot_chats, device_id)
             for device_id in queue.pending():
                 session = self._hub.get(device_id)
                 running = self._installing.get(device_id)
                 if session is None or session.closed or (running and not running.done()):
                     continue
                 self._installing[device_id] = session.spawn(self._install_staged(queue, session))
+
+    async def _serve_bot_chat_guarded(self, queue: "botchat.BotChatQueue", device_id: str) -> None:
+        """Serve the device's request without ever raising: the update watcher runs this, and must keep
+        serving firmware updates and the other requests whatever one request, or the data dir, does."""
+        request = None
+        try:
+            request = queue.load(device_id)
+            await self._serve_bot_chat(queue, device_id, request)
+        except Exception as exc:
+            logger.warning("[%s] bot-chat request for %s failed", self.name, device_id, exc_info=True)
+            # Fail only the request that raised: one a newer run wrote meanwhile stays pending. The
+            # data dir may be what failed, so recording the failure only logs if it fails too.
+            try:
+                request_id = (request or {}).get("id")
+                if request is not None and queue.drop(device_id, request_id):
+                    queue.report(device_id, id=request_id, state="failed", error=str(exc))
+            except Exception:
+                logger.warning("[%s] could not record the bot-chat failure for %s", self.name, device_id,
+                               exc_info=True)
+
+    async def _serve_bot_chat(self, queue: "botchat.BotChatQueue", device_id: str,
+                              request: Optional[dict] = None) -> None:
+        """Run one 'hermes gadget bot-chat' request (``request``, or the one in ``queue``): switch the
+        device to the profile, then send ``/resume --all Bot Chat`` from it, so Hermes moves that
+        profile's Bot Chat onto its chat. Hermes decides whether the device may (an admin of this
+        platform); the CLI checks the result."""
+        if request is None:
+            request = queue.load(device_id)
+            if request is None:
+                queue.drop(device_id)
+                return
+        request_id = request.get("id")
+
+        def fail(error: str) -> None:
+            if queue.drop(device_id, request_id):  # a newer request replaced it: that one reports instead
+                queue.report(device_id, id=request_id, state="failed", error=error)
+
+        if time.time() - float(request.get("requested_at") or 0) > botchat.REQUEST_TTL_S:
+            fail("the device did not come online in time")
+            return
+        session = self._hub.get(device_id) if self._hub else None
+        # Wait, until the request expires, for a connected, paired device with no turn or question
+        # pending: Hermes refuses /resume during a turn, whatever profile the device is on.
+        if session is None or session.closed or not session.paired or self._busy(device_id):
+            return
+        profile = request["profile"]
+        if session.profile != profile:
+            error = await self.select_profile(session, profile)
+            if error == "busy":
+                return  # a turn began meanwhile: try again at the next pass
+            if error is not None:
+                fail(f"cannot switch to {profile}: {error}")
+                return
+            await session.send_profile()
+        # The awaits above let the device, or the pairing watch, change the profile or the connection:
+        # the resume must go out on this connection, for the profile asked for, or not at all.
+        if self._hub is None or self._hub.get(device_id) is not session or session.closed:
+            fail("the device reconnected; run the command again")
+            return
+        if session.profile != profile:
+            fail(f"the device left {profile} (now on {session.profile}); run the command again")
+            return
+        if self._busy(device_id):
+            return
+        event = self._event(session, "botchat", botchat.RESUME_COMMAND, message_type=MessageType.TEXT)
+        # The profile answers this chat only once it has approved the device itself; until then Hermes
+        # takes the resume for a stranger's message and replies with a pairing code. Where the gateway's
+        # check can tell (a routed or virtual chat), say so rather than send a resume that can't work.
+        approved = None
+        if event.source.chat_id != device_id:  # on the device's own chat the check answers for the default profile
+            try:
+                approved = self._is_sender_authorized(device_id, "dm", event.source.chat_id)
+            except Exception:
+                approved = None
+        if approved is False:
+            fail(f"{profile} hasn't approved this gadget yet: talk to {profile} once on the gadget, approve "
+                 f"the code it shows (hermes -p {profile} pairing list), then run the command again")
+            return
+        if not queue.drop(device_id, request_id):
+            return  # a newer request replaced this one while it was being served
+        try:
+            forwarded = await self._forward(session, event)
+        except Exception as exc:  # the request is already taken: report it here, the guard can't
+            queue.report(device_id, id=request_id, state="failed", error=f"sending the resume failed: {exc}")
+            raise
+        if not forwarded:
+            queue.report(device_id, id=request_id, state="failed",
+                         error="the default profile no longer trusts this device")
+            return
+        queue.report(device_id, id=request_id, state="sent", profile=profile, chat_id=event.source.chat_id)
+        logger.info("[%s] sent %r from %s on profile %s", self.name, botchat.RESUME_COMMAND, device_id, profile)
 
     async def _install_staged(self, queue: ota.UpdateQueue, session: DeviceSession) -> None:
         staged = queue.load(session.device_id)
@@ -1137,10 +1231,11 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             text=text, source=self._source(session), message_id=self._message_id(session, msg_id),
             user_id=session.device_id, user_name=session.name, channel_prompt=session.prompt_context(), **kw)
 
-    async def _forward(self, session: DeviceSession, event: MessageEvent) -> None:
-        """Hand a device message to Hermes. Work for another profile needs the default profile's live
-        trust and the current connection, so neither a revoked device nor a replaced connection still
-        finishing an upload reaches another profile; that profile then checks its own approval."""
+    async def _forward(self, session: DeviceSession, event: MessageEvent) -> bool:
+        """Hand a device message to Hermes; False when it was dropped here. Work for another profile needs
+        the default profile's live trust and the current connection, so neither a revoked device nor a
+        replaced connection still finishing an upload reaches another profile; that profile then checks
+        its own approval."""
         if (event.source.profile not in (None, "default") and self._owner_bound(session)
                 and not self._still_trusted(session)):
             logger.info("[%s] dropped a message from %s for profile %s: not trusted by the default profile",
@@ -1149,8 +1244,9 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 # The device is waiting for an answer; an old connection's leftovers get none.
                 await session.turn_end("", "failure")
                 await session.send_notice("Not allowed: this gadget is not approved for that profile")
-            return
+            return False
         await self.handle_message(event)
+        return True
 
     async def on_text(self, session: DeviceSession, msg_id: str, text: str) -> None:
         await self._forward(session, self._event(session, msg_id, text, message_type=MessageType.TEXT))
