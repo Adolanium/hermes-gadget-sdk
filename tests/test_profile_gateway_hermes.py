@@ -1900,3 +1900,78 @@ def test_a_bot_chat_failure_is_reported_for_the_request_that_raised_only(live_ri
         monkeypatch.setattr(session, "send_profile", sent)
         rig.run(rig.adapter._serve_bot_chat_guarded(queue, rig.device))  # on ops already: B goes out
         assert queue.status(rig.device)["id"] == newer[0] and queue.status(rig.device)["state"] == "sent"
+
+
+def _messages(device, kind, wait_s=1.0):
+    """The messages of type ``kind`` the raw device receives within ``wait_s``."""
+    import time as _time
+
+    from websockets.exceptions import ConnectionClosed
+
+    seen, deadline = [], _time.monotonic() + wait_s
+    while _time.monotonic() < deadline:
+        try:
+            raw = device.ws.recv(timeout=max(0.01, deadline - _time.monotonic()))
+        except (TimeoutError, ConnectionClosed):
+            break
+        if isinstance(raw, str):
+            message = json.loads(raw)
+            if message.get("type") == kind:
+                seen.append(message)
+    return seen
+
+
+def test_a_profile_created_or_deleted_after_the_welcome_reaches_a_connected_device(live_rig, hermes_home):
+    """The pairing watch's roster push: a new profile is sent to the device as `profiles`, an unchanged
+    roster sends nothing, and a deleted one is taken away again, all without a reconnect."""
+    import shutil
+
+    rig = live_rig
+    rig.approve()
+    with rig.connect({"profiles": True}) as device:
+        assert [p["id"] for p in device.welcome["profiles"]] == ["default", "ops"]
+        rig.run(rig.adapter._push_rosters())
+        assert _messages(device, "profiles", 0.3) == []  # unchanged since the welcome
+        work = hermes_home / "profiles" / "work"
+        work.mkdir()
+        (work / "config.yaml").write_text("{}\n")
+        rig.run(rig.adapter._push_rosters())
+        pushed = _messages(device, "profiles")
+        assert [[p["id"] for p in m["profiles"]] for m in pushed] == [["default", "ops", "work"]]
+        rig.run(rig.adapter._push_rosters())
+        assert _messages(device, "profiles", 0.3) == []  # sent once, not on every pass
+        shutil.rmtree(work)
+        rig.run(rig.adapter._push_rosters())
+        assert [[p["id"] for p in m["profiles"]] for m in _messages(device, "profiles")] == [["default", "ops"]]
+
+
+def test_a_device_that_does_not_take_profiles_or_is_routed_gets_no_push(live_rig, hermes_home):
+    """Only devices that sent caps.profiles get `profiles`; a routed device keeps its empty roster."""
+    rig = live_rig
+    rig.approve()
+    with rig.connect({}) as device:  # older firmware: no caps.profiles
+        (hermes_home / "profiles" / "work").mkdir()
+        (hermes_home / "profiles" / "work" / "config.yaml").write_text("{}\n")
+        rig.run(rig.adapter._push_rosters())
+        assert _messages(device, "profiles", 0.3) == []
+    rig.route()  # an old static route sends this device to ops: it is offered no profiles
+    rig.approve("ops")
+    with rig.connect({"profiles": True}) as device:
+        assert "profiles" not in device.welcome
+        rig.run(rig.adapter._push_rosters())
+        assert _messages(device, "profiles", 0.3) == []
+
+
+def test_an_unreadable_profile_tree_leaves_the_devices_lists_alone(live_rig, monkeypatch):
+    """A failed read of Hermes's profiles is "unknown", not "none": the device keeps its list."""
+    import hermes_cli.profiles as profiles
+
+    rig = live_rig
+    rig.approve()
+    with rig.connect({"profiles": True}) as device:
+        def broken(*args, **kw):
+            raise OSError("profile tree unreadable")
+
+        monkeypatch.setattr(profiles, "profiles_to_serve", broken)
+        rig.run(rig.adapter._push_rosters())
+        assert _messages(device, "profiles", 0.3) == []
