@@ -73,10 +73,11 @@ class BotChatQueue:
                       if not p.name.endswith(".status.json") and protocol.DEVICE_ID_RE.match(p.stem))
 
     def load(self, device_id: str) -> Optional[dict]:
-        """The device's request, or None when there is none or it can't be read."""
+        """The device's request, or None when there is none or it isn't a valid request. Any other read
+        error raises: the request may be fine, so it stays for a later pass."""
         try:
             data = json.loads(self._path(device_id, ".json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except (FileNotFoundError, ValueError):
             return None
         return data if isinstance(data, dict) and isinstance(data.get("profile"), str) else None
 

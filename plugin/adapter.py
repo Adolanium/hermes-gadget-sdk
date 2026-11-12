@@ -1019,7 +1019,12 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             return
         if not queue.drop(device_id, request_id):
             return  # a newer request replaced this one while it was being served
-        if not await self._forward(session, event):
+        try:
+            forwarded = await self._forward(session, event)
+        except Exception as exc:  # the request is already taken: report it here, the guard can't
+            queue.report(device_id, id=request_id, state="failed", error=f"sending the resume failed: {exc}")
+            raise
+        if not forwarded:
             queue.report(device_id, id=request_id, state="failed",
                          error="the default profile no longer trusts this device")
             return

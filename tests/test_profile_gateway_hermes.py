@@ -1975,3 +1975,44 @@ def test_an_unreadable_profile_tree_leaves_the_devices_lists_alone(live_rig, mon
         monkeypatch.setattr(profiles, "profiles_to_serve", broken)
         rig.run(rig.adapter._push_rosters())
         assert _messages(device, "profiles", 0.3) == []
+
+
+def test_a_resume_that_raises_after_the_request_was_taken_is_still_reported(live_rig, monkeypatch):
+    """The request is already off the queue when the resume goes out: if that raises, the failure is
+    reported for it there, so the command doesn't wait out its timeout."""
+    rig = live_rig
+    queue = _bot_chat_rig(rig)
+    with rig.connect({"profiles": True}):
+        async def boom(*args, **kw):
+            raise RuntimeError("hermes went away")
+
+        monkeypatch.setattr(rig.adapter, "_forward", boom)
+        request_id = queue.request(rig.device, "ops")
+        rig.run(rig.adapter._serve_bot_chat_guarded(queue, rig.device))
+        status = queue.status(rig.device)
+        assert queue.pending() == [] and status["id"] == request_id and status["state"] == "failed"
+        assert "hermes went away" in status["error"]
+
+
+def test_a_request_whose_file_cannot_be_read_stays_for_a_later_pass(live_rig, monkeypatch):
+    """A read error other than a missing file (permissions, too many open files) leaves the request:
+    it is logged, and served once the file can be read again."""
+    from pathlib import Path
+
+    rig = live_rig
+    queue = _bot_chat_rig(rig)
+    with rig.connect({"profiles": True}):
+        request_id = queue.request(rig.device, "ops")
+        real = Path.read_text
+
+        def denied(self, *args, **kw):
+            if self.name == f"{rig.device}.json":
+                raise PermissionError(13, "Permission denied")
+            return real(self, *args, **kw)
+
+        monkeypatch.setattr(Path, "read_text", denied)
+        rig.run(rig.adapter._serve_bot_chat_guarded(queue, rig.device))
+        monkeypatch.setattr(Path, "read_text", real)
+        assert queue.pending() == [rig.device] and queue.status(rig.device) is None and not _resumes(rig)
+        rig.run(rig.adapter._serve_bot_chat_guarded(queue, rig.device))
+        assert queue.status(rig.device)["id"] == request_id and queue.status(rig.device)["state"] == "sent"
