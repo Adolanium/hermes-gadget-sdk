@@ -10,6 +10,9 @@
 #include "esp_log.h"
 #include "hg/console_args.hpp"
 #include "sdkconfig.h"
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+#include "hal/usb_serial_jtag_ll.h"
+#endif
 
 namespace hgp::console {
 namespace {
@@ -58,6 +61,21 @@ void begin() {
   repl_cfg.prompt = "gadget>";
   repl_cfg.max_cmdline_length = 256;
 #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+  // The USB Serial/JTAG block keeps its interrupt enables and status through a software reset,
+  // and the driver installed below adds its two (bytes received, send buffer empty) without
+  // clearing the rest; its handler acknowledges only those two. An M5Stack StopWatch came up
+  // with BUS_RESET enabled as well (int_ena 0x0204) after esptool had talked to it, and without
+  // it after a power cycle (0x0004). Plugged into USB while it ran, it went silent within
+  // seconds and then restarted every 3.8 s from the interrupt watchdog inside
+  // usb_serial_jtag_driver_install, until a reset over USB. So only the driver's own
+  // interrupts stay enabled, and whatever else is pending is acknowledged.
+  constexpr uint32_t kDriverInterrupts = USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT | USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY;
+  const uint32_t enabled = usb_serial_jtag_ll_get_intr_ena_status();
+  if (enabled & ~kDriverInterrupts)
+    ESP_LOGW(TAG, "usb serial/jtag had interrupts enabled that nothing handles (int_ena 0x%04x); disabling them",
+             static_cast<unsigned>(enabled));
+  usb_serial_jtag_ll_disable_intr_mask(~kDriverInterrupts);
+  usb_serial_jtag_ll_clr_intsts_mask(~kDriverInterrupts);
   esp_console_dev_usb_serial_jtag_config_t dev = ESP_CONSOLE_DEV_USB_SERIAL_JTAG_CONFIG_DEFAULT();
   ESP_ERROR_CHECK(esp_console_new_repl_usb_serial_jtag(&dev, &repl_cfg, &repl));
 #elif CONFIG_ESP_CONSOLE_USB_CDC
