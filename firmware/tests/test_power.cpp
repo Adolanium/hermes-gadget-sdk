@@ -6,6 +6,7 @@
 #include "stc8_battery.hpp"
 #include "cores3.hpp"
 #include "sticks3.hpp"
+#include "stopwatch.hpp"
 #include "check.hpp"
 #include "hg/battery.hpp"
 
@@ -402,4 +403,210 @@ TEST("AXP2101: external power is read from VBUS good, and a failed read is unkno
   CHECK(power.vbus_good() == std::optional<bool>(false));
   fail = true;
   CHECK(!power.vbus_good().has_value());
+}
+
+namespace {
+// The StopWatch's M5PM1 (8-bit registers) and M5IOE1 (16-bit, low byte first) as register files.
+struct FakeStopWatch {
+  std::array<uint8_t, 256> pm1{};
+  std::array<uint8_t, 256> ioe{};
+  bool pm1_fail = false, ioe_fail = false;
+  struct IoeWrite {
+    uint8_t reg;
+    uint16_t value;
+  };
+  std::vector<IoeWrite> ioe_written;
+  std::vector<uint8_t> pm1_written;
+  std::vector<uint32_t> delays;
+  // What the expander's outputs were when each delay began.
+  std::vector<uint16_t> out_at_delay;
+  uint16_t ioe16(uint8_t reg) const { return static_cast<uint16_t>(ioe[reg] | (ioe[reg + 1] << 8)); }
+  hg::StopWatchControl make() {
+    return hg::StopWatchControl(
+        {[this](uint8_t reg, uint8_t* out, size_t n) {
+           if (pm1_fail) return false;
+           for (size_t i = 0; i < n; ++i) out[i] = pm1[reg + i];
+           if (reg == 0x48) pm1[0x48] &= 0x7F;  // the was-pressed flag clears on a read
+           return true;
+         },
+         [this](uint8_t reg, uint8_t value) {
+           if (pm1_fail) return false;
+           pm1_written.push_back(reg);
+           pm1[reg] = value;
+           return true;
+         }},
+        [this](uint8_t reg, uint8_t* out, size_t n) {
+          if (ioe_fail) return false;
+          for (size_t i = 0; i < n; ++i) out[i] = ioe[reg + i];
+          return true;
+        },
+        [this](uint8_t reg, uint16_t value) {
+          if (ioe_fail) return false;
+          ioe_written.push_back({reg, value});
+          ioe[reg] = static_cast<uint8_t>(value & 0xFF);
+          ioe[reg + 1] = static_cast<uint8_t>(value >> 8);
+          return true;
+        },
+        [this](uint32_t ms) {
+          delays.push_back(ms);
+          out_at_delay.push_back(ioe16(0x05));
+        });
+  }
+};
+constexpr uint16_t kSwAudio = 1 << 2, kSwTouchReset = 1 << 3, kSwPanelReset = 1 << 4, kSwPanel = 1 << 7, kSwMotor = 1 << 8,
+                   kSwAmp = 1 << 9;
+}  // namespace
+
+TEST("StopWatch: supplies come on, touch and panel are reset, motor and amplifier stay off") {
+  FakeStopWatch fake;
+  // Pins this board does not use keep whatever they had: PYG1 (the USB/UART switch) as an
+  // output driven high, PYG16 open-drain.
+  fake.ioe[0x03] = 0x01;
+  fake.ioe[0x05] = 0x01;
+  fake.ioe[0x14] = 0x80;
+  fake.pm1[0x09] = 0x05;  // left by an earlier firmware: I2C idle sleep and the watchdog
+  fake.pm1[0x0A] = 30;
+  fake.pm1[0x49] = 0x80;  // download-mode lock, which is not this driver's to clear
+  auto control = fake.make();
+  CHECK(control.begin());
+
+  CHECK_EQ(fake.pm1[0x09], 0);
+  CHECK_EQ(fake.pm1[0x0A], 0);
+  CHECK_EQ(fake.pm1[0x49], 0x80 | 0x18 | 0x01);  // lock kept; 4 s long press; a click resets nothing
+  CHECK_EQ(fake.pm1[0x43], 0x1F);                // every interrupt masked: the key is polled
+  CHECK_EQ(fake.pm1[0x44], 0x3F);
+  CHECK_EQ(fake.pm1[0x45], 0x07);
+
+  const uint16_t outputs = kSwAudio | kSwTouchReset | kSwPanelReset | kSwPanel | kSwMotor | kSwAmp;
+  CHECK_EQ(fake.ioe16(0x03), outputs | 0x0001);
+  CHECK_EQ(fake.ioe16(0x13), 0x8000);  // our pins push-pull, PYG16 untouched
+  CHECK_EQ(fake.ioe16(0x1B), 0);       // motor PWM off
+  CHECK_EQ(fake.ioe16(0x05), kSwAudio | kSwPanel | kSwTouchReset | kSwPanelReset | 0x0001);
+
+  // 20 ms with the supplies on and the resets released, 10 ms with both resets low, 120 ms after.
+  CHECK(fake.delays == std::vector<uint32_t>({20, 10, 120}));
+  CHECK_EQ(fake.out_at_delay[0], kSwAudio | kSwPanel | kSwTouchReset | kSwPanelReset | 0x0001);
+  CHECK_EQ(fake.out_at_delay[1], kSwAudio | kSwPanel | 0x0001);
+  CHECK_EQ(fake.out_at_delay[2], kSwAudio | kSwPanel | kSwTouchReset | kSwPanelReset | 0x0001);
+  // The levels are written before the pins become outputs.
+  size_t out_at = 0, mode_at = 0;
+  for (size_t i = 0; i < fake.ioe_written.size(); ++i) {
+    if (fake.ioe_written[i].reg == 0x05 && !out_at) out_at = i + 1;
+    if (fake.ioe_written[i].reg == 0x03 && !mode_at) mode_at = i + 1;
+  }
+  CHECK(out_at && mode_at && out_at < mode_at);
+}
+
+TEST("StopWatch: a chip that does not answer stops initialization") {
+  FakeStopWatch no_pm1;
+  no_pm1.pm1_fail = true;
+  auto a = no_pm1.make();
+  CHECK(!a.begin());
+  CHECK(no_pm1.ioe_written.empty());
+  CHECK(no_pm1.delays.empty());
+  CHECK(!a.read());
+  CHECK(!a.external_power());
+  CHECK(!a.take_key_press());
+
+  FakeStopWatch no_ioe;
+  no_ioe.ioe_fail = true;
+  auto b = no_ioe.make();
+  CHECK(!b.begin());
+  CHECK(no_ioe.delays.empty());
+}
+
+TEST("StopWatch: the amplifier is switched only on a change and leaves the other outputs alone") {
+  FakeStopWatch fake;
+  auto control = fake.make();
+  CHECK(control.begin());
+  const uint16_t before = fake.ioe16(0x05);
+  const size_t writes = fake.ioe_written.size();
+  CHECK(control.set_amplifier(false));  // already off
+  CHECK_EQ(fake.ioe_written.size(), writes);
+  CHECK(control.set_amplifier(true));
+  CHECK_EQ(fake.ioe16(0x05), before | kSwAmp);
+  CHECK(control.set_amplifier(true));
+  CHECK_EQ(fake.ioe_written.size(), writes + 1);
+  CHECK(control.set_amplifier(false));
+  CHECK_EQ(fake.ioe16(0x05), before);
+  fake.ioe_fail = true;
+  CHECK(!control.set_amplifier(true));  // a failed write is tried again next time
+  fake.ioe_fail = false;
+  CHECK(control.set_amplifier(true));
+  CHECK_EQ(fake.ioe16(0x05), before | kSwAmp);
+}
+
+TEST("StopWatch: cell and VIN millivolts and the active-low charge status are reported") {
+  FakeStopWatch fake;
+  auto control = fake.make();
+  const auto set_mv = [&](uint8_t reg, uint16_t mv) {
+    fake.pm1[reg] = static_cast<uint8_t>(mv & 0xFF);
+    fake.pm1[reg + 1] = static_cast<uint8_t>(mv >> 8);
+  };
+  set_mv(0x22, 4174);
+  set_mv(0x24, 5078);
+  fake.pm1[0x12] = 0x03;  // CHG_STAT (PMG2) low: charging
+  auto s = control.read();
+  CHECK(s.has_value());
+  CHECK(s->battery_present == std::optional<bool>(true));
+  CHECK(s->battery_mv == std::optional<uint16_t>(4174));
+  CHECK(!s->battery_percent.has_value());  // no measured curve for this cell
+  CHECK(s->external_power == std::optional<bool>(true));
+  CHECK(s->charging == std::optional<bool>(true));
+  CHECK(control.external_power() == std::optional<bool>(true));
+
+  fake.pm1[0x12] = 0x07;  // high: the charger rests
+  CHECK(control.read()->charging == std::optional<bool>(false));
+
+  set_mv(0x24, 0);  // on battery: never charging, whatever the pin reads
+  fake.pm1[0x12] = 0x03;
+  s = control.read();
+  CHECK(s->external_power == std::optional<bool>(false));
+  CHECK(s->charging == std::optional<bool>(false));
+  CHECK(control.external_power() == std::optional<bool>(false));
+
+  set_mv(0x22, 0);  // no cell: nothing to report about one
+  s = control.read();
+  CHECK(s->battery_present == std::optional<bool>(false));
+  CHECK(!s->battery_mv.has_value());
+  CHECK(!s->charging.has_value());
+
+  fake.pm1_fail = true;
+  CHECK(!control.read());
+  CHECK(!control.external_power());
+}
+
+TEST("StopWatch: a short press of the red key is reported once, on its release; a long hold is not") {
+  FakeStopWatch fake;
+  auto control = fake.make();
+  CHECK(!control.take_key_press());
+  fake.pm1[0x48] = 0x81;  // down
+  for (int i = 0; i < 3; ++i) CHECK(!control.take_key_press());
+  fake.pm1[0x48] = 0x00;  // up after 300 ms
+  CHECK(control.take_key_press());
+  CHECK(!control.take_key_press());
+
+  fake.pm1[0x48] = 0x80;  // pressed and released between two polls: only the flag shows it
+  CHECK(control.take_key_press());
+  CHECK(!control.take_key_press());
+
+  fake.pm1[0x48] = 0x81;  // held past a second: the PM1's own long press, not a short one
+  for (int i = 0; i < 15; ++i) CHECK(!control.take_key_press());
+  fake.pm1[0x48] = 0x00;
+  CHECK(!control.take_key_press());
+  fake.pm1[0x48] = 0x81;  // the next short press counts again
+  CHECK(!control.take_key_press());
+  fake.pm1[0x48] = 0x00;
+  CHECK(control.take_key_press());
+}
+
+TEST("StopWatch: power-off silences the amplifier, then sends the PM1's shutdown command") {
+  FakeStopWatch fake;
+  auto control = fake.make();
+  CHECK(control.begin());
+  CHECK(control.set_amplifier(true));
+  CHECK(control.power_off());
+  CHECK_EQ(fake.ioe16(0x05) & kSwAmp, 0);
+  CHECK_EQ(fake.pm1[0x0C], 0xA1);
+  CHECK_EQ(fake.pm1_written.back(), 0x0C);
 }

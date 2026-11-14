@@ -343,6 +343,7 @@ struct BoardConfig {
   hg::Curve battery_curve, battery_charge_curve;
   bool cores3 = false;
   bool sticks3 = false;  // the M5PM1 switches the LCD rail and the speaker amplifier
+  bool stopwatch = false;  // M5IOE1 supplies/resets/amplifier and the M5PM1 (StopWatchBoard)
   // A phone companion app over Bluetooth LE (port_ble.cpp). Experimental: needs
   // the Bluetooth lines in the board's sdkconfig.defaults and stays off until the
   // board passes the checks in docs/hardware-validation.md#bluetooth.

@@ -82,6 +82,7 @@ hgp::AxpPower g_power;
 hgp::LatchPower g_latch_power;
 hgp::CoreS3Board g_cores3;
 hgp::StickS3Board g_sticks3;
+hgp::StopWatchBoard g_stopwatch;
 hgp::PhoneLink g_phone;
 hgp::TailnetLink g_tailnet;
 #endif
@@ -449,6 +450,7 @@ extern "C" void app_main(void) {
   i2c_master_bus_handle_t i2c_bus = io_rail_ready ? hgp::i2c::bus(board.i2c) : nullptr;
   const bool peripherals_ready = io_rail_ready && (!board.cores3 || g_cores3.begin(i2c_bus)) &&
       (!board.sticks3 || g_sticks3.begin(i2c_bus)) &&
+      (!board.stopwatch || g_stopwatch.begin(i2c_bus)) &&
       (!board.expander_reset.mask || hgp::tca9554_reset(i2c_bus, board.expander_reset)) &&
       (!board.expander_levels.enabled || hgp::tca9554_levels_begin(i2c_bus, board.expander_levels));
   if (board.cores3 && peripherals_ready)
@@ -501,9 +503,14 @@ extern "C" void app_main(void) {
     hal.power = &g_sticks3;
     g_wifi.on_battery = [] { return g_sticks3.external_power() == std::optional<bool>(false); };
   }
+  if (board.stopwatch && peripherals_ready) {  // peripherals_ready includes g_stopwatch.begin()
+    hal.power = &g_stopwatch;
+    g_wifi.on_battery = [] { return g_stopwatch.external_power() == std::optional<bool>(false); };
+  }
   const bool audio_power = peripherals_ready && (!board.axp_audio_supply || g_power.enable_audio_supply());
   if (!audio_power) ESP_LOGE(TAG, "audio supply unavailable");
   if (board.sticks3) g_codec_speaker.board_pa = [](bool on) { g_sticks3.set_amplifier(on); };
+  if (board.stopwatch) g_codec_speaker.board_pa = [](bool on) { g_stopwatch.set_amplifier(on); };
   if (board.codec.enabled && audio_power && g_codec.begin(board.codec, i2c_bus)) {
     if (g_codec_mic.begin(g_codec.in(), board.codec.rmnm_mics, g_codec.mic_link())) hal.mic = &g_codec_mic;
     g_codec_speaker.es8311_fade_ramp = board.codec.dac_fade_ramp && board.codec.speaker == hgp::SpeakerCodec::Es8311;

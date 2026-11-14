@@ -1,0 +1,6 @@
+{
+  "title": "M5Stack StopWatch",
+  "summary": "Round 1.75\" 466×466 AMOLED touchscreen, onboard microphone, speaker and battery, three keys. Experimental.",
+  "docs": "docs/hardware.md#m5stack-stopwatch",
+  "ready_made": true
+}

@@ -27,6 +27,7 @@
 #include "qmi8658.hpp"
 #include "shared_reply.hpp"
 #include "sticks3.hpp"
+#include "stopwatch.hpp"
 #include "speaker_pa.hpp"
 #include "speaker_underruns.hpp"
 #include "tag_scanner.hpp"
@@ -751,6 +752,23 @@ class StickS3Board final : public hg::Power {
  private:
   i2c_master_dev_handle_t pm1_ = nullptr;
   std::unique_ptr<hg::StickS3Control> control_;
+};
+
+// The StopWatch's M5IOE1 (supplies, resets, amplifier) and M5PM1 (battery, red key,
+// shutdown). Hal::power once begin() succeeded.
+class StopWatchBoard final : public hg::Power {
+ public:
+  bool begin(i2c_master_bus_handle_t bus);
+  void set_amplifier(bool on);
+  std::optional<hg::PowerStatus> read() override { return control_->read(); }
+  bool power_off() override { return control_->power_off(); }
+  bool take_key_press() override { return control_->take_key_press(); }
+  std::optional<bool> external_power() override { return control_->external_power(); }
+
+ private:
+  i2c_master_dev_handle_t pm1_ = nullptr;
+  i2c_master_dev_handle_t ioe_ = nullptr;
+  std::unique_ptr<hg::StopWatchControl> control_;
 };
 
 // Opus reply audio (port_opus.cpp). It decodes on the app task, whose stack

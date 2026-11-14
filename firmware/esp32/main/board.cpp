@@ -42,6 +42,8 @@ namespace {
 #define HG_BOARD_NAME "m5stack-cores3"
 #elif CONFIG_HG_BOARD_STICKS3
 #define HG_BOARD_NAME "m5stack-sticks3"
+#elif CONFIG_HG_BOARD_STOPWATCH
+#define HG_BOARD_NAME "m5stack-stopwatch"
 #elif CONFIG_HG_BOARD_CARDPUTER_ADV
 #define HG_BOARD_NAME "cardputer-adv"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_185C_V2
@@ -912,6 +914,56 @@ BoardConfig make() {
   b.buttons = {11, 12, -1, -1};
   b.talk_label = "KEY1";
   b.cancel_label = "KEY2";
+  return b;
+}
+#elif CONFIG_HG_BOARD_STOPWATCH
+// M5Stack StopWatch (SKU C152): ESP32-S3R8, 16 MB flash, 8 MB octal PSRAM, a round
+// 1.75" 466x466 CO5300 over QSPI, CST820 touch, one ES8311 for the speaker and the
+// microphone, a blue and a yellow key. The panel, the touch controller, the codec
+// and the AW8737A amplifier have no ESP32 pin for power or reset: the M5IOE1
+// expander switches and resets them and the M5PM1 measures the cell and reads the
+// red key (StopWatchBoard). A BMI270 at 0x68 and an RX8130CE clock at 0x32 are on
+// the bus and unused.
+// Pins: docs/hardware.md#m5stack-stopwatch
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.stopwatch = true;
+  b.i2c = {47, 48, 400000};
+  b.amoled.enabled = true;
+  b.amoled.width = 466;
+  b.amoled.height = 466;
+  b.amoled.cs = 39;
+  b.amoled.sclk = 40;
+  b.amoled.d0 = 41;
+  b.amoled.d1 = 42;
+  b.amoled.d2 = 46;
+  b.amoled.d3 = 45;
+  b.amoled.gap_x = 6;  // the controller's RAM is 480 wide; the glass starts at column 6
+  b.amoled.qspi_mhz = 40;
+  b.amoled.round = true;
+  b.amoled.panel = AmoledPanel::Co5300_466;
+  b.codec.enabled = true;
+  b.codec.mclk = 18;
+  b.codec.bclk = 17;
+  b.codec.ws = 15;
+  b.codec.dout = 21;
+  b.codec.din = 16;
+  b.codec.mic = MicCodec::Es8311;
+  b.codec.amp_supply_v = 3.3f;
+  // Speech through this microphone measures 300-800 RMS per block at the usual 24 dB and
+  // room noise 25-100, both below 3.4 kHz: under tap mode's default floor of 500 most
+  // speech counted as silence and a recording ended after 900 ms mid-sentence.
+  b.codec.vad_min_rms = 180.0f;
+  b.touch.enabled = true;
+  b.touch.controller = TouchController::Cst816;  // the CST820 sends the same report
+  b.touch.addr = 0x15;
+  b.touch.width = 466;
+  b.touch.height = 466;
+  b.touch.ppi = 266;  // estimate (see TouchConfig::ppi): 466 px across the 1.75" diameter
+  b.buttons = {1, 2, -1, -1};  // blue (KEYB) talks, yellow (KEYA) cancels
+  b.talk_label = "Blue";
+  b.cancel_label = "Yellow";
   return b;
 }
 #elif CONFIG_HG_BOARD_T_DISPLAY_S3
