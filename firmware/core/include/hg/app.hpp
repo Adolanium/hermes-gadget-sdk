@@ -44,6 +44,9 @@ struct DeviceProfile {
   std::string default_access_token;
   uint32_t mic_rate = 16000;
   float vad_min_rms = 500.0f;  // tap mode: the quietest block that counts as speech (a quiet mic wants less)
+  // A held recording in which the microphone heard no speech is dropped, not sent: for boards whose
+  // vad_min_rms was measured on the board. Off, hold mode sends whatever was recorded.
+  bool drop_silent_recordings = false;
   uint32_t speaker_rate = 16000;
   bool has_cancel_button = true;
   bool has_scroll_buttons = false;
@@ -449,6 +452,7 @@ class App {
   bool can_talk() const;
   void start_listening(bool hands_free);
   void finish_listening();
+  void end_held_recording();
   void cancel_listening(std::string_view why);
   // The recording buffer (profile_.recording_alloc): see rec_ below.
   bool send_audio_start();

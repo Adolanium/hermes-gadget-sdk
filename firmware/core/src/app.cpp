@@ -1648,7 +1648,7 @@ void App::on_button(Button button, bool pressed, bool touch) {
           set_hint_flash(profile_.touch_screen && touch_talk_ ? std::string(tr(i18n::Msg::HoldScreenWhileSpeaking))
                                                : tr(i18n::Msg::HoldButtonWhileSpeaking, {control(profile_.talk_label)}));
         } else {
-          finish_listening();
+          end_held_recording();
         }
       }
       break;
@@ -1791,6 +1791,20 @@ void App::finish_listening() {
   last_turn_rx_ = now();
   turn_started_ = false;
   status_ = tr(i18n::Msg::Sending);
+}
+
+// A held recording the microphone heard no speech in is not sent, on a board that asks for it
+// (DeviceProfile::drop_silent_recordings): a speech-to-text model makes words out of silence
+// ("Thank you."), and Hermes would answer them. Speech is what tap mode calls speech: 200 ms
+// above the board's floor. A recording with no audio at all (a port that delivered nothing)
+// goes as before.
+void App::end_held_recording() {
+  if (profile_.drop_silent_recordings && vad_.heard_ms() >= kMinUtteranceMs && !vad_.spoke()) {
+    cancel_listening("no speech");
+    set_hint_flash(tr(i18n::Msg::DidntHearAnything));
+    return;
+  }
+  finish_listening();
 }
 
 void App::cancel_listening(std::string_view why) {
@@ -1970,8 +1984,9 @@ void App::on_mic_samples(const int16_t* samples, size_t count) {
     off += n;
     if (mic_pending_.size() == frame) send_mic_frame();
   }
+  // A held recording ends with the button; the detector only notes whether anyone spoke.
+  const Vad::Result r = vad_.feed(samples, count);
   if (hands_free_) {
-    Vad::Result r = vad_.feed(samples, count);
     if (r == Vad::Result::EndOfSpeech) {
       finish_listening();
       update_model();
@@ -2392,7 +2407,8 @@ void App::tick() {
     }
   }
   if (mode_ == Mode::Listening && elapsed(t, mode_since_) > kMaxUtteranceMs) {
-    finish_listening();
+    if (hands_free_) finish_listening();
+    else end_held_recording();
     update_model();
   }
   if (!prompt_id_.empty()) last_turn_rx_ = t;  // Hermes is waiting for the user, not stuck

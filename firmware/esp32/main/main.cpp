@@ -624,6 +624,7 @@ extern "C" void app_main(void) {
   if (hal.mic == &g_codec_mic) {
     profile.mic_rate = hgp::CodecAudio::kRate;
     profile.vad_min_rms = board.codec.vad_min_rms;
+    profile.drop_silent_recordings = board.codec.drop_silent_recordings;
   }
   if (hal.speaker == &g_codec_speaker) profile.speaker_rate = hgp::CodecAudio::kRate;
   profile.tailnet = hgp::TailnetLink::supported();
