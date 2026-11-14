@@ -514,14 +514,14 @@ TEST("ring: the listening arc grows with the seconds and turns amber in the last
   CHECK(r.app.screen() == hg::Screen::Listening);
   const auto at = [&](int x, int y) { return r.fake.fb[static_cast<size_t>(y * 466 + x)]; };
 
-  r.advance(15000);  // half of the 30 s recording limit (the last frame may lag a little)
+  r.advance(hg::App::kMaxUtteranceMs / 2);  // half of the recording limit (the last frame may lag a little)
   const int16_t half = r.app.model().progress_permille;
   CHECK(half >= 490 && half <= 500);
   CHECK_EQ(at(456, 233), kGreen);    // 3 o'clock, on the arc
   CHECK_EQ(at(10, 233), kGreenDim);  // 9 o'clock, past it
 
-  r.advance(11000);  // 26 s in: the last 5 s of the limit
-  CHECK(r.app.model().progress_permille >= 834);
+  r.advance(hg::App::kMaxUtteranceMs / 2 - 4000);  // 4 s before the limit: in its last 5 s
+  CHECK(r.app.model().progress_permille >= 900);
   CHECK_EQ(at(456, 233), kAccent);  // amber now
   CHECK(r.app.screen() == hg::Screen::Listening);
   r.app.on_button(hg::Button::Talk, false);

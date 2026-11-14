@@ -104,7 +104,7 @@ int isqrt(int64_t v) {
 // The edge ring's angles are in 1/64 degree: a whole turn, and the comet's tail.
 constexpr int32_t kTurn64 = 360 * 64;
 constexpr int32_t kTail64 = 70 * 64;
-// Listening turns amber in the last sixth of the recording limit: its last 5 of 30 s.
+// Listening turns amber in the last sixth of the recording limit: its last 10 of 60 s.
 constexpr int16_t kLateListening = 834;
 
 // The resting clock's burn-in shift: each minute the face moves (dx, dy) px, each -4 to 4,

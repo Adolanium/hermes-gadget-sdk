@@ -577,12 +577,12 @@ TEST("ring: a recording takes the ring from a running timer, and the timer's arc
   Rig r;
   r.fake.panel(466, 466, true);
   r.online();
-  r.action("timer.start", R"({"seconds":90})");
+  r.action("timer.start", R"({"seconds":180})");  // six times half the recording limit
   r.idle(200);
   CHECK_EQ(r.fake.at(456, 233), kAccent);  // the timer's arc, at 3 o'clock
 
   r.app.on_button(hg::Button::Talk, true);
-  r.idle(15000);  // half the recording limit (the last frame may lag a little)
+  r.idle(hg::App::kMaxUtteranceMs / 2);  // half the recording limit (the last frame may lag a little)
   CHECK(r.app.model().progress_permille >= 490);
   CHECK_EQ(r.fake.at(456, 233), kGreen);    // the recording owns the ring now
   CHECK_EQ(r.fake.at(10, 233), kGreenDim);  // the timer's amber is gone with it
@@ -594,7 +594,7 @@ TEST("ring: a recording takes the ring from a running timer, and the timer's arc
   r.idle(200);
   CHECK(r.app.screen() == hg::Screen::Ready);
   const int permille = r.app.model().timer_permille;
-  CHECK(permille > 780 && permille < 840);  // about 16 s of the 90 s used
+  CHECK(permille > 780 && permille < 840);  // about a sixth of the timer used
   CHECK_EQ(r.fake.at(456, 233), kAccent);   // the timer's arc is back
   // ...and it is the timer's partial arc, not a full ring: dim past its end.
   const double end = permille * 360.0 / 1000.0;
