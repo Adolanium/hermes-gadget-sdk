@@ -467,6 +467,8 @@ TEST("StopWatch: supplies come on, touch and panel are reset, motor and amplifie
   fake.pm1[0x09] = 0x05;  // left by an earlier firmware: I2C idle sleep and the watchdog
   fake.pm1[0x0A] = 30;
   fake.pm1[0x49] = 0x80;  // download-mode lock, which is not this driver's to clear
+  fake.ioe[0x23] = 0x35;  // I2C idle sleep after 5 s, 400 kHz and the wake bit
+  fake.ioe[0x24] = 0x07;  // the LED count next to it
   auto control = fake.make();
   CHECK(control.begin());
 
@@ -481,6 +483,8 @@ TEST("StopWatch: supplies come on, touch and panel are reset, motor and amplifie
   CHECK_EQ(fake.ioe16(0x03), outputs | 0x0001);
   CHECK_EQ(fake.ioe16(0x13), 0x8000);  // our pins push-pull, PYG16 untouched
   CHECK_EQ(fake.ioe16(0x1B), 0);       // motor PWM off
+  CHECK_EQ(fake.ioe[0x23], 0x30);      // idle sleep off, the other bits kept
+  CHECK_EQ(fake.ioe[0x24], 0x07);
   CHECK_EQ(fake.ioe16(0x05), kSwAudio | kSwPanel | kSwTouchReset | kSwPanelReset | 0x0001);
 
   // 20 ms with the supplies on and the resets released, 10 ms with both resets low, 120 ms after.

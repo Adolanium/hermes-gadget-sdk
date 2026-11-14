@@ -4,7 +4,7 @@
 
 namespace hg {
 namespace {
-// M5PM1 registers, from M5Stack's M5PM1 driver (M5PM1.h, commit 315d2899).
+// M5PM1 registers, from M5Stack's M5PM1 library (src/M5PM1.h, commit 315d2899).
 constexpr uint8_t kI2cConfig = 0x09;      // 0 = no I2C idle sleep
 constexpr uint8_t kWatchdog = 0x0A;       // 0 = watchdog off
 constexpr uint8_t kSystemCommand = 0x0C;
@@ -18,19 +18,22 @@ constexpr uint8_t kButtonConfig = 0x49;
 constexpr uint8_t kShutdown = 0xA1;
 constexpr uint8_t kChargeStatus = 1 << 2;  // PMG2, CHG_STAT: low while charge current flows
 constexpr uint8_t kButtonDown = 1 << 0, kButtonWasPressed = 1 << 7;
-// A single click must not reset the ESP32, and the long press that cuts power takes 4 s.
+// The PM1 acts on its key by itself: a single click resets the ESP32, a double click powers
+// off, a long press enters download mode. The click is this firmware's (the screen), so the
+// reset goes; the long press is put at its longest, 4 s.
 constexpr uint8_t kNoClickReset = 1 << 0, kLongPressMask = 0x18, kLongPress4s = 0x18;
 // A reading outside a single Li-ion cell's range means the gauge has nothing to measure.
 constexpr uint16_t kMinCellMv = 2600, kMaxCellMv = 4450;
 constexpr uint16_t kVinPresentMv = 4000;
 constexpr uint8_t kShortPressPolls = 10;  // the app polls every 100 ms: under a second
 
-// M5IOE1 registers, 16 bits each, and its pins (M5Stack's labels PYG1.. are bits 0..).
+// M5IOE1 registers, from M5Stack's M5IOE1 library (src/M5IOE1.h, commit 8401119b): the pin
+// registers are two bytes, low first, one bit per pin (M5Stack's labels PYG1.. are bits 0..).
 constexpr uint8_t kIoeMode = 0x03;       // 1 = output
 constexpr uint8_t kIoeOut = 0x05;
 constexpr uint8_t kIoeOpenDrain = 0x13;  // 0 = push-pull
-constexpr uint8_t kIoePwm1 = 0x1B;       // the vibration motor's duty; 0 = off
-constexpr uint8_t kIoeI2cConfig = 0x23;  // 0 = no I2C idle sleep
+constexpr uint8_t kIoePwm1 = 0x1B;       // the vibration motor's duty, bit 15 enables; 0 = off
+constexpr uint8_t kIoeI2cConfig = 0x23;  // one byte, low nibble = I2C idle sleep in seconds; 0x24 is the LED count
 constexpr uint16_t kAudioSupply = 1 << 2;  // PYG3, AU_EN: codec and microphone
 constexpr uint16_t kTouchReset = 1 << 3;   // PYG4, active low
 constexpr uint16_t kPanelReset = 1 << 4;   // PYG5, active low
@@ -69,7 +72,7 @@ bool StopWatchControl::begin() {
 
   // Levels before directions: supplies on, both resets released, motor and
   // amplifier off. The expander's other pins keep their configuration.
-  if (!ioe_write_(kIoeI2cConfig, 0x0000) || !ioe_write_(kIoePwm1, 0x0000)) return false;
+  if (!ioe_change(kIoeI2cConfig, 0x000F, 0) || !ioe_write_(kIoePwm1, 0x0000)) return false;
   if (!ioe_change(kIoeOpenDrain, kOutputs, 0) ||
       !ioe_change(kIoeOut, kOutputs, kAudioSupply | kPanelSupply | kTouchReset | kPanelReset) ||
       !ioe_change(kIoeMode, kOutputs, kOutputs))

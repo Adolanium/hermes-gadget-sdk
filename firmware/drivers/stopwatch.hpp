@@ -43,7 +43,7 @@ class StopWatchControl final : public Power {
   // The PM1's shutdown command. The amplifier goes off first.
   bool power_off() override;
   // The red key: true once per press shorter than a second, on its release.
-  // Holding it for four seconds is the PM1's own emergency power-off.
+  // A double click and a long press stay the PM1's own (power off, download mode).
   bool take_key_press() override;
   std::optional<bool> external_power() override;
 

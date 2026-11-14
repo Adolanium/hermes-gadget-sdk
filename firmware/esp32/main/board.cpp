@@ -923,7 +923,8 @@ BoardConfig make() {
 // and the AW8737A amplifier have no ESP32 pin for power or reset: the M5IOE1
 // expander switches and resets them and the M5PM1 measures the cell and reads the
 // red key (StopWatchBoard). A BMI270 at 0x68 and an RX8130CE clock at 0x32 are on
-// the bus and unused.
+// the bus and unused, and so are the touch interrupt (GPIO 13), the panel's tearing
+// line (GPIO 38) and the vibration motor.
 // Pins: docs/hardware.md#m5stack-stopwatch
 BoardConfig make() {
   BoardConfig b{};
@@ -950,6 +951,7 @@ BoardConfig make() {
   b.codec.dout = 21;
   b.codec.din = 16;
   b.codec.mic = MicCodec::Es8311;
+  // The AW8737A runs from the cell, or USB less a diode: 3.3 to 4.8 V. The lowest is assumed.
   b.codec.amp_supply_v = 3.3f;
   // Speech through this microphone measures 300-800 RMS per block at the usual 24 dB and
   // room noise 25-100, both below 3.4 kHz: under tap mode's default floor of 500 most
