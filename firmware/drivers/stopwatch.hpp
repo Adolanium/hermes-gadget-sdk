@@ -6,6 +6,7 @@
 #include <optional>
 #include <utility>
 
+#include "battery_curve.hpp"
 #include "hg/hal.hpp"
 
 namespace hg {
@@ -39,6 +40,9 @@ class StopWatchControl final : public Power {
   // Writes only on a change: the speaker task calls this for every chunk.
   bool set_amplifier(bool on);
 
+  // With the cell's measured discharge curve read() reports a percentage;
+  // without, none.
+  void use_curve(Curve discharge) { percent_.emplace(discharge); }
   std::optional<PowerStatus> read() override;
   // The PM1's shutdown command. The amplifier goes off first.
   bool power_off() override;
@@ -54,6 +58,7 @@ class StopWatchControl final : public Power {
   Read ioe_read_;
   Write16 ioe_write_;
   Delay delay_;
+  std::optional<BatteryPercent> percent_;
   bool amplifier_ = false;
   bool key_down_ = false;
   uint8_t key_polls_ = 0;  // polls the key has been down for, saturating

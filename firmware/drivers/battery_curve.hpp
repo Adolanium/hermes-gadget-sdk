@@ -80,6 +80,17 @@ inline constexpr CurvePoint kAmoled206Points[] = {
 };
 inline constexpr Curve kAmoled206Curve{kAmoled206Points, sizeof(kAmoled206Points) / sizeof(kAmoled206Points[0])};
 
+// The M5Stack StopWatch's 450 mAh cell: one full discharge, 6 h 25 min from
+// unplugging at full to the device switching off at 3000 mV, on Wi-Fi with light
+// use. Percent = share of the time left until shutdown; voltage = median of the
+// 11 readings (30 s apart) around that time, read by the M5PM1; 100 is the first
+// reading after unplugging and 0 the last minute before shutdown. No charge curve.
+inline constexpr CurvePoint kStopWatchPoints[] = {
+    {4138, 100}, {4076, 95}, {4018, 90}, {3910, 80}, {3814, 70}, {3724, 60}, {3652, 50}, {3610, 40},
+    {3574, 30},  {3518, 20}, {3476, 15}, {3436, 10}, {3366, 5},  {3208, 2},  {3072, 0},
+};
+inline constexpr Curve kStopWatchCurve{kStopWatchPoints, sizeof(kStopWatchPoints) / sizeof(kStopWatchPoints[0])};
+
 // What the device shows, from readings every few seconds, with the median of the
 // last kWindow voltages (about a minute) on the curve for the direction of flow:
 // - on battery, the discharge curve, never rising: a lighter load lifts the

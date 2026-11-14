@@ -351,6 +351,19 @@ TEST("battery curve: the 2.06 table falls monotonically from full to empty") {
   CHECK_EQ(hg::percent_on_curve(c, 3038), uint8_t(0));   // the brown-out
 }
 
+TEST("battery curve: the StopWatch table falls monotonically from full to empty") {
+  const hg::Curve c = hg::kStopWatchCurve;
+  CHECK_EQ(c.points[0].percent, uint8_t(100));
+  CHECK_EQ(c.points[c.size - 1].percent, uint8_t(0));
+  for (size_t i = 1; i < c.size; ++i) {
+    CHECK(c.points[i].mv < c.points[i - 1].mv);
+    CHECK(c.points[i].percent < c.points[i - 1].percent);
+  }
+  CHECK_EQ(hg::percent_on_curve(c, 4200), uint8_t(100));
+  CHECK_EQ(hg::percent_on_curve(c, 3631), uint8_t(45));  // halfway 3652..3610
+  CHECK_EQ(hg::percent_on_curve(c, 3000), uint8_t(0));   // where it switched off
+}
+
 TEST("battery curve: replaying the 2.06's measured day, it tracks the time left where the gauge read low") {
   hg::BatteryPercent percent(hg::kAmoled206Curve);
   int last = 101, worst = 0, total = 0, n = 0, at_42 = -1;

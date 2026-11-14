@@ -24,6 +24,8 @@ constexpr uint8_t kButtonDown = 1 << 0, kButtonWasPressed = 1 << 7;
 constexpr uint8_t kNoClickReset = 1 << 0, kLongPressMask = 0x18, kLongPress4s = 0x18;
 // A reading outside a single Li-ion cell's range means the gauge has nothing to measure.
 constexpr uint16_t kMinCellMv = 2600, kMaxCellMv = 4450;
+// The lowest the cell read on USB with the charger resting was 4094 mV.
+constexpr uint16_t kFullMv = 4050;
 constexpr uint16_t kVinPresentMv = 4000;
 constexpr uint8_t kShortPressPolls = 10;  // the app polls every 100 ms: under a second
 
@@ -110,8 +112,18 @@ std::optional<PowerStatus> StopWatchControl::read() {
   out.battery_present = mv >= kMinCellMv && mv <= kMaxCellMv;
   if (*out.battery_present) {
     out.battery_mv = mv;
-    // No percentage: this cell's discharge curve has not been measured.
     out.charging = usb && !(pins & kChargeStatus);
+    if (percent_) {
+      // The charger has no "done" signal: on USB with a full cell its status pin
+      // goes back and forth between charging and resting. Resting on USB with the
+      // cell near full counts as done; resting lower down (a charger that stopped
+      // for another reason) reads the voltage like charging does.
+      using Charge = BatteryPercent::Charge;
+      const Charge charge = !usb                               ? Charge::Discharging
+                            : !*out.charging && mv >= kFullMv ? Charge::Done
+                                                               : Charge::Charging;
+      out.battery_percent = percent_->update(mv, charge, std::nullopt);
+    }
   }
   return out;
 }

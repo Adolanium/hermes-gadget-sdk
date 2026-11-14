@@ -554,7 +554,7 @@ TEST("StopWatch: cell and VIN millivolts and the active-low charge status are re
   CHECK(s.has_value());
   CHECK(s->battery_present == std::optional<bool>(true));
   CHECK(s->battery_mv == std::optional<uint16_t>(4174));
-  CHECK(!s->battery_percent.has_value());  // no measured curve for this cell
+  CHECK(!s->battery_percent.has_value());  // no curve was given
   CHECK(s->external_power == std::optional<bool>(true));
   CHECK(s->charging == std::optional<bool>(true));
   CHECK(control.external_power() == std::optional<bool>(true));
@@ -578,6 +578,35 @@ TEST("StopWatch: cell and VIN millivolts and the active-low charge status are re
   fake.pm1_fail = true;
   CHECK(!control.read());
   CHECK(!control.external_power());
+}
+
+TEST("StopWatch: with the cell's curve the percentage follows the voltage, and resting on USB near full is 100") {
+  FakeStopWatch fake;
+  auto control = fake.make();
+  control.use_curve(hg::kStopWatchCurve);
+  const auto set_mv = [&](uint8_t reg, uint16_t mv) {
+    fake.pm1[reg] = static_cast<uint8_t>(mv & 0xFF);
+    fake.pm1[reg + 1] = static_cast<uint8_t>(mv >> 8);
+  };
+  set_mv(0x24, 0);  // on battery
+  fake.pm1[0x12] = 0x07;
+  set_mv(0x22, 3652);
+  CHECK(control.read()->battery_percent == std::optional<uint8_t>(50));
+  set_mv(0x22, 3700);  // a lighter load lifts the voltage, not the charge
+  CHECK(control.read()->battery_percent == std::optional<uint8_t>(50));
+
+  set_mv(0x24, 5078);  // plugged in, the charger resting far below full: not done
+  set_mv(0x22, 3724);
+  CHECK(control.read()->battery_percent == std::optional<uint8_t>(60));
+  fake.pm1[0x12] = 0x03;  // charging
+  set_mv(0x22, 3910);
+  CHECK(control.read()->battery_percent == std::optional<uint8_t>(80));
+  fake.pm1[0x12] = 0x07;  // full: the status pin goes back and forth
+  set_mv(0x22, 4142);
+  CHECK(control.read()->battery_percent == std::optional<uint8_t>(100));
+  fake.pm1[0x12] = 0x03;
+  set_mv(0x22, 4176);
+  CHECK(control.read()->battery_percent == std::optional<uint8_t>(100));
 }
 
 TEST("StopWatch: a short press of the red key is reported once, on its release; a long hold is not") {

@@ -937,6 +937,7 @@ BoardConfig make() {
   b.rtc.enabled = true;  // RX8130CE: keeps UTC while the cell has charge, also switched off
   b.rtc.chip = RtcChip::Rx8130;
   b.rtc.addr = 0x32;
+  b.battery_curve = hg::kStopWatchCurve;
   b.amoled.enabled = true;
   b.amoled.width = 466;
   b.amoled.height = 466;
