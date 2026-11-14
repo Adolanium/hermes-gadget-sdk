@@ -313,6 +313,14 @@ the CST820 stay-awake write and the key settings follow the StopWatch port in
 allinnb/hermes-gadget-sdk at commits deb5707 and df58bd1 (MIT), by allinnb and
 heyia, rewritten here.
 
+The RX8130CE register facts in firmware/drivers/rx8130.cpp (the BCD time
+registers from 0x10, the one-bit-per-day weekday, the VLF flag and its
+clear-on-zero flag register, STOP and TEST) come from Epson's RX8130CE
+application manual ETM50E-10,
+https://download.epsondevice.com/td/pdf/app/RX8130CE_en.pdf (SHA-256
+db027a5fa2dd17b333da81e95063764eb5536d2878c63b64949348d2ec4b8a22). Hardware
+facts only; no Epson code is included.
+
 The PCF85063 register facts in firmware/drivers/pcf85063.cpp (the BCD time
 registers 0x04-0x0A, the oscillator-stop flag on the seconds register and the
 burst-write behavior that restarts the clock) come from NXP's PCF85063A
