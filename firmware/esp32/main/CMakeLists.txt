@@ -71,6 +71,7 @@ idf_component_register(
         "../../drivers/stopwatch.cpp"
         "../../drivers/bmi270.cpp"
         "../../drivers/pcf85063.cpp"
+        "../../drivers/rx8130.cpp"
         "../../drivers/qmi8658.cpp"
         "port_storage.cpp"
         "port_tailnet.cpp"

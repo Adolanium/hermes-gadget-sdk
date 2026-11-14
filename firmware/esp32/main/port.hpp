@@ -24,6 +24,7 @@
 #include "bmi270.hpp"
 #include "cores3.hpp"
 #include "pcf85063.hpp"
+#include "rx8130.hpp"
 #include "qmi8658.hpp"
 #include "shared_reply.hpp"
 #include "sticks3.hpp"
@@ -663,14 +664,18 @@ class TimePort {
   void set_wanted(bool on);
   // A sync arrived: records it and writes the RTC from the system clock.
   void on_synced();
-  bool rtc_ready() const { return chip_ != nullptr; }
+  bool rtc_ready() const { return chip_ != nullptr || rx8130_ != nullptr; }
+  const char* rtc_name() const { return rx8130_ ? "rx8130" : chip_ ? "pcf85063" : "none"; }
   hg::json::Value diag() const;  // {valid, synced, utc} for the diag report
 
  private:
   static void on_sntp(struct timeval* tv);  // SNTP context: posts TimeSynced
   void sync_sntp();  // starts or stops SNTP after set_network/set_wanted
   i2c_master_dev_handle_t dev_ = nullptr;
-  std::unique_ptr<hg::Pcf85063> chip_;
+  std::unique_ptr<hg::Pcf85063> chip_;  // one of the two, by RtcConfig::chip
+  std::unique_ptr<hg::Rx8130> rx8130_;
+  bool read_rtc(hg::WallTime& utc) { return rx8130_ ? rx8130_->read(utc) : chip_->read(utc); }
+  bool write_rtc(const hg::WallTime& utc) { return rx8130_ ? rx8130_->write(utc) : chip_->write(utc); }
   bool network_up_ = false, wanted_ = false;
   bool sntp_started_ = false;
   bool synced_ = false;  // set and read on the app task

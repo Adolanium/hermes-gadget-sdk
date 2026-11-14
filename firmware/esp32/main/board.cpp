@@ -922,15 +922,21 @@ BoardConfig make() {
 // microphone, a blue and a yellow key. The panel, the touch controller, the codec
 // and the AW8737A amplifier have no ESP32 pin for power or reset: the M5IOE1
 // expander switches and resets them and the M5PM1 measures the cell and reads the
-// red key (StopWatchBoard). A BMI270 at 0x68 and an RX8130CE clock at 0x32 are on
-// the bus and unused, and so are the touch interrupt (GPIO 13), the panel's tearing
-// line (GPIO 38) and the vibration motor.
+// red key (StopWatchBoard). A BMI270 at 0x68 gives face-down sleep and an RX8130CE
+// at 0x32 keeps the time. The touch interrupt (GPIO 13), the panel's tearing line
+// (GPIO 38) and the vibration motor are unused.
 // Pins: docs/hardware.md#m5stack-stopwatch
 BoardConfig make() {
   BoardConfig b{};
   b.name = kBoardName;
   b.stopwatch = true;
   b.i2c = {47, 48, 400000};
+  b.imu.enabled = true;
+  b.imu.chip = ImuChip::Bmi270;
+  b.imu.addr = 0x68;
+  b.rtc.enabled = true;  // RX8130CE: keeps UTC while the cell has charge, also switched off
+  b.rtc.chip = RtcChip::Rx8130;
+  b.rtc.addr = 0x32;
   b.amoled.enabled = true;
   b.amoled.width = 466;
   b.amoled.height = 466;

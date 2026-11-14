@@ -228,10 +228,13 @@ struct ImuConfig {
   ImuChip chip = ImuChip::Qmi8658;
 };
 
-// PCF85063 RTC on the I2C bus, keeping UTC across power loss.
+// An RTC on the I2C bus, keeping UTC across power loss.
+enum class RtcChip { Pcf85063, Rx8130 };
+
 struct RtcConfig {
   bool enabled = false;
   uint8_t addr = 0x51;
+  RtcChip chip = RtcChip::Pcf85063;
 };
 
 // A key whose level is read from a TCA9554 or PCF8574 I/O expander input (e.g.
