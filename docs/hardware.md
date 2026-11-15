@@ -906,14 +906,15 @@ Writing that file back at `0x0` restores the original firmware.
 | Speaker DAC + microphone ADC | ES8311 | I2C 0x18 on the same bus; I2S MCLK 18, BCLK 17, WS 15, DOUT 21, DIN 16 |
 | I/O expander | M5IOE1 | I2C 0x4F; PYG3 audio supply, PYG8 AMOLED supply, PYG4 touch reset, PYG5 panel reset, PYG10 amplifier enable, PYG9 vibration motor (kept off) |
 | Power manager | M5PM1 | I2C 0x6E; cell and VIN millivolts, the charger's status on its GPIO2 (low while charging), shutdown, and the red key |
-| Motion, clock | BMI270, RX8130CE | I2C 0x68 and 0x32; not used yet |
+| Motion sensor | BMI270 | I2C 0x68; accelerometer only (face-down sleep) |
+| Clock | RX8130CE | I2C 0x32; keeps UTC while the cell has charge |
 | Keys | | Blue (KEYB) GPIO 1, TALK; yellow (KEYA) GPIO 2, CANCEL; red is the M5PM1's power key |
 
 Hold the blue key or the screen to talk, tap to answer yes, and press the yellow key or swipe down to cancel. Blue and yellow together for a second open the device settings. A short press of the red key turns the screen off and on.
 
 The red key is the M5PM1's own: it powers the device on, a double click powers it off, and holding it enters download mode (the green LED blinks). The firmware reads it over I2C for the short press only, and turns off the single-click reset the power manager would otherwise perform. **Power off** in settings sends the power manager's shutdown command; on USB power the device starts again.
 
-`StopWatchBoard` (`port_stopwatch.cpp`, `drivers/stopwatch.cpp`) runs the power sequence before the panel starts: both supplies on, 20 ms, the touch and panel resets low for 10 ms, and 120 ms for the CO5300 to wake. It keeps the amplifier off except while audio plays, and it is the board's `Power`: battery millivolts, USB presence and charging, with no percentage until the cell's discharge curve has been measured. The CST820 is told to stay awake (register `0xFE`), because asleep it answers no read and its interrupt line is not used.
+`StopWatchBoard` (`port_stopwatch.cpp`, `drivers/stopwatch.cpp`) runs the power sequence before the panel starts: both supplies on, 20 ms, the touch and panel resets low for 10 ms, and 120 ms for the CO5300 to wake. It keeps the amplifier off except while audio plays, and it is the board's `Power`: battery millivolts, USB presence and charging, and a percentage from the cell's measured curves: one for discharge (6 h 25 min from full to shutdown, screen on) and one for charging on USB (2 h 37 min from empty), both read by the M5PM1 on one unit. Charging shows at most 99; 100 comes when the charger rests with the cell at 4050 mV or more. The CST820 is told to stay awake (register `0xFE`), because asleep it answers no read and its interrupt line is not used.
 
 The microphone is quiet: speech measures 300–800 RMS per block at the usual 24 dB gain. The profile sets tap mode's speech floor to 180 (`codec.vad_min_rms`) instead of 500.
 
@@ -935,7 +936,8 @@ The USB-C port is the ESP32-S3's own USB Serial/JTAG, so flashing and the serial
 3. **Touch:** holding the screen records, a swipe down cancels, and taps land where you touch, also after a minute without touching.
 4. **Keys:** blue records while held, yellow cancels, blue and yellow together open settings, and a short press of red turns the screen off and on.
 5. **Microphone and speaker:** hold blue and speak; the waves move with your voice and Hermes's transcript is right. Replies are clear (`set volume 80`). Silence with a working microphone points at the amplifier enable on the M5IOE1.
-6. **Power:** `status` shows `power` with `battery_mv`, `external_power` and `charging`. Unplugging USB changes `external_power` within a few seconds. **Power off** in settings turns the device off on battery.
+6. **Power:** `status` shows `power` with `battery_mv`, `battery_percent`, `external_power` and `charging`. Unplugging USB changes `external_power` within a few seconds. **Power off** in settings turns the device off on battery.
+7. **Motion and clock:** the boot log has `bmi270 ready`, and `diag` lists `imu bmi270` and `rtc rx8130`. Lying screen up, `motion.z` reads near `+1000`; standing on its left edge, `motion.x` near `+1000`; standing on its top edge, `motion.y` near `-1000`. After the first network time the log has `RTC set from network time`, and a later start takes the time from the clock chip.
 
 Pin numbers and the M5PM1 and M5IOE1 pin functions follow M5Stack's StopWatch documentation and schematic; register addresses follow M5Stack's M5PM1 and M5IOE1 libraries. The port started from the one in allinnb/hermes-gadget-sdk. See [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
 
