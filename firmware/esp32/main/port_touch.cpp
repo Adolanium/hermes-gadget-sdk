@@ -5,11 +5,13 @@
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h
 
 #include <algorithm>
+#include <utility>
 
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
 #include "esp_timer.h"
+#include "axs5106.hpp"
 #include "cst816.hpp"
 #include "esp_lcd_touch_gt911.h"
 #include "esp_lcd_touch_tt21100.h"
@@ -28,6 +30,13 @@ constexpr uint32_t kDozePollMs = 50;
 constexpr uint32_t kArmedDozeWaitMs = 1000;
 constexpr uint8_t kTca9554Input = 0x00;
 constexpr uint8_t kCstAck = 0xAB;
+
+// AXS5106L register reads on this board are a stopped write of the address,
+// then a read. A repeated start is not how its examples collect the report.
+bool axs5106_read(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t* data, size_t len, int timeout_ms) {
+  if (i2c_master_transmit(dev, &reg, 1, timeout_ms) != ESP_OK) return false;
+  return i2c_master_receive(dev, data, len, timeout_ms) == ESP_OK;
+}
 
 }  // namespace
 
@@ -77,6 +86,47 @@ bool TouchInput::begin(const TouchConfig& touch, const ExpanderKeyConfig& key, c
     if (esp_lcd_new_panel_io_i2c(bus, &io_cfg, &io) == ESP_OK &&
         esp_lcd_touch_new_i2c_spd2010(io, &cfg, &managed_touch_) != ESP_OK) esp_lcd_panel_io_del(io);
     if (managed_touch_ && touch.int_gpio >= 0) gate_on_int();
+  } else if (touch.enabled && touch.controller == TouchController::Axs5106) {
+    // Poll register 0x01. Do not send the CST816 0xFE or CST9217 0xD1 command.
+    if (touch.rst >= 0) {
+      gpio_config_t rst = {};
+      rst.pin_bit_mask = 1ULL << touch.rst;
+      rst.mode = GPIO_MODE_OUTPUT;
+      gpio_config(&rst);
+      gpio_set_level(static_cast<gpio_num_t>(touch.rst), 0);
+      vTaskDelay(pdMS_TO_TICKS(10));
+      gpio_set_level(static_cast<gpio_num_t>(touch.rst), 1);
+      vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    if (touch.int_gpio >= 0) {
+      gpio_config_t irq = {};
+      irq.pin_bit_mask = 1ULL << touch.int_gpio;
+      irq.mode = GPIO_MODE_INPUT;
+      irq.pull_up_en = GPIO_PULLUP_ENABLE;
+      gpio_config(&irq);
+    }
+    i2c_device_config_t dev = {};
+    dev.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+    dev.device_address = touch.addr;
+    dev.scl_speed_hz = 400000;
+    if (i2c_master_bus_add_device(bus, &dev, &touch_dev_) == ESP_OK) {
+      bool answered = false;
+      uint8_t data[6] = {};
+      for (int attempt = 0; attempt < 5 && !answered; ++attempt) {
+        answered = axs5106_read(touch_dev_, 0x01, data, sizeof(data), 50);
+        if (!answered) vTaskDelay(pdMS_TO_TICKS(10));
+      }
+      if (!answered) {
+        ESP_LOGW(TAG, "AXS5106 at 0x%02x did not answer", touch.addr);
+        i2c_master_bus_rm_device(touch_dev_);
+        touch_dev_ = nullptr;
+      } else {
+        uint8_t id[3] = {};
+        if (axs5106_read(touch_dev_, 0x08, id, sizeof(id), 50)) {
+          ESP_LOGI(TAG, "AXS5106 id %02x %02x %02x", id[0], id[1], id[2]);
+        }
+      }
+    }
   } else if (touch.enabled) {
     if (touch.rst >= 0) {
       gpio_config_t rst = {};
@@ -160,6 +210,30 @@ bool TouchInput::read_touch(TouchSample& out) {
     uint8_t points = 0;
     const bool down = esp_lcd_touch_get_coordinates(managed_touch_, &x, &y, nullptr, &points, 1);
     out = {down && points > 0, static_cast<int16_t>(x), static_cast<int16_t>(y)};
+    return true;
+  }
+  if (touch_.controller == TouchController::Axs5106) {
+    uint8_t data[14] = {};
+    if (!axs5106_read(touch_dev_, 0x01, data, sizeof(data), 20)) return false;
+    // The controller reports the glass's native axes. swap_xy is applied after
+    // the mirror, matching the other touch drivers, so the limits here are the
+    // pre-swap size.
+    const int lim_w = touch_.swap_xy ? touch_.height : touch_.width;
+    const int lim_h = touch_.swap_xy ? touch_.width : touch_.height;
+    if (!hg::axs5106_touch(data, static_cast<uint16_t>(lim_w), static_cast<uint16_t>(lim_h), out.touching, out.x,
+                           out.y)) {
+      static int ignored = 0;
+      if (ignored < 8) {
+        ++ignored;
+        ESP_LOGW(TAG, "AXS5106 point ignored %02x %02x %02x %02x %02x %02x", data[0], data[1], data[2], data[3], data[4], data[5]);
+      }
+      return false;
+    }
+    if (out.touching) {
+      if (touch_.mirror_x && lim_w) out.x = static_cast<int16_t>(lim_w - 1 - out.x);
+      if (touch_.mirror_y && lim_h) out.y = static_cast<int16_t>(lim_h - 1 - out.y);
+      if (touch_.swap_xy) std::swap(out.x, out.y);
+    }
     return true;
   }
   if (touch_.controller == TouchController::Cst816) {
@@ -467,17 +541,21 @@ void TouchInput::task(void* arg) {
       if (s.touching || was_touching) {
         const bool posted = events::post(EventType::Touch, &s, sizeof(s));
         // CST816: keep the delivered state until enqueue succeeds, including a lift.
-        if (posted || self->touch_.controller != TouchController::Cst816) was_touching = s.touching;
+        const bool raw = self->touch_.controller == TouchController::Cst816 ||
+                         self->touch_.controller == TouchController::Axs5106;
+        if (posted || !raw) was_touching = s.touching;
       }
       last = s;
-    } else if (self->touch_.controller == TouchController::Cst816 &&
+    } else if ((self->touch_.controller == TouchController::Cst816 ||
+                self->touch_.controller == TouchController::Axs5106) &&
                fault.release_due(was_touching)) {
       // Five failed polls (~100–200 ms plus scheduler delay): release once.
       // Retry if the event queue is full; do not silently lose the release.
       last.touching = false;
       if (events::post(EventType::Touch, &last, sizeof(last))) {
         was_touching = false;
-        ESP_LOGW(TAG, "CST816 fault: held touch released after five failed polls");
+        ESP_LOGW(TAG, "%s fault: held touch released after five failed polls",
+                 self->touch_.controller == TouchController::Axs5106 ? "AXS5106" : "CST816");
       }
     }
     bool pressed = false;

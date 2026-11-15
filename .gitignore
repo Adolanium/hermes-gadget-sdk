@@ -22,6 +22,9 @@ site/_site/
 site/test-results/
 site/playwright-report/
 
+# Factory flash dumps taken before a board is overwritten.
+backup/
+
 # ESP-IDF / PlatformIO outputs
 firmware/esp32/build/
 firmware/esp32/build-*/
