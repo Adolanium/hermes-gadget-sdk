@@ -369,6 +369,10 @@ class App {
   void h_ota_end(const json::Value& m);
   void h_ota_abort(const json::Value& m);
   void h_profile(const json::Value& m);
+  void h_profiles(const json::Value& m);
+  // The profiles offered, from a welcome or a later `profiles` message: the list, and the thumbnails
+  // of profiles no longer in it dropped.
+  void set_agent_roster(const json::Value& profiles);
   void h_face(const json::Value& m);
   void h_face_start(const json::Value& m);
   void h_face_end(const json::Value& m);

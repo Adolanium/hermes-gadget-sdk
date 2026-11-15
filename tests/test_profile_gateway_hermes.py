@@ -754,6 +754,117 @@ def test_an_unknown_profile_falls_back_to_the_launch_home(routing_rig):
     assert identity.runtime_home == home
 
 
+def test_virtual_mode_gives_each_picked_profile_its_own_routed_chat(routing_rig):
+    # profile_mode: virtual. The pick becomes the chat <device>~ops, which a route the plugin adds sends to
+    # ops: Hermes resolves it like any routed chat, with no validate_native_profile_route hook.
+    from gateway.session_identity import resolve_identity
+
+    runner, adapter, home = routing_rig
+    adapter._virtual_profiles = True
+    session = _session("ops")
+    source = adapter._source(session)
+    assert (source.chat_id, source.user_id, source.profile) == (f"{DEVICE}~ops", DEVICE, "ops")
+    assert [(r.chat_id, r.profile) for r in runner.config.profile_routes] == [(f"{DEVICE}~ops", "ops")]
+    identity = resolve_identity(source, runner=runner, adapter=adapter)
+    assert (identity.transport_profile, identity.runtime_profile) == ("default", "ops")
+    assert identity.runtime_home == home / "profiles" / "ops"
+    assert runner._delivery_adapter_for(source) is adapter
+    # Its own conversation, apart from the device's default one.
+    default_source = adapter._source(_session("default"))
+    assert (default_source.chat_id, default_source.profile) == (DEVICE, "default")
+    assert runner._session_key_for_source(source) != runner._session_key_for_source(default_source)
+    # Another message adds no second route; replies to the virtual chat find the device.
+    adapter._source(session)
+    assert len(runner.config.profile_routes) == 1
+    assert adapter._device_id(f"{DEVICE}~ops") == DEVICE and adapter._device_id(DEVICE) == DEVICE
+
+
+def test_virtual_mode_keeps_the_owner_check_on_the_device_itself(routing_rig):
+    # The added route names the virtual chat only, so the default profile still answers for the device.
+    from gateway.config import Platform
+
+    runner, adapter, home = routing_rig
+    adapter._virtual_profiles = True
+    adapter.set_authorization_check(runner._make_adapter_auth_check(Platform("gadget")))
+    default = runner.pairing_store
+    default.approve_code("gadget", default.generate_code("gadget", DEVICE, "Kitchen"))
+    adapter._source(_session("ops"))
+    assert adapter._owner_trusts(DEVICE) is True
+    assert not adapter._routed(_session("default"))  # the device still switches
+
+
+def test_virtual_mode_drops_the_routes_of_profiles_no_longer_offered(routing_rig):
+    runner, adapter, home = routing_rig
+    adapter._virtual_profiles = True
+    adapter._source(_session("ops"))
+    adapter._prune_virtual_routes(set())  # a roster Hermes could not give drops nothing
+    assert len(runner.config.profile_routes) == 1
+    adapter._prune_virtual_routes({"default", "ops"})
+    assert len(runner.config.profile_routes) == 1
+    adapter._prune_virtual_routes({"default"})  # ops deleted, parked or taken off the list
+    assert runner.config.profile_routes == [] and adapter._virtual_routes == set()
+    adapter._source(_session("ops"))  # offered again: the route comes back with the next message
+    assert len(runner.config.profile_routes) == 1
+
+
+def test_virtual_mode_never_removes_a_route_it_did_not_add(routing_rig):
+    # An administrator's route for the same chat serves it, and the cleanup leaves it in place.
+    from gateway.profile_routing import ProfileRoute
+
+    runner, adapter, home = routing_rig
+    adapter._virtual_profiles = True
+    admin = ProfileRoute(name="admin", platform="gadget", profile="ops", chat_id=f"{DEVICE}~ops")
+    runner.config.profile_routes.append(admin)
+    source = adapter._source(_session("ops"))
+    assert source.chat_id == f"{DEVICE}~ops"
+    assert runner.config.profile_routes == [admin]  # no second route added
+    adapter._prune_virtual_routes({"default"})
+    assert runner.config.profile_routes == [admin]
+
+
+def test_virtual_mode_does_not_count_a_disabled_or_foreign_route(routing_rig):
+    # A disabled route is not one Hermes uses, so the adapter adds its own; a route sending the chat to
+    # another profile is the administrator's choice, so the pick falls back to the stamp.
+    from gateway.profile_routing import ProfileRoute
+
+    runner, adapter, home = routing_rig
+    adapter._virtual_profiles = True
+    off = ProfileRoute(name="off", platform="gadget", profile="ops", chat_id=f"{DEVICE}~ops", enabled=False)
+    runner.config.profile_routes.append(off)
+    source = adapter._source(_session("ops"))
+    assert source.chat_id == f"{DEVICE}~ops"
+    assert [r.name for r in runner.config.profile_routes if r.enabled] == [f"gadget-virtual-{DEVICE}~ops"]
+
+    runner.config.profile_routes[:] = [
+        ProfileRoute(name="elsewhere", platform="gadget", profile="default", chat_id=f"{DEVICE}~ops")]
+    adapter._virtual_routes.clear()
+    adapter._virtual_owned.clear()
+    source = adapter._source(_session("ops"))
+    assert (source.chat_id, source.profile) == (DEVICE, "ops")  # the stamp, as without virtual mode
+
+
+def test_virtual_mode_still_removes_its_route_after_an_administrator_overrides_it(routing_rig):
+    from gateway.profile_routing import ProfileRoute
+
+    runner, adapter, home = routing_rig
+    adapter._virtual_profiles = True
+    adapter._source(_session("ops"))  # the adapter adds its route
+    override = ProfileRoute(name="override", platform="gadget", profile="default", chat_id=f"{DEVICE}~ops",
+                            user_id=DEVICE)  # more specific: it wins
+    runner.config.profile_routes.append(override)
+    source = adapter._source(_session("ops"))
+    assert source.chat_id == DEVICE  # the stamp
+    adapter._prune_virtual_routes({"default"})  # ops leaves the roster
+    assert runner.config.profile_routes == [override]  # the adapter's route is gone, the override stays
+
+
+def test_without_virtual_mode_the_pick_stamps_the_devices_own_chat(routing_rig):
+    runner, adapter, home = routing_rig
+    source = adapter._source(_session("ops"))
+    assert (source.chat_id, source.profile) == (DEVICE, "ops")
+    assert runner.config.profile_routes == []
+
+
 class _RawDevice:
     """A device speaking the handshake by hand, so a test chooses exactly what it claims in hello."""
 
@@ -1572,3 +1683,336 @@ def test_a_connection_replaced_while_it_waits_leaves_the_newest_one_following_it
 
     sent, later = asyncio.run(main())
     assert sent == [first, later]
+
+
+@pytest.mark.parametrize("virtual", [False, True], ids=["stamp", "virtual"])
+def test_a_bot_chat_request_switches_the_device_and_sends_the_resume_from_it(live_rig, virtual):
+    # hermes gadget bot-chat: the gateway puts the device on the profile, then sends /resume --all Bot Chat
+    # as the device, in the chat that profile's turns use; Hermes decides whether the device may.
+    from hermes_gadget_plugin import botchat
+
+    rig = live_rig
+    rig.adapter._virtual_profiles = virtual
+    rig.approve()
+    rig.approve("ops")  # ops answers the device; see the next test for a profile that hasn't approved it
+    queue = botchat.BotChatQueue(rig.adapter._store.path.parent)
+    with rig.connect({"profiles": True}):
+        session = rig.adapter.hub.get(rig.device)
+        queue.request(rig.device, "ops")
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+        assert session.profile == "ops"
+        sent = [e for e in rig.events if e.text == botchat.RESUME_COMMAND]
+        chat_id = f"{rig.device}~ops" if virtual else rig.device
+        assert [(e.source.chat_id, e.source.profile, e.source.user_id) for e in sent] == [(chat_id, "ops", rig.device)]
+        assert queue.pending() == []
+        assert queue.status(rig.device) | {"at": 0} == {
+            "id": queue.status(rig.device)["id"], "state": "sent", "profile": "ops", "chat_id": chat_id, "at": 0}
+
+
+def test_a_bot_chat_request_waits_for_the_device_and_expires(live_rig):
+    """An offline device's request waits, and fails once it is older than the request lifetime."""
+    import time as _time
+
+    from hermes_gadget_plugin import botchat
+
+    rig = live_rig
+    queue = botchat.BotChatQueue(rig.adapter._store.path.parent)
+    queue.request(rig.device, "ops")
+    rig.run(rig.adapter._serve_bot_chat(queue, rig.device))  # not connected: it waits
+    assert queue.pending() == [rig.device] and queue.status(rig.device) is None
+    request = queue.load(rig.device)
+    queue._write(queue._path(rig.device, ".json"),
+                 {**request, "requested_at": _time.time() - botchat.REQUEST_TTL_S - 1})
+    rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+    assert queue.pending() == [] and queue.status(rig.device)["state"] == "failed"
+    assert not [e for e in rig.events if e.text == botchat.RESUME_COMMAND]
+
+
+def test_a_bot_chat_request_for_a_profile_the_device_cannot_use_fails(live_rig):
+    """A profile the device may not switch to fails without sending anything."""
+    from hermes_gadget_plugin import botchat
+
+    rig = live_rig
+    rig.approve()
+    queue = botchat.BotChatQueue(rig.adapter._store.path.parent)
+    with rig.connect({"profiles": True}):
+        queue.request(rig.device, "nosuch")
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+        assert queue.status(rig.device) == {**queue.status(rig.device), "state": "failed"}
+        assert "cannot switch to nosuch" in queue.status(rig.device)["error"]
+        assert not [e for e in rig.events if e.text == botchat.RESUME_COMMAND]
+
+
+def _bot_chat_rig(rig):
+    """A paired, switching device connected to the live rig, and the bot-chat queue."""
+    from hermes_gadget_plugin import botchat
+
+    rig.approve()
+    return botchat.BotChatQueue(rig.adapter._store.path.parent)
+
+
+def _resumes(rig):
+    from hermes_gadget_plugin import botchat
+
+    return [e for e in rig.events if e.text == botchat.RESUME_COMMAND]
+
+
+@pytest.mark.parametrize("profile", ["default", "ops"])
+def test_a_bot_chat_request_waits_while_a_turn_runs_even_on_the_same_profile(live_rig, profile):
+    """Hermes refuses /resume during a turn, so the request waits for an idle device, whether or not the
+    device must switch first."""
+    rig = live_rig
+    queue = _bot_chat_rig(rig)
+    with rig.connect({"profiles": True}):
+        session = rig.adapter.hub.get(rig.device)
+        if profile != "default":
+            assert rig.run(rig.adapter.select_profile(session, profile)) is None
+        rig.adapter._turns[rig.device] = "t1"  # a turn is running
+        queue.request(rig.device, profile)
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+        assert queue.pending() == [rig.device] and queue.status(rig.device) is None and not _resumes(rig)
+        rig.adapter._turns.pop(rig.device)  # the turn ends: the next pass sends it
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+        assert queue.pending() == [] and queue.status(rig.device)["state"] == "sent" and len(_resumes(rig)) == 1
+
+
+def test_a_bot_chat_request_fails_when_the_device_leaves_the_profile_during_the_switch(live_rig, monkeypatch):
+    """While the switch is announced, the device can pick another profile: the resume must not move that
+    other profile's Bot Chat."""
+    rig = live_rig
+    queue = _bot_chat_rig(rig)
+    with rig.connect({"profiles": True}):
+        session = rig.adapter.hub.get(rig.device)
+        sent = session.send_profile
+
+        async def moved_on(*args, **kw):
+            await sent(*args, **kw)
+            session.profile = "default"  # the device switched back meanwhile
+
+        monkeypatch.setattr(session, "send_profile", moved_on)
+        queue.request(rig.device, "ops")
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+        assert queue.status(rig.device)["state"] == "failed" and "left ops" in queue.status(rig.device)["error"]
+        assert not _resumes(rig) and queue.pending() == []
+
+
+def test_a_bot_chat_request_fails_when_the_plugin_drops_the_resume(live_rig, monkeypatch):
+    """The default profile revokes the device during the switch: _forward drops the resume, and the
+    request says so instead of reporting it sent."""
+    rig = live_rig
+    queue = _bot_chat_rig(rig)
+    with rig.connect({"profiles": True}):
+        session = rig.adapter.hub.get(rig.device)
+        sent = session.send_profile
+
+        async def revoked(*args, **kw):
+            await sent(*args, **kw)
+            rig.runner.pairing_store.revoke("gadget", rig.device)
+
+        monkeypatch.setattr(session, "send_profile", revoked)
+        queue.request(rig.device, "ops")
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+        status = queue.status(rig.device)
+        assert status["state"] == "failed" and "no longer trusts" in status["error"]
+        assert not _resumes(rig)
+
+
+def test_a_newer_bot_chat_request_is_neither_dropped_nor_reported_for_by_an_older_one(live_rig, monkeypatch):
+    """A second run replaces the request while the first is being served: the first leaves it, and its
+    report, alone; the next pass serves the second."""
+    rig = live_rig
+    queue = _bot_chat_rig(rig)
+    with rig.connect({"profiles": True}):
+        session = rig.adapter.hub.get(rig.device)
+        sent = session.send_profile
+        newer = []
+
+        async def replaced(*args, **kw):
+            await sent(*args, **kw)
+            newer.append(queue.request(rig.device, "ops"))
+
+        monkeypatch.setattr(session, "send_profile", replaced)
+        queue.request(rig.device, "ops")
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+        assert queue.pending() == [rig.device] and queue.load(rig.device)["id"] == newer[0]
+        assert queue.status(rig.device) is None and not _resumes(rig)
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))  # on ops already: no switch this time
+        assert queue.status(rig.device)["id"] == newer[0] and queue.status(rig.device)["state"] == "sent"
+
+
+def test_a_bot_chat_request_fails_on_a_virtual_chat_the_profile_has_not_approved(live_rig):
+    """On a virtual chat the gateway's check answers for the target profile: until ops approves the
+    device, Hermes would take the resume for a stranger's message, so the request fails and says how
+    to approve it, without sending anything."""
+    rig = live_rig
+    rig.adapter._virtual_profiles = True
+    queue = _bot_chat_rig(rig)
+    with rig.connect({"profiles": True}):
+        queue.request(rig.device, "ops")
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+        status = queue.status(rig.device)
+        assert status["state"] == "failed" and "ops hasn't approved this gadget" in status["error"]
+        assert "hermes -p ops pairing list" in status["error"] and not _resumes(rig)
+        rig.approve("ops")
+        queue.request(rig.device, "ops")
+        rig.run(rig.adapter._serve_bot_chat(queue, rig.device))
+        assert queue.status(rig.device)["state"] == "sent" and len(_resumes(rig)) == 1
+
+
+def test_the_update_watcher_survives_a_bot_chat_failure_it_cannot_record(live_rig, monkeypatch):
+    """A request that raises, on a data dir where the failure can't be written either, is logged: the
+    watcher that also installs firmware updates keeps running."""
+    rig = live_rig
+    queue = _bot_chat_rig(rig)
+
+    async def boom(*args, **kw):
+        raise RuntimeError("switch exploded")
+
+    def full_disk(*args, **kw):
+        raise OSError(28, "No space left on device")
+
+    with rig.connect({"profiles": True}):
+        monkeypatch.setattr(rig.adapter, "_serve_bot_chat", boom)
+        monkeypatch.setattr(queue, "report", full_disk)
+        queue.request(rig.device, "ops")
+        rig.run(rig.adapter._serve_bot_chat_guarded(queue, rig.device))  # no exception
+        assert queue.pending() == [] and not _resumes(rig)
+
+
+def test_a_bot_chat_failure_is_reported_for_the_request_that_raised_only(live_rig, monkeypatch):
+    """Request A raises after another run wrote B: A's error is not put on B, and B stays pending."""
+    rig = live_rig
+    queue = _bot_chat_rig(rig)
+    with rig.connect({"profiles": True}):
+        session = rig.adapter.hub.get(rig.device)
+        sent = session.send_profile
+        newer = []
+
+        async def replaced_then_boom(*args, **kw):
+            newer.append(queue.request(rig.device, "ops"))
+            raise RuntimeError("switch exploded")
+
+        monkeypatch.setattr(session, "send_profile", replaced_then_boom)
+        queue.request(rig.device, "ops")
+        rig.run(rig.adapter._serve_bot_chat_guarded(queue, rig.device))
+        assert queue.pending() == [rig.device] and queue.load(rig.device)["id"] == newer[0]
+        assert queue.status(rig.device) is None and not _resumes(rig)
+        monkeypatch.setattr(session, "send_profile", sent)
+        rig.run(rig.adapter._serve_bot_chat_guarded(queue, rig.device))  # on ops already: B goes out
+        assert queue.status(rig.device)["id"] == newer[0] and queue.status(rig.device)["state"] == "sent"
+
+
+def _messages(device, kind, wait_s=1.0):
+    """The messages of type ``kind`` the raw device receives within ``wait_s``."""
+    import time as _time
+
+    from websockets.exceptions import ConnectionClosed
+
+    seen, deadline = [], _time.monotonic() + wait_s
+    while _time.monotonic() < deadline:
+        try:
+            raw = device.ws.recv(timeout=max(0.01, deadline - _time.monotonic()))
+        except (TimeoutError, ConnectionClosed):
+            break
+        if isinstance(raw, str):
+            message = json.loads(raw)
+            if message.get("type") == kind:
+                seen.append(message)
+    return seen
+
+
+def test_a_profile_created_or_deleted_after_the_welcome_reaches_a_connected_device(live_rig, hermes_home):
+    """The pairing watch's roster push: a new profile is sent to the device as `profiles`, an unchanged
+    roster sends nothing, and a deleted one is taken away again, all without a reconnect."""
+    import shutil
+
+    rig = live_rig
+    rig.approve()
+    with rig.connect({"profiles": True}) as device:
+        assert [p["id"] for p in device.welcome["profiles"]] == ["default", "ops"]
+        rig.run(rig.adapter._push_rosters())
+        assert _messages(device, "profiles", 0.3) == []  # unchanged since the welcome
+        work = hermes_home / "profiles" / "work"
+        work.mkdir()
+        (work / "config.yaml").write_text("{}\n")
+        rig.run(rig.adapter._push_rosters())
+        pushed = _messages(device, "profiles")
+        assert [[p["id"] for p in m["profiles"]] for m in pushed] == [["default", "ops", "work"]]
+        rig.run(rig.adapter._push_rosters())
+        assert _messages(device, "profiles", 0.3) == []  # sent once, not on every pass
+        shutil.rmtree(work)
+        rig.run(rig.adapter._push_rosters())
+        assert [[p["id"] for p in m["profiles"]] for m in _messages(device, "profiles")] == [["default", "ops"]]
+
+
+def test_a_device_that_does_not_take_profiles_or_is_routed_gets_no_push(live_rig, hermes_home):
+    """Only devices that sent caps.profiles get `profiles`; a routed device keeps its empty roster."""
+    rig = live_rig
+    rig.approve()
+    with rig.connect({}) as device:  # older firmware: no caps.profiles
+        (hermes_home / "profiles" / "work").mkdir()
+        (hermes_home / "profiles" / "work" / "config.yaml").write_text("{}\n")
+        rig.run(rig.adapter._push_rosters())
+        assert _messages(device, "profiles", 0.3) == []
+    rig.route()  # an old static route sends this device to ops: it is offered no profiles
+    rig.approve("ops")
+    with rig.connect({"profiles": True}) as device:
+        assert "profiles" not in device.welcome
+        rig.run(rig.adapter._push_rosters())
+        assert _messages(device, "profiles", 0.3) == []
+
+
+def test_an_unreadable_profile_tree_leaves_the_devices_lists_alone(live_rig, monkeypatch):
+    """A failed read of Hermes's profiles is "unknown", not "none": the device keeps its list."""
+    import hermes_cli.profiles as profiles
+
+    rig = live_rig
+    rig.approve()
+    with rig.connect({"profiles": True}) as device:
+        def broken(*args, **kw):
+            raise OSError("profile tree unreadable")
+
+        monkeypatch.setattr(profiles, "profiles_to_serve", broken)
+        rig.run(rig.adapter._push_rosters())
+        assert _messages(device, "profiles", 0.3) == []
+
+
+def test_a_resume_that_raises_after_the_request_was_taken_is_still_reported(live_rig, monkeypatch):
+    """The request is already off the queue when the resume goes out: if that raises, the failure is
+    reported for it there, so the command doesn't wait out its timeout."""
+    rig = live_rig
+    queue = _bot_chat_rig(rig)
+    with rig.connect({"profiles": True}):
+        async def boom(*args, **kw):
+            raise RuntimeError("hermes went away")
+
+        monkeypatch.setattr(rig.adapter, "_forward", boom)
+        request_id = queue.request(rig.device, "ops")
+        rig.run(rig.adapter._serve_bot_chat_guarded(queue, rig.device))
+        status = queue.status(rig.device)
+        assert queue.pending() == [] and status["id"] == request_id and status["state"] == "failed"
+        assert "hermes went away" in status["error"]
+
+
+def test_a_request_whose_file_cannot_be_read_stays_for_a_later_pass(live_rig, monkeypatch):
+    """A read error other than a missing file (permissions, too many open files) leaves the request:
+    it is logged, and served once the file can be read again."""
+    from pathlib import Path
+
+    rig = live_rig
+    queue = _bot_chat_rig(rig)
+    with rig.connect({"profiles": True}):
+        request_id = queue.request(rig.device, "ops")
+        real = Path.read_text
+
+        def denied(self, *args, **kw):
+            if self.name == f"{rig.device}.json":
+                raise PermissionError(13, "Permission denied")
+            return real(self, *args, **kw)
+
+        monkeypatch.setattr(Path, "read_text", denied)
+        rig.run(rig.adapter._serve_bot_chat_guarded(queue, rig.device))
+        monkeypatch.setattr(Path, "read_text", real)
+        assert queue.pending() == [rig.device] and queue.status(rig.device) is None and not _resumes(rig)
+        rig.run(rig.adapter._serve_bot_chat_guarded(queue, rig.device))
+        assert queue.status(rig.device)["id"] == request_id and queue.status(rig.device)["state"] == "sent"

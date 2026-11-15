@@ -238,6 +238,26 @@ def test_streaming_tts_seam_streams_pcm_to_the_device(gadget, make_sim):
         assert abs(w.getnframes() - 16000) <= 4
 
 
+def test_agent_tools_find_the_device_behind_a_virtual_chat(monkeypatch):
+    # profile_mode: virtual runs another profile's turns in the chat <device>~<profile>. With two gadgets
+    # connected, the tools must still pick the one the turn came from, not ask which.
+    import types
+
+    from gateway import session_context
+    from hermes_gadget_plugin import tools
+    from hermes_gadget_plugin.adapter import GadgetAdapter
+
+    desk, hall = types.SimpleNamespace(name="Desk"), types.SimpleNamespace(name="Hall")
+    sessions = {"hg-aaaaaaaaaaaaaaaa": desk, "hg-bbbbbbbbbbbbbbbb": hall}
+    adapter = types.SimpleNamespace(hub=types.SimpleNamespace(get=sessions.get, sessions=sessions),
+                                    _device_id=GadgetAdapter._device_id)
+    for chat_id in ("hg-bbbbbbbbbbbbbbbb", "hg-bbbbbbbbbbbbbbbb~ops"):
+        monkeypatch.setattr(session_context, "get_session_env",
+                            lambda name, default="", c=chat_id: {"HERMES_SESSION_PLATFORM": "gadget",
+                                                                 "HERMES_SESSION_CHAT_ID": c}.get(name, default))
+        assert tools._resolve(adapter, None) == (hall, None)
+
+
 def test_agent_tools_drive_the_device(gadget, make_sim, monkeypatch):
     from gateway import session_context
     from hermes_gadget_plugin import tools

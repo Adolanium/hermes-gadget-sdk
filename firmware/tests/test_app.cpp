@@ -5876,6 +5876,53 @@ TEST("profiles: the grid ends with a Settings cell that opens Settings, pages li
   CHECK_EQ(few.app.profile_per_page(), 4);
 }
 
+TEST("profiles: a profiles message replaces the list, and an open grid updates in place") {
+  Rig r(Rig::touch_profile());
+  r.fake.kv["profile_grid"] = "4";
+  welcome_with_roster(r, 2, "p0");
+  CHECK(r.app.open_profile_picker());
+  CHECK_EQ(r.app.model().dash.size(), size_t(3));  // two profiles and Settings
+  r.server(R"({"type":"profiles","profiles":[)" + roster_of(3) + "]}");  // one created in Hermes
+  CHECK(r.app.profile_picker_open());  // still open, now with the new profile
+  CHECK_EQ(r.app.model().dash.size(), size_t(4));
+  CHECK_EQ(r.app.model().dash[2].value, std::string("p2"));
+  CHECK_EQ(r.app.model().settings_row, 3);
+  CHECK(r.fake.last("profile.select") == nullptr);
+  CHECK_EQ(r.app.agent_profile(), std::string("p0"));  // the answering profile is Hermes's to change
+  r.server(R"({"type":"profiles","profiles":[)" + roster_of(2) + "]}");  // and deleted again
+  CHECK_EQ(r.app.model().dash.size(), size_t(3));
+  r.server(R"({"type":"profiles","profiles":[)" + roster_of(1) + "]}");  // nothing left to switch to
+  CHECK(!r.app.profile_picker_open());
+}
+
+TEST("profiles: a shorter list keeps the grid's page, or moves it to the last page there is") {
+  Rig r(Rig::touch_profile());
+  r.fake.make_panel(410, 486, false);
+  r.fake.kv["profile_grid"] = "4";
+  welcome_with_roster(r, 8, "p0");  // eight and Settings: three pages of 2x2
+  CHECK(r.app.open_profile_picker());
+  CHECK(r.app.profile_page_step(1));
+  CHECK(r.app.profile_page_step(1));
+  CHECK_EQ(r.app.model().scroll, 8);  // the third page: Settings alone
+  r.server(R"({"type":"profiles","profiles":[)" + roster_of(7) + "]}");
+  CHECK_EQ(r.app.model().scroll, 4);  // seven and Settings fill two pages: the last one
+  r.server(R"({"type":"profiles","profiles":[)" + roster_of(6) + "]}");
+  CHECK_EQ(r.app.model().scroll, 4);  // the page still has cells: it stays
+  CHECK(r.app.profile_picker_open());
+}
+
+TEST("protocol: a message type the device doesn't know changes nothing") {
+  Rig r(Rig::touch_profile());
+  welcome_with_roster(r, 3, "p1");
+  const size_t sent = r.fake.sent.size();
+  r.server(R"({"type":"something.new","profiles":[]})");
+  CHECK(r.app.online());
+  CHECK_EQ(r.app.agent_profile(), std::string("p1"));
+  CHECK(r.app.open_profile_picker());
+  CHECK_EQ(r.app.model().dash.size(), size_t(4));
+  CHECK_EQ(r.fake.sent.size(), sent);
+}
+
 TEST("profiles: a welcome brings up to 32 profiles; the rest are dropped") {
   Rig r(Rig::touch_profile());
   welcome_with_roster(r, 40);
