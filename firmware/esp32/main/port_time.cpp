@@ -1,4 +1,4 @@
-// Wall time for the gadget. The PCF85063 seeds the system clock at boot (it
+// Wall time for the gadget. The RTC (a PCF85063 or an RX8130CE) seeds the system clock at boot (it
 // holds UTC; the conversion uses days-from-civil, never mktime, which would
 // apply the local timezone). The `timezone` setting (a POSIX TZ string,
 // default UTC0) is applied through TZ + tzset(). SNTP (pool.ntp.org) sets the
@@ -26,19 +26,20 @@ void TimePort::begin(const RtcConfig& cfg, i2c_master_bus_handle_t bus, hg::Stor
       dev.device_address = cfg.addr;
       dev.scl_speed_hz = 400000;
       if (i2c_master_bus_add_device(bus, &dev, &dev_) == ESP_OK) {
-        chip_ = std::make_unique<hg::Pcf85063>(
-            [this](uint8_t reg, uint8_t* data, size_t size) {
-              return i2c_master_transmit_receive(dev_, &reg, 1, data, size, 50) == ESP_OK;
-            },
-            [this](uint8_t reg, const uint8_t* data, size_t size) {
-              uint8_t buf[8];  // register address + the 7-byte time table
-              if (size > sizeof(buf) - 1) return false;
-              buf[0] = reg;
-              for (size_t i = 0; i < size; ++i) buf[i + 1] = data[i];
-              return i2c_master_transmit(dev_, buf, size + 1, 50) == ESP_OK;
-            });
+        const auto read = [this](uint8_t reg, uint8_t* data, size_t size) {
+          return i2c_master_transmit_receive(dev_, &reg, 1, data, size, 50) == ESP_OK;
+        };
+        const auto write = [this](uint8_t reg, const uint8_t* data, size_t size) {
+          uint8_t buf[8];  // register address + the 7-byte time table
+          if (size > sizeof(buf) - 1) return false;
+          buf[0] = reg;
+          for (size_t i = 0; i < size; ++i) buf[i + 1] = data[i];
+          return i2c_master_transmit(dev_, buf, size + 1, 50) == ESP_OK;
+        };
+        if (cfg.chip == RtcChip::Rx8130) rx8130_ = std::make_unique<hg::Rx8130>(read, write);
+        else chip_ = std::make_unique<hg::Pcf85063>(read, write);
         hg::WallTime utc{};
-        if (chip_->read(utc)) {
+        if (read_rtc(utc)) {
           const int64_t secs = hg::days_from_civil(utc.year, utc.month, utc.day) * 86400 +
                                utc.hour * 3600 + utc.minute * 60 + utc.second;
           const struct timeval tv{static_cast<time_t>(secs), 0};
@@ -107,7 +108,7 @@ void TimePort::on_sntp(struct timeval* tv) {
 
 void TimePort::on_synced() {
   synced_ = true;
-  if (!chip_) return;
+  if (!rtc_ready()) return;
   const time_t now = time(nullptr);
   struct tm utc{};
   if (!gmtime_r(&now, &utc)) return;
@@ -119,7 +120,7 @@ void TimePort::on_synced() {
   w.hour = static_cast<uint8_t>(utc.tm_hour);
   w.minute = static_cast<uint8_t>(utc.tm_min);
   w.second = static_cast<uint8_t>(utc.tm_sec);
-  if (chip_->write(w)) ESP_LOGI(TAG, "RTC set from network time");
+  if (write_rtc(w)) ESP_LOGI(TAG, "RTC set from network time");
   else ESP_LOGW(TAG, "writing the RTC failed");
 }
 

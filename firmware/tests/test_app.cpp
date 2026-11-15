@@ -13,6 +13,7 @@
 #include "hg/qr.hpp"
 #include "hg/setup.hpp"
 #include "hg/touch.hpp"
+#include "stopwatch.hpp"
 
 using hg::json::Value;
 
@@ -3403,6 +3404,53 @@ TEST("full battery: once per charge, when charging ends or the gauge reaches 100
   battery.status.battery_percent = 100;
   r.advance(5000);
   CHECK(r.app.charged_notice());
+}
+
+TEST("full battery: on the StopWatch a charger pausing below a full cell is not the end of the charge") {
+  // The board's own driver on a fake M5PM1: its status pin only says whether current flows.
+  std::array<uint8_t, 256> pm1{};
+  hg::StopWatchControl watch({[&](uint8_t reg, uint8_t* out, size_t n) {
+                                for (size_t i = 0; i < n; ++i) out[i] = pm1[reg + i];
+                                return true;
+                              },
+                              [&](uint8_t reg, uint8_t value) {
+                                pm1[reg] = value;
+                                return true;
+                              }},
+                             [](uint8_t, uint8_t*, size_t) { return true; }, [](uint8_t, uint16_t) { return true; },
+                             [](uint32_t) {});
+  watch.use_curves(hg::kStopWatchCurve, hg::kStopWatchChargeCurve);
+  const auto set_mv = [&](uint8_t reg, uint16_t mv) {
+    pm1[reg] = static_cast<uint8_t>(mv & 0xFF);
+    pm1[reg + 1] = static_cast<uint8_t>(mv >> 8);
+  };
+  const uint8_t kCharging = 0x03, kResting = 0x07;  // CHG_STAT (PMG2) low while current flows
+  Rig r;
+  r.hal.power = &watch;
+  r.fake.backlight = true;
+  r.bring_online(true);
+  set_mv(0x24, 0);  // on battery
+  set_mv(0x22, 3700);
+  pm1[0x12] = kResting;
+  r.advance(5000);
+  set_mv(0x24, 5078);  // plugged in, charging
+  set_mv(0x22, 3806);
+  pm1[0x12] = kCharging;
+  r.advance(10000);
+  CHECK(!r.app.charging_notice());
+  pm1[0x12] = kResting;  // the charger pauses far below full, for many readings
+  r.advance(15000);
+  CHECK(!r.app.charged_notice());
+  CHECK(r.app.screen() != hg::Screen::Charged);
+  pm1[0x12] = kCharging;  // and goes on
+  set_mv(0x22, 4160);
+  r.advance(10000);
+  CHECK(!r.app.charged_notice());
+  pm1[0x12] = kResting;  // the cell is full and the charger rests: this is the end, and it still shows
+  set_mv(0x22, 4124);
+  r.advance(5000);
+  CHECK(r.app.charged_notice());
+  CHECK(r.app.screen() == hg::Screen::Charged);
 }
 
 TEST("full battery: the screen is on by default and the chime off, so a charge ending at night is silent") {
