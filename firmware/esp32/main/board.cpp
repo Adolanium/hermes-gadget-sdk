@@ -934,6 +934,10 @@ BoardConfig make() {
   b.imu.enabled = true;
   b.imu.chip = ImuChip::Bmi270;
   b.imu.addr = 0x68;
+  // Measured on the watch: flat face up reads sensor z +1 g, standing on its left edge
+  // sensor y +1 g, standing on its top edge sensor x +1 g.
+  b.imu.x_from = 1; b.imu.y_from = 0; b.imu.z_from = 2;
+  b.imu.x_sign = 1; b.imu.y_sign = -1; b.imu.z_sign = 1;
   b.rtc.enabled = true;  // RX8130CE: keeps UTC while the cell has charge, also switched off
   b.rtc.chip = RtcChip::Rx8130;
   b.rtc.addr = 0x32;
