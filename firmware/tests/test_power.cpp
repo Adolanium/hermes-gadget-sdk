@@ -599,8 +599,9 @@ TEST("StopWatch: with the cell's curves the percentage follows the voltage, and 
   fake.pm1[0x12] = 0x03;
   set_mv(0x22, 3806);
   CHECK(control.read()->battery_percent == std::optional<uint8_t>(62));
-  fake.pm1[0x12] = 0x07;  // the charger resting far below full is not done
+  fake.pm1[0x12] = 0x07;  // the charger resting far below full is a pause, not done
   CHECK(control.read()->battery_percent == std::optional<uint8_t>(62));
+  CHECK(control.read()->charging == std::optional<bool>(true));
   fake.pm1[0x12] = 0x03;
   set_mv(0x22, 4176);  // the top of the charge curve
   for (int i = 0; i < 12; ++i) control.read();
@@ -608,6 +609,7 @@ TEST("StopWatch: with the cell's curves the percentage follows the voltage, and 
   fake.pm1[0x12] = 0x07;  // full: the charger rests
   set_mv(0x22, 4124);
   CHECK(control.read()->battery_percent == std::optional<uint8_t>(100));
+  CHECK(control.read()->charging == std::optional<bool>(false));
   fake.pm1[0x12] = 0x03;  // and tops the cell up again: still 100
   set_mv(0x22, 4172);
   CHECK(control.read()->battery_percent == std::optional<uint8_t>(100));
