@@ -117,7 +117,7 @@ std::optional<PowerStatus> StopWatchControl::read() {
       // The charger has no "done" signal: on USB with a full cell its status pin
       // goes back and forth between charging and resting. Resting on USB with the
       // cell near full counts as done; resting lower down (a charger that stopped
-      // for another reason) reads the voltage like charging does.
+      // for another reason) is read like charging.
       using Charge = BatteryPercent::Charge;
       const Charge charge = !usb                               ? Charge::Discharging
                             : !*out.charging && mv >= kFullMv ? Charge::Done

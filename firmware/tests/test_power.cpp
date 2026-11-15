@@ -580,10 +580,10 @@ TEST("StopWatch: cell and VIN millivolts and the active-low charge status are re
   CHECK(!control.external_power());
 }
 
-TEST("StopWatch: with the cell's curve the percentage follows the voltage, and resting on USB near full is 100") {
+TEST("StopWatch: with the cell's curves the percentage follows the voltage, and resting on USB near full is 100") {
   FakeStopWatch fake;
   auto control = fake.make();
-  control.use_curve(hg::kStopWatchCurve);
+  control.use_curves(hg::kStopWatchCurve, hg::kStopWatchChargeCurve);
   const auto set_mv = [&](uint8_t reg, uint16_t mv) {
     fake.pm1[reg] = static_cast<uint8_t>(mv & 0xFF);
     fake.pm1[reg + 1] = static_cast<uint8_t>(mv >> 8);
@@ -595,17 +595,21 @@ TEST("StopWatch: with the cell's curve the percentage follows the voltage, and r
   set_mv(0x22, 3700);  // a lighter load lifts the voltage, not the charge
   CHECK(control.read()->battery_percent == std::optional<uint8_t>(50));
 
-  set_mv(0x24, 5078);  // plugged in, the charger resting far below full: not done
-  set_mv(0x22, 3724);
-  CHECK(control.read()->battery_percent == std::optional<uint8_t>(60));
-  fake.pm1[0x12] = 0x03;  // charging
-  set_mv(0x22, 3910);
-  CHECK(control.read()->battery_percent == std::optional<uint8_t>(80));
-  fake.pm1[0x12] = 0x07;  // full: the status pin goes back and forth
-  set_mv(0x22, 4142);
-  CHECK(control.read()->battery_percent == std::optional<uint8_t>(100));
+  set_mv(0x24, 5078);  // plugged in and charging: the charge curve, where 3728 mV is 50
   fake.pm1[0x12] = 0x03;
-  set_mv(0x22, 4176);
+  set_mv(0x22, 3806);
+  CHECK(control.read()->battery_percent == std::optional<uint8_t>(62));
+  fake.pm1[0x12] = 0x07;  // the charger resting far below full is not done
+  CHECK(control.read()->battery_percent == std::optional<uint8_t>(62));
+  fake.pm1[0x12] = 0x03;
+  set_mv(0x22, 4176);  // the top of the charge curve
+  for (int i = 0; i < 12; ++i) control.read();
+  CHECK(control.read()->battery_percent == std::optional<uint8_t>(99));
+  fake.pm1[0x12] = 0x07;  // full: the charger rests
+  set_mv(0x22, 4124);
+  CHECK(control.read()->battery_percent == std::optional<uint8_t>(100));
+  fake.pm1[0x12] = 0x03;  // and tops the cell up again: still 100
+  set_mv(0x22, 4172);
   CHECK(control.read()->battery_percent == std::optional<uint8_t>(100));
 }
 

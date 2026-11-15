@@ -765,8 +765,8 @@ class StopWatchBoard final : public hg::Power {
  public:
   bool begin(i2c_master_bus_handle_t bus);
   void set_amplifier(bool on);
-  void use_curve(hg::Curve discharge) {
-    if (control_ && discharge) control_->use_curve(discharge);
+  void use_curves(hg::Curve discharge, hg::Curve charge) {
+    if (control_ && discharge) control_->use_curves(discharge, charge);
   }
   std::optional<hg::PowerStatus> read() override { return control_->read(); }
   bool power_off() override { return control_->power_off(); }

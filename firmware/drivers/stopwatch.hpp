@@ -40,9 +40,8 @@ class StopWatchControl final : public Power {
   // Writes only on a change: the speaker task calls this for every chunk.
   bool set_amplifier(bool on);
 
-  // With the cell's measured discharge curve read() reports a percentage;
-  // without, none.
-  void use_curve(Curve discharge) { percent_.emplace(discharge); }
+  // With the cell's measured curves read() reports a percentage; without, none.
+  void use_curves(Curve discharge, Curve charge = {}) { percent_.emplace(discharge, charge); }
   std::optional<PowerStatus> read() override;
   // The PM1's shutdown command. The amplifier goes off first.
   bool power_off() override;

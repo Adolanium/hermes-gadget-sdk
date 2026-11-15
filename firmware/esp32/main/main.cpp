@@ -505,7 +505,7 @@ extern "C" void app_main(void) {
   }
   if (board.stopwatch && peripherals_ready) {  // peripherals_ready includes g_stopwatch.begin()
     hal.power = &g_stopwatch;
-    g_stopwatch.use_curve(board.battery_curve);
+    g_stopwatch.use_curves(board.battery_curve, board.battery_charge_curve);
     g_wifi.on_battery = [] { return g_stopwatch.external_power() == std::optional<bool>(false); };
   }
   const bool audio_power = peripherals_ready && (!board.axp_audio_supply || g_power.enable_audio_supply());

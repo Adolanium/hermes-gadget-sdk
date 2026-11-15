@@ -938,6 +938,7 @@ BoardConfig make() {
   b.rtc.chip = RtcChip::Rx8130;
   b.rtc.addr = 0x32;
   b.battery_curve = hg::kStopWatchCurve;
+  b.battery_charge_curve = hg::kStopWatchChargeCurve;
   b.amoled.enabled = true;
   b.amoled.width = 466;
   b.amoled.height = 466;
