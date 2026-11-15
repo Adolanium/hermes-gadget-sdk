@@ -191,6 +191,14 @@ Copyright 2022-2026 Espressif Systems (Shanghai) CO LTD, Apache License 2.0.
 The adapter changes sleep-out and display-on to zero data bytes and explicit
 delays, and omits the legacy table terminator.
 
+The CoreS3 LCD register probe and software-SPI timing in
+firmware/drivers/cores3_panel.hpp are adapted from M5Stack M5GFX,
+https://github.com/m5stack/M5GFX/tree/28d47949bdc84f30881623476f555398e2194313,
+src/board_detect/m5/board_registry.inl and src/board_detect/probe_hardware.inl,
+Copyright (c) 2021 M5Stack, MIT License (LICENSES/M5GFX-MIT.txt).
+The adapter retains known touch-firmware hints, uses a bounded CoreS3-only GPIO
+interface and rejects unrecognized LCD signatures instead of assuming C.
+
 The CoreS3 ILI9342E initialization table in firmware/esp32/main/panel_cores3.hpp
 is adapted from Espressif's m5stack_core_s3 BSP,
 https://github.com/espressif/esp-bsp/tree/master/bsp/m5stack_core_s3,
