@@ -1,9 +1,9 @@
 diff -ruN a/tailtiny/CMakeLists.txt b/tailtiny/CMakeLists.txt
---- a/tailtiny/CMakeLists.txt	2026-10-29 15:01:09.000000000 +0000
-+++ b/tailtiny/CMakeLists.txt	2026-10-29 15:02:55.046472095 +0000
+--- a/tailtiny/CMakeLists.txt	2026-11-08 09:32:00.898342294 +0000
++++ b/tailtiny/CMakeLists.txt	2026-11-08 09:32:26.719793935 +0000
 @@ -1,4 +1,9 @@
 -set(SRCS
-+# TailTiny, vendored: ../TAILTINY.md has the pinned commit and our patches.
++# TailTiny, vendored: ../TAILTINY.md has the pinned release and our patches.
 +# Compiled only when CONFIG_HG_TAILNET is on. The requirements stay unconditional:
 +# ESP-IDF resolves them before the sdkconfig exists.
 +set(SRCS)
@@ -12,15 +12,7 @@ diff -ruN a/tailtiny/CMakeLists.txt b/tailtiny/CMakeLists.txt
      "src/tailtiny.c"
      "src/ml_coord.c"
      "src/ml_derp.c"
-@@ -13,12 +18,14 @@
-     "src/nacl_box.c"
-     "src/x25519.c"
-     "src/ml_zerocopy.c"
--    "src/ml_cellular.c"
-+    # src/ml_cellular.c: the 4G modem driver, left out (CONFIG_ML_ENABLE_CELLULAR stays off,
-+    # and the file includes driver/uart.h outside its #ifdef).
-     "src/ml_at_socket.c"
-     "src/ml_net_switch.c"
+@@ -19,6 +24,7 @@
      "src/ml_config_httpd.c"
      "src/ml_json_strip.c"
  )
@@ -28,42 +20,21 @@ diff -ruN a/tailtiny/CMakeLists.txt b/tailtiny/CMakeLists.txt
  
  set(REQUIRES
      nvs_flash
-@@ -28,8 +35,10 @@
-     esp_timer
-     lwip
-     mbedtls
--    json
-+    espressif__cjson
-     driver
-+    # ESP-IDF 6 dropped UART from `driver`; ml_at_socket.c includes driver/uart.h.
-+    esp_driver_uart
-     esp_driver_tsens
-     esp_http_server
- )
-@@ -43,3 +52,9 @@
-     PRIV_REQUIRES
-         wireguard_lwip
- )
-+
-+if(CONFIG_HG_TAILNET)
-+    # GCC 15: protocol constants (HSalsa20's sigma) are byte arrays initialised from
-+    # strings of exactly their length, deliberately without the NUL.
-+    target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-unterminated-string-initialization)
-+endif()
 diff -ruN a/tailtiny/idf_component.yml b/tailtiny/idf_component.yml
---- a/tailtiny/idf_component.yml	2026-10-29 15:01:09.000000000 +0000
-+++ b/tailtiny/idf_component.yml	2026-10-29 15:02:55.046472095 +0000
-@@ -3,5 +3,5 @@
+--- a/tailtiny/idf_component.yml	2026-11-08 09:32:00.898342294 +0000
++++ b/tailtiny/idf_component.yml	2026-11-08 09:32:26.719866018 +0000
+@@ -3,8 +3,6 @@
  url: "https://github.com/Asimmimx/tailtiny"
  dependencies:
-   idf: ">=5.0"
+   idf: ">=5.3"
 -  wireguard_lwip:
 -    path: "components/wireguard_lwip"
-+  # ESP-IDF 6 no longer ships cJSON as the `json` component.
-+  espressif/cjson: "^1.7.19"
+   # ESP-IDF 6 no longer ships cJSON; ESP-IDF 5 keeps its built-in `json` component.
+   espressif/cjson:
+     version: "^1.7.19"
 diff -ruN a/tailtiny/Kconfig b/tailtiny/Kconfig
---- a/tailtiny/Kconfig	2026-10-29 15:01:09.000000000 +0000
-+++ b/tailtiny/Kconfig	2026-10-29 15:02:55.046472095 +0000
+--- a/tailtiny/Kconfig	2026-11-08 09:32:00.898342294 +0000
++++ b/tailtiny/Kconfig	2026-11-08 09:32:26.720427103 +0000
 @@ -1,4 +1,5 @@
  menu "TailTiny Configuration"
 +    depends on HG_TAILNET
@@ -71,8 +42,8 @@ diff -ruN a/tailtiny/Kconfig b/tailtiny/Kconfig
      config ML_ZERO_COPY_WG
          bool "Enable zero-copy WireGuard receive (high-throughput mode)"
 diff -ruN a/wireguard_lwip/CMakeLists.txt b/wireguard_lwip/CMakeLists.txt
---- a/wireguard_lwip/CMakeLists.txt	2026-10-29 15:01:09.000000000 +0000
-+++ b/wireguard_lwip/CMakeLists.txt	2026-10-29 15:02:55.047737517 +0000
+--- a/wireguard_lwip/CMakeLists.txt	2026-11-08 09:32:00.899135794 +0000
++++ b/wireguard_lwip/CMakeLists.txt	2026-11-08 09:32:26.720623312 +0000
 @@ -1,5 +1,8 @@
 -idf_component_register(
 -    SRCS
@@ -97,7 +68,7 @@ diff -ruN a/wireguard_lwip/CMakeLists.txt b/wireguard_lwip/CMakeLists.txt
      INCLUDE_DIRS
          "src"
          "src/crypto/refc"
-@@ -17,12 +24,17 @@
+@@ -17,12 +24,14 @@
          esp_timer
  )
  
@@ -108,9 +79,6 @@ diff -ruN a/wireguard_lwip/CMakeLists.txt b/wireguard_lwip/CMakeLists.txt
 +    target_compile_definitions(${COMPONENT_LIB} PRIVATE
 +        WIREGUARD_CRYPTO_REFC=1
 +    )
-+    # GCC 15: the protocol names (CONSTRUCTION, IDENTIFIER, LABEL_*) are byte arrays
-+    # initialised from strings of exactly their length, deliberately without the NUL.
-+    target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-unterminated-string-initialization)
  
 -# Disable stringop-overread warning for x25519.c (false positive in GCC array bounds check)
 -set_source_files_properties(

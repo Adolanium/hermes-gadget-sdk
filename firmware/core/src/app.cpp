@@ -37,6 +37,15 @@ bool band_in(const json::Value& v, int px, mascot::Band& out) {
 }
 
 constexpr uint32_t kBootScreenMs = 800;
+// How long ago `since` was, at `t`; 0 when `since` is later. tick() reads the clock once, and
+// a stamp it takes later in the same tick with now() (connect_now() setting phase_since_)
+// can be a few milliseconds past `t`: unsigned, that difference wrapped to ~49 days and fired
+// the timeout at once, so a connection was closed as it opened ("connect timeout") and the
+// device waited out a backoff before the next try.
+uint32_t elapsed(uint32_t t, uint32_t since) {
+  return static_cast<int32_t>(t - since) > 0 ? t - since : 0;
+}
+
 constexpr uint32_t kConnectTimeoutMs = 10000;
 constexpr uint32_t kHandshakeTimeoutMs = 10000;
 constexpr uint32_t kStableSessionMs = 30000;
@@ -67,7 +76,7 @@ constexpr uint32_t kBackoffMs[] = {1000, 2000, 4000, 8000, 15000, 30000};
 constexpr size_t kBackoffSteps = sizeof(kBackoffMs) / sizeof(kBackoffMs[0]);
 
 const char* const kSettingKeys[] = {"name", "server", "token", "talk_mode", "volume", "brightness", "screen_timeout", "battery_display", "battery_estimate", "language", "wifi_ssid", "wifi_pass",
-                                    "face_down_sleep", "clock", "time_format", "touch_wake", "battery_alert", "battery_alert_sound", "charging_notice", "charging_sound", "charged_notice", "charged_sound", "double_home", "wake_talk", "touch_talk", "profile_grid", "wifi_deep_sleep"};
+                                    "face_down_sleep", "clock", "time_format", "touch_wake", "battery_alert", "battery_alert_sound", "charging_notice", "charging_sound", "charged_notice", "charged_sound", "double_home", "wake_talk", "touch_talk", "profile_grid", "wifi_deep_sleep", "animation", "sd_log"};
 
 // NVS limits storage keys to 15 characters; keep the public setting name unchanged.
 std::string_view setting_storage_key(std::string_view key) {
@@ -183,7 +192,8 @@ const App::Route App::kRoutes[] = {
     {"prompt.close", &App::h_prompt_close}, {"ota.offer", &App::h_ota_offer},
     {"ota.begin", &App::h_ota_begin},     {"ota.end", &App::h_ota_end},
     {"ota.abort", &App::h_ota_abort},     {"dashboard", &App::h_dashboard},
-    {"profile", &App::h_profile},         {"face", &App::h_face},
+    {"profile", &App::h_profile},         {"profiles", &App::h_profiles},
+    {"face", &App::h_face},
     {"face.start", &App::h_face_start},   {"face.end", &App::h_face_end},
     {"face.thumb", &App::h_face_thumb},   {"face.thumb.start", &App::h_face_thumb_start},
     {"face.thumb.end", &App::h_face_thumb_end},
@@ -243,6 +253,8 @@ void App::load_settings() {
   wake_talk_ = setting("wake_talk", "off") == "on";
   touch_talk_ = !profile_.talk_key || setting("touch_talk", "on") != "off";
   wifi_deep_sleep_ = setting("wifi_deep_sleep", "on") != "off";
+  animation_ = setting("animation", "on") != "off";
+  sd_log_ = setting("sd_log", "off") == "on";
   {
     const int grid = std::atoi(setting("profile_grid", "9").c_str());
     profile_grid_ = static_cast<uint8_t>(grid == 4 || grid == 6 || grid == 16 ? grid : 9);
@@ -746,28 +758,52 @@ void App::h_welcome(const json::Value& m) {
   // The held face stays only if the welcome names it, paired (else revoked, or a new route: the mascot).
   if (face_ && (!paired_ || m["face"].as_string() != face_->hash)) face_.reset();
   log(LogLevel::Info, paired_ ? "online (paired)" : "online (waiting for pairing approval)");
+  // Thumbnails go with pairing, like the face, and with the profiles no longer offered.
+  thumb_in_.reset();
+  set_agent_roster(m["profiles"]);
+  if (m["profile"].is_string()) set_agent_profile(m["profile"].as_string());
+  profile_pending_.clear();  // the welcome says which profile answers
+  // A freshly installed firmware has reached Hermes, so it can take the next update: keep it.
+  if (hal_.updater && hal_.updater->pending_verify()) {
+    hal_.updater->confirm();
+    log(LogLevel::Info, "new firmware " + profile_.firmware + " reached Hermes; keeping it");
+  }
+}
+
+void App::set_agent_roster(const json::Value& profiles) {
   agent_profiles_.clear();
-  for (const auto& p : m["profiles"].elements()) {
+  for (const auto& p : profiles.elements()) {
     if (agent_profiles_.size() >= kMaxProfiles) break;
     const std::string& id = p["id"].as_string();
     if (id.empty()) continue;
     const std::string& name = p["name"].as_string();
     agent_profiles_.push_back({id, (name.empty() ? id : name).substr(0, 24)});
   }
-  if (m["profile"].is_string()) set_agent_profile(m["profile"].as_string());
-  profile_pending_.clear();  // the welcome says which profile answers
-  // Thumbnails go with pairing, like the face, and with the profiles no longer offered.
-  thumb_in_.reset();
   for (size_t i = 0; i < thumb_slots_.size(); ++i) {
     bool offered = false;
     for (const auto& p : agent_profiles_) offered = offered || p.id == thumb_slots_[i].id;
     if (!paired_ || !offered) drop_thumb(i);
   }
-  // A freshly installed firmware has reached Hermes, so it can take the next update: keep it.
-  if (hal_.updater && hal_.updater->pending_verify()) {
-    hal_.updater->confirm();
-    log(LogLevel::Info, "new firmware " + profile_.firmware + " reached Hermes; keeping it");
+}
+
+// Hermes's offered profiles changed while the device is connected (one created, deleted or taken off the
+// offer): the new list replaces the welcome's. An open grid redraws in place, on the same page while it
+// still has cells, else on the last one; with nothing left to switch to it closes. The profile answering
+// the device is not changed here: Hermes sends `profile` for that.
+void App::h_profiles(const json::Value& m) {
+  if (phase_ != Phase::Online || !m["profiles"].is_array()) return;
+  set_agent_roster(m["profiles"]);
+  if (profile_picker_open()) {
+    if (agent_profiles_.size() < 2) {
+      dismiss_overlay();
+    } else {
+      update_model();
+      const int per = ui_ ? ui_->profile_per_page(model_) : 0;
+      const int cells = static_cast<int>(model_.dash.size());
+      if (per > 0 && profile_page_ >= cells) profile_page_ = (cells - 1) / per * per;
+    }
   }
+  update_model();
 }
 
 void App::h_profile(const json::Value& m) {
@@ -1553,6 +1589,24 @@ void App::on_button(Button button, bool pressed, bool touch) {
     update_model();
     return;
   }
+  // The camera screen owns the input: a tap (a TALK key press too) is the trigger,
+  // a swipe down's CANCEL release leaves. Nothing records here.
+  if (camera_open_) {
+    if (button == Button::Cancel) {
+      if (pressed) {
+        cancel_held_ = true;
+        cancel_down_at_ = now();
+        cancel_long_fired_ = false;
+        camera_touch_at_ = now();
+      } else if (cancel_held_) {
+        cancel_held_ = false;
+        if (!cancel_long_fired_) close_camera();
+      }
+      return;
+    }
+    if (button == Button::Talk && pressed) camera_tap();
+    return;
+  }
   switch (button) {
     case Button::Talk:
       if (pressed) {
@@ -1734,6 +1788,7 @@ void App::cancel_listening(std::string_view why) {
 
 void App::go_home() {
   wake_display();
+  close_camera();
   if (mode_ == Mode::Listening) cancel_listening("cancelled");
   if (rec_on_) cancel_upload("cancelled");  // a finished recording still uploading goes with the turn
   // Leaving the bot stops it: a reply on its way, or one the first press talked over.
@@ -1846,6 +1901,7 @@ void App::start_new_session() {
   if (rec_on_) cancel_upload("new session");
   stop_playback();
   dismiss_overlay();
+  close_camera();
   clear_prompt();
   send(proto::message("session.new"));
   reply_.clear();
@@ -2236,6 +2292,7 @@ void App::tick() {
   motion_tick();
   clock_tick();
   settings_tick();
+  camera_tick();
   phone_tick();
 
   if (phase_ == Phase::Boot && static_cast<int32_t>(t - boot_until_) >= 0) {
@@ -2259,26 +2316,26 @@ void App::tick() {
     }
   }
 
-  if (phase_ == Phase::Connecting && !reconnect_pending_ && t - phase_since_ > kConnectTimeoutMs) {
+  if (phase_ == Phase::Connecting && !reconnect_pending_ && elapsed(t, phase_since_) > kConnectTimeoutMs) {
     hal_.transport->close();
     drop_session("connect timeout");
     update_model();
-  } else if (phase_ == Phase::Handshake && t - phase_since_ > kHandshakeTimeoutMs) {
+  } else if (phase_ == Phase::Handshake && elapsed(t, phase_since_) > kHandshakeTimeoutMs) {
     hal_.transport->close();
     drop_session("handshake timeout");
     update_model();
-  } else if (phase_ == Phase::Online && t - last_rx_ > 3 * heartbeat_ms_) {
+  } else if (phase_ == Phase::Online && elapsed(t, last_rx_) > 3 * heartbeat_ms_) {
     hal_.transport->close();
     drop_session("server silent");
     update_model();
-  } else if (!profile_pending_.empty() && t - profile_pending_at_ > kProfileReplyMs) {
+  } else if (!profile_pending_.empty() && elapsed(t, profile_pending_at_) > kProfileReplyMs) {
     // The switch may still have happened: reconnect, and the welcome says which profile answers.
     hal_.transport->close();
     drop_session("no answer to the profile switch");
     update_model();
   }
 
-  if (ota_busy() && t - ota_last_rx_ > kOtaIdleMs) {
+  if (ota_busy() && elapsed(t, ota_last_rx_) > kOtaIdleMs) {
     ota_fail("timeout", "the update stalled");
     update_model();
   }
@@ -2317,14 +2374,14 @@ void App::tick() {
       update_model();
     }
   }
-  if (mode_ == Mode::Listening && t - mode_since_ > kMaxUtteranceMs) {
+  if (mode_ == Mode::Listening && elapsed(t, mode_since_) > kMaxUtteranceMs) {
     finish_listening();
     update_model();
   }
   if (!prompt_id_.empty()) last_turn_rx_ = t;  // Hermes is waiting for the user, not stuck
   // Hermes ends every turn it starts (turn.end), and a lost connection ends it here: once
   // it has started, the device waits on (the screen lit) through a long task.
-  if (mode_ == Mode::Thinking && t - last_turn_rx_ > (turn_started_ ? kTurnTimeoutMs : kThinkingTimeoutMs)) {
+  if (mode_ == Mode::Thinking && elapsed(t, last_turn_rx_) > (turn_started_ ? kTurnTimeoutMs : kThinkingTimeoutMs)) {
     if (rec_on_) cancel_upload("timeout");  // a recording the link never finished taking
     mode_ = Mode::Idle;
     notice_ = tr(i18n::Msg::NoReplyFromHermes);
@@ -2332,7 +2389,7 @@ void App::tick() {
     update_model();
   }
   if (mode_ == Mode::Responding && !speaking()) {
-    bool settled = turn_done_ || (reply_final_ && t - last_turn_rx_ > kSettleAfterReplyMs);
+    bool settled = turn_done_ || (reply_final_ && elapsed(t, last_turn_rx_) > kSettleAfterReplyMs);
     if (settled) {
       mode_ = Mode::Idle;
       mode_since_ = t;
@@ -2353,7 +2410,7 @@ void App::tick() {
     notice_until_ = 0;
     update_model();
   }
-  if (cancel_held_ && !talk_held_ && !settings_open() && !cancel_long_fired_ && !prompt_showing()) {
+  if (cancel_held_ && !talk_held_ && !settings_open() && !cancel_long_fired_ && !prompt_showing() && !camera_open_) {
     uint32_t held = t - cancel_down_at_;
     if (held >= kNewSessionHoldMs) {
       cancel_long_fired_ = true;
@@ -2422,6 +2479,7 @@ void App::update_model() {
   m.color_test = false;
   m.settings_hold = settings_hold_live();
   m.timer_permille = timer_permille();
+  m.animate = animation_;
   m.progress_permille = -1;
   m.flash = false;
   m.battery = m.face_battery = -1;
@@ -2548,6 +2606,14 @@ void App::update_model() {
     m.detail = tr(level ? Msg::Charging : Msg::UsbPower);
     m.face_battery = level ? static_cast<int8_t>(std::min<int>(*percent, 100)) : int8_t(-1);
     m.hint.clear();
+    if (!display_sleeping_) render(m);
+    return;
+  } else if (camera_open_) {
+    // The camera owns the rows between the bars: the draw step paints the live
+    // view (and the countdown number over it) straight to them, and the photo
+    // once. The Ui still draws the bars, and the alerts above cover the screen.
+    camera_draw();
+    camera_model();
     if (!display_sleeping_) render(m);
     return;
   } else if (!fatal_.empty()) {
@@ -2879,7 +2945,7 @@ std::string App::console(std::string_view raw) {
     if (profile_.tailnet)
       for (const char* k : kTailnetKeys) keys += std::string(" ") + k;
     return "@help commands: status | diag [log] | get <key> | set <key> <value> | say <text> | talk | release | "
-           "cancel | new-session | settings [close] | wifi-setup [close] | wifi [list | add <ssid> [password] | join <ssid> | "
+           "cancel | new-session | camera [close] | settings [close] | wifi-setup [close] | wifi [list | add <ssid> [password] | join <ssid> | "
            "forget <ssid>] | phone [pair [close] | forget] | perf [on | off | reset | budget <us> | bench [scroll | mascot | redraw | all]] | yes | no | reconnect | forget-key | factory-reset   keys:" + keys;
   }
   if (cmd == "status") return "@status " + status_json();
@@ -2904,6 +2970,10 @@ std::string App::console(std::string_view raw) {
   if (cmd == "settings") {
     if (rest == "close") { close_settings(); return "@ok settings closed"; }
     return open_settings() ? "@ok settings" : "@error settings unavailable during a prompt or update";
+  }
+  if (cmd == "camera") {
+    if (rest == "close") { close_camera(); return "@ok camera closed"; }
+    return open_camera() ? "@ok camera" : "@error camera unavailable (no camera, or during a prompt, update or pairing)";
   }
   if (cmd == "perf") return perf_command(rest);
   if (cmd == "diag" && rest.empty()) return diag_report();
@@ -2956,6 +3026,10 @@ std::string App::console(std::string_view raw) {
       return "@error touch_talk must be on or off";
     if (key == "wifi_deep_sleep" && !value.empty() && value != "on" && value != "off")
       return "@error wifi_deep_sleep must be on or off";
+    if (key == "animation" && !value.empty() && value != "on" && value != "off")
+      return "@error animation must be on or off";
+    if (key == "sd_log" && !value.empty() && value != "on" && value != "off")
+      return "@error sd_log must be on or off";
     if (key == "profile_grid" && !value.empty() && value != "4" && value != "6" && value != "9" && value != "16")
       return "@error profile_grid must be 4, 6, 9 or 16";
     if (key == "clock" && !value.empty() &&

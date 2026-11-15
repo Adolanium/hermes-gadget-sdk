@@ -264,7 +264,8 @@ constexpr Msg kLines[] = {
     Msg::Cancelled, Msg::NewSessionIn, Msg::NewSession, Msg::MicUnavailable, Msg::AnsweredYes, Msg::AnsweredNo,
     Msg::PhonePaired, Msg::PhonePairingFailed, Msg::PhonePairingClosed, Msg::BluetoothUnavailable,
     Msg::WifiSetupUnavailable, Msg::ProfileListHint, Msg::ProfileCantSwitch, Msg::ProfileRefusedBusy,
-    Msg::ProfileRefusedUnknown, Msg::ProfileRefused,
+    Msg::ProfileRefusedUnknown, Msg::ProfileRefused, Msg::CameraTake, Msg::CameraHoldStill, Msg::CameraRetake,
+    Msg::CameraFailed,
     // hero headlines and one-line captions
     Msg::HiImHermes, Msg::AskMeAnything, Msg::UpShowsLastReply, Msg::SwipeDownForSessions,
     Msg::ButtonShowsSessions, Msg::LowBattery, Msg::Listening, Msg::SpeakNowPause, Msg::LiftFingerToSend, Msg::OfflineStillRecording, Msg::ReconnectingToSend,

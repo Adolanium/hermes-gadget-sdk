@@ -1,0 +1,6 @@
+{
+  "title": "LCDWIKI ES3C28P",
+  "summary": "2.8 inch 240×320 touchscreen, onboard microphone and speaker output. Experimental.",
+  "docs": "docs/hardware.md#lcdwiki-es3c28p",
+  "ready_made": true
+}

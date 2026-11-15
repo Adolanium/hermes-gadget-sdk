@@ -1,6 +1,6 @@
 diff -ruN a/tailtiny/include/tailtiny_internal.h b/tailtiny/include/tailtiny_internal.h
---- a/tailtiny/include/tailtiny_internal.h	2026-10-29 15:12:21.000000000 +0000
-+++ b/tailtiny/include/tailtiny_internal.h	2026-10-29 15:12:21.211127558 +0000
+--- a/tailtiny/include/tailtiny_internal.h	2026-11-08 09:32:26.725358160 +0000
++++ b/tailtiny/include/tailtiny_internal.h	2026-11-08 09:32:26.731446844 +0000
 @@ -58,19 +58,21 @@
  #define ML_TASK_APP_CORE        1
  #endif
@@ -28,8 +28,8 @@ diff -ruN a/tailtiny/include/tailtiny_internal.h b/tailtiny/include/tailtiny_int
  #define ML_TASK_WG_MGR_CORE     ML_TASK_APP_CORE
  
 diff -ruN a/tailtiny/src/ml_wg_mgr.c b/tailtiny/src/ml_wg_mgr.c
---- a/tailtiny/src/ml_wg_mgr.c	2026-10-29 15:12:21.000000000 +0000
-+++ b/tailtiny/src/ml_wg_mgr.c	2026-10-29 15:12:21.211327934 +0000
+--- a/tailtiny/src/ml_wg_mgr.c	2026-11-08 09:32:00.898342294 +0000
++++ b/tailtiny/src/ml_wg_mgr.c	2026-11-08 09:32:26.732643473 +0000
 @@ -1455,7 +1455,8 @@
          if (dev && p->wg_peer_index < WIREGUARD_MAX_PEERS) {
              struct wireguard_peer *wp = &dev->peers[p->wg_peer_index];

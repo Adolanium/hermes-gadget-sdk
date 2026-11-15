@@ -91,14 +91,14 @@ After Wi-Fi connects, the gadget waits for the tailnet before it contacts Hermes
 
 | Shown | Meaning |
 |---|---|
-| Joining tailnet | Registering with Tailscale. This can take 15 seconds or more. |
+| Joining tailnet | Registering with Tailscale. This can take 15 seconds or more. If a session with the Hermes computer is already up meanwhile, the gadget connects without waiting for the rest. |
 | Reaching Hermes over the tailnet | On the tailnet; setting up the encrypted session with the Hermes computer. |
 | Tailnet: auth key rejected | The key is wrong, used up or expired. Make a new one and `set ts_key` again. |
 | Tailnet: *the control server's reason* | Tailscale refused the gadget and said why, for example `invalid key: API key … not valid` after the gadget was removed in the admin console: its saved key is spent. Make a new key and `set ts_key` again. |
 | Tailnet: approve this device in the admin console | Your tailnet requires approval and the key wasn't pre-approved. |
 | Tailnet: no auth key (set ts_key) | `tailnet` is on but no key is saved. |
 | Tailnet: Hermes host unreachable | The session with the Hermes computer stopped. Check that it's online, and that your access rules allow the gadget port. |
-| Tailnet reconnecting | The gadget lost its connection to Tailscale and to the Hermes computer, for more than 15 seconds once it had been connected, and is getting it back. Before the first connection it shows at once. When only the connection to Tailscale's servers is replaced, which happens from time to time, the session with Hermes carries on. |
+| Tailnet reconnecting | The gadget lost its connection to Tailscale and to the Hermes computer, for more than 15 seconds once it had been connected, and is getting it back. Before the first connection it shows at once. After a Wi-Fi change it also shows until the gadget is registered with Tailscale again on the new network. When only the connection to Tailscale's servers is replaced, which happens from time to time, the session with Hermes carries on. |
 
 Once it is up, the gadget connects as usual: pairing, Ready and replies don't change.
 

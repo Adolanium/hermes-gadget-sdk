@@ -192,12 +192,12 @@ EdgeRing edge_ring(const UiModel& m) {
     return r;
   }
   switch (m.screen) {
-    case Screen::Thinking: comet(24, kBlue); break;
+    case Screen::Thinking: if (m.animate) comet(24, kBlue); break;
     case Screen::Responding:
-      if (m.speaking) comet(40, kAccent);
+      if (m.speaking && m.animate) comet(40, kAccent);
       break;
     case Screen::Boot:
-    case Screen::Connecting: comet(24, kAccent); break;
+    case Screen::Connecting: if (m.animate) comet(24, kAccent); break;
     default: break;
   }
   return r;
@@ -239,6 +239,8 @@ int tri(uint32_t frame, int period) {
 }
 
 mascot::Frame mascot_frame(const UiModel& m) {
+  // With animation off the Updating mascot never blinks, so the screen stands still.
+  if (m.screen == Screen::Updating && !m.animate) return mascot::Frame::Idle;
   mascot::Frame f = m.frame % 45 < 2 ? mascot::Frame::Blink : mascot::Frame::Idle;  // blink every ~4.5 s
   if (m.screen == Screen::Responding && m.speaking) f = (m.frame / 2) % 2 ? mascot::Frame::Talk : mascot::Frame::Idle;
   const bool still = m.face && m.face->rgb565 && !m.face->band(f).rows;  // a colour face without that frame
@@ -264,7 +266,11 @@ uint32_t hero_anim_key(const UiModel& m) {
     case Screen::Listening: h.val(m.frame % 3).val(m.level / 20); break;
     case Screen::Thinking:
     case Screen::Connecting:
-    case Screen::Updating: h.val((m.frame / 2) % 4); break;
+      h.val((m.frame / 2) % 4);
+      break;
+    case Screen::Updating:
+      if (m.animate) h.val((m.frame / 2) % 4);
+      break;
     case Screen::Responding: h.val((m.frame / 2) % 3); break;
     default: break;
   }
@@ -316,6 +322,7 @@ const char* screen_name(Screen s) {
     case Screen::Prompt: return "prompt";
     case Screen::Updating: return "updating";
     case Screen::Settings: return "settings";
+    case Screen::Camera: return "camera";
     case Screen::Setup: return "setup";
     case Screen::Dashboard: return "dashboard";
     case Screen::Profiles: return "profiles";
@@ -649,8 +656,9 @@ void Ui::draw_frame(const UiModel& m) {
       hash_[i] = 0;
       continue;
     }
-    // An image owns the area between the bars; the app draws and flushes it.
-    if (m.screen == Screen::Image && (i == 1 || i == 2)) {
+    // An image owns the area between the bars; the app draws and flushes it. The
+    // camera screen does too (the port paints the live view there; see App::camera_draw).
+    if ((m.screen == Screen::Image || m.screen == Screen::Camera) && (i == 1 || i == 2)) {
       hash_[i] = 0;
       continue;
     }
@@ -809,8 +817,14 @@ void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
   switch (m.screen) {
     case Screen::Boot:
     case Screen::Connecting:
-    case Screen::Updating:
       spinner(kAccent);
+      break;
+    case Screen::Updating:
+      if (m.animate) spinner(kAccent);
+      else {
+        c.ring(cx, cy, r, s + 1, kAccent);
+        c.fill_circle(cx, cy, r / 3, kAccentDim);
+      }
       break;
     case Screen::Thinking:
       spinner(kBlue);
@@ -860,6 +874,7 @@ void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
       break;
     }
     case Screen::Image:
+    case Screen::Camera:  // the area between the bars belongs to the camera/App; see draw_frame
     case Screen::Settings:
     case Screen::Setup:
     case Screen::Profiles:
@@ -1236,6 +1251,7 @@ constexpr uint8_t kSettingIcons[][8] = {
     {0x0C, 0x18, 0x30, 0x7E, 0x0C, 0x18, 0x30, 0x00},  // Bolt
     {0x00, 0x01, 0x03, 0x86, 0xCC, 0x78, 0x30, 0x00},  // Check
     {0xDB, 0xDB, 0x00, 0xDB, 0xDB, 0x00, 0xDB, 0xDB},  // Grid
+    {0x18, 0x7E, 0x81, 0xBD, 0xA5, 0x81, 0x7E, 0x18},  // Camera
 };
 
 void draw_icon(Canvas& c, int x, int y, SettingRow::Icon icon, int scale, uint16_t color) {
@@ -1588,12 +1604,12 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
       c.arc(cx, cy, r, stroke, dir, col);
     }
   };
-  auto dots = [&](uint16_t on, uint16_t dim) {
+  auto dots = [&](uint16_t on, uint16_t dim, bool animate = true) {
     int r = std::max(2, size / 30);
     int gap = 3 * r;
     int tx = mx + size * a.head_top_right.x / 1000;
     int ty = my + size * a.head_top_right.y / 1000;
-    int active = static_cast<int>((m.frame / 2) % 4);
+    int active = animate ? static_cast<int>((m.frame / 2) % 4) : -1;
     for (int i = 0; i < 3; ++i) {
       c.fill_circle(tx + i * gap, ty - i * gap / 2, r, i == active ? on : dim);
     }
@@ -1613,8 +1629,8 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
       }
       break;
     case Screen::Thinking: dots(kBlue, kBlueDim); break;
-    case Screen::Connecting:
-    case Screen::Updating: dots(kAccent, kAccentDim); break;
+    case Screen::Connecting: dots(kAccent, kAccentDim); break;
+    case Screen::Updating: dots(kAccent, kAccentDim, m.animate); break;
     default: break;
   }
 

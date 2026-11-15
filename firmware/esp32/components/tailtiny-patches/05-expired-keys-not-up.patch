@@ -1,6 +1,6 @@
 diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
---- a/wireguard_lwip/src/wireguardif.c	2026-10-30 18:04:13.286736600 +0200
-+++ b/wireguard_lwip/src/wireguardif.c	2026-10-30 18:04:13.449523400 +0200
+--- a/wireguard_lwip/src/wireguardif.c	2026-11-08 09:32:00.899135794 +0000
++++ b/wireguard_lwip/src/wireguardif.c	2026-11-08 09:32:26.745528677 +0000
 @@ -1061,13 +1061,20 @@
  	return result;
  }
@@ -15,7 +15,7 @@ diff -ruN a/wireguard_lwip/src/wireguardif.c b/wireguard_lwip/src/wireguardif.c
  err_t wireguardif_peer_is_up(struct netif *netif, u8_t peer_index, ip_addr_t *current_ip, u16_t *current_port) {
  	struct wireguard_peer *peer;
  	struct wireguard_device *device = (struct wireguard_device *)netif->state;
- 	WG_LOCK(device);  // Hermes gadget patch
+ 	WG_LOCK(device);
  	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
  	if (result == ERR_OK) {
 -		if ((peer->curr_keypair.valid) || (peer->prev_keypair.valid)) {

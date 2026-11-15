@@ -189,6 +189,11 @@ tts:
 """
 
 
+# A device key known in advance, so its id can be an admin in the config before the gateway starts.
+ADMIN_KEY = bytes(range(101, 133))
+ADMIN_DEVICE = "hg-" + __import__("hashlib").sha256(ADMIN_KEY).hexdigest()[:16]
+
+
 def _face(profile: str) -> bytes:
     """A one-colour face file, different for each profile."""
     from hermes_gadget_plugin.face import FACE_BYTES
@@ -211,7 +216,9 @@ def two_profile_gateway(tmp_path, request):
     for where in (home, ops):
         shutil.copytree(REPO / "plugin", where / "plugins" / "gadget", ignore=shutil.ignore_patterns("__pycache__"))
     config = CONFIG.format(api=api_port, gadget=gadget_port).replace(
-        "      unauthorized_dm_behavior: pair\n", "      unauthorized_dm_behavior: pair\n      profiles: all\n")
+        "      unauthorized_dm_behavior: pair\n", "      unauthorized_dm_behavior: pair\n      profiles: all\n"
+        + ("      profile_mode: virtual\n" if getattr(request, "param", None) in ("virtual", "admin") else "")
+        + (f"      allow_admin_from: [{ADMIN_DEVICE}]\n" if getattr(request, "param", None) == "admin" else ""))
     (home / "config.yaml").write_text(config + "gateway:\n  multiplex_profiles: true\n", encoding="utf-8")
     (ops / "config.yaml").write_text(OPS_CONFIG.format(api=api_port), encoding="utf-8")
     (home / FACE_FILE).write_bytes(_face("default"))
@@ -241,6 +248,10 @@ def two_profile_gateway(tmp_path, request):
             proc.kill()
 
 
+# "stamp" marks the device's own chat with the picked profile, which Hermes versions with native session
+# admission accept only through validate_native_profile_route (NousResearch/hermes-agent#147690); "virtual"
+# gives each picked profile its own routed chat, which they accept as it is.
+@pytest.mark.parametrize("two_profile_gateway", ["stamp", "virtual"], indirect=True)
 def test_a_device_switches_to_a_second_profile_and_that_profile_answers(two_profile_gateway, make_sim):
     from hermes_gadget_plugin.face import ProfileFace
 
@@ -300,3 +311,56 @@ def test_a_device_switches_to_a_second_profile_and_that_profile_answers(two_prof
     assert sim.wait_for(lambda: faces() and faces()[-1]["hash"] == digest["default"], timeout=30)
     assert "You said: back again" in says("back again")
     assert chats()[-1]["model"] == "fake-gadget-model"
+
+
+@pytest.mark.parametrize("two_profile_gateway", ["admin"], indirect=True)
+def test_bot_chat_moves_a_profiles_bot_chat_onto_the_gadget_through_hermes(two_profile_gateway, make_sim, tmp_path):
+    """hermes gadget bot-chat end to end: Hermes's own /resume handler moves ops's Bot Chat onto the
+    gadget's chat, and the row in ops's state.db says so."""
+    import base64
+    import json
+    import sqlite3
+
+    gateway = two_profile_gateway
+    home = gateway["home"]
+    made = _hermes(home, "-p", "ops", "chat", "-c", "Bot Chat", "--create-if-missing", "-q", "hello ops")
+    assert made.returncode == 0, made.stdout + made.stderr
+    state = tmp_path / "admin-device"
+    state.mkdir()
+    (state / "nvs.json").write_text(json.dumps({"device_key": base64.b64encode(ADMIN_KEY).decode()}), encoding="utf-8")
+    sim = make_sim(gateway["url"], name="Lead", state="admin-device")
+    assert sim.wait_for(lambda: sim.status().get("pairing_code"), timeout=60)
+    assert sim.status()["device_id"] == ADMIN_DEVICE
+    approved = _hermes(home, "pairing", "approve", "gadget", sim.status()["pairing_code"])
+    assert approved.returncode == 0, approved.stdout + approved.stderr
+    assert sim.wait_screen("ready", timeout=30)
+
+    def bot_chat_row():
+        conn = sqlite3.connect(home / "profiles" / "ops" / "state.db")
+        try:
+            return conn.execute("SELECT source, chat_id FROM sessions WHERE title = 'Bot Chat'").fetchone()
+        finally:
+            conn.close()
+
+    assert bot_chat_row()[0] != "gadget"
+    # Ops hasn't approved the device: the gateway says so instead of sending a resume Hermes would refuse.
+    refused = _hermes(home, "gadget", "bot-chat", "Lead", "ops", "--timeout", "60")
+    assert refused.returncode == 1 and "ops hasn't approved this gadget yet" in refused.stdout + refused.stderr
+    assert bot_chat_row()[0] != "gadget"
+
+    def says(text):
+        sim.received.clear()
+        sim.type_text(text)
+        assert sim.wait_for(lambda: sim.last_received("turn.end") is not None
+                            and sim.last_received("reply") is not None, timeout=90), sim.received
+        return sim.last_received("reply").get("text", "")
+
+    offer = re.search(r"hermes -p ops pairing approve gadget (\w+)", says("hello ops"))  # the device is on ops now
+    assert offer, sim.received
+    approved = _hermes(home, "-p", "ops", "pairing", "approve", "gadget", offer.group(1))
+    assert approved.returncode == 0, approved.stdout + approved.stderr
+    moved = _hermes(home, "gadget", "bot-chat", "Lead", "ops", "--timeout", "90")
+    assert moved.returncode == 0, moved.stdout + moved.stderr
+    assert "now talks in ops's Bot Chat" in moved.stdout
+    assert bot_chat_row() == ("gadget", f"{ADMIN_DEVICE}~ops")
+    assert sim.wait_for(lambda: sim.last_received("profile") == {"type": "profile", "profile": "ops"}, timeout=10)

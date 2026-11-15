@@ -41,6 +41,7 @@ void App::close_phone_pairing() {
 void App::close_setup_screens() {
   close_wifi_setup();
   close_phone_pairing();
+  close_camera();
 }
 
 void App::on_phone_passkey(uint32_t passkey) {

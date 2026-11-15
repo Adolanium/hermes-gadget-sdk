@@ -1,7 +1,10 @@
-version: "3.0.2"
+version: "3.1.0"
 description: "Tailscale client for ESP32: WireGuard, DERP relay, DISCO, MagicDNS"
 url: "https://github.com/Asimmimx/tailtiny"
 dependencies:
-  idf: ">=5.0"
-  # ESP-IDF 6 no longer ships cJSON as the `json` component.
-  espressif/cjson: "^1.7.19"
+  idf: ">=5.3"
+  # ESP-IDF 6 no longer ships cJSON; ESP-IDF 5 keeps its built-in `json` component.
+  espressif/cjson:
+    version: "^1.7.19"
+    rules:
+      - if: "idf_version >=6.0"

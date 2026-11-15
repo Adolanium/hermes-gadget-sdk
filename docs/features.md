@@ -94,6 +94,7 @@ The screenshots come from the desktop simulator, which runs the same device core
 - **Settings from the grid.** A gear cell after the last profile opens the settings menu. [Device settings](using-gadget.md#device-settings-and-hardware-checks)
 - **Approval in each profile.** The first time you talk to a new profile, the screen shows the command that approves the gadget there. [Profile switching](hermes-integration.md#running-against-a-profile-or-a-multiplexed-gateway)
 - **One profile per gadget.** The host can pin a device to its own profile, with its own model, memory and personality. [One profile per gadget](hermes-integration.md#one-profile-per-gadget)
+- **A gadget that leads the other Bots.** `hermes gadget bot-chat` puts a gadget in a profile's Bot Chat, where it can message the other Hermes Bots and say what they answered. [A gadget that talks to the other Bots](hermes-integration.md#a-gadget-that-talks-to-the-other-bots)
 - **Clear refusals.** A device that a profile route refuses shows "Refused by a route" and its device ID instead of waiting for a code. [Profile switching and profile routes](hermes-integration.md#profile-switching-and-profile-routes)
 
 ## The Hermes plugin and dashboards
@@ -105,7 +106,7 @@ The screenshots come from the desktop simulator, which runs the same device core
 - **Status tiles.** Put up to eight lines, such as a NAS's state, on that list from a script on the host. [The dashboard](using-gadget.md#watch-hermes-sessions-on-the-dashboard)
 - **Gadgets tab.** The Hermes web dashboard lists your devices with board, firmware, last seen, online state and battery. [The Gadgets tab](hermes-integration.md#the-gadgets-tab-in-the-hermes-dashboard)
 - **Gadgets page in Hermes Desktop.** A gadget that runs in the desktop app's window, pairing with one click, a live copy of each device's screen, and buttons to send a card or run an action. [The Gadgets page](hermes-integration.md#the-gadgets-page-in-hermes-desktop)
-- **Device commands.** `hermes gadget devices`, `info`, `pair`, `update` and `forget` manage devices from the host. [Hermes integration](hermes-integration.md#hermes-surfaces-the-sdk-uses)
+- **Device commands.** `hermes gadget devices`, `info`, `pair`, `update`, `bot-chat` and `forget` manage devices from the host. [Hermes integration](hermes-integration.md#hermes-surfaces-the-sdk-uses)
 - **Speech language.** Set the language gadget speech is transcribed in, whichever profile answers. [Fix the language of gadget speech](hermes-integration.md#fix-the-language-of-gadget-speech)
 - **Faster replies.** Settings in Hermes that shorten the wait for an answer. [Making replies fast](hermes-integration.md#making-replies-fast)
 
@@ -146,9 +147,11 @@ The table shows what each board profile drives. In the battery column, "Voltage"
 | Spotpear ESP32-S3-1.54 muma | Touch version | Yes | Yes | Voltage | Light sleep | Smoke test |
 | Espressif ESP32-S3-BOX | Yes | Yes | Yes | No | | Not run on a board |
 | Espressif ESP32-S3-Korvo-2 | Yes | Yes | Yes | Voltage | | Not run on a board |
+| LCDWIKI ES3C28P | Yes | Yes | Output, needs a speaker | Voltage | | Partial report |
 | Espressif ESP32-S3-BOX-3 | Yes | Yes | Yes | No | | No report yet |
 | M5Stack CoreS3 | Yes | Yes | Yes | Gauge | | No report yet |
 | M5Stack StickS3 | No | Yes | Yes | Voltage | Face-down sleep | Smoke test |
+| M5Stack StopWatch | Yes | Yes | Yes | Voltage (measured curves) | Face-down sleep, clock chip | Partial report |
 | LilyGO T-Display-S3 | No | No | No | Voltage | Text through the USB console | Smoke test |
 | Elecrow CrowPanel 2.1-inch HMI | Yes | No | No | No | Knob; text through the USB console | Smoke test |
 | Elecrow CrowPanel 5.0-inch HMI | Yes | No | No | No | Text through the USB console | Boot check |

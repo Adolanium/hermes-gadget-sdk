@@ -34,4 +34,12 @@ void CoreS3Board::set_backlight(uint8_t percent) {
   if (control_ && !control_->set_brightness(percent)) ESP_LOGW("hg.cores3", "backlight update failed");
 }
 
+bool CoreS3Board::camera_power(bool on) {
+  return control_ && control_->camera_power(on);
+}
+
+bool CoreS3Board::camera_rails_off() {
+  return control_ && control_->camera_rails_off();
+}
+
 }  // namespace hgp

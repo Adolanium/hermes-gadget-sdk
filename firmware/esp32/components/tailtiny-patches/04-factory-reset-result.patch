@@ -1,7 +1,7 @@
 diff -ruN a/tailtiny/src/tailtiny.c b/tailtiny/src/tailtiny.c
---- a/tailtiny/src/tailtiny.c	2026-10-30 17:25:39.029609800 +0200
-+++ b/tailtiny/src/tailtiny.c	2026-10-30 17:25:39.056298100 +0200
-@@ -151,16 +151,25 @@
+--- a/tailtiny/src/tailtiny.c	2026-11-08 09:32:00.898342294 +0000
++++ b/tailtiny/src/tailtiny.c	2026-11-08 09:32:26.738857407 +0000
+@@ -154,16 +154,25 @@
      nvs_handle_t nvs;
      err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
      if (err == ESP_OK) {

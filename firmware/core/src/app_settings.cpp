@@ -13,7 +13,7 @@ bool App::settings_hold_live() const {
 }
 
 bool App::settings_title_hit(int x, int y) const {
-  return ui_ && settings_hold_live() && ui_->title_hit(x, y);
+  return ui_ && settings_hold_live() && !camera_open_ && ui_->title_hit(x, y);
 }
 
 // Steps over the items this board can't offer.
@@ -33,11 +33,17 @@ bool App::menu_offered(Menu item) const {
     case Menu::TouchWake: return profile_.touch_screen && profile_.wake_key && hal_.display != nullptr;
     case Menu::DoubleHome: return profile_.talk_key;
     case Menu::WakeTalk: return profile_.talk_key && hal_.mic != nullptr && hal_.display != nullptr;
+    case Menu::Animation: return hal_.display != nullptr;
+    case Menu::SdLog: return profile_.sd_log && hal_.display != nullptr;
     case Menu::FaceDownSleep: return can_sleep_face_down();
     case Menu::Clock: return hal_.display != nullptr;
     case Menu::PowerOff: return hal_.power && hal_.power->can_power_off();
     case Menu::WifiSetup: return static_cast<bool>(on_wifi_setup);
     case Menu::Phone: return static_cast<bool>(on_phone_pair);
+    case Menu::Camera:
+      // A camera screen draws into a whole-panel framebuffer, as an image does.
+      return hal_.camera != nullptr && hal_.camera->available() && hal_.display != nullptr &&
+             hal_.display->framebuffer_rows() == 0;
     case Menu::Closed: return false;
     default: return true;
   }
@@ -205,6 +211,12 @@ void App::settings_input(Button button, bool pressed) {
     case Menu::WakeTalk:
       console(wake_talk_ ? "set wake_talk off" : "set wake_talk on");
       break;
+    case Menu::Animation:
+      console(animation_ ? "set animation off" : "set animation on");
+      break;
+    case Menu::SdLog:
+      console(sd_log_ ? "set sd_log off" : "set sd_log on");
+      break;
     case Menu::FaceDownSleep:
       console(face_down_sleep_ ? "set face_down_sleep off" : "set face_down_sleep on");
       break;
@@ -240,6 +252,9 @@ void App::settings_input(Button button, bool pressed) {
         console(std::string("set battery_display ") + kNext[static_cast<int>(battery_display_)]);
       }
       break;
+    case Menu::Camera:
+      open_camera();
+      break;
     case Menu::Info:
     case Menu::Closed: break;
   }
@@ -254,7 +269,7 @@ void App::settings_tick() {
     settings_scroll_ += d > 0 ? (d + 1) / 2 : (d - 1) / 2;
     update_model();
   }
-  if (talk_held_ && cancel_held_ && !settings_chord_fired_ &&
+  if (talk_held_ && cancel_held_ && !settings_chord_fired_ && !camera_open_ &&
       now() - talk_down_at_ >= 1000 && now() - cancel_down_at_ >= 1000) {
     if (open_settings()) {
       settings_chord_fired_ = true;
@@ -334,6 +349,7 @@ SettingRow App::settings_row(Menu item, const std::string& label, const std::str
     case Menu::Speaker: row.icon = Icon::Note; row.kind = Kind::Action; break;
     case Menu::Display: row.icon = Icon::Screen; row.kind = Kind::Action; break;
     case Menu::Inputs: row.icon = Icon::Keys; row.kind = Kind::Action; break;
+    case Menu::Camera: row.icon = Icon::Camera; row.kind = Kind::Action; break;
     case Menu::Info: row.icon = Icon::Info; row.kind = Kind::Action; break;
     case Menu::Power:
       row.icon = Icon::Battery;
@@ -358,6 +374,8 @@ SettingRow App::settings_row(Menu item, const std::string& label, const std::str
     case Menu::Language: row.icon = Icon::Globe; break;
     case Menu::DoubleHome: row.icon = Icon::Back; row.kind = Kind::Toggle; row.level = double_home_; break;
     case Menu::WakeTalk: row.icon = Icon::Talk; row.kind = Kind::Toggle; row.level = wake_talk_; break;
+    case Menu::Animation: row.icon = Icon::Screen; row.kind = Kind::Toggle; row.level = animation_; break;
+    case Menu::SdLog: row.icon = Icon::Info; row.kind = Kind::Toggle; row.level = sd_log_; break;
     case Menu::Back: row.icon = Icon::Back; row.kind = Kind::Action; break;
     case Menu::Closed: break;
   }
@@ -505,6 +523,10 @@ void App::settings_item(Menu item, UiModel& m) const {
       m.detail = tr(Msg::InputCheck);
       m.body = tr(Msg::InputCheckIntro);
       break;
+    case Menu::Camera:
+      m.detail = tr(Msg::Camera);
+      m.body = tr(Msg::CameraIntro);
+      break;
     case Menu::Info:
       m.detail = tr(Msg::DeviceInfo);
       m.body = tr(Msg::DeviceInfoBody, {profile_.board, profile_.firmware, device_id_,
@@ -589,6 +611,14 @@ void App::settings_item(Menu item, UiModel& m) const {
     case Menu::WakeTalk:
       m.detail = tr(Msg::WakeTalk);
       m.body = tr(wake_talk_ ? Msg::WakeTalkOn : Msg::WakeTalkOff, {control(profile_.talk_label)});
+      break;
+    case Menu::Animation:
+      m.detail = tr(Msg::Animation);
+      m.body = tr(animation_ ? Msg::AnimationOn : Msg::AnimationOff);
+      break;
+    case Menu::SdLog:
+      m.detail = tr(Msg::SdLog);
+      m.body = tr(sd_log_ ? Msg::SdLogOn : Msg::SdLogOff);
       break;
     case Menu::FaceDownSleep:
       m.detail = tr(Msg::FaceDownSleep);

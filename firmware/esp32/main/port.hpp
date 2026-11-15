@@ -24,9 +24,11 @@
 #include "bmi270.hpp"
 #include "cores3.hpp"
 #include "pcf85063.hpp"
+#include "rx8130.hpp"
 #include "qmi8658.hpp"
 #include "shared_reply.hpp"
 #include "sticks3.hpp"
+#include "stopwatch.hpp"
 #include "speaker_pa.hpp"
 #include "speaker_underruns.hpp"
 #include "tag_scanner.hpp"
@@ -662,14 +664,18 @@ class TimePort {
   void set_wanted(bool on);
   // A sync arrived: records it and writes the RTC from the system clock.
   void on_synced();
-  bool rtc_ready() const { return chip_ != nullptr; }
+  bool rtc_ready() const { return chip_ != nullptr || rx8130_ != nullptr; }
+  const char* rtc_name() const { return rx8130_ ? "rx8130" : chip_ ? "pcf85063" : "none"; }
   hg::json::Value diag() const;  // {valid, synced, utc} for the diag report
 
  private:
   static void on_sntp(struct timeval* tv);  // SNTP context: posts TimeSynced
   void sync_sntp();  // starts or stops SNTP after set_network/set_wanted
   i2c_master_dev_handle_t dev_ = nullptr;
-  std::unique_ptr<hg::Pcf85063> chip_;
+  std::unique_ptr<hg::Pcf85063> chip_;  // one of the two, by RtcConfig::chip
+  std::unique_ptr<hg::Rx8130> rx8130_;
+  bool read_rtc(hg::WallTime& utc) { return rx8130_ ? rx8130_->read(utc) : chip_->read(utc); }
+  bool write_rtc(const hg::WallTime& utc) { return rx8130_ ? rx8130_->write(utc) : chip_->write(utc); }
   bool network_up_ = false, wanted_ = false;
   bool sntp_started_ = false;
   bool synced_ = false;  // set and read on the app task
@@ -715,11 +721,29 @@ class CoreS3Board {
  public:
   bool begin(i2c_master_bus_handle_t bus);
   void set_backlight(uint8_t percent);
+  // The GC0308's power/reset line: AW9523B P1_0, routed through CoreS3Control.
+  bool camera_power(bool on);
+  // The camera ribbon's power supplies down (the counterpart of camera_power(true)'s
+  // rails), leaving everything else on the same PMIC registers as it is.
+  bool camera_rails_off();
 
  private:
   i2c_master_dev_handle_t pmic_ = nullptr, expander_ = nullptr;
   std::unique_ptr<hg::CoreS3Control> control_;
 };
+
+// The CoreS3's hg::Camera implementation (port_camera_cores3.cpp). camera_hal()
+// returns nullptr on any other board; camera_hal_set_display() gives it the
+// panel for the live preview (call once after the display is up). The pipeline
+// starts on demand — camera_hal_begin() runs after the board's camera rails and
+// reset pulse — and camera_hal_stop() is its counterpart. A failed start
+// latches for the boot (camera_hal_start_failed(), and available() goes false).
+hg::Camera* camera_hal();
+void camera_hal_set_display(hg::Display* display);
+bool camera_hal_begin();
+bool camera_hal_running();
+bool camera_hal_start_failed();
+void camera_hal_stop();
 
 // The M5PM1's rails, amplifier and battery. Hal::power once begin() succeeded.
 class StickS3Board final : public hg::Power {
@@ -733,6 +757,26 @@ class StickS3Board final : public hg::Power {
  private:
   i2c_master_dev_handle_t pm1_ = nullptr;
   std::unique_ptr<hg::StickS3Control> control_;
+};
+
+// The StopWatch's M5IOE1 (supplies, resets, amplifier) and M5PM1 (battery, red key,
+// shutdown). Hal::power once begin() succeeded.
+class StopWatchBoard final : public hg::Power {
+ public:
+  bool begin(i2c_master_bus_handle_t bus);
+  void set_amplifier(bool on);
+  void use_curves(hg::Curve discharge, hg::Curve charge) {
+    if (control_ && discharge) control_->use_curves(discharge, charge);
+  }
+  std::optional<hg::PowerStatus> read() override { return control_->read(); }
+  bool power_off() override { return control_->power_off(); }
+  bool take_key_press() override { return control_->take_key_press(); }
+  std::optional<bool> external_power() override { return control_->external_power(); }
+
+ private:
+  i2c_master_dev_handle_t pm1_ = nullptr;
+  i2c_master_dev_handle_t ioe_ = nullptr;
+  std::unique_ptr<hg::StopWatchControl> control_;
 };
 
 // Opus reply audio (port_opus.cpp). It decodes on the app task, whose stack

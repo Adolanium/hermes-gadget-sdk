@@ -36,6 +36,7 @@ enum class Screen : uint8_t {
   Prompt,  // a yes/no question from Hermes, answered with the buttons
   Updating,  // installing a firmware update
   Settings,
+  Camera,     // the device's own camera: a live view, a countdown, and the photo (App::open_camera)
   Setup,
   Dashboard,  // Hermes's sessions and the user's status tiles (docs/protocol.md#dashboard)
   Profiles,   // the Hermes profiles to choose from: a grid of `dash` (name, id), the page from item `scroll`
@@ -64,7 +65,7 @@ struct DashRow {
 struct SettingRow {
   enum class Kind : uint8_t { Value, Toggle, Slider, Action };
   enum class Icon : uint8_t { Volume, Sun, Talk, Person, Mic, Note, Screen, Keys, Info, Battery, Timer, Touch,
-                              FaceDown, Clock, Power, Wifi, Phone, Globe, Back, Bell, Bolt, Check, Grid };
+                              FaceDown, Clock, Power, Wifi, Phone, Globe, Back, Bell, Bolt, Check, Grid, Camera };
   std::string label, value;  // Value: the text at the right; Slider: its percentage
   Icon icon = Icon::Info;
   Kind kind = Kind::Value;
@@ -133,6 +134,7 @@ struct UiModel {
   // The round panel's edge ring: while recording, thousandths of the recording limit used
   // so far; while updating, of the firmware image received (1000 while restarting). -1: none.
   int16_t progress_permille = -1;
+  bool animate = true;     // the `animation` setting: the ring's comet and the Updating screen move
   bool flash = false;  // Screen::Alarm: the green half of a beep cycle
   // Screen::Clock: the time and the date as the app formats them, and the minute
   // that picks the burn-in shift. The face's text changes once a minute; on a round

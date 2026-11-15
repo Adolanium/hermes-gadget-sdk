@@ -17,7 +17,7 @@
 #include "tailtiny_internal.h"
 #include "esp_log.h"
 #include "esp_random.h"
-#include "ml_noise_aead.h"  /* wireguard-lwip reference AEAD (Hermes gadget patch) */
+#include "ml_noise_aead.h"
 #include <string.h>
 
 static const char *TAG = "ml_noise";
@@ -148,8 +148,7 @@ static void noise_mix_key(uint8_t ck[32], uint8_t k[32], const uint8_t *dh_outpu
  * ChaCha20-Poly1305 AEAD (Noise uses 64-bit nonce, padded to 96-bit)
  * ========================================================================== */
 
-/* Hermes gadget patch: noise_aead_encrypt()/noise_aead_decrypt() are in
- * ml_noise_aead.h, so the host tests can check them. */
+/* noise_aead_encrypt() and noise_aead_decrypt() are in ml_noise_aead.h. */
 
 /* ============================================================================
  * Noise IK Handshake
@@ -231,8 +230,8 @@ esp_err_t ml_noise_write_msg1(ml_noise_state_t *state, uint8_t *out, size_t *out
 
     /* s: Encrypt and send static public key (32 + 16 MAC = 48 bytes) */
     noise_aead_encrypt(k, 0, state->h, 32,
-                              state->local_static_public, 32,
-                              out + pos);
+                        state->local_static_public, 32,
+                        out + pos);
     noise_mix_hash(state->h, out + pos, 48);
     pos += 48;
 
@@ -243,7 +242,7 @@ esp_err_t ml_noise_write_msg1(ml_noise_state_t *state, uint8_t *out, size_t *out
 
     /* Empty payload encrypted (just the 16-byte auth tag) */
     noise_aead_encrypt(k, 0, state->h, 32,
-                              NULL, 0, out + pos);
+                        NULL, 0, out + pos);
     noise_mix_hash(state->h, out + pos, 16);
     pos += 16;
 
@@ -290,8 +289,8 @@ esp_err_t ml_noise_read_msg2(ml_noise_state_t *state, const uint8_t *msg, size_t
     /* Decrypt payload (should be empty for IK — just 16-byte auth tag) */
     size_t ciphertext_len = len - offset;
     if (noise_aead_decrypt(k, 0, state->h, 32,
-                                  msg + offset, ciphertext_len,
-                                  NULL) != 0) {
+                            msg + offset, ciphertext_len,
+                            NULL) != 0) {
         ESP_LOGE(TAG, "Noise msg2 auth tag verification failed");
         memset(k, 0, 32);
         return ESP_ERR_INVALID_MAC;
@@ -318,7 +317,7 @@ esp_err_t ml_noise_encrypt(const uint8_t *key, uint64_t nonce,
                             const uint8_t *plaintext, size_t pt_len,
                             uint8_t *ciphertext) {
     if (noise_aead_encrypt(key, nonce, ad, ad_len,
-                                  plaintext, pt_len, ciphertext) != 0) {
+                            plaintext, pt_len, ciphertext) != 0) {
         ESP_LOGE(TAG, "Noise encrypt failed");
         return ESP_FAIL;
     }
@@ -330,7 +329,7 @@ esp_err_t ml_noise_decrypt(const uint8_t *key, uint64_t nonce,
                             const uint8_t *ciphertext, size_t ct_len,
                             uint8_t *plaintext) {
     if (noise_aead_decrypt(key, nonce, ad, ad_len,
-                                  ciphertext, ct_len, plaintext) != 0) {
+                            ciphertext, ct_len, plaintext) != 0) {
         ESP_LOGE(TAG, "Noise decrypt failed (nonce=%llu)", (unsigned long long)nonce);
         return ESP_ERR_INVALID_MAC;
     }

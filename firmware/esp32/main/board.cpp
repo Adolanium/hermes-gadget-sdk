@@ -36,10 +36,14 @@ namespace {
 #define HG_BOARD_NAME "esp32-s3-box"
 #elif CONFIG_HG_BOARD_ESP32S3_KORVO_2
 #define HG_BOARD_NAME "esp32-s3-korvo-2"
+#elif CONFIG_HG_BOARD_LCDWIKI_ES3C28P
+#define HG_BOARD_NAME "lcdwiki-es3c28p"
 #elif CONFIG_HG_BOARD_CORES3
 #define HG_BOARD_NAME "m5stack-cores3"
 #elif CONFIG_HG_BOARD_STICKS3
 #define HG_BOARD_NAME "m5stack-sticks3"
+#elif CONFIG_HG_BOARD_STOPWATCH
+#define HG_BOARD_NAME "m5stack-stopwatch"
 #elif CONFIG_HG_BOARD_CARDPUTER_ADV
 #define HG_BOARD_NAME "cardputer-adv"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_185C_V2
@@ -822,6 +826,71 @@ BoardConfig make() {
   b.latch_power.usb_external_power = true;
   return b;
 }
+#elif CONFIG_HG_BOARD_LCDWIKI_ES3C28P
+// LCDWIKI ES3C28P (QDtech): 2.8" 240x320 IPS ILI9341V over SPI, FT6336G touch,
+// one ES8311 for the speaker and the analog MEMS microphone. 16 MB QSPI flash,
+// 8 MB octal PSRAM. The touch, the codec and the I2C header share one bus.
+// Freenove's ESP32-S3 2.8" display uses the same pin map. The panel's reset is
+// CHIP_PU, shared with the ESP32-S3, so it has no GPIO. The RGB LED on GPIO 42
+// is an addressable part, not a plain GPIO LED, so it stays off.
+// Pins: docs/hardware.md#lcdwiki-es3c28p
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  // GPIO 1 enables the speaker amplifier, active low. CodecAudioConfig::pa is
+  // active high, so hold it low from boot as a rail: the amplifier stays on,
+  // as it does on boards whose pa goes through esp_codec_dev.
+  b.power_rails[0] = {1, false};
+  b.power_rails_settle_ms = 10;
+  // Portrait, so touch needs no axis swap (the FT5x06 path applies no swap or
+  // mirror). Upstream runs landscape with swap_xy alone, so the unflagged scan is
+  // a reflection: portrait needs mirror_x (the usual ILI9341 MX | BGR).
+  b.lcd.enabled = true;
+  b.lcd.controller = LcdController::Ili9341;
+  b.lcd.width = 240;
+  b.lcd.height = 320;
+  b.lcd.swap_xy = false;
+  b.lcd.mirror_x = true;
+  b.lcd.mirror_y = false;
+  b.lcd.invert = true;  // IPS glass; upstream inverts too
+  b.lcd.bgr = true;
+  b.lcd.mosi = 11;
+  b.lcd.sclk = 12;
+  b.lcd.cs = 10;
+  b.lcd.dc = 46;
+  b.lcd.rst = -1;
+  b.lcd.backlight = 45;
+  b.lcd.spi_mhz = 20;  // upstream's clock for this panel
+  b.i2c = {16, 15, 400000};
+  b.codec.enabled = true;
+  b.codec.mclk = 4;
+  b.codec.bclk = 5;
+  b.codec.ws = 7;
+  b.codec.dout = 8;
+  b.codec.din = 6;
+  b.codec.pa = -1;  // see power_rails above
+  b.codec.mic = MicCodec::Es8311;
+  // Measured on the board: at the default 24 dB, speech peaked near -40 dBFS
+  // (RMS about -53 dBFS) over a -78 dBFS floor, so a loopback was inaudible.
+  // 42 dB is the ES8311's top ADC scale step.
+  b.codec.mic_gain_db = 42.0f;
+  b.touch.enabled = true;
+  b.touch.controller = TouchController::Ft5x06;
+  b.touch.addr = 0x38;
+  b.touch.rst = 18;
+  b.touch.int_gpio = 17;
+  b.touch.width = 240;
+  b.touch.height = 320;
+  b.touch.ppi = 143;  // 240x320 across a 2.8 inch diagonal
+  b.buttons = {0, -1, -1, -1};  // BOOT
+  b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
+  // GPIO 9 is ADC1 channel 8, behind a 200k/200k divider. No charge pin and no latch.
+  b.latch_power = {true, 9, -1, -1, -1, 2};
+  b.latch_power.power_off_supported = false;
+  b.latch_power.usb_external_power = true;
+  return b;
+}
 #elif CONFIG_HG_BOARD_CORES3
 BoardConfig make() {
   BoardConfig b{};
@@ -837,6 +906,7 @@ BoardConfig make() {
   b.lcd.mirror_x = false;
   b.lcd.mirror_y = false;
   b.lcd.invert = true;
+  b.lcd.bgr = true;  // CoreS3 BSP display.h: LCD_RGB_ELEMENT_ORDER_BGR
   b.lcd.mosi = 37;
   b.lcd.sclk = 36;
   b.lcd.cs = 3;
@@ -895,6 +965,70 @@ BoardConfig make() {
   b.buttons = {11, 12, -1, -1};
   b.talk_label = "KEY1";
   b.cancel_label = "KEY2";
+  return b;
+}
+#elif CONFIG_HG_BOARD_STOPWATCH
+// M5Stack StopWatch (SKU C152): ESP32-S3R8, 16 MB flash, 8 MB octal PSRAM, a round
+// 1.75" 466x466 CO5300 over QSPI, CST820 touch, one ES8311 for the speaker and the
+// microphone, a blue and a yellow key. The panel, the touch controller, the codec
+// and the AW8737A amplifier have no ESP32 pin for power or reset: the M5IOE1
+// expander switches and resets them and the M5PM1 measures the cell and reads the
+// red key (StopWatchBoard). A BMI270 at 0x68 gives face-down sleep and an RX8130CE
+// at 0x32 keeps the time. The touch interrupt (GPIO 13), the panel's tearing line
+// (GPIO 38) and the vibration motor are unused.
+// Pins: docs/hardware.md#m5stack-stopwatch
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.stopwatch = true;
+  b.i2c = {47, 48, 400000};
+  b.imu.enabled = true;
+  b.imu.chip = ImuChip::Bmi270;
+  b.imu.addr = 0x68;
+  // Measured on the watch: flat face up reads sensor z +1 g, standing on its left edge
+  // sensor y +1 g, standing on its top edge sensor x +1 g.
+  b.imu.x_from = 1; b.imu.y_from = 0; b.imu.z_from = 2;
+  b.imu.x_sign = 1; b.imu.y_sign = -1; b.imu.z_sign = 1;
+  b.rtc.enabled = true;  // RX8130CE: keeps UTC while the cell has charge, also switched off
+  b.rtc.chip = RtcChip::Rx8130;
+  b.rtc.addr = 0x32;
+  b.battery_curve = hg::kStopWatchCurve;
+  b.battery_charge_curve = hg::kStopWatchChargeCurve;
+  b.amoled.enabled = true;
+  b.amoled.width = 466;
+  b.amoled.height = 466;
+  b.amoled.cs = 39;
+  b.amoled.sclk = 40;
+  b.amoled.d0 = 41;
+  b.amoled.d1 = 42;
+  b.amoled.d2 = 46;
+  b.amoled.d3 = 45;
+  b.amoled.gap_x = 6;  // the controller's RAM is 480 wide; the glass starts at column 6
+  b.amoled.qspi_mhz = 40;
+  b.amoled.round = true;
+  b.amoled.panel = AmoledPanel::Co5300_466;
+  b.codec.enabled = true;
+  b.codec.mclk = 18;
+  b.codec.bclk = 17;
+  b.codec.ws = 15;
+  b.codec.dout = 21;
+  b.codec.din = 16;
+  b.codec.mic = MicCodec::Es8311;
+  // The AW8737A runs from the cell, or USB less a diode: 3.3 to 4.8 V. The lowest is assumed.
+  b.codec.amp_supply_v = 3.3f;
+  // Speech through this microphone measures 300-800 RMS per block at the usual 24 dB and
+  // room noise 25-100, both below 3.4 kHz: under tap mode's default floor of 500 most
+  // speech counted as silence and a recording ended after 900 ms mid-sentence.
+  b.codec.vad_min_rms = 180.0f;
+  b.touch.enabled = true;
+  b.touch.controller = TouchController::Cst816;  // the CST820 sends the same report
+  b.touch.addr = 0x15;
+  b.touch.width = 466;
+  b.touch.height = 466;
+  b.touch.ppi = 266;  // estimate (see TouchConfig::ppi): 466 px across the 1.75" diameter
+  b.buttons = {1, 2, -1, -1};  // blue (KEYB) talks, yellow (KEYA) cancels
+  b.talk_label = "Blue";
+  b.cancel_label = "Yellow";
   return b;
 }
 #elif CONFIG_HG_BOARD_T_DISPLAY_S3
@@ -1352,7 +1486,8 @@ BoardConfig make() {
   b.lcd.dsi.dpi_clock_mhz = 80;
   b.lcd.dsi.ldo_channel = 3;
   b.lcd.dsi.ldo_voltage_mv = 2500;
-  b.lcd.dsi.use_dma2d = true;
+  // CPU copies, not DMA2D: the configuration the 3.4C rev 1.3 booted and drew with (#292).
+  b.lcd.dsi.use_dma2d = false;
   b.lcd.dsi.hsync_pulse_width = 20;
   b.lcd.dsi.hsync_back_porch = 20;
   b.lcd.dsi.hsync_front_porch = 40;
@@ -1384,6 +1519,8 @@ BoardConfig make() {
   b.codec.dac_mclk = true;
   b.codec.rmnm_mics = false;
   b.codec.es7210_mics = 0x03;
+  // microSD slot (SDIO 3.0, 4-bit): Waveshare's XC pinout.
+  b.sd = {true, 43, 44, 39, 40, 41, 42};
   // Wi-Fi via C6 over SDIO (standard P4 function board pins).
   b.buttons = {0, -1, -1, -1};
   b.talk_label = "BOOT";

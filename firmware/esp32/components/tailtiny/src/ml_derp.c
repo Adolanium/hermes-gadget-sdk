@@ -27,12 +27,14 @@
 #include "lwip/netdb.h"
 #include "mbedtls/net_sockets.h"
 #include "mbedtls/error.h"
+#if CONFIG_ML_DERP_VERIFY_CERT
 #include "esp_crt_bundle.h"
-#include "ml_derp_tls.h"  /* Hermes gadget patch */
+#endif
 #include "nacl_box.h"
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
+#include "ml_idle_wait.h"
 
 static uint16_t derp_measure_regions(tailtiny_t *ml, uint16_t current,
                                      int64_t *best_us_out, int64_t *current_us);
@@ -293,7 +295,7 @@ static void route_derp_packet(tailtiny_t *ml, uint8_t *data, size_t len,
     memcpy(pkt.src_pubkey, src_pubkey, 32);
 
     QueueHandle_t target = (type == PKT_DISCO) ? ml->disco_rx_queue : ml->wg_rx_queue;
-    if (xQueueSend(target, &pkt, 0) != pdTRUE) {
+    if (ml_wg_queue_send(ml, target, &pkt, 0) != pdTRUE) {
         free(data);
     }
 }
@@ -440,6 +442,33 @@ static int poll_derp_read(tailtiny_t *ml) {
  * DERP TX Queue Processing
  * ========================================================================== */
 
+/* Queued TX and control requests write an eventfd, so they interrupt the same
+ * select() that waits for relay RX. The count stays set until the DERP task
+ * reads it, so a signal is never lost. */
+void ml_derp_wake(tailtiny_t *ml) {
+    if (ml->derp_wake_fd >= 0) {
+        const uint64_t one = 1;
+        (void)write(ml->derp_wake_fd, &one, sizeof(one));
+    }
+}
+
+static void derp_wait_work(tailtiny_t *ml, uint32_t timeout_ms) {
+    const int fd = ml->derp.connected ? ml->derp.sockfd : -1;
+    /* Poll as before where select() can't wait on both: an AT modem socket
+     * isn't a lwIP descriptor, and without VFS select there is no eventfd. */
+    if ((fd >= 0 && ml_at_socket_is_at_fd(fd)) || ml->derp_wake_fd < 0) {
+        vTaskDelay(fd >= 0 ? ML_DELAY_TICKS(1) : pdMS_TO_TICKS(timeout_ms));
+        return;
+    }
+    if ((fd >= 0 && (uxQueueMessagesWaiting(ml->derp_tx_queue) ||
+                    mbedtls_ssl_check_pending(&ml->derp.ssl))) ||
+        (xEventGroupGetBits(ml->events) & ML_EVT_SHUTDOWN_REQUEST)) return;
+    if (ml_idle_wait(fd, ml->derp_wake_fd, timeout_ms) < 0 && errno != EINTR) {
+        ESP_LOGW(TAG, "DERP readiness wait failed: %d", errno);
+        vTaskDelay(ML_DELAY_TICKS(50));  /* avoid spinning on a bad descriptor */
+    }
+}
+
 /* Queue a packet for DERP TX with backpressure */
 esp_err_t ml_derp_queue_send(tailtiny_t *ml, const uint8_t *dest_key,
                               const uint8_t *data, size_t len) {
@@ -461,8 +490,7 @@ esp_err_t ml_derp_queue_send(tailtiny_t *ml, const uint8_t *dest_key,
     bool is_wg_handshake = (len >= 4 && (data[0] == 0x01 || data[0] == 0x02));
 
     /* Try to send to queue */
-    if ((is_wg_handshake ? xQueueSendToFront(ml->derp_tx_queue, &item, 0)
-                         : xQueueSend(ml->derp_tx_queue, &item, 0)) == pdTRUE) {
+    if (ml_derp_queue_item(ml, &item, is_wg_handshake) == pdTRUE) {
         return ESP_OK;
     }
 
@@ -472,7 +500,7 @@ esp_err_t ml_derp_queue_send(tailtiny_t *ml, const uint8_t *dest_key,
         if (xQueueReceive(ml->derp_tx_queue, &dropped, 0) == pdTRUE) {
             free(dropped.data);  /* Drop oldest */
         }
-        if (xQueueSend(ml->derp_tx_queue, &item, 0) == pdTRUE) {
+        if (ml_derp_queue_item(ml, &item, false) == pdTRUE) {
             return ESP_OK;
         }
     }
@@ -599,8 +627,8 @@ void ml_derp_tx_task(void *arg) {
         }
 
         if (!ml->derp.connected) {
-            /* Not connected - just wait and check again */
-            vTaskDelay(pdMS_TO_TICKS(100));
+            /* Control requests wake the same wait even without a socket. */
+            derp_wait_work(ml, 100);
             continue;
         }
 
@@ -657,8 +685,10 @@ void ml_derp_tx_task(void *arg) {
             }
         }
 
-        /* Yield briefly */
-        vTaskDelay(ML_DELAY_TICKS(1));
+        /* Sleep until the relay has data or TX/control work is queued. A
+         * fixed delay here would hold outgoing relay packets back, and a
+         * one-tick yield keeps the chip from entering light sleep. */
+        derp_wait_work(ml, 100);
     }
 
     ESP_LOGI(TAG, "DERP I/O task exiting");
@@ -875,7 +905,7 @@ esp_err_t ml_derp_connect(tailtiny_t *ml) {
     int setup_ret = mbedtls_ctr_drbg_seed(&ml->derp.ctr_drbg, mbedtls_entropy_func,
                                           &ml->derp.entropy, NULL, 0);
 #else
-    int setup_ret = 0;
+    int setup_ret = 0;  /* Mbed TLS 4: TLS takes its randomness from PSA */
 #endif
     if (setup_ret == 0) {
         setup_ret = mbedtls_ssl_config_defaults(&ml->derp.ssl_conf,
@@ -888,14 +918,18 @@ esp_err_t ml_derp_connect(tailtiny_t *ml) {
         derp_connect_abort(ml, sock);
         return ESP_FAIL;
     }
-    /* Hermes gadget patch: check the relay's certificate against the
-     * firmware's CA bundle (upstream skipped verification); ml_derp_tls.h. */
-    setup_ret = ml_derp_tls_verify(&ml->derp.ssl_conf, esp_crt_bundle_attach);
-    if (setup_ret != 0) {
-        ESP_LOGE(TAG, "TLS setup failed: no CA bundle");
+#if CONFIG_ML_DERP_VERIFY_CERT
+    /* Check the relay's certificate against ESP-IDF's CA bundle, and its host
+     * name (mbedtls_ssl_set_hostname() below). */
+    mbedtls_ssl_conf_authmode(&ml->derp.ssl_conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+    if (esp_crt_bundle_attach(&ml->derp.ssl_conf) != ESP_OK) {
+        ESP_LOGE(TAG, "TLS setup failed: could not attach the CA bundle");
         derp_connect_abort(ml, sock);
         return ESP_FAIL;
     }
+#else
+    mbedtls_ssl_conf_authmode(&ml->derp.ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
+#endif
 #if MBEDTLS_VERSION_MAJOR < 4
     mbedtls_ssl_conf_rng(&ml->derp.ssl_conf, mbedtls_ctr_drbg_random, &ml->derp.ctr_drbg);
 #endif
@@ -930,6 +964,14 @@ esp_err_t ml_derp_connect(tailtiny_t *ml) {
         char err_buf[128];
         mbedtls_strerror(ret, err_buf, sizeof(err_buf));
         ESP_LOGE(TAG, "TLS handshake failed: %s", err_buf);
+#if CONFIG_ML_DERP_VERIFY_CERT
+        uint32_t flags = mbedtls_ssl_get_verify_result(&ml->derp.ssl);
+        if (flags != 0 && flags != (uint32_t)-1) {
+            char why[160];
+            mbedtls_x509_crt_verify_info(why, sizeof(why), "", flags);
+            ESP_LOGE(TAG, "DERP certificate for %s not accepted: %s", derp_host, why);
+        }
+#endif
         derp_connect_abort(ml, sock);
         return ESP_FAIL;
     }

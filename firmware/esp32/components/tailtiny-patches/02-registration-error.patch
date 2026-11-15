@@ -1,6 +1,6 @@
 diff -ruN a/tailtiny/include/tailtiny_internal.h b/tailtiny/include/tailtiny_internal.h
---- a/tailtiny/include/tailtiny_internal.h	2026-10-29 15:11:54.000000000 +0000
-+++ b/tailtiny/include/tailtiny_internal.h	2026-10-29 15:12:21.062202983 +0000
+--- a/tailtiny/include/tailtiny_internal.h	2026-11-08 09:32:00.898150502 +0000
++++ b/tailtiny/include/tailtiny_internal.h	2026-11-08 09:32:26.725358160 +0000
 @@ -377,6 +377,9 @@
  
      /* State (atomic reads from any task, writes only from coord) */
@@ -12,8 +12,8 @@ diff -ruN a/tailtiny/include/tailtiny_internal.h b/tailtiny/include/tailtiny_int
  
      /* Event group (cross-task synchronization) */
 diff -ruN a/tailtiny/src/ml_coord.c b/tailtiny/src/ml_coord.c
---- a/tailtiny/src/ml_coord.c	2026-10-29 15:11:54.000000000 +0000
-+++ b/tailtiny/src/ml_coord.c	2026-10-29 15:12:21.062389608 +0000
+--- a/tailtiny/src/ml_coord.c	2026-11-08 09:32:00.898342294 +0000
++++ b/tailtiny/src/ml_coord.c	2026-11-08 09:32:26.725971120 +0000
 @@ -1016,6 +1016,7 @@
      cJSON *reg_err = cJSON_GetObjectItem(resp_json, "Error");
      if (cJSON_IsString(reg_err) && reg_err->valuestring[0]) {
@@ -37,7 +37,7 @@ diff -ruN a/tailtiny/src/ml_coord.c b/tailtiny/src/ml_coord.c
      }
  
      /* Extract our VPN IP from Node.Addresses */
-@@ -2733,6 +2736,7 @@
+@@ -2734,6 +2737,7 @@
  
              state = COORD_LONG_POLL;
              ml->state = ML_STATE_CONNECTED;

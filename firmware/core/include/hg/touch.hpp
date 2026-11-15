@@ -49,7 +49,7 @@ class TouchGestures {
   void tick(uint32_t now_ms);
 
  private:
-  enum class State : uint8_t { Idle, Pending, Settings, Picker, PickerDrag, Side, List, ListDrag, Talk, Swipe, Ignored };
+  enum class State : uint8_t { Idle, Pending, Settings, Picker, PickerDrag, Side, List, ListDrag, Camera, Talk, Swipe, Ignored };
   void press(Button b);
   void release(Button b);
 

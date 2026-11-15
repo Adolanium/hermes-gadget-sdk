@@ -19,6 +19,17 @@ if(IDF_TARGET STREQUAL "esp32p4")
         list(APPEND HG_P4_REQUIRES esp_video)
     endif()
 endif()
+# The CoreS3's GC0308 camera rides the S3 DVP backend of esp32-camera; the
+# driver's own Kconfig default enables the GC0308 board support. The action is
+# registered only for this board, so no other S3 image grows.
+set(HG_CORES3_CAMERA_SOURCES)
+set(HG_CORES3_CAMERA_REQUIRES)
+if(IDF_TARGET STREQUAL "esp32s3")
+    if(CONFIG_HG_BOARD_CORES3)
+        list(APPEND HG_CORES3_CAMERA_SOURCES "port_camera_cores3.cpp")
+        list(APPEND HG_CORES3_CAMERA_REQUIRES esp32-camera)
+    endif()
+endif()
 # The RGB panel driver (ST7701 over an I/O expander) only builds for the chips
 # with an LCD_CAM RGB scanout: port_rgb.cpp is compiled out on every other
 # target, and esp_lcd_st7701 does not publish builds for them either.
@@ -32,12 +43,14 @@ idf_component_register(
         "port_amoled.cpp"
         "port_audio.cpp"
         ${HG_P4_SOURCES}
+        ${HG_CORES3_CAMERA_SOURCES}
         "port_ble.cpp"
         "port_buttons.cpp"
         "port_cardputer.cpp"
         "port_codec.cpp"
         "port_cores3.cpp"
         "port_sticks3.cpp"
+        "port_stopwatch.cpp"
         "port_tca9554.cpp"
         "port_console.cpp"
         "port_dac.cpp"
@@ -48,14 +61,17 @@ idf_component_register(
         "port_ota.cpp"
         "port_parallel.cpp"
         "port_rgb.cpp"
+        "port_sdlog.cpp"
         "port_power.cpp"
         "port_latch_power.cpp"
         "port_opus.cpp"
         "../../drivers/axp2101.cpp"
         "../../drivers/cores3.cpp"
         "../../drivers/sticks3.cpp"
+        "../../drivers/stopwatch.cpp"
         "../../drivers/bmi270.cpp"
         "../../drivers/pcf85063.cpp"
+        "../../drivers/rx8130.cpp"
         "../../drivers/qmi8658.cpp"
         "port_storage.cpp"
         "port_tailnet.cpp"
@@ -83,11 +99,14 @@ idf_component_register(
         esp_lcd
         ${HG_RGB_REQUIRES}
         ${HG_P4_REQUIRES}
+        ${HG_CORES3_CAMERA_REQUIRES}
         esp_netif
         esp_http_server
         esp_psram
         esp_timer
         esp_wifi
+        sdmmc
+        fatfs
         console
         nvs_flash
         mbedtls
