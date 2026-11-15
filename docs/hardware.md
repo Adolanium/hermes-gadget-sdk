@@ -400,7 +400,9 @@ Use `m5stack-cores3` for the CoreS3 K128 with 16 MB flash and 8 MB **quad** PSRA
 | AW88298 speaker / ES7210 microphones | MCLK 0, BCLK 34, WS 33, DOUT 13, DIN 14; reset through AW9523 P0_2 |
 | Power and backlight | AXP2101 at 0x34; AW9523 at 0x58; boost enable P1_7 |
 
-The display selects ILI9342C for touch firmware ID 0x10 and ILI9342E for 0x12. An unrecognized ID leaves the display unavailable and logs an error. M5Stack changed the LCD to ILI9342E in August 2026, so record the panel revision with test results.
+The display selects ILI9342C for touch firmware ID 0x10 and ILI9342E for 0x12. Other touch IDs (including 0x05) do not identify an LCD revision: the port probes the LCD registers directly over its 3-wire SPI connection before selecting either initialization table. It logs the read-back values and leaves the display unavailable if neither panel signature answers; it does not assume C for an unknown panel. M5Stack changed the LCD to ILI9342E in August 2026, so record the detection log and panel revision with test results.
+
+The profile selects BGR color order, as specified by [Espressif's CoreS3 BSP display header](https://github.com/espressif/esp-bsp/blob/67f41a169401d1f23e827188dd08fb351cb0febe/bsp/m5stack_core_s3/include/bsp/display.h). This is independent of the RGB565 byte order on the SPI wire. Use settings **Display check** to verify red, green, blue, white and black on the actual panel; a readable screen alone does not establish correct colors.
 
 Hold the screen to talk, swipe down to cancel, and hold the title for one second to open settings. GPIO 0 carries the audio clock and is not a TALK button. The hardware power and reset buttons retain their functions. The camera is the `camera.capture` action and a local **camera mode** (the settings menu's **Camera** item, below); the IMU, RTC, SD storage and expansion outputs are not exposed.
 
