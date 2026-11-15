@@ -95,7 +95,7 @@ The last line puts the Wi-Fi and lwIP buffers in PSRAM, so the larger windows do
 
 ## Recording buffer
 
-A board with PSRAM sets `DeviceProfile::recording_alloc` to a PSRAM allocator (`main.cpp` does when `esp_psram_is_initialized()`). The app then keeps each recording whole while it uploads, so a slow link delays audio instead of dropping it and a connection lost mid-recording loses nothing ([the recording buffer](architecture.md#the-recording-buffer)). It takes 1 MB at 16 kHz or 1.5 MB at 24 kHz at start-up. Have it return null unless about 1 MB of PSRAM stays free afterwards (`RecordingBuffer::leaves_headroom`), as `main.cpp` does: faces, WebSocket send copies and event payloads prefer PSRAM and would otherwise fall back to internal RAM. Leave it unset without PSRAM.
+A board with PSRAM sets `DeviceProfile::recording_alloc` to a PSRAM allocator (`main.cpp` does when `esp_psram_is_initialized()`). The app then keeps each recording whole while it uploads, so a slow link delays audio instead of dropping it and a connection lost mid-recording loses nothing ([the recording buffer](architecture.md#the-recording-buffer)). It takes 2 MB at 16 kHz or 3 MB at 24 kHz at start-up, for the 60 s limit. Have it return null unless about 1 MB of PSRAM stays free afterwards (`RecordingBuffer::leaves_headroom`), as `main.cpp` does: faces, WebSocket send copies and event payloads prefer PSRAM and would otherwise fall back to internal RAM. Leave it unset without PSRAM.
 
 ## Battery and power
 
