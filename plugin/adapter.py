@@ -89,6 +89,14 @@ STATUS_POLL_S = 0.5           # how often live device state is compared with sta
 PAIRING_TRIGGER = "/status"
 HOST_ONLY_TEXT = "Can't show all of it here. Approve or deny it on the host."
 _PAIRING_CMD = re.compile(r"(hermes\s+(?:-p\s+\S+\s+)?pairing\s+approve\s+\S+\s+([A-Z2-9]{8}))\b")
+# What Hermes wraps around cron output (cron/scheduler_delivery.py), and the note it appends when
+# output is cut to fit a platform (gateway/delivery.py). Neither is worth reading aloud.
+_CRON_WRAP = re.compile(r"^Cronjob Response: .*?\n-{5,}\n\n(.*?)(?:\n\nTo stop or manage this job.*)?$", re.S)
+_TRUNCATED_NOTE = re.compile(r"\n\n\.\.\. \[truncated, full output saved to [^\]]*\]\s*$")
+# A message that arrives while the device is busy (a turn, or audio already playing) waits this long
+# for it to finish before it is spoken anyway.
+SPEECH_QUEUE_WAIT_S = 120.0
+_NOT_SPOKEN = "_gadget_not_spoken"  # metadata: this text is played or spoken another way (a caption, a question)
 # The gateway echoes speech-to-text results with this translated line: a microphone emoji and the
 # quoted transcript, quoted per language (Ukrainian uses «»). Patterns are built from the line itself.
 _ECHO_KEY = "gateway.voice.transcript_echo_short"
@@ -155,6 +163,17 @@ def spoken_question(question: str, choices: Optional[list]) -> str:
         listed = " ".join(f"{i}: {c.rstrip('.')}." for i, c in enumerate(picks, start=1))
         text = f"{text} The choices are {listed} Say the number or your own answer."
     return text
+
+
+def spoken_message(content: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+    """A message sent outside a turn as it is read aloud: no Markdown, and for cron output
+    (``job_id`` in the metadata) no header, footer or truncation note."""
+    text = content or ""
+    if (metadata or {}).get("job_id"):
+        text = _TRUNCATED_NOTE.sub("", text)
+        if m := _CRON_WRAP.match(text):
+            text = m.group(1)
+    return textfmt.strip_markdown(text).strip()
 
 
 def transcript_echo(content: str) -> Optional[str]:
@@ -251,6 +270,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._dashboard_wake: Optional[asyncio.Event] = None
         self._boards: Dict[dashboard.SessionBoard, Callable[[], None]] = {}  # each board read, its unsubscribe
         self._roster_lock = asyncio.Lock()  # one roster read at a time; never held across a send
+        self._speech_locks: Dict[str, asyncio.Lock] = {}  # device -> one out-of-turn message spoken at a time
         self._push_seq = 0
         self._pushed_seq: Dict[str, int] = {}  # device -> the newest push that read a roster for it
         # connection -> its last face lookup; it goes with the connection, and a replaced one keeps its own
@@ -1359,7 +1379,30 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if text:
             interim = bool((metadata or {}).get("_interim_send"))
             await session.send_reply(text, turn=self._turns.get(session.device_id), interim=interim)
+        # Hermes speaks only replies to voice turns, so a message pushed outside a turn (send_message,
+        # cron delivery) would stay silent on a device that has no screen worth reading. Speak it.
+        meta = metadata or {}
+        if (self._turns.get(session.device_id) is None and not meta.get("_interim_send")
+                and not meta.get(_NOT_SPOKEN) and session.has_speaker and self._should_auto_tts_for_chat(chat_id)
+                and (spoken := spoken_message(content, meta))):
+            session.spawn(self.speak_queued(chat_id, spoken))
         return SendResult(success=True, message_id=uuid.uuid4().hex[:12])
+
+    async def speak_queued(self, chat_id: str, text: str) -> SendResult:
+        """Speak ``text`` after anything the device is already saying or doing, one message at a time.
+
+        Waits (up to SPEECH_QUEUE_WAIT_S) for a turn in progress and for audio already playing, so a
+        message never cuts off a spoken reply or an earlier message."""
+        device_id = self._device_id(chat_id)
+        lock = self._speech_locks.setdefault(device_id, asyncio.Lock())
+        async with lock:
+            deadline = time.monotonic() + SPEECH_QUEUE_WAIT_S
+            while time.monotonic() < deadline:
+                session = self._session(chat_id)
+                if session is None or (device_id not in self._turns and not session.audio_playing):
+                    break
+                await asyncio.sleep(0.2)
+            return await self._speak(chat_id, text, wait=True)
 
     def supports_draft_streaming(self, chat_type=None, metadata=None, chat_id=None) -> bool:
         return True
@@ -1499,14 +1542,18 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         or typed, is the answer) and, on a device that speaks replies, is also spoken: otherwise a
         voice user hears nothing while the agent waits."""
         result = await super().send_clarify(chat_id=chat_id, question=question, choices=choices,
-                                            clarify_id=clarify_id, session_key=session_key, metadata=metadata)
+                                            clarify_id=clarify_id, session_key=session_key,
+                                            metadata={**(metadata or {}), _NOT_SPOKEN: True})
         session = self._session(chat_id)
         if result.success and session is not None and session.paired and self._should_auto_tts_for_chat(chat_id):
             session.spawn(self._speak(chat_id, spoken_question(question, choices)))
         return result
 
-    async def _speak(self, chat_id: str, text: str) -> None:
-        """Speak ``text`` on the device with Hermes's configured text-to-speech."""
+    async def _speak(self, chat_id: str, text: str, *, wait: bool = False) -> SendResult:
+        """Speak ``text`` on the device with Hermes's configured text-to-speech.
+
+        Long text comes back as several files; each one waits for the one before it to finish, so
+        they never cut each other off. ``wait`` also waits for the last one."""
         paths: List[str] = []
         try:
             from tools.tts_tool import text_to_speech_tool
@@ -1515,12 +1562,18 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             result = json.loads(raw) if raw else {}
             paths = [str(p) for p in (result.get("file_paths") or [result.get("file_path")]) if p]
             if not result.get("success") or not paths:
-                logger.warning("[%s] could not speak a question: %s", self.name, result.get("error"))
-                return
-            for path in paths:
-                await self._play_file(chat_id, path)
+                error = result.get("error") or "text-to-speech failed"
+                logger.warning("[%s] could not speak: %s", self.name, error)
+                return SendResult(success=False, error=error)
+            played = SendResult(success=False, error="nothing to play")
+            for i, path in enumerate(paths):
+                played = await self._play_file(chat_id, path, wait=wait or i < len(paths) - 1)
+                if not played.success:
+                    break
+            return played
         except Exception as exc:  # TTS unavailable or misconfigured: the text still went out
-            logger.warning("[%s] could not speak a question: %s", self.name, exc)
+            logger.warning("[%s] could not speak: %s", self.name, exc)
+            return SendResult(success=False, error=str(exc))
         finally:
             for path in paths:
                 with contextlib.suppress(OSError):
@@ -1542,7 +1595,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             return True
         return super()._should_auto_tts_for_chat(chat_id)
 
-    async def _play_file(self, chat_id: str, path: str) -> SendResult:
+    async def _play_file(self, chat_id: str, path: str, *, wait: bool = False) -> SendResult:
         session = self._session(chat_id)
         if session is None or not session.paired:
             return SendResult(success=False, error="gadget not connected")
@@ -1553,7 +1606,11 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         except Exception as exc:  # undecodable file, missing ffmpeg, I/O error
             logger.warning("[%s] cannot play %s: %s", self.name, path, exc)
             return SendResult(success=False, error=str(exc))
-        await session.play_pcm(pcm, session.speaker_rate, turn=self._turns.get(session.device_id))
+        out = await session.play_pcm(pcm, session.speaker_rate, turn=self._turns.get(session.device_id))
+        if wait:
+            await out.done.wait()
+            if out.aborted:
+                return SendResult(success=False, error="interrupted by newer audio")
         return SendResult(success=True, message_id=uuid.uuid4().hex[:12])
 
     async def play_tts(self, chat_id: str, audio_path: str, **kwargs) -> SendResult:
@@ -1563,8 +1620,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                          reply_to: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None,
                          **kwargs) -> SendResult:
         result = await self._play_file(chat_id, audio_path)
-        if caption:
-            await self.send(chat_id, caption, metadata=metadata)
+        if caption:  # shown, not spoken: speech would cut off the file that just started
+            await self.send(chat_id, caption, metadata={**(metadata or {}), _NOT_SPOKEN: True})
         return result
 
     def supports_streaming_tts(self, chat_id: str, audio_format: AudioFormat) -> bool:

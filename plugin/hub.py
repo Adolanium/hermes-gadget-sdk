@@ -340,6 +340,11 @@ class DeviceSession:
         return isinstance(self.caps.get("speaker"), dict)
 
     @property
+    def audio_playing(self) -> bool:
+        """An outbound audio stream is still being sent; a new one would cut it off."""
+        return self._audio_out is not None and not self._audio_out.done.is_set()
+
+    @property
     def speaker_formats(self) -> list[str]:
         """Speaker audio formats the device decodes; PCM16 always."""
         spk = self.caps.get("speaker") or {}
