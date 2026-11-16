@@ -115,6 +115,9 @@ struct BurnInShift {
   int dx, dy;
 };
 BurnInShift burn_in_shift(int minute) { return {(minute * 7) % 9 - 4, (minute * 5) % 9 - 4}; }
+// The step a face's shift is taken at: the minute, unless the app counts the steps itself (a
+// widget page at rest, where the faces take turns and each must still meet every offset).
+int shift_step(const UiModel& m) { return m.shift_step >= 0 ? m.shift_step : m.clock_minute; }
 constexpr int32_t kTickTurn64 = 32;
 
 // atan(n / d) for 0 <= n <= d, d > 0, in 1/64 degree: (pi/4) t + 0.273 t (1 - t) radians
@@ -170,7 +173,7 @@ EdgeRing edge_ring(const UiModel& m) {
       r.kind = EdgeRing::Kind::Ticks;
       r.colour = kAccent;
       r.second = static_cast<uint8_t>(m.clock_second % 60);
-      r.turn64 = static_cast<int16_t>(burn_in_shift(m.clock_minute).dx * kTickTurn64);
+      r.turn64 = static_cast<int16_t>(burn_in_shift(shift_step(m)).dx * kTickTurn64);
       return r;
     case Screen::Listening:
       if (m.progress_permille >= 0) {
@@ -2078,7 +2081,7 @@ void Ui::draw_widget(const UiModel& m) {
   const Widget& w = m.widget;
   Hash h;
   h.val(w.kind).add(w.label).add(w.value).add(w.unit).add(w.text).val(w.percent).val(w.tone)
-      .val(m.widget_index).val(m.widget_count).val(m.widget_rest).val(m.widget_rest ? m.clock_minute : uint8_t(0));
+      .val(m.widget_index).val(m.widget_count).val(m.widget_rest).val(m.widget_rest ? shift_step(m) : 0);
   for (const std::string& item : w.items) h.add(item);
   const uint32_t key = h.get();
   if (valid_ && full_face_ == FullFace::Widget && key == face_hash_) return;
@@ -2088,7 +2091,7 @@ void Ui::draw_widget(const UiModel& m) {
 
   const int s = layout_.scale;
   const int W = panel_.width, H = panel_.height;
-  const BurnInShift shift = m.widget_rest ? burn_in_shift(m.clock_minute) : BurnInShift{0, 0};
+  const BurnInShift shift = m.widget_rest ? burn_in_shift(shift_step(m)) : BurnInShift{0, 0};
   // The box: a square inside the glass, or the panel less a margin, either with room for the
   // shift's 4 px each way.
   const int box_w = panel_.round ? std::min(W, H) * 66 / 100 : W - 2 * std::max(6, 4 * s);
@@ -2230,7 +2233,7 @@ void Ui::draw_widget(const UiModel& m) {
 void Ui::draw_clock(const UiModel& m) {
   // The ring's ticks go on with the clock: each push paints them, turned with this minute's
   // shift (edge_ring), and a new second moves only the dot (draw_frame, update_ring).
-  const uint32_t key = Hash().add(m.clock_time).add(m.clock_date).val(m.clock_minute).val(m.lang)
+  const uint32_t key = Hash().add(m.clock_time).add(m.clock_date).val(m.clock_minute).val(m.shift_step).val(m.lang)
                            .add(m.face ? m.face->hash : std::string()).get();
   if (valid_ && full_face_ == FullFace::Clock && key == face_hash_) return;  // invalidate() repaints it too
   full_face_ = FullFace::Clock;
@@ -2241,7 +2244,7 @@ void Ui::draw_clock(const UiModel& m) {
   const int W = panel_.width, H = panel_.height;
   const int cx = W / 2, cy = H / 2, R = std::min(W, H) / 2;
   // The burn-in shift moves the whole face a few pixels each minute.
-  const BurnInShift shift = burn_in_shift(m.clock_minute);
+  const BurnInShift shift = burn_in_shift(shift_step(m));
   const int dx = shift.dx, dy = shift.dy;
   const int gap = 3 * s;
   const int margin = 4;

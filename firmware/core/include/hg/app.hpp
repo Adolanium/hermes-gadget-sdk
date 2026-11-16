@@ -216,6 +216,9 @@ class App {
   // last one the Ready screen comes back. UP, or a swipe from right to left, goes back one, and
   // from the first to Ready. CANCEL (swipe down) closes them.
   bool widgets_open() const { return overlay_ == Overlay::Widgets; }
+  // A widget is what the screen shows: open, with no question, alarm or alert over it. Only then
+  // does a sideways swipe page them.
+  bool widgets_showing() const { return widgets_open() && model_.screen == Screen::Widget; }
   // Whether DOWN or a swipe from left to right that starts now opens them: the Ready screen, with widgets.
   bool widgets_can_open() const;
   bool open_widgets();
@@ -837,6 +840,7 @@ class App {
   std::vector<Widget> widgets_;
   int widget_index_ = 0;
   void clock_model(UiModel& m) const;  // makes `m` the resting clock face
+  void turn_takes_screen();  // a turn or a reply closes the widgets: it is shown, not held under them
 
   // a yes/no question from Hermes (confirmations, command approvals)
   std::string prompt_id_, prompt_title_, prompt_text_;

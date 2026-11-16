@@ -914,7 +914,6 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         mine = dashboard.BOARD.sessions()  # after any roster wait, so a change made during it goes out
         if theirs is None:
             theirs = mine
-        tiles = self._tiles.tiles()
         for session, switches in zip(targets, switching):
             if not session.paired or (switches and not self._still_trusted(session)):
                 continue  # revoked or replaced while the roster was read
@@ -922,9 +921,12 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 continue  # a newer push has a newer roster for this device and sends it
             # No await from the check to here: send_dashboard queues on the device's send lock (FIFO)
             # before any newer push can, so an older dashboard never lands after a newer one.
-            await session.send_dashboard(dashboard.message(
-                theirs if switches else mine, tiles, self._tiles.widgets(session.device_id), charset=session.charset,
-                cols=session.display.get("text_cols"), version=session.dashboard_version))
+            try:
+                msg = dashboard.message_for(session, theirs if switches else mine, self._tiles)
+            except OSError as exc:  # the file is busy past its retries: the next look sends it
+                logger.debug("[%s] dashboard file unreadable: %s", self.name, exc)
+                return
+            await session.send_dashboard(msg)
 
     async def _offered_boards(self) -> List[dashboard.SessionBoard]:
         """The session boards of the other profiles a switching device may pick, as each profile's

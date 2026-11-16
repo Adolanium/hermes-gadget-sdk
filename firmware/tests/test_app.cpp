@@ -9821,3 +9821,199 @@ TEST("widgets: left open at rest, the clock takes turns with them, dimmed, and a
   at_minute(47);
   CHECK(r.app.screen() == hg::Screen::Clock);
 }
+
+TEST("widgets: a turn or a reply takes the screen from an open widget") {
+  // A turn Hermes starts by itself (a cron delivery): Thinking, then the reply's text.
+  Rig r(scroll_profile());
+  r.bring_online(true);
+  r.server(kWidgets);
+  press(r, hg::Button::Down);
+  CHECK(r.app.screen() == hg::Screen::Widget);
+  r.server(R"({"type":"turn.start","turn":"c1"})");
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  CHECK(!r.app.widgets_open());
+  r.server(R"({"type":"reply","turn":"c1","text":"Your backup finished."})");
+  CHECK(r.app.screen() == hg::Screen::Responding);
+  CHECK_EQ(r.app.model().body, std::string("Your backup finished."));
+  r.server(R"({"type":"turn.end","turn":"c1","outcome":"success"})");
+  r.advance(500);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.app.model().body, std::string("Your backup finished."));  // read on Ready, not under a widget
+
+  // A reply outside any turn, and one that streams.
+  Rig alone(scroll_profile());
+  alone.bring_online(true);
+  alone.server(kWidgets);
+  press(alone, hg::Button::Down);
+  alone.server(R"({"type":"reply","text":"Dinner is ready."})");
+  CHECK(alone.app.screen() == hg::Screen::Responding);
+  CHECK_EQ(alone.app.model().body, std::string("Dinner is ready."));
+  Rig stream(scroll_profile());
+  stream.bring_online(true);
+  stream.server(kWidgets);
+  press(stream, hg::Button::Down);
+  stream.server(R"({"type":"reply.delta","turn":"s1","text":"Dinner"})");
+  CHECK(stream.app.screen() == hg::Screen::Responding);
+  CHECK_EQ(stream.app.model().body, std::string("Dinner"));
+
+  // Spoken audio is a reply too: the face talks instead of the widget staying up.
+  Rig spoken(scroll_profile());
+  spoken.bring_online(true);
+  spoken.server(kWidgets);
+  press(spoken, hg::Button::Down);
+  spoken.server(R"({"type":"audio.start","stream":1,"rate":16000,"format":"pcm16"})");
+  CHECK(spoken.app.screen() == hg::Screen::Responding);
+  CHECK(!spoken.app.widgets_open());
+}
+
+TEST("widgets: at rest every face is drawn at all nine burn-in offsets, for any number of widgets") {
+  for (int n = 1; n <= 8; ++n) {
+    Rig r(scroll_profile());
+    r.fake.backlight = true;
+    r.bring_online(true);
+    CHECK_EQ(r.app.console("set clock 5"), std::string("@ok clock"));
+    std::string msg = R"({"type":"dashboard","v":2,"sessions":[],"widgets":[)";
+    for (int i = 0; i < n; ++i)
+      msg += std::string(i ? "," : "") + R"({"kind":"value","label":"w","value":")" + std::to_string(i) + "\"}";
+    r.server(msg + "]}");
+    r.fake.wall = hg::WallTime{2026, 10, 24, 6, 9, 0, 0};
+    r.fake.wall_ok = true;
+    press(r, hg::Button::Down);
+    r.advance(6000);
+    CHECK(r.app.clock_showing());
+    // Nine turns of every face: the frames each widget was drawn as, and the clock's shift steps.
+    std::vector<std::vector<std::vector<uint16_t>>> frames(static_cast<size_t>(n));
+    std::vector<int> clock_steps;
+    int clock_turns = 0;
+    for (int t = 0; t < 9 * (n + 1); ++t) {
+      const int total = 9 * 60 + t;
+      r.fake.wall = hg::WallTime{2026, 10, 24, 6, static_cast<uint8_t>(total / 60), static_cast<uint8_t>(total % 60), 0};
+      r.server(R"({"type":"ping"})");
+      r.advance(1100);
+      const hg::UiModel& m = r.app.model();
+      if (m.screen == hg::Screen::Clock) {
+        ++clock_turns;
+        if (std::find(clock_steps.begin(), clock_steps.end(), m.shift_step % 9) == clock_steps.end())
+          clock_steps.push_back(m.shift_step % 9);
+        continue;
+      }
+      CHECK(m.screen == hg::Screen::Widget && m.widget_rest);
+      if (m.screen != hg::Screen::Widget) return;
+      auto& seen = frames[m.widget_index];
+      if (std::find(seen.begin(), seen.end(), r.fake.fb) == seen.end()) seen.push_back(r.fake.fb);
+    }
+    CHECK_EQ(clock_turns, 9);
+    CHECK_EQ(clock_steps.size(), size_t(9));
+    for (const auto& seen : frames) CHECK_EQ(seen.size(), size_t(9));
+  }
+}
+
+TEST("widgets: at rest UP and DOWN page from the widget on screen, and on the clock face they only wake") {
+  Rig r(scroll_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  r.fake.wall = kWallSaturday;  // 09:41
+  r.fake.wall_ok = true;
+  CHECK_EQ(r.app.console("set clock 5"), std::string("@ok clock"));
+  r.server(kWidgets);
+  press(r, hg::Button::Down);
+  press(r, hg::Button::Down);
+  CHECK_EQ(int(r.app.model().widget_index), 1);
+  r.advance(6000);
+  r.fake.wall = hg::WallTime{2026, 10, 24, 6, 9, 44, 0};  // the fourth widget's turn
+  r.advance(1100);
+  CHECK(r.app.model().widget_rest);
+  CHECK_EQ(int(r.app.model().widget_index), 3);
+  press(r, hg::Button::Up);  // from the one on screen, not the one left a while ago
+  CHECK(!r.app.clock_showing());
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Widget);
+  CHECK_EQ(int(r.app.model().widget_index), 2);
+
+  r.server(R"({"type":"ping"})");
+  r.advance(6000);
+  r.fake.wall = hg::WallTime{2026, 10, 24, 6, 9, 45, 0};  // the clock face's turn
+  r.advance(1100);
+  CHECK(r.app.screen() == hg::Screen::Clock);
+  press(r, hg::Button::Down);
+  CHECK(r.app.screen() == hg::Screen::Widget);
+  CHECK_EQ(int(r.app.model().widget_index), 2);  // the page that was left, unmoved
+  press(r, hg::Button::Down);
+  CHECK_EQ(int(r.app.model().widget_index), 3);
+}
+
+TEST("widgets: one with nothing to draw is no page, and long text is cut on the device") {
+  Rig r(scroll_profile());
+  r.bring_online(true);
+  const std::string longer(300, 'x');
+  r.server(std::string(R"({"type":"dashboard","v":2,"sessions":[],"widgets":[)") +
+           R"({"kind":"list","label":"A string","items":"milk"},)"
+           R"({"kind":"list","label":"An object","items":{"a":"b"}},)"
+           R"({"kind":"list","label":"Blank lines","items":["",7,null]},)"
+           R"({"kind":"value","label":"A number","value":21.5},)"
+           R"({"kind":"value","label":"Empty","value":""},)"
+           R"({"kind":"headline","label":"No title","text":"only a second line"},)"
+           R"({"kind":"progress","label":"No percent"},)"
+           R"({"kind":"progress","label":"Words","percent":"half"},)"
+           R"({"kind":"list","label":"Mixed","items":["",3,"eggs"]},)"
+           R"({"kind":"value","label":")" + longer + R"(","value":")" + longer + R"(","unit":")" + longer + R"("},)"
+           R"({"kind":"headline","title":")" + longer + R"(","text":")" + longer + R"("},)"
+           R"({"kind":"list","items":[")" + longer + R"("]}]})");
+  press(r, hg::Button::Down);
+  const hg::UiModel& m = r.app.model();
+  CHECK_EQ(int(m.widget_count), 4);
+  CHECK(m.widget.label == "Mixed");
+  CHECK_EQ(m.widget.items.size(), size_t(1));  // only the lines with text
+  press(r, hg::Button::Down);
+  CHECK_EQ(m.widget.label.size(), size_t(64));
+  CHECK_EQ(m.widget.value.size(), size_t(64));
+  CHECK_EQ(m.widget.unit.size(), size_t(64));
+  press(r, hg::Button::Down);
+  CHECK(m.widget.value.size() == 64 && m.widget.text.size() == 64);
+  press(r, hg::Button::Down);
+  CHECK_EQ(m.widget.items[0].size(), size_t(64));
+
+  // Nothing drawable at all: no widgets, so nothing opens.
+  r.server(R"({"type":"dashboard","v":2,"sessions":[],"widgets":[{"kind":"value","label":"x"},{"kind":"list"}]})");
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  press(r, hg::Button::Down);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+}
+
+TEST("widgets: a swipe down closes them with swipe-to-cancel off, and records nothing") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  r.server(kWidgets);
+  hg::TouchGestures::Config cfg;
+  cfg.swipe_cancel = false;
+  hg::TouchGestures touch(r.app, cfg);
+  swipe(r, touch, 60, 120, 140, 6);
+  CHECK(r.app.screen() == hg::Screen::Widget);
+  const std::string hint = r.app.model().hint;
+  swipe(r, touch, 160, 60, 4, 140);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK(!r.app.widgets_open());
+  CHECK(r.fake.last("audio.start") == nullptr);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.app.model().hint.find("while speaking") == std::string::npos);
+}
+
+TEST("widgets: under a question a sideways swipe does nothing, and the widgets are still there after it") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  r.server(kWidgets);
+  hg::TouchGestures touch(r.app);
+  swipe(r, touch, 60, 120, 140, 6);
+  swipe(r, touch, 60, 120, 140, 6);
+  CHECK_EQ(int(r.app.model().widget_index), 1);
+  r.server(R"({"type":"prompt","id":"q","title":"Allow?","text":"rm -rf build"})");
+  CHECK(r.app.screen() == hg::Screen::Prompt);
+  swipe(r, touch, 60, 120, 140, 6);
+  swipe(r, touch, 200, 120, -140, 4);
+  swipe(r, touch, 200, 120, -140, 4);
+  CHECK(r.app.screen() == hg::Screen::Prompt);  // unanswered
+  CHECK(r.fake.last("prompt.reply") == nullptr);
+  r.server(R"({"type":"prompt.close","id":"q"})");
+  CHECK(r.app.screen() == hg::Screen::Widget);
+  CHECK_EQ(int(r.app.model().widget_index), 1);  // where the question found them
+}

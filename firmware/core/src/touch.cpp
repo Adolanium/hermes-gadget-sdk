@@ -50,7 +50,8 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
       case State::Side:  // a sideways swipe: travel enough, and more sideways than down or up
         if (std::abs(dx_) >= cfg_.swipe_px && std::abs(dx_) > 2 * std::abs(dy_)) {
           if (in_picker_) app_.profile_page_step(dx_ < 0 ? 1 : -1);  // the next page comes in from the right
-          else if (app_.widgets_open()) app_.widget_step(dx_ > 0 ? 1 : -1);  // further left, or back towards Ready
+          else if (app_.widgets_showing()) app_.widget_step(dx_ > 0 ? 1 : -1);  // further left, or back towards Ready
+          else if (app_.widgets_open()) break;  // a question or an alert came over them meanwhile
           else if (dx_ < 0) app_.open_profile_picker();  // from right to left, as the grid's next page
           else app_.open_widgets();  // from left to right: the widgets lie to the left of Ready
         }
@@ -86,7 +87,7 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
 
   const int dx = x - x0_, dy = y - y0_;
   const bool swiped_down = (cfg_.swipe_cancel || app_.settings_open() || app_.wifi_setup_open() ||
-                           app_.phone_pairing_open() || app_.profile_picker_open()) &&
+                           app_.phone_pairing_open() || app_.profile_picker_open() || app_.widgets_showing()) &&
                           dy >= cfg_.swipe_px && std::abs(dx) < dy;
   switch (state_) {
     case State::Picker:  // a tap picks a cell, a swipe sideways turns the page and a swipe down closes the grid
@@ -140,7 +141,7 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
         // right to left) or the widgets (from left to right), or page the widgets; wait for a
         // clear swipe, else ignore.
         if (std::abs(dx) >= std::abs(dy) && !from_clock_ &&
-            (app_.widgets_open() || (dx < 0 ? app_.profile_swipe_opens() : app_.widgets_can_open()))) {
+            (app_.widgets_showing() || (dx < 0 ? app_.profile_swipe_opens() : app_.widgets_can_open()))) {
           state_ = State::Side;
           in_picker_ = false;
           dx_ = dx, dy_ = dy;

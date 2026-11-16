@@ -433,11 +433,12 @@ def test_widgets_expire_and_are_validated_and_limited(tmp_path):
         store.set_widget("k2", "value", value=2, device=KITCHEN)
     store.set_widget("k1", "value", value="changed", device=KITCHEN)  # an existing one can still change
     store.set_widget("s0", "value", value="mine", device=KITCHEN)  # so can a device's own over a shared one
+    assert store.clear_widgets(device=KITCHEN)
     store.set_widget("s6", "value", value=6)
     store.set_widget("s7", "value", value=7)  # eight shared: the limit for a device with none of its own
     with pytest.raises(ValueError, match="8 widgets"):
         store.set_widget("s8", "value", value=8)
-    assert len(store.widgets()) == 8 and len(store.widgets(KITCHEN)) == 8  # cut to what a device takes
+    assert len(store.widgets()) == 8 and len(store.widgets(KITCHEN)) == 8
     # An expired widget frees its place.
     store.clear_widgets()
     store.set_widget("brief", "value", value=1, ttl_s=10)
@@ -673,8 +674,8 @@ def test_the_widget_tool_explains_what_it_refuses(widget_tool, monkeypatch):
                        ({"name": "x"}, "kind must be one of"),
                        ({"kind": "value", "value": "1"}, "needs a name"),
                        ({"name": "x", "kind": "list", "items": list("abcde")}, "holds 4 items"),
-                       ({"name": "x", "kind": "value", "value": "1", "ttl_s": -5}, "ttl_s"),
-                       ({"name": "x", "kind": "value", "value": "1", "ttl_s": "soon"}, "ttl_s"),
+                       ({"name": "x", "kind": "value", "value": "1", "ttl_s": -5}, "ttl must be"),
+                       ({"name": "x", "kind": "value", "value": "1", "ttl_s": "soon"}, "ttl must be"),
                        ({"name": "x", "kind": "value", "value": "1", "device": "attic"}, "no single gadget"),
                        ({"action": "shuffle"}, "action must be")):
         answer = call(args)
@@ -684,3 +685,184 @@ def test_the_widget_tool_explains_what_it_refuses(widget_tool, monkeypatch):
     assert "turned off" in call({"name": "x", "kind": "value", "value": "1"})["error"]
     monkeypatch.setattr(tools, "_adapter", lambda: None)
     assert "not running" in call({"name": "x", "kind": "value", "value": "1"})["error"]
+
+
+# -- review fixes: concurrent writers, the limit across scopes, ttl, forget --------------------
+
+def test_threads_setting_widgets_and_tiles_at_once_lose_nothing(tmp_path):
+    import threading
+
+    TileStore(tmp_path).set("nas", "up", state="ok")
+    TileStore(tmp_path).set_widget("kept", "value", value="before")
+    errors: list[BaseException] = []
+
+    def writer(i: int) -> None:
+        store = TileStore(tmp_path)  # as the tool, the gateway and the CLI each have their own
+        try:
+            for n in range(25):
+                if i % 2:
+                    store.set_widget(f"w{i}", "value", value=n)
+                else:
+                    store.set(f"t{i}", str(n))
+                store.widgets()
+                store.tiles()
+        except BaseException as exc:  # noqa: BLE001 - the test reports whatever a writer met
+            errors.append(exc)
+
+    threads = [threading.Thread(target=writer, args=(i,)) for i in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    store = TileStore(tmp_path)
+    assert {w["id"]: w["value"] for w in store.widgets()} == {"kept": "before", "w1": "24", "w3": "24", "w5": "24"}
+    assert {t["id"]: t["value"] for t in store.tiles()} == {"nas": "up", "t0": "24", "t2": "24", "t4": "24"}
+    assert sorted(p.name for p in tmp_path.iterdir()) == [TileStore.FILENAME]  # no temporary or lock file left
+
+
+def test_processes_setting_widgets_and_tiles_at_once_lose_nothing(tmp_path):
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    TileStore(tmp_path).set("nas", "up", state="ok")
+    TileStore(tmp_path).set_widget("kept", "value", value="before")
+    plugin_parent = Path(dashboard.__file__).resolve().parent.parent
+    script = (
+        "import sys\n"
+        f"sys.path.insert(0, {str(plugin_parent)!r})\n"
+        f"from {dashboard.__name__} import TileStore\n"
+        "store, who = TileStore(sys.argv[1]), sys.argv[2]\n"
+        "for n in range(40):\n"
+        "    if who == 'tiles':\n"
+        "        store.set('t', str(n))\n"
+        "    else:\n"
+        "        store.set_widget(who, 'value', value=n)\n"
+    )
+    procs = [subprocess.Popen([sys.executable, "-c", script, str(tmp_path), who], stderr=subprocess.PIPE)
+             for who in ("a", "b", "tiles")]
+    failures = [p.communicate(timeout=120)[1].decode(errors="replace") for p in procs]
+    assert [p.returncode for p in procs] == [0, 0, 0], failures
+    store = TileStore(tmp_path)
+    assert {w["id"]: w["value"] for w in store.widgets()} == {"kept": "before", "a": "39", "b": "39"}
+    assert {t["id"]: t["value"] for t in store.tiles()} == {"nas": "up", "t": "39"}
+
+
+def test_a_file_that_cannot_be_read_is_not_taken_for_an_empty_one(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    store = TileStore(tmp_path)
+    store.set("nas", "up")
+    store.set_widget("kept", "value", value="before")
+    before = store.path.read_text(encoding="utf-8")
+    real_read, calls = Path.read_text, []
+
+    def busy(self, *args, **kw):  # another process holds the file: Windows says PermissionError
+        if self == store.path:
+            calls.append(1)
+            if len(calls) <= busy.times:
+                raise PermissionError(13, "busy")
+        return real_read(self, *args, **kw)
+
+    monkeypatch.setattr(Path, "read_text", busy)
+    monkeypatch.setattr(dashboard.time, "sleep", lambda s: None)
+    busy.times = 3  # it frees up within a few tries: the write goes through, with everything kept
+    store.set_widget("new", "value", value="1")
+    assert [w["id"] for w in store.widgets()] == ["kept", "new"] and store.tiles()[0]["id"] == "nas"
+    busy.times = 10 ** 6  # it never does: an error, and the file as it was
+    calls.clear()
+    after_new = real_read(store.path, encoding="utf-8")
+    for change in (lambda: store.set_widget("lost", "value", value="1"), lambda: store.set("lost", "1"),
+                   lambda: store.clear_widgets(), lambda: store.clear(None)):
+        with pytest.raises(OSError):
+            change()
+    with pytest.raises(OSError):
+        store.widgets()  # the gateway keeps what devices show rather than sending them nothing
+    assert real_read(store.path, encoding="utf-8") == after_new != before
+
+
+def test_the_widget_tool_and_command_report_a_file_they_cannot_write(widget_tool, widget_cli, monkeypatch):
+    call, adapter = widget_tool
+
+    def refuse(*args, **kw):
+        raise PermissionError(13, "busy")
+
+    monkeypatch.setattr(TileStore, "_save", refuse)
+    answer = call({"name": "x", "kind": "value", "value": "1"})
+    assert answer["success"] is False and "busy" in answer["error"]
+    assert call({"action": "clear"})["success"] is True  # nothing to clear writes nothing
+    run, _store = widget_cli
+    with pytest.raises(SystemExit) as exit_:
+        run("widget", "set", "x", "--value", "1")
+    assert "busy" in str(exit_.value.code)
+
+
+def test_a_shared_widget_never_pushes_a_gadgets_own_off_its_screen(tmp_path):
+    store = TileStore(tmp_path)
+    for i in range(6):
+        store.set_widget(f"s{i}", "value", value=i)
+    store.set_widget("k0", "value", value="mine", device=KITCHEN)
+    store.set_widget("k1", "value", value="mine", device=KITCHEN)
+    with pytest.raises(ValueError, match=KITCHEN):  # the kitchen has no room: it says which gadget
+        store.set_widget("s6", "value", value=6)
+    assert [w["id"] for w in store.widgets(KITCHEN)] == ["s0", "s1", "s2", "s3", "s4", "s5", "k0", "k1"]
+    assert len(store.widgets()) == 6  # refused whole: no other gadget got it either
+    store.set_widget("s0", "value", value="changed")  # one every gadget already shows can change
+    store.set_widget("k0", "value", value="shared now")  # so can a name the kitchen has of its own
+    assert len(store.widgets(KITCHEN)) == 8 and len(store.widgets(DESK)) == 7
+    assert store.clear_widgets("k1", device=KITCHEN)
+    store.set_widget("s6", "value", value=6)  # room again
+    assert len(store.widgets(KITCHEN)) == 8
+
+
+def test_a_ttl_is_a_positive_number_of_seconds_for_the_store_the_command_and_the_tool(
+        tmp_path, widget_cli, widget_tool):
+    store = TileStore(tmp_path / "own")
+    for bad in (-5, 0, float("nan"), float("inf"), "soon", True):
+        with pytest.raises(ValueError, match="ttl"):
+            store.set_widget("x", "value", value="1", ttl_s=bad)
+        with pytest.raises(ValueError, match="ttl"):
+            store.set("x", "1", ttl_s=bad)
+    assert store.widgets() == [] and store.tiles() == []
+    store.set_widget("x", "value", value="1", ttl_s="90")  # a number as text, as a tool may send it
+    assert "NaN" not in store.path.read_text(encoding="utf-8")
+
+    run, shared = widget_cli
+    for bad in ("-5", "nan", "0"):
+        with pytest.raises(SystemExit) as exit_:
+            run("widget", "set", "x", "--value", "1", "--ttl", bad)
+        assert "ttl" in str(exit_.value.code)
+    assert shared.widgets() == []
+    call, _adapter = widget_tool
+    assert "ttl" in call({"name": "x", "kind": "value", "value": "1", "ttl_s": float("inf")})["error"]
+
+
+def test_forgetting_a_gadget_removes_the_widgets_set_for_it(widget_cli, capsys):
+    run, store = widget_cli
+    run("widget", "set", "shared", "--value", "1")
+    run("widget", "set", "oven", "--percent", "40", "--device", "kitchen")
+    run("forget", "kitchen")
+    assert "widget" in capsys.readouterr().out
+    assert set(store.widget_scopes()) == {"*"}
+    assert [w["id"] for w in store.widgets(KITCHEN)] == ["shared"]
+
+
+def test_each_session_gets_its_own_widgets_in_the_layout_it_draws(tmp_path):
+    from types import SimpleNamespace
+
+    store = TileStore(tmp_path)
+    store.set("nas", "up")
+    store.set_widget("temp", "value", value="21", label="Büro")
+    store.set_widget("oven", "progress", percent=40, device=KITCHEN)
+    sessions = [{"id": "abcd", "label": "cli abcd", "state": "idle"}]
+    kitchen = SimpleNamespace(device_id=KITCHEN, charset="ascii", display={"text_cols": 20}, dashboard_version=2)
+    desk = SimpleNamespace(device_id=DESK, charset="latin1", display={}, dashboard_version=1)
+    newer = SimpleNamespace(device_id=DESK, charset="ascii", display={"text_cols": 20}, dashboard_version=9)
+    msg = dashboard.message_for(kitchen, sessions, store)
+    assert msg["v"] == 2 and [w["id"] for w in msg["widgets"]] == ["temp", "oven"]
+    assert msg["widgets"][0]["label"] == "Buro" and msg["sessions"] == sessions
+    old = dashboard.message_for(desk, sessions, store)
+    assert old["v"] == 1 and "widgets" not in old
+    assert [(t["id"], t["label"]) for t in old["tiles"]] == [("nas", "nas"), ("temp", "Büro")]  # not the kitchen's
+    assert dashboard.message_for(newer, sessions, store)["v"] == dashboard.VERSION

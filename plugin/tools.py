@@ -244,27 +244,28 @@ def gadget_widget(args: dict, **_kw) -> str:
     action = str(args.get("action") or "set")
     name = str(args.get("name") or "").strip()
     if action == "list":
-        return json.dumps({"success": True, "widgets": store.widgets(device), "device": where})
+        try:
+            return json.dumps({"success": True, "widgets": store.widgets(device), "device": where})
+        except OSError as exc:
+            return _error(f"could not read the widgets: {exc}")
     if action == "clear":
-        cleared = store.clear_widgets(name or None, device=device)
+        try:
+            cleared = store.clear_widgets(name or None, device=device)
+        except OSError as exc:
+            return _error(f"could not update the widgets: {exc}")
         adapter._board_changed()  # devices hear of it now rather than at the next look at the file
         return json.dumps({"success": True, "cleared": cleared, "device": where})
     if action != "set":
         return _error("action must be set, clear or list")
-    ttl = args.get("ttl_s")
-    try:
-        ttl = float(ttl) if ttl is not None else None
-        if ttl is not None and not 0 < ttl < float("inf"):
-            raise ValueError
-    except (TypeError, ValueError):
-        return _error("ttl_s must be a positive number of seconds")
     try:
         widget = store.set_widget(
             name, str(args.get("kind") or ""), device=device, label=args.get("label"), value=args.get("value"),
             unit=args.get("unit"), percent=args.get("percent"), items=args.get("items"), title=args.get("title"),
-            text=args.get("text"), state=args.get("state") or None, ttl_s=ttl)
+            text=args.get("text"), state=args.get("state") or None, ttl_s=args.get("ttl_s"))
     except ValueError as exc:
         return _error(str(exc))
+    except OSError as exc:  # the file is locked or unwritable: say so instead of failing the tool call
+        return _error(f"could not save the widget: {exc}")
     adapter._board_changed()
     drawing = [s.name for s in adapter.hub.sessions.values()
                if s.paired and s.dashboard_version and (device is None or s.device_id == device)]

@@ -86,10 +86,12 @@ hermes gadget widget set playing --title "Blue in Green" --text "Miles Davis" --
 - The option you give picks the kind. Setting a name again replaces that widget.
 - `--label` is the small heading; without it the name is shown.
 - `--state` colours the value, the bar or the title green (`ok`), yellow (`warn`) or red (`bad`).
-- `--ttl 900` removes the widget after 15 minutes unless it is set again.
+- `--ttl 900` removes the widget after 15 minutes unless it is set again. It is a positive number of seconds.
 - `--device kitchen` sets the widget for one gadget, by name or id. Without it every gadget gets the widget. A gadget's own widget replaces the shared widget of the same name.
 - `hermes gadget widget list` shows the widgets. `hermes gadget widget clear office` removes one, and `hermes gadget widget clear --all` removes all of them; add `--device` for the widgets set for one gadget.
-- A gadget shows up to eight widgets. Connected gadgets get a change within a few seconds.
+- A gadget shows up to eight widgets, the shared ones counted with its own. A widget that would give any gadget a ninth is refused, and the message names that gadget; nothing already on a screen is pushed off it. Clear one first.
+- Connected gadgets get a change within a few seconds.
+- `hermes gadget forget` also removes the widgets set for that gadget.
 
 To page through the widgets on the gadget:
 
@@ -98,9 +100,9 @@ To page through the widgets on the gadget:
 | Touchscreen | Swipe from left to right on the idle screen, and again on each widget | Swipe from right to left | Swipe down |
 | Up and Down buttons, or a knob | Press Down on the idle screen, and again on each widget | Press Up | Tap CANCEL |
 
-Past the last widget the idle screen returns, and so it does when you go back from the first. The dots at the bottom show which widget you are on. Holding or tapping the screen, or TALK, still talks from a widget. A question, a card or an image takes the screen over. The other gestures are unchanged: a swipe down on the idle screen opens the sessions list, a swipe from right to left opens the profile grid, and Up brings the last reply back.
+Past the last widget the idle screen returns, and so it does when you go back from the first. The dots at the bottom show which widget you are on. Holding or tapping the screen, or TALK, still talks from a widget. A question, a card or an image takes the screen over, and so does a reply from Hermes: a turn that starts by itself, such as a scheduled message, closes the widgets and shows its text. While a question is on screen, a sideways swipe does nothing, and the widget comes back when the question is answered. The other gestures are unchanged: a swipe down on the idle screen opens the sessions list, a swipe from right to left opens the profile grid, and Up brings the last reply back.
 
-A widget left open follows the screen timeout like the sessions list: the screen dims, goes dark and wakes to the idle screen. With the [resting clock](#resting-clock) on, a widget left open rests too: each minute the screen shows the clock face or the next widget in turn, at the clock's lower brightness, and moved a few pixels as the clock face is to spare OLED panels. A touch or a press brings back the widget you left. The idle screen's own rest is the clock alone, as before.
+A widget left open follows the screen timeout like the sessions list: the screen dims, goes dark and wakes to the idle screen. With the [resting clock](#resting-clock) on, a widget left open rests too: each minute the screen shows the clock face or the next widget in turn, at the clock's lower brightness. Like the clock face, each of them is drawn a few pixels away from where it was the turn before, through nine places, to spare OLED panels. A touch brings back the widget you left. Up or Down pages from the widget on screen; on the clock face's turn they bring back the widget you left. The idle screen's own rest is the clock alone, as before.
 
 Boards with only TALK and CANCEL cannot page, and so do gadgets on firmware older than this feature. They show each widget as a line on the [sessions list](#watch-hermes-sessions-on-the-dashboard), after the tiles and while fewer than eight lines are in use.
 

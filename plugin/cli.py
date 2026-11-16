@@ -98,6 +98,11 @@ def _cmd_forget(args) -> None:
         return
     store.forget(device_id)
     print(f"Forgot the key for {device_id}; the device will re-enroll on its next connection.")
+    try:
+        if _tiles().clear_widgets(device=device_id):
+            print("Removed the widgets set for it. Widgets set for every gadget stay.")
+    except OSError as exc:
+        print(f"Could not remove the widgets set for it: {exc}")
     print(f"To also remove its chat approval: hermes pairing revoke gadget {device_id}")
 
 
@@ -433,7 +438,7 @@ def _cmd_widget(args) -> None:
                 args.name, _widget_kind(args), device=device, label=args.label, value=args.value, unit=args.unit,
                 percent=args.percent, items=args.item, title=args.title, text=args.text, state=args.state,
                 ttl_s=args.ttl)
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:
             sys.exit(str(exc))
         print(f"Set {args.name} ({widget['kind']}) for {where}: {widget_summary(widget)}. "
               "Connected gadgets get it within a few seconds.")

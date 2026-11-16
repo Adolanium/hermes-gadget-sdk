@@ -19,9 +19,11 @@ for one. A device that draws only layout 1 gets them as tiles on its list.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -37,6 +39,9 @@ MAX_ITEMS = 4              # lines of a list widget
 MAX_TEXT = 200             # characters kept of any widget text; the message cuts it to the device's line
 WIDGET_KINDS = ("value", "progress", "list", "headline")
 ALL_DEVICES = "*"          # in the file: the widgets every device gets
+RETRIES, RETRY_S = 10, 0.01  # a file Windows holds for another process frees up within milliseconds
+LOCK_WAIT_S = 10.0         # how long a change waits for another one to finish
+LOCK_STALE_S = 30.0        # a lock file older than this was left by a process that died
 IDLE_KEEP_S = 30 * 60      # an idle session leaves the dashboard this long after its last turn
 ACTIVE_KEEP_S = 6 * 3600   # ...and one that never reported its end, after this long
 TILE_STATES = ("ok", "warn", "bad")
@@ -159,7 +164,8 @@ BOARD = SessionBoard()  # this process's sessions; the plugin registers its hook
 
 
 class TileStore:
-    """Status tiles in ``dashboard.json``; written by the CLI, read by the gateway."""
+    """Status tiles and widgets in ``dashboard.json``; written by the CLI and the agent's tool,
+    read by the gateway. Every change is one locked read-modify-write of the whole file."""
 
     FILENAME = "dashboard.json"
 
@@ -167,13 +173,58 @@ class TileStore:
         self.path = Path(directory) / self.FILENAME
         self._clock = clock
 
+    @contextlib.contextmanager
+    def _locked(self):
+        """Hold the file for one read-modify-write. The CLI, a cron job, the agent's tool and the
+        gateway each change it from their own process or thread; without this, two changes read
+        the same file and the later write drops the earlier one."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        lock = self.path.with_name(self.path.name + ".lock")
+        deadline = time.monotonic() + LOCK_WAIT_S
+        while True:
+            try:
+                os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                break
+            except (FileExistsError, PermissionError):  # held; on Windows also while it is being removed
+                try:
+                    if time.time() - lock.stat().st_mtime > LOCK_STALE_S:
+                        lock.unlink(missing_ok=True)  # its holder died before removing it
+                        continue
+                except OSError:
+                    pass  # gone meanwhile, or busy: try again
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"{self.path.name} is locked by another process") from None
+                time.sleep(0.002)
+        try:
+            yield
+        finally:
+            for attempt in range(RETRIES):
+                try:
+                    lock.unlink(missing_ok=True)
+                    break
+                except PermissionError:  # Windows: another process is looking at it this instant
+                    time.sleep(RETRY_S)
+
     def _load(self) -> dict[str, dict]:
         """The file's two sections: ``tiles`` (name -> tile) and ``widgets`` (device id or ``*`` ->
-        name -> widget). Anything malformed reads as absent."""
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            raw = None
+        name -> widget). A missing file is an empty one, and anything malformed in it reads as
+        absent. A file that cannot be read is neither: the error is raised, so that a busy file
+        is never written back as an empty one."""
+        raw = None
+        for attempt in range(RETRIES):
+            try:
+                raw = json.loads(self.path.read_text(encoding="utf-8"))
+                break
+            except FileNotFoundError:
+                break
+            except ValueError:
+                break
+            except OSError:
+                # Windows refuses a read while another process replaces the file; it frees up
+                # within milliseconds, so try a few times before giving up.
+                if attempt == RETRIES - 1:
+                    raise
+                time.sleep(RETRY_S)
         raw = raw if isinstance(raw, dict) else {}
 
         def table(value: Any) -> dict[str, dict]:
@@ -183,19 +234,39 @@ class TileStore:
                 "widgets": {scope: table(rows) for scope, rows in table(raw.get("widgets")).items()}}
 
     def _save(self, doc: dict[str, dict]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_name(f"{self.path.name}.{os.getpid()}.tmp")
         out = {"tiles": doc["tiles"]}
         if any(doc["widgets"].values()):
             out["widgets"] = {scope: rows for scope, rows in doc["widgets"].items() if rows}
-        tmp.write_text(json.dumps(out, indent=2), encoding="utf-8")
-        os.replace(tmp, self.path)
+        text = json.dumps(out, indent=2, allow_nan=False)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # A unique temporary file (as store.py does): two writers never share one.
+        fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=f"{self.path.stem}.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(text)
+            for attempt in range(RETRIES):
+                try:
+                    os.replace(tmp, self.path)
+                    break
+                except PermissionError:  # Windows: a reader holds the file at this moment
+                    if attempt == RETRIES - 1:
+                        raise
+                    time.sleep(RETRY_S)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
 
-    def _read(self) -> dict[str, dict]:
-        return self._load()["tiles"]
-
-    def _write(self, tiles: dict[str, dict]) -> None:
-        self._save({**self._load(), "tiles": tiles})
+    def _expiry(self, ttl_s: Any) -> float | None:
+        """When something set now with ``ttl_s`` expires; None for no expiry."""
+        if ttl_s is None:
+            return None
+        try:
+            seconds = float(ttl_s)
+        except (TypeError, ValueError):
+            seconds = float("nan")
+        if isinstance(ttl_s, bool) or not math.isfinite(seconds) or seconds <= 0:
+            raise ValueError("ttl must be a positive number of seconds")
+        return self._clock() + seconds
 
     def mtime(self) -> float:
         try:
@@ -210,35 +281,36 @@ class TileStore:
             raise ValueError("a tile needs a name")
         if state is not None and state not in TILE_STATES:
             raise ValueError(f"state must be one of {', '.join(TILE_STATES)}")
-        tiles = self._read()
-        if name not in tiles and len(self.tiles()) >= MAX_TILES:
-            raise ValueError(f"the dashboard holds {MAX_TILES} tiles; clear one first")
         tile = {"label": label or name, "value": value}
         if state:
             tile["state"] = state
-        if ttl_s:
-            tile["expires"] = self._clock() + float(ttl_s)
-        tiles[name] = tile
-        self._write(tiles)
+        expires = self._expiry(ttl_s)
+        if expires is not None:
+            tile["expires"] = expires
+        with self._locked():
+            doc = self._load()
+            if name not in doc["tiles"] and len(self._live_tiles(doc["tiles"])) >= MAX_TILES:
+                raise ValueError(f"the dashboard holds {MAX_TILES} tiles; clear one first")
+            doc["tiles"][name] = tile
+            self._save(doc)
         return tile
 
     def clear(self, name: str | None = None) -> bool:
-        tiles = self._read()
-        if name is None:
-            if not tiles:
+        with self._locked():
+            doc = self._load()
+            if not (doc["tiles"] if name is None else name in doc["tiles"]):
                 return False
-            self._write({})
-            return True
-        if tiles.pop(name, None) is None:
-            return False
-        self._write(tiles)
+            if name is None:
+                doc["tiles"] = {}
+            else:
+                del doc["tiles"][name]
+            self._save(doc)
         return True
 
-    def tiles(self) -> list[dict[str, str]]:
-        """Tiles that haven't expired, in the order they were first set."""
+    def _live_tiles(self, tiles: dict[str, dict]) -> list[dict[str, str]]:
         now = self._clock()
         out = []
-        for name, tile in self._read().items():
+        for name, tile in tiles.items():
             expires = tile.get("expires")
             if isinstance(expires, (int, float)) and expires <= now:
                 continue
@@ -246,8 +318,11 @@ class TileStore:
             if tile.get("state") in TILE_STATES:
                 row["state"] = tile["state"]
             out.append(row)
-        return out[:MAX_TILES]
+        return out
 
+    def tiles(self) -> list[dict[str, str]]:
+        """Tiles that haven't expired, in the order they were first set."""
+        return self._live_tiles(self._load()["tiles"])[:MAX_TILES]
 
     # -- widgets ------------------------------------------------------------------------
 
@@ -256,7 +331,8 @@ class TileStore:
                    title: str | None = None, text: str | None = None, state: str | None = None,
                    ttl_s: float | None = None) -> dict:
         """Add a widget or replace the one of that name, for ``device`` (a device id) or for every
-        device. Raises ValueError for what no device could draw."""
+        device. Raises ValueError for what no device could draw, and for a widget that would leave
+        a device with more than it shows: nothing already on a screen is ever pushed off it."""
         name = str(name or "").strip()
         if not name:
             raise ValueError("a widget needs a name")
@@ -299,29 +375,36 @@ class TileStore:
                 widget["text"] = line(text)
         if state:
             widget["state"] = state
-        if ttl_s:
-            widget["expires"] = self._clock() + float(ttl_s)
+        expires = self._expiry(ttl_s)
+        if expires is not None:
+            widget["expires"] = expires
         scope = device or ALL_DEVICES
-        doc = self._load()
-        # What the device would show with it: a name it already shows takes no new place.
-        if len(set(self._merged(doc, device)) | {name}) > MAX_WIDGETS:
-            raise ValueError(f"a gadget shows {MAX_WIDGETS} widgets; clear one first")
-        doc["widgets"].setdefault(scope, {})[name] = widget
-        self._save(doc)
+        with self._locked():
+            doc = self._load()
+            # What each device it reaches would show with it; a name a device already shows takes
+            # no new place. A shared widget reaches every device, those with their own included.
+            reached = [device] if device else [None, *(d for d in doc["widgets"] if d != ALL_DEVICES)]
+            for d in reached:
+                if len(set(self._merged(doc, d)) | {name}) > MAX_WIDGETS:
+                    who = "a gadget" if d is None or d == device else f"the gadget {d}, with its own,"
+                    raise ValueError(f"{who} shows {MAX_WIDGETS} widgets; clear one first")
+            doc["widgets"].setdefault(scope, {})[name] = widget
+            self._save(doc)
         return widget
 
     def clear_widgets(self, name: str | None = None, *, device: str | None = None) -> bool:
         """Remove the widget ``name``, or every widget, set for ``device`` or for every device.
         False when there was nothing to remove."""
-        doc = self._load()
-        rows = doc["widgets"].get(device or ALL_DEVICES, {})
-        if not (rows if name is None else name in rows):
-            return False
-        if name is None:
-            rows.clear()
-        else:
-            del rows[name]
-        self._save(doc)
+        with self._locked():
+            doc = self._load()
+            rows = doc["widgets"].get(device or ALL_DEVICES, {})
+            if not (rows if name is None else name in rows):
+                return False
+            if name is None:
+                rows.clear()
+            else:
+                del rows[name]
+            self._save(doc)
         return True
 
     def _live(self, rows: dict[str, dict]) -> dict[str, dict]:
@@ -377,6 +460,13 @@ def widget_summary(widget: dict) -> str:
     if kind == "list":
         return str((widget.get("items") or [""])[0])
     return str(widget.get("title") or "")
+
+
+def message_for(session, sessions: list[dict], store: TileStore) -> dict:
+    """The ``dashboard`` message for one connected device (a hub ``DeviceSession``): the tiles,
+    the widgets set for every device and for this one, in the layout and the text it draws."""
+    return message(sessions, store.tiles(), store.widgets(session.device_id), charset=session.charset,
+                   cols=session.display.get("text_cols"), version=session.dashboard_version)
 
 
 def message(sessions: list[dict], tiles: list[dict], widgets: list[dict] | None = None, *,

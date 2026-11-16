@@ -149,6 +149,9 @@ struct UiModel {
   Widget widget;
   uint8_t widget_index = 0, widget_count = 0;
   bool widget_rest = false;
+  // The burn-in shift's place in its nine-step cycle, for the clock face and a resting widget;
+  // -1: the clock's own, `clock_minute`.
+  int16_t shift_step = -1;
   // A running timer: thousandths of its length still to go, or -1 for none. The round
   // panel's edge ring and the rectangular top bar's line show it.
   int16_t timer_permille = -1;
