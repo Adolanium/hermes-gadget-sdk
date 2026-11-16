@@ -896,7 +896,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if self._hub is None or self._tiles is None:
             return
         live = [s for s in self._hub.sessions.values()
-                if s.paired and not s.closed and s.dashboard_version >= dashboard.VERSION]
+                if s.paired and not s.closed and s.dashboard_version]  # each gets the layout it draws
         targets = live if only is None else [s for s in live if s is only]
         if not any(self._switches(s) for s in live):  # no device reads other profiles' boards any more
             self._keep_boards([])
@@ -923,7 +923,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             # No await from the check to here: send_dashboard queues on the device's send lock (FIFO)
             # before any newer push can, so an older dashboard never lands after a newer one.
             await session.send_dashboard(dashboard.message(
-                theirs if switches else mine, tiles, charset=session.charset, cols=session.display.get("text_cols")))
+                theirs if switches else mine, tiles, self._tiles.widgets(session.device_id), charset=session.charset,
+                cols=session.display.get("text_cols"), version=session.dashboard_version))
 
     async def _offered_boards(self) -> List[dashboard.SessionBoard]:
         """The session boards of the other profiles a switching device may pick, as each profile's

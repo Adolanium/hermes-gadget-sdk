@@ -12,7 +12,7 @@ Hermes's gateway runs "platform adapters": Telegram, Slack and about twenty othe
 | `__init__.py` | `register(ctx)`: platform entry, agent tools, `hermes gadget` CLI |
 | `adapter.py` | `GadgetAdapter(BasePlatformAdapter)`: the Hermes-facing side |
 | `hub.py` | WebSocket server, auth, audio, images, actions (no Hermes imports) |
-| `tools.py` | `gadget_devices`, `gadget_display`, `gadget_action` |
+| `tools.py` | `gadget_devices`, `gadget_display`, `gadget_action`, `gadget_widget` |
 | `store.py`, `status.py`, `protocol.py`, `audio.py`, `textfmt.py`, `imaging.py` | Support modules (no Hermes imports) |
 | `dashboard/` | The **Gadgets** tab of the Hermes web dashboard: `manifest.json`, the backend routes in `plugin_api.py`, and the tab's bundle in `dist/`, built from `src/` (see [The Gadgets tab](#the-gadgets-tab-in-the-hermes-dashboard)) |
 | `desktop/plugin.js`, `desk.py` | The **Gadgets** page of the Hermes desktop app, built from `desktop-src/`, and the queue that carries its cards and actions to the gateway (see [The Gadgets page in Hermes Desktop](#the-gadgets-page-in-hermes-desktop)) |
@@ -211,6 +211,23 @@ Hermes asks before destructive commands (`/new`, `/undo`), costly model switches
 ### Agent tools and Hermes tool search
 
 Hermes keeps the core tool schema narrow. Plugin tools are therefore deferred behind its tool-search bridge (`tool_search` / `tool_describe` / `tool_call`), and their names and descriptions appear in the bridge's manifest. A model invokes `gadget_action` through `tool_call`, and the end-to-end test exercises exactly that. The per-device context names the available actions so the model knows they exist.
+
+`gadget_widget` sets, lists and clears [home-screen widgets](using-gadget.md#glance-at-widgets). It writes the same file as `hermes gadget widget` (`dashboard.json` in the plugin's data folder), so a widget the agent sets and one a cron job sets are the same thing, and either can replace or clear the other's.
+
+| Argument | Meaning |
+|---|---|
+| `action` | `set` (the default), `clear` or `list` |
+| `name` | The widget's name. Setting it again replaces the widget. `clear` without a name removes every widget of that scope |
+| `kind` | `value`, `progress`, `list` or `headline` |
+| `label`, `value`, `unit`, `percent`, `items`, `title`, `text`, `state` | The widget's fields, as in the [protocol](protocol.md#widgets) |
+| `ttl_s` | Seconds until the widget disappears unless it is set again |
+| `device` | A gadget's name or id, connected or not. Without it the widget is for every gadget |
+
+- The tool does not take the screen and does not wait for a device: the gateway sends the changed dashboard to connected gadgets at once, and to the others when they connect or their screens light up.
+- The limits are the CLI's: eight widgets for a gadget, counting the shared ones with its own, four list items, and text cut to the device's line.
+- The tool answers with an error, and stores nothing, for a widget no device could draw: a missing value, a percent that is not a number, more than four items.
+- The gateway picks each device's layout from its `caps.dashboard.v`. Older firmware, and boards that cannot page, get each widget as a tile on the sessions list.
+- With `dashboard: false` the tool reports that the dashboard is off.
 
 ## Making replies fast
 

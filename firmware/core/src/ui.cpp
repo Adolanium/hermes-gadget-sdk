@@ -164,6 +164,7 @@ EdgeRing edge_ring(const UiModel& m) {
     case Screen::LowBattery:
     case Screen::Charging:
     case Screen::Charged:
+    case Screen::Widget:
       return r;
     case Screen::Clock:
       r.kind = EdgeRing::Kind::Ticks;
@@ -325,6 +326,7 @@ const char* screen_name(Screen s) {
     case Screen::Camera: return "camera";
     case Screen::Setup: return "setup";
     case Screen::Dashboard: return "dashboard";
+    case Screen::Widget: return "widget";
     case Screen::Profiles: return "profiles";
     case Screen::Alarm: return "alarm";
     case Screen::Clock: return "clock";
@@ -564,6 +566,10 @@ void Ui::draw_frame(const UiModel& m) {
   }
   if (m.screen == Screen::LowBattery || m.screen == Screen::Charging || m.screen == Screen::Charged) {
     draw_battery_face(m);
+    return;
+  }
+  if (m.screen == Screen::Widget) {
+    draw_widget(m);
     return;
   }
   if (full_face_ != FullFace::None) {  // a face painted the whole panel: everything comes back
@@ -883,6 +889,7 @@ void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
     case Screen::LowBattery:
     case Screen::Charging:
     case Screen::Charged:
+    case Screen::Widget:
       break;
   }
 }
@@ -2060,6 +2067,157 @@ void Ui::draw_battery_face(const UiModel& m) {
     const int hw = panel_.round ? W * 60 / 100 : W - 8 * s;
     const std::string hint = fit(m.hint, (hw + s) / (font::kCellWidth * s));
     panel.text(cx - Canvas::text_width(hint, s) / 2, hy + s, hint, s, kDim);
+  });
+}
+
+// A widget (docs/protocol.md#widgets). The whole panel: the label small at the top, the
+// content as large as fits under it, and a dot per widget at the bottom when there are
+// several. On a round panel everything keeps to a square inside the glass. At rest the
+// group moves with the clock's burn-in shift, and the box leaves room for it.
+void Ui::draw_widget(const UiModel& m) {
+  const Widget& w = m.widget;
+  Hash h;
+  h.val(w.kind).add(w.label).add(w.value).add(w.unit).add(w.text).val(w.percent).val(w.tone)
+      .val(m.widget_index).val(m.widget_count).val(m.widget_rest).val(m.widget_rest ? m.clock_minute : uint8_t(0));
+  for (const std::string& item : w.items) h.add(item);
+  const uint32_t key = h.get();
+  if (valid_ && full_face_ == FullFace::Widget && key == face_hash_) return;
+  full_face_ = FullFace::Widget;
+  face_hash_ = key;
+  valid_ = true;  // leaving it repaints everything anyway (draw_frame)
+
+  const int s = layout_.scale;
+  const int W = panel_.width, H = panel_.height;
+  const BurnInShift shift = m.widget_rest ? burn_in_shift(m.clock_minute) : BurnInShift{0, 0};
+  // The box: a square inside the glass, or the panel less a margin, either with room for the
+  // shift's 4 px each way.
+  const int box_w = panel_.round ? std::min(W, H) * 66 / 100 : W - 2 * std::max(6, 4 * s);
+  const int box_h = panel_.round ? box_w : H - 2 * std::max(6, 2 * s);
+  const int x0 = (W - box_w) / 2 + shift.dx, y0 = (H - box_h) / 2 + shift.dy;
+  const int cx = x0 + box_w / 2;
+  const uint16_t ink = w.tone == DashRow::Tone::Dim ? kText : tone_color(w.tone);
+  auto cols = [&](int scale) { return std::max(1, (box_w + scale) / (font::kCellWidth * scale)); };
+
+  each_window(0, H, [&](int, int) {
+    Canvas panel = panel_canvas();
+    panel.fill_rect(0, 0, W, H, bg_);
+    auto centred = [&](int y, const std::string& text, int scale, uint16_t colour) {
+      panel.text(cx - Canvas::text_width(text, scale) / 2, y, text, scale, colour);
+    };
+
+    // The dots: one per widget, the current one lit.
+    int bottom = y0 + box_h;
+    if (m.widget_count > 1) {
+      const int r = std::max(2, s + s / 2 + 1), step = 4 * r, n = m.widget_count;
+      const int dy = bottom - r - 1;
+      for (int i = 0; i < n; ++i)
+        panel.fill_circle(cx - (n - 1) * step / 2 + i * step, dy, r, i == m.widget_index ? kText : kFaint);
+      bottom -= 2 * r + 2 + 2 * s;
+    }
+    // The label, a step above the base scale where it fits.
+    int top = y0;
+    if (!w.label.empty()) {
+      const int ls = Canvas::text_width(w.label, s + 1) <= box_w ? s + 1 : s;
+      centred(top, fit(w.label, cols(ls)), ls, kDim);
+      top += Canvas::line_height(ls) + 2 * s;
+    }
+    const int room = bottom - top;
+    if (room <= 0) return;
+
+    switch (w.kind) {
+      case Widget::Kind::Value: {
+        // The value as large as fits with its unit beside it, at about half the size, on its baseline.
+        int k = s + 1, us = s;
+        for (int kk = 10; kk > s; --kk) {
+          const int u = std::max(s, (kk + 1) / 2);
+          const int width = Canvas::text_width(w.value, kk) + (w.unit.empty() ? 0 : kk + Canvas::text_width(w.unit, u));
+          if (width > box_w || font::kGlyphHeight * kk > room) continue;
+          k = kk, us = u;
+          break;
+        }
+        const int unit_w = w.unit.empty() ? 0 : k + Canvas::text_width(fit(w.unit, cols(us)), us);
+        const std::string value = fit(w.value, std::max(1, (box_w - unit_w + k) / (font::kCellWidth * k)));
+        const int vw = Canvas::text_width(value, k);
+        const int x = cx - (vw + unit_w) / 2, y = top + std::max(0, room - font::kGlyphHeight * k) / 2;
+        panel.text(x, y, value, k, ink);
+        if (unit_w) panel.text(x + vw + k, y + font::kGlyphHeight * (k - us), fit(w.unit, cols(us)), us, kDim);
+        break;
+      }
+      case Widget::Kind::Progress: {
+        // The percentage over a bar as wide as the box.
+        const std::string text = std::to_string(w.percent) + "%";
+        const int bar_h = std::max(2 * s, std::min(8 * s, room / 6)), gap = 2 * s;
+        int k = 1;
+        for (int kk = 10; kk >= 1; --kk) {
+          if (Canvas::text_width(text, kk) > box_w || font::kGlyphHeight * kk + gap + bar_h > room) continue;
+          k = kk;
+          break;
+        }
+        const int y = top + std::max(0, room - (font::kGlyphHeight * k + gap + bar_h)) / 2;
+        centred(y, text, k, kText);
+        const int by = y + font::kGlyphHeight * k + gap, fill = box_w * w.percent / 100;
+        panel.fill_round_rect(x0, by, box_w, bar_h, bar_h / 2, kFaint);
+        if (fill > 0)
+          panel.fill_round_rect(x0, by, std::max(fill, bar_h), bar_h, bar_h / 2,
+                                w.tone == DashRow::Tone::Dim ? kAccent : tone_color(w.tone));
+        break;
+      }
+      case Widget::Kind::List: {
+        // One item per line from the left edge, at the largest scale whose lines all fit whole.
+        const int n = static_cast<int>(w.items.size());
+        if (!n) break;
+        int k = s;
+        for (int kk = s + 2; kk > s; --kk) {
+          bool fits = n * Canvas::line_height(kk) <= room;
+          for (const std::string& item : w.items) fits = fits && Canvas::text_width(item, kk) <= box_w;
+          if (!fits) continue;
+          k = kk;
+          break;
+        }
+        const int lh = Canvas::line_height(k), shown = std::max(1, std::min(n, room / lh));
+        int y = top + std::max(0, room - shown * lh) / 2;
+        for (int i = 0; i < shown; ++i, y += lh) panel.text(x0, y, fit(w.items[static_cast<size_t>(i)], cols(k)), k, kText);
+        break;
+      }
+      case Widget::Kind::Headline: {
+        // The title on one line as large as fits, up to twice the base scale and two, or on two
+        // lines at a step above the base scale; the text under it, dim, on up to two lines.
+        int k = s + 1;
+        for (int kk = 2 * s + 2; kk > s + 1; --kk) {
+          if (Canvas::text_width(w.value, kk) > box_w) continue;
+          k = kk;
+          break;
+        }
+        std::vector<std::string> title = wrap_text(w.value, cols(k));
+        if (title.size() > 2) {
+          title.resize(2);
+          title[1] = fit(title[1] + "..", cols(k));
+        }
+        const int ts = !w.text.empty() && Canvas::text_width(w.text, s + 1) <= box_w ? s + 1 : s;
+        std::vector<std::string> text = wrap_text(w.text, cols(ts));
+        if (text.size() > 2) {
+          text.resize(2);
+          text[1] = fit(text[1] + "..", cols(ts));
+        }
+        const int tlh = Canvas::line_height(k), xlh = Canvas::line_height(ts), gap = text.empty() ? 0 : 2 * s;
+        // What the room holds: the title first, then the text's lines.
+        while (title.size() > 1 && static_cast<int>(title.size()) * tlh > room) title.pop_back();
+        while (!text.empty() && static_cast<int>(title.size()) * tlh + gap + static_cast<int>(text.size()) * xlh > room)
+          text.pop_back();
+        const int total = static_cast<int>(title.size()) * tlh + (text.empty() ? 0 : gap + static_cast<int>(text.size()) * xlh);
+        int y = top + std::max(0, room - total) / 2;
+        for (const std::string& line : title) {
+          centred(y, line, k, ink);
+          y += tlh;
+        }
+        y += gap;
+        for (const std::string& line : text) {
+          centred(y, line, ts, kDim);
+          y += xlh;
+        }
+        break;
+      }
+    }
   });
 }
 

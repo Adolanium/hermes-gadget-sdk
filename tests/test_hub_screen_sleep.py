@@ -19,7 +19,7 @@ from hermes_gadget_plugin import protocol
 class Device:
     """A bare protocol client: says what the firmware says, records what it receives."""
 
-    def __init__(self, url: str, *, key: bytes | None = None, sleeping: bool | None = None, dashboard: bool = False):
+    def __init__(self, url: str, *, key: bytes | None = None, sleeping: bool | None = None, dashboard: bool | int = False):
         from websockets.sync.client import connect
 
         self.key = key or secrets.token_bytes(32)
@@ -32,7 +32,7 @@ class Device:
         if sleeping is not None:
             hello["display_sleeping"] = sleeping
         if dashboard:
-            hello["caps"]["dashboard"] = {"v": 1}
+            hello["caps"]["dashboard"] = {"v": int(dashboard)}  # True: layout 1; a number: that layout
         self.ws.send(json.dumps(hello))
         challenge = json.loads(self.ws.recv(timeout=5))
         if challenge["enrolled"]:

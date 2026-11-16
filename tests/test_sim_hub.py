@@ -599,7 +599,7 @@ def test_the_dashboard_opens_from_the_idle_screen(loop_thread, devserver, make_s
     sim = make_sim(url, board=board)
     assert sim.wait_screen("ready", timeout=10)
     session = next(iter(hub.sessions.values()))
-    assert session.dashboard_version == 1
+    assert session.dashboard_version == 2  # each of these boards can page widgets
     msg = dashboard.message(SAMPLE_DASHBOARD["sessions"], SAMPLE_DASHBOARD["tiles"],
                             cols=session.display.get("text_cols"))
     assert loop_thread.run(session.send_dashboard(msg))
@@ -620,6 +620,101 @@ def test_the_dashboard_opens_from_the_idle_screen(loop_thread, devserver, make_s
     assert any(p[0] < 120 and 140 < p[1] < 200 and p[2] > 200 for p in pixels)  # the busy session's blue
     assert any(p[0] > 200 and 150 < p[1] < 200 and p[2] < 90 for p in pixels)  # the waiting one's amber
     sim.screenshot(tmp_path / f"dashboard-{board}.png")
+
+
+def _swipe(sim, dx: int, dy: int) -> None:
+    """A straight swipe across the middle of the screen."""
+    x, y = sim.board.width // 2 - dx // 2, sim.board.height // 2 - dy // 2
+    sim.touch(True, x, y)
+    for i in range(1, 7):
+        sim.touch(True, x + dx * i // 6, y + dy * i // 6)
+        sim.run_for(0.02)
+    sim.touch(False)
+    sim.run_for(0.05)
+
+
+@pytest.mark.parametrize("board", ["sim-320x240", "sim-240x135", "sim-466x466-round", "sim-800x480-nospeaker"])
+def test_widgets_page_from_the_idle_screen(loop_thread, devserver, make_sim, board, tmp_path):
+    from hermes_gadget.devserver import SAMPLE_DASHBOARD
+    from hermes_gadget_plugin import dashboard
+
+    hub, _brain, url = devserver()
+    sim = make_sim(url, board=board)
+    assert sim.wait_screen("ready", timeout=10)
+    session = next(iter(hub.sessions.values()))
+    assert session.dashboard_version == 2
+    msg = dashboard.message(SAMPLE_DASHBOARD["sessions"], SAMPLE_DASHBOARD["tiles"], SAMPLE_DASHBOARD["widgets"],
+                            charset=session.charset, cols=session.display.get("text_cols"),
+                            version=session.dashboard_version)
+    assert loop_thread.run(session.send_dashboard(msg))
+    assert sim.wait_for(lambda: sim.last_received("dashboard") is not None, timeout=5)
+    assert sim.status()["screen"] == "ready"  # data, not a screen takeover
+    step = sim.board.width // 2
+
+    def forward():
+        _swipe(sim, step, 0) if sim.board.touch else sim.tap("down")
+
+    def back():
+        _swipe(sim, -step, 0) if sim.board.touch else sim.tap("up")
+
+    seen = []
+    for kind in ("value", "progress", "list", "headline"):
+        forward()
+        assert sim.wait_screen("widget", timeout=5), kind
+        sim.run_for(0.2)
+        seen.append(sim.rgb888())
+        sim.screenshot(tmp_path / f"widget-{board}-{kind}.png")
+    assert len(set(seen)) == 4  # four different pages
+    pixels = {seen[0][i:i + 3] for i in range(0, len(seen[0]), 3)}
+    assert any(p[0] < 100 and p[1] > 190 and 110 < p[2] < 170 for p in pixels)  # the value, green for "ok"
+    back()
+    sim.run_for(0.2)
+    assert sim.rgb888() == seen[2]  # the list again
+    forward()
+    forward()  # past the last one
+    assert sim.wait_screen("ready", timeout=5)
+    forward()
+    assert sim.wait_screen("widget", timeout=5)
+    sim.run_for(0.2)
+    assert sim.rgb888() == seen[0]  # they open at the first
+    back()
+    assert sim.wait_screen("ready", timeout=5)
+    forward()
+    assert sim.wait_screen("widget", timeout=5)
+    _swipe(sim, 0, sim.board.height // 2) if sim.board.touch else sim.tap("cancel")
+    assert sim.wait_screen("ready", timeout=5)
+    # A snapshot without widgets takes them away.
+    assert loop_thread.run(session.send_dashboard(dashboard.message(
+        SAMPLE_DASHBOARD["sessions"], [], [], version=session.dashboard_version)))
+    assert sim.wait_for(lambda: sim.last_received("dashboard").get("widgets") == [], timeout=5)
+    forward()
+    sim.run_for(0.3)
+    assert sim.status()["screen"] == "ready"
+
+
+def test_a_board_that_cannot_page_widgets_lists_them_as_tiles(loop_thread, devserver, make_sim):
+    from hermes_gadget.devserver import SAMPLE_DASHBOARD
+    from hermes_gadget_plugin import dashboard
+
+    hub, _brain, url = devserver()
+    sim = make_sim(url, board="sim-240x240")  # TALK and CANCEL: no scroll buttons, no touch
+    assert sim.wait_screen("ready", timeout=10)
+    session = next(iter(hub.sessions.values()))
+    assert session.dashboard_version == 1
+    msg = dashboard.message([], SAMPLE_DASHBOARD["tiles"], SAMPLE_DASHBOARD["widgets"],
+                            cols=session.display.get("text_cols"), version=session.dashboard_version)
+    assert msg["v"] == 1 and len(msg["tiles"]) == 6
+    assert loop_thread.run(session.send_dashboard(msg))
+    assert sim.wait_for(lambda: sim.last_received("dashboard") is not None, timeout=5)
+    sim.tap("cancel")
+    assert sim.wait_screen("dashboard", timeout=5)
+    # The layout it asked for is the only one it takes: a layout 2 message changes nothing.
+    newer = dashboard.message([], [], SAMPLE_DASHBOARD["widgets"])
+    before = sim.rgb888()
+    assert loop_thread.run(session.send_dashboard(newer))
+    assert sim.wait_for(lambda: sim.last_received("dashboard").get("v") == 2, timeout=5)
+    sim.run_for(0.3)
+    assert sim.status()["screen"] == "dashboard" and sim.rgb888() == before
 
 
 class _TwoProfiles(HubDelegate):

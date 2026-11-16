@@ -130,7 +130,9 @@ void App::on_power_key() {
   apply_backlight();
 }
 
-bool App::menu_open() const { return overlay_ == Overlay::Profiles || overlay_ == Overlay::Dashboard; }
+bool App::menu_open() const {
+  return overlay_ == Overlay::Profiles || overlay_ == Overlay::Dashboard || overlay_ == Overlay::Widgets;
+}
 
 // A turn, speech, held buttons, a prompt, Wi-Fi setup, phone pairing, an update,
 // a card or an image: something for the user is on the screen. A list the user
@@ -450,7 +452,8 @@ void App::leave_face_down() {
 bool App::clock_blocked() const {
   if (!clock_after_ms_ || !hal_.display || !wall_valid_) return true;
   if (phase_ != Phase::Online || !paired_) return true;
-  if (screen_busy() || settings_open() || overlay_ != Overlay::None) return true;
+  // Widgets left open rest too: the clock takes turns with them (update_model).
+  if (screen_busy() || settings_open() || (overlay_ != Overlay::None && overlay_ != Overlay::Widgets)) return true;
   if (alarm_ || timer_active()) return true;
   if (!fatal_.empty() || !notice_.empty()) return true;
   // The low-battery caption (update_model) holds the Ready screen the same way.

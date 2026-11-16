@@ -63,8 +63,10 @@ constexpr uint8_t kPromptLines = 4;           // ...and on a question (the rende
 constexpr uint32_t kFrameMs = 100;
 constexpr uint32_t kSensorIntervalMs = 2000;
 constexpr uint32_t kDefaultCardMs = 15000;
-constexpr int kDashboardVersion = 1;    // the dashboard message this firmware draws
+constexpr int kDashboardVersion = 2;    // the newest dashboard message this firmware draws: 2 adds widgets
 constexpr size_t kDashMaxEach = 12;     // sessions, and tiles, kept from one dashboard message
+constexpr size_t kWidgetMax = 8;        // widgets kept from one dashboard message
+constexpr size_t kWidgetItems = 4;      // lines of a list widget
 // Microphone audio goes in 40 ms frames whatever the port delivers (the codec boards hand
 // over 13 ms at a time): each frame is a WebSocket message, a TLS record and a queue slot, so
 // three times as many small ones cost the uplink, and fill the send queue three times sooner.
@@ -575,6 +577,7 @@ void App::drop_session(std::string_view reason) {
   // What the dashboard showed is stale now; the next connection sends it afresh.
   dashboard_ready_ = false;
   dash_rows_.clear();
+  widgets_.clear();
   profile_pending_.clear();
   clear_prompt();
   transport_active_ = false;
@@ -656,7 +659,7 @@ void App::send_hello() {
   caps.set("talk_mode", talk_mode_ == TalkMode::Tap ? "tap" : "hold");
   if (ui_ && can_open_dashboard()) {
     json::Value dash = json::Value::object();
-    dash.set("v", kDashboardVersion).set("rows", ui_->dash_rows());
+    dash.set("v", can_page_widgets() ? kDashboardVersion : 1).set("rows", ui_->dash_rows());
     caps.set("dashboard", dash);
   }
   caps.set("profiles", true);
@@ -1080,6 +1083,28 @@ bool App::profile_page_step(int dir) {
   return true;
 }
 
+bool App::widgets_can_open() const {
+  return can_page_widgets() && !widgets_.empty() && paired_ && !display_sleeping_ && !settings_open() &&
+         model_.screen == Screen::Ready && model_.hero;  // not over a reply still being read
+}
+
+bool App::open_widgets() {
+  if (!widgets_can_open()) return false;
+  overlay_ = Overlay::Widgets;
+  overlay_until_ = 0;
+  widget_index_ = 0;
+  update_model();
+  return true;
+}
+
+bool App::widget_step(int dir) {
+  if (!widgets_open()) return false;
+  widget_index_ += dir < 0 ? -1 : 1;
+  if (widget_index_ < 0 || widget_index_ >= static_cast<int>(widgets_.size())) dismiss_overlay();
+  update_model();
+  return true;
+}
+
 bool App::show_reply_text() {
   if (model_.screen != Screen::Responding || !model_.hero || reply_.empty()) return false;
   reply_shown_ = true;
@@ -1332,7 +1357,8 @@ void App::h_display(const json::Value& m) {
 // A full snapshot: it replaces what the dashboard showed. Unlike a card it doesn't
 // light the screen; the user opens the dashboard to look.
 void App::h_dashboard(const json::Value& m) {
-  if (m["v"].as_int(kDashboardVersion) != kDashboardVersion) return;  // a layout this firmware can't draw
+  const int64_t v = m["v"].as_int(1);
+  if (v < 1 || v > (can_page_widgets() ? kDashboardVersion : 1)) return;  // a layout this firmware can't draw
   auto tone = [](std::string_view state) {
     if (state == "busy") return DashRow::Tone::Busy;
     if (state == "waiting") return DashRow::Tone::Waiting;
@@ -1368,6 +1394,41 @@ void App::h_dashboard(const json::Value& m) {
                    : busy  ? tr(i18n::Msg::NBusy, {std::to_string(busy)})
                            : std::string(tr(i18n::Msg::AllIdle));
   dashboard_ready_ = true;
+  // Widgets (layout 2): a snapshot too, so a message without them clears them.
+  std::vector<Widget> widgets;
+  const json::Value& list = m["widgets"];
+  for (size_t i = 0; v >= 2 && i < list.size() && widgets.size() < kWidgetMax; ++i) {
+    const json::Value& w = list[i];
+    const std::string kind(w["kind"].str_or(""));
+    Widget out;
+    out.label = w["label"].as_string();
+    out.tone = tone(w["state"].str_or(""));
+    if (kind == "value") {
+      out.kind = Widget::Kind::Value;
+      out.value = w["value"].as_string();
+      out.unit = w["unit"].as_string();
+    } else if (kind == "progress") {
+      out.kind = Widget::Kind::Progress;
+      out.percent = static_cast<uint8_t>(std::clamp<double>(w["percent"].as_number(0), 0, 100));
+    } else if (kind == "list") {
+      out.kind = Widget::Kind::List;
+      const json::Value& items = w["items"];
+      for (size_t k = 0; k < items.size() && k < kWidgetItems; ++k) out.items.push_back(items[k].as_string());
+    } else if (kind == "headline") {
+      out.kind = Widget::Kind::Headline;
+      out.value = w["title"].as_string();
+      out.text = w["text"].as_string();
+    } else {
+      continue;  // a kind a later firmware draws
+    }
+    widgets.push_back(std::move(out));
+  }
+  widgets_ = std::move(widgets);
+  if (widgets_.empty()) {
+    if (overlay_ == Overlay::Widgets) dismiss_overlay();
+  } else {
+    widget_index_ = std::min(widget_index_, static_cast<int>(widgets_.size()) - 1);
+  }
   if (ui_) dash_scroll_ = std::min(dash_scroll_, std::max(0, static_cast<int>(dash_rows_.size()) - ui_->dash_rows()));
 }
 
@@ -1683,6 +1744,13 @@ void App::on_button(Button button, bool pressed, bool touch) {
       if (!pressed) break;
       if (prompt_showing()) break;
       if (show_reply_text()) return;
+      // DOWN on the Ready screen opens the widgets, and the two page them; UP there still
+      // brings the last reply back.
+      if (widgets_open()) {
+        widget_step(button == Button::Down ? 1 : -1);
+        break;
+      }
+      if (button == Button::Down && open_widgets()) break;
       page_at_ = now() + kManualScrollPauseMs;
       if (mode_ == Mode::Idle && overlay_ == Overlay::None && !reply_.empty() &&
           static_cast<int32_t>(reply_until_ - now()) <= 0) {
@@ -2739,6 +2807,18 @@ void App::update_model() {
     }
     m.grid = profile_grid_;
     m.scroll = profile_page_;
+  } else if (overlay_ == Overlay::Widgets && !widgets_.empty()) {
+    // The whole panel is the widget's. Left open, the resting state takes turns: each minute
+    // the clock or the next widget, dimmed and shifted like the clock face.
+    const int n = static_cast<int>(widgets_.size());
+    const int turn = clock_showing_ ? wall_.minute % (n + 1) : 0;
+    m.screen = Screen::Widget;
+    m.widget_rest = clock_showing_;
+    m.widget_count = static_cast<uint8_t>(n);
+    m.widget_index = static_cast<uint8_t>(clock_showing_ ? std::max(0, turn - 1) : std::min(widget_index_, n - 1));
+    m.widget = widgets_[m.widget_index];
+    m.clock_minute = wall_.minute;
+    if (clock_showing_ && turn == 0) clock_model(m);
   } else if (overlay_ == Overlay::Dashboard) {
     m.screen = Screen::Dashboard;
     m.headline = dash_headline_;
@@ -2818,22 +2898,7 @@ void App::update_model() {
         m.caption_lines = 2;
       }
     }
-    if (clock_showing_) {
-      // The resting clock owns the whole panel: the time, the date and the mascot.
-      m.screen = Screen::Clock;
-      m.clock_time = clock_time_text(wall_, clock_24h_);
-      m.clock_date = tr(Msg::ClockDate,
-                        {tr(static_cast<Msg>(static_cast<int>(Msg::WeekdaySun) + std::min<unsigned>(wall_.weekday, 6))),
-                         tr(static_cast<Msg>(static_cast<int>(Msg::MonthJan) + std::clamp<int>(wall_.month, 1, 12) - 1)),
-                         std::to_string(wall_.day)});
-      m.clock_minute = wall_.minute;
-      m.clock_second = wall_.second;
-      m.hero = false;
-      m.name_target = false;
-      m.hint.clear();
-      m.detail.clear();
-      m.body.clear();
-    }
+    if (clock_showing_) clock_model(m);
   }
   bool keeps_detail = m.screen == Screen::Pairing || m.screen == Screen::Boot || m.screen == Screen::Prompt ||
                       m.screen == Screen::Profiles;
@@ -2843,6 +2908,24 @@ void App::update_model() {
     m.detail = tr(Msg::LowBattery);
   if (!hint_flash_.empty()) m.hint = hint_flash_;
   if (!display_sleeping_) render(m);
+}
+
+// The resting clock owns the whole panel: the time, the date and the mascot.
+void App::clock_model(UiModel& m) const {
+  using i18n::Msg;
+  m.screen = Screen::Clock;
+  m.clock_time = clock_time_text(wall_, clock_24h_);
+  m.clock_date = tr(Msg::ClockDate,
+                    {tr(static_cast<Msg>(static_cast<int>(Msg::WeekdaySun) + std::min<unsigned>(wall_.weekday, 6))),
+                     tr(static_cast<Msg>(static_cast<int>(Msg::MonthJan) + std::clamp<int>(wall_.month, 1, 12) - 1)),
+                     std::to_string(wall_.day)});
+  m.clock_minute = wall_.minute;
+  m.clock_second = wall_.second;
+  m.hero = false;
+  m.name_target = false;
+  m.hint.clear();
+  m.detail.clear();
+  m.body.clear();
 }
 
 // --------------------------------------------------------------------------

@@ -70,7 +70,7 @@ Because the id is derived from the key, nobody can claim another device's id wit
 - `caps.speaker.formats` (`["pcm16", "opus"]`) lists the speaker audio formats the device decodes. `format` stays `"pcm16"` for servers that predate the list, and PCM16 is always accepted. See [Audio to the device](#audio-to-the-device).
 - `caps.speaker.buffer_ms` (`4096`) is how much reply audio, in milliseconds, the device can hold before it plays it. The server then sends audio further ahead of real time, which keeps playback smooth on a link whose delay varies, such as a phone hotspot. It is optional: without it the server keeps its default lead. See [Audio to the device](#audio-to-the-device).
 - `caps.ota` (`{"max_size": 2031616}`) means the device installs firmware updates over this connection, up to `max_size` bytes.
-- `caps.dashboard` (`{"v": 1, "rows": 6}`) means the device draws the [dashboard](#dashboard). `v` is the newest layout it draws, and `rows` is how many lines fit on its screen at once.
+- `caps.dashboard` (`{"v": 2, "rows": 6}`) means the device draws the [dashboard](#dashboard). `v` is the newest layout it draws: 1 is the list of sessions and tiles, and 2 adds [widgets](#widgets). `rows` is how many lines fit on its screen at once.
 - `actions` is the device's tool manifest. Each action has a JSON-Schema `params` object and a `description` written for the model.
 - `caps.profiles: true` means the device can switch Hermes profiles (see [Profiles](#profiles)). `profile` is the profile it used last; it is omitted for `default`.
 - `caps.faces: 1` means the device draws a face that the server sends for the profile answering it (see [Faces](#faces)). `caps.faces: {"v": 2, "px": 192}` means it also draws colour faces, at `px` pixels square (at most 256): the largest size its Ready screen draws the face at. Where Ready has less room, for example with a second caption line while the device offers profiles, the device scales the face down. `"frames": true` in that object means its colour faces also blink and talk. `"thumbs": 96` in that object means the device's profile grid also takes a thumbnail of each offered profile, 96 pixels square (16 to 128); see [Profile thumbnails](#profile-thumbnails). `face` is the `hash` of the face it holds from an earlier connection; it is omitted when it shows the mascot. `thumbs` (`{"ops": "9c1d0e2f3a4b5c6d"}`) names the thumbnails it holds from an earlier connection, profile id to `hash`; it is `{}` when it holds none, and omitted by a device without `caps.faces.thumbs`.
@@ -262,7 +262,7 @@ A device whose screen goes dark (a timeout, the power key, or lying face down) t
 
 - The device sends `{"type": "state", "display_sleeping": true}` when the screen goes dark and `{"type": "state", "display_sleeping": false}` when it lights up. Only changes are sent, as they happen, without the rate limit sensor readings have. A device that connects in the dark says so in `hello` instead.
 - While the screen is dark the server keeps the latest `display` card or image (a newer one replaces an older one, as it would on screen), the latest `status` phrase and the latest `dashboard`, and sends none of them.
-- When the screen lights up, the server sends the held `status` phrase, then the held `dashboard`, then the held card or image. A card or image with a `ttl_s` keeps only the time it has left, counted from when it was sent, and one whose time ran out is dropped. A held status phrase is dropped when its turn ends. A held dashboard is dropped when a newer one goes out first, and is not sent to a device that is unpaired or that reconnects without `caps.dashboard`.
+- When the screen lights up, the server sends the held `status` phrase, then the held `dashboard`, then the held card or image. A card or image with a `ttl_s` keeps only the time it has left, counted from when it was sent, and one whose time ran out is dropped. A held status phrase is dropped when its turn ends. A held dashboard is dropped when a newer one goes out first, and is not sent to a device that is unpaired or that reconnects without `caps.dashboard`, or with a `caps.dashboard.v` below the held one's `v`.
 - What is held survives a reconnect: it goes out once the device connects with its screen lit.
 - Everything else is sent at once: `prompt` and `prompt.close`, `pairing`, turns, transcripts, replies, audio, `notice`, actions and firmware updates. A question or a reply still lights the screen, except while the device lies face down: then it waits for the device to be turned over.
 - A device that never sends `display_sleeping` counts as lit, so nothing is held back for it.
@@ -280,7 +280,7 @@ A device that advertises `caps.dashboard` gets a live summary of Hermes: the age
 
 | Field | Meaning |
 |---|---|
-| `v` | Layout version. A device ignores a dashboard whose `v` it doesn't draw. The server sends only to devices whose `caps.dashboard.v` is at least the version it sends |
+| `v` | Layout version. The server sends each device the newest layout that both know: its `caps.dashboard.v` or the server's own, whichever is lower. A device ignores a dashboard whose `v` is newer than the one it advertised |
 | `sessions[].state` | `idle`, `busy` (a turn is running) or `waiting` (the turn waits for the user to approve a command) |
 | `sessions[].label` | Text to show: the platform and the end of the session id |
 | `tiles[].label`, `tiles[].value` | Text to show for a tile |
@@ -291,6 +291,32 @@ A device that advertises `caps.dashboard` gets a live summary of Hermes: the age
 - The server sends a dashboard when a paired device connects, and again only when something in it changes. An unpaired device gets none.
 - A dashboard is data, not a screen takeover: the device keeps showing what it showed. The reference firmware opens it with CANCEL (a swipe down on touch boards) on the idle screen and closes it with CANCEL again. Talking, a question, a card or an image take the screen over. It forgets the dashboard when the connection drops, and the next connection sends it again.
 - While the screen is dark, only the latest dashboard is kept; see [Screen sleep](#screen-sleep).
+
+#### Widgets
+
+Layout 2 adds `widgets` to the same message: full-screen pages of data that the owner or the agent sets on the host (`hermes gadget widget`, the `gadget_widget` tool). The device needs no network access for them; every value comes from the host.
+
+```json
+{"type": "dashboard", "v": 2, "sessions": [], "tiles": [],
+ "widgets": [{"id": "office", "kind": "value", "label": "Office", "value": "21.5", "unit": "C", "state": "ok"},
+             {"id": "backup", "kind": "progress", "label": "Backup", "percent": 62},
+             {"id": "today", "kind": "list", "label": "Today", "items": ["09:00 Standup", "11:30 Dentist"]},
+             {"id": "playing", "kind": "headline", "label": "Now playing", "title": "Blue in Green", "text": "Miles Davis"}]}
+```
+
+| `kind` | Fields | What the device draws |
+|---|---|---|
+| `value` | `value`, optional `unit` | The value as large as fits, the unit beside it |
+| `progress` | `percent`, a whole number from 0 to 100 | The percentage over a bar |
+| `list` | `items`, up to 4 strings | One item per line |
+| `headline` | `title`, optional `text` | The title large, the text under it |
+
+- Every widget has a `label`, a small heading, and may have a `state`: `ok`, `warn` or `bad`. The state colours the value, the bar or the title green, yellow or red; a list ignores it.
+- At most 8 widgets, in the order the host set them. Text is shaped like the rest of the dashboard, and the device cuts what still doesn't fit its screen.
+- `widgets` is part of the snapshot: a message without it, or with an empty list, removes the widgets the device held. A device skips a widget whose `kind` it doesn't know.
+- A device that advertises `caps.dashboard.v` 1 gets a layout 1 message. The server adds each widget to `tiles` as one line (the value and unit, the percentage, the first list item or the title) while fewer than 8 tiles are in use, so older firmware shows the same data on its list.
+- Widgets are data, like the rest of the dashboard: they never take the screen. The reference firmware asks for layout 2 only on boards that can page widgets (a touchscreen, Up and Down buttons, or a knob). From the idle screen, Down or a swipe from left to right opens the first widget; the same again shows the next, and past the last one the idle screen returns. Up or a swipe from right to left goes back. CANCEL closes them.
+- The screen-sleep rules apply unchanged: the held dashboard carries its widgets, and a held layout 2 dashboard is not sent to a connection that advertises only layout 1.
 
 ### Questions
 

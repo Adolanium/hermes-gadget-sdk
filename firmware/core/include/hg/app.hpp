@@ -211,6 +211,16 @@ class App {
   // A tap or a scroll while a spoken reply's latest lines caption the talking face shows its whole text.
   bool show_reply_text();
   bool profile_picker_open() const { return overlay_ == Overlay::Profiles; }
+  // Widgets: pages the host set, one at a time over the whole panel. From the Ready screen DOWN,
+  // or a swipe from left to right, opens the first; the same again shows the next, and past the
+  // last one the Ready screen comes back. UP, or a swipe from right to left, goes back one, and
+  // from the first to Ready. CANCEL (swipe down) closes them.
+  bool widgets_open() const { return overlay_ == Overlay::Widgets; }
+  // Whether DOWN or a swipe from left to right that starts now opens them: the Ready screen, with widgets.
+  bool widgets_can_open() const;
+  bool open_widgets();
+  // +1 the next widget, -1 the previous; off either end closes them.
+  bool widget_step(int dir);
   bool profile_switch_pending() const { return !profile_pending_.empty(); }
   static constexpr uint32_t kProfileReplyMs = 15000;
   int profile_row_hit(int x, int y) const;
@@ -805,7 +815,7 @@ class App {
   uint32_t id_counter_ = 0;
 
   // overlays
-  enum class Overlay : uint8_t { None, Card, Image, Dashboard, Profiles };
+  enum class Overlay : uint8_t { None, Card, Image, Dashboard, Profiles, Widgets };
   Overlay overlay_ = Overlay::None;
   uint32_t overlay_until_ = 0;  // 0 = until dismissed
   std::string card_title_, card_body_;
@@ -821,6 +831,12 @@ class App {
   std::string dash_headline_;
   int dash_scroll_ = 0;
   bool can_open_dashboard() const { return profile_.has_cancel_button || profile_.touch_screen; }
+  // the dashboard's widgets (layout 2), paged with the scroll buttons or sideways swipes; a board
+  // with neither asks for layout 1, where the host lists them as tiles
+  bool can_page_widgets() const { return profile_.has_scroll_buttons || profile_.touch_screen; }
+  std::vector<Widget> widgets_;
+  int widget_index_ = 0;
+  void clock_model(UiModel& m) const;  // makes `m` the resting clock face
 
   // a yes/no question from Hermes (confirmations, command approvals)
   std::string prompt_id_, prompt_title_, prompt_text_;

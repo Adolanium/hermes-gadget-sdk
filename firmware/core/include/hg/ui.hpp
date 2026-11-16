@@ -39,6 +39,7 @@ enum class Screen : uint8_t {
   Camera,     // the device's own camera: a live view, a countdown, and the photo (App::open_camera)
   Setup,
   Dashboard,  // Hermes's sessions and the user's status tiles (docs/protocol.md#dashboard)
+  Widget,     // one of the host's widgets, the whole panel (docs/protocol.md#widgets)
   Profiles,   // the Hermes profiles to choose from: a grid of `dash` (name, id), the page from item `scroll`
   Alarm,      // TIMER DONE: the whole panel until dismissed (App::start_alarm)
   Clock,      // the resting clock face: the time, the date and the mascot (App::clock_tick)
@@ -58,6 +59,21 @@ struct DashRow {
   std::string label, value;
   Tone tone = Tone::Dim;
   bool heading = false;
+};
+
+// A home-screen widget: data the host set, drawn over the whole panel.
+struct Widget {
+  enum class Kind : uint8_t {
+    Value,     // `value` large, `unit` beside it
+    Progress,  // `percent` large over a bar
+    List,      // `items`, one per line
+    Headline,  // `value` (the title) over `text`
+  };
+  Kind kind = Kind::Value;
+  std::string label, value, unit, text;
+  std::vector<std::string> items;
+  uint8_t percent = 0;
+  DashRow::Tone tone = DashRow::Tone::Dim;  // Dim: no state, the plain colours
 };
 
 // One row of the settings list: a small icon, the item's name, and its state at the
@@ -128,6 +144,11 @@ struct UiModel {
   int settings_scroll = 0;
   // Dashboard screen: its rows, drawn from `scroll` (0 = the top).
   std::vector<DashRow> dash;
+  // Widget screen: the widget, its place among `widget_count`, and whether it is the resting
+  // state's turn of it, drawn with the clock's burn-in shift for `clock_minute`.
+  Widget widget;
+  uint8_t widget_index = 0, widget_count = 0;
+  bool widget_rest = false;
   // A running timer: thousandths of its length still to go, or -1 for none. The round
   // panel's edge ring and the rectangular top bar's line show it.
   int16_t timer_permille = -1;
@@ -319,6 +340,7 @@ class Ui {
   RingBox comet_box(uint16_t was, uint16_t now) const;
   void draw_alarm(const UiModel& m);
   void draw_clock(const UiModel& m);
+  void draw_widget(const UiModel& m);
   void draw_battery_face(const UiModel& m);  // LowBattery, Charging, Charged
   Display& display_;
   DisplayInfo panel_;
@@ -365,7 +387,7 @@ class Ui {
   // The screen that owns the whole panel right now, and the hash of what it drew.
   // Leaving it repaints everything (draw_frame); each face repaints when the flag
   // is not itself, so Clock -> Alarm -> Clock in one minute still redraws.
-  enum class FullFace : uint8_t { None, Alarm, Clock, Battery };
+  enum class FullFace : uint8_t { None, Alarm, Clock, Battery, Widget };
   FullFace full_face_ = FullFace::None;
   uint32_t face_hash_ = 0;
 };

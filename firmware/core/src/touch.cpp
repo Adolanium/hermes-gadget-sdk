@@ -50,7 +50,9 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
       case State::Side:  // a sideways swipe: travel enough, and more sideways than down or up
         if (std::abs(dx_) >= cfg_.swipe_px && std::abs(dx_) > 2 * std::abs(dy_)) {
           if (in_picker_) app_.profile_page_step(dx_ < 0 ? 1 : -1);  // the next page comes in from the right
+          else if (app_.widgets_open()) app_.widget_step(dx_ > 0 ? 1 : -1);  // further left, or back towards Ready
           else if (dx_ < 0) app_.open_profile_picker();  // from right to left, as the grid's next page
+          else app_.open_widgets();  // from left to right: the widgets lie to the left of Ready
         }
         break;
       case State::Talk: release(Button::Talk); break;
@@ -134,9 +136,11 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
         state_ = State::Swipe;
         press(Button::Cancel);
       } else if (std::abs(dx) > cfg_.slop_px || std::abs(dy) > cfg_.slop_px) {
-        // Neither a hold nor a downward swipe yet: one from right to left may open the profile
-        // grid; wait for a clear swipe, else ignore.
-        if (dx < 0 && std::abs(dx) >= std::abs(dy) && !from_clock_ && app_.profile_swipe_opens()) {
+        // Neither a hold nor a downward swipe yet: a sideways one may open the profile grid (from
+        // right to left) or the widgets (from left to right), or page the widgets; wait for a
+        // clear swipe, else ignore.
+        if (std::abs(dx) >= std::abs(dy) && !from_clock_ &&
+            (app_.widgets_open() || (dx < 0 ? app_.profile_swipe_opens() : app_.widgets_can_open()))) {
           state_ = State::Side;
           in_picker_ = false;
           dx_ = dx, dy_ = dy;
