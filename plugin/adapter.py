@@ -105,6 +105,7 @@ _ECHO_SLOT = "\x00"
 _echo_patterns: Dict[str, Optional[re.Pattern]] = {}
 # Holding CANCEL already is a deliberate "start over", so the /new it sends confirms itself.
 AUTO_CONFIRM_NEW_S = 15.0
+INTERPRET_LLM_TIMEOUT_S = 45.0  # one translation; a model that takes longer has lost the conversation
 PROMPT_PREFIX = "prompt:"  # message ids of device questions, so edits can withdraw them
 SLASH_CONFIRM_TTL_S = 300  # mirrors tools.slash_confirm.DEFAULT_TIMEOUT_SECONDS
 # Hermes words confirmations for chat apps: a bold header and the detail, then a
@@ -289,9 +290,11 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._store: Optional[DeviceStore] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._turns: Dict[str, str] = {}
-        self._turn_chats: Dict[str, str] = {}  # device id -> the chat its running turn belongs to
-        # device id -> its interpreter mode (docs/hermes-integration.md#interpreter-mode); gone with the gateway
+        # Interpreter mode (docs/hermes-integration.md#interpreter-mode): device id -> its languages and
+        # who speaks next, and the translation under way. In memory: gone with the gateway.
         self._interpreting: Dict[str, interpret.Session] = {}
+        self._interpret_tasks: Dict[str, asyncio.Task] = {}
+        self._llm: Any = None  # tests may stand in for Hermes's ctx.llm; None = this profile's own
         self._watch_task: Optional[asyncio.Task] = None
         self._update_task: Optional[asyncio.Task] = None
         self._status_task: Optional[asyncio.Task] = None
@@ -785,11 +788,11 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             await self._claim_home(session)
             await self._show_prompt(session)  # a question asked while it was away
             await self._push_dashboard(session)
-            if (state := self._interpreting.get(session.device_id)) is not None:
+            if (state := self.interpreting(session.device_id)) is not None:
                 await session.send_interpret(state.message())  # still interpreting after a reconnect
             return
         self._prompts.pop(session.device_id, None)  # unpaired while away: its questions are void
-        self._interpreting.pop(session.device_id, None)
+        await self.interpret_stop(session.device_id)
         refusal = self._refusal(session)
         if refusal:  # no pairing code can let it in: say why rather than ask Hermes for one
             await session.set_paired(False, refusal)
@@ -824,6 +827,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         verdict = self._verdict(session)
         if verdict is None:
             return served
+        state = self._interpreting.get(session.device_id)
+        if state is not None and state.expired() and session.device_id not in self._interpret_tasks:
+            await self.interpret_stop(session.device_id)  # left in the mode, unused: it answers again
+            await session.send_notice("Interpreter off")
         if session.profile != "default":
             if served is None:
                 served = {p["id"] for p in await asyncio.to_thread(self.profiles)}
@@ -839,7 +846,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             refusal = self._refusal(session)
             if session.paired or refusal != session.unpaired_reason:
                 self._prompts.pop(session.device_id, None)
-                self._interpreting.pop(session.device_id, None)
+                await self.interpret_stop(session.device_id)
                 await session.set_paired(False, refusal)
                 if refusal is None:  # a pairing code can let it in again
                     await self.on_ready(session)
@@ -1178,6 +1185,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                     logger.warning("[%s] Desktop request failed: %s", self.name, exc)
 
     async def _desk_request(self, req: Dict[str, Any]) -> Dict[str, Any]:
+        if req["kind"] == "interpret" and req.get("off"):  # also for a gadget that is away
+            return {"ok": True, "was_on": await self.interpret_stop(req["device"])}
         session = self._hub.get(req["device"]) if self._hub else None
         if session is None or session.closed:
             return {"ok": False, "error": "That gadget isn't connected right now."}
@@ -1193,10 +1202,9 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             return {"ok": False, "error": f"{session.name} is waiting for pairing approval."}
         try:
             if req["kind"] == "interpret":
-                if req.get("off"):
-                    return {"ok": True, "was_on": await self.interpret_stop(session)}
-                state = await self.interpret_start(session, req.get("a"), req.get("b"), bool(req.get("auto")))
-                return {"ok": True, "label": state.label, "draws": session.caps.get("interpret") is not None}
+                state = await self.interpret_start(session, req.get("a"), req.get("b"))
+                return {"ok": True, "label": state.label, "draws": session.caps.get("interpret") is not None,
+                        "speaks": session.has_speaker and self._should_auto_tts_for_chat(session.device_id)}
             if req["kind"] == "card":
                 title = textfmt.for_device(str(req.get("title") or ""), session.charset)
                 text = textfmt.for_device(str(req.get("text") or ""), session.charset)
@@ -1268,66 +1276,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     def _message_id(session: DeviceSession, msg_id: str) -> str:
         return f"{session.session_id}:{msg_id or uuid.uuid4().hex[:8]}"
 
-    def _event(self, session: DeviceSession, msg_id: str, text: str, *,
-               interpreting: Optional[interpret.Session] = None, **kw) -> MessageEvent:
-        """A message from the device for Hermes. With ``interpreting``, it goes to the device's interpreter
-        chat with the instruction to translate it, instead of to its conversation."""
-        if interpreting is not None:
-            source, prompt = self._interpret_source(session), interpret.instruction(interpreting)
-        else:
-            source, prompt = self._source(session), session.prompt_context()
+    def _event(self, session: DeviceSession, msg_id: str, text: str, **kw) -> MessageEvent:
         return MessageEvent(
-            text=text, source=source, message_id=self._message_id(session, msg_id),
-            user_id=session.device_id, user_name=session.name, channel_prompt=prompt, **kw)
-
-    # -- interpreter mode -------------------------------------------------------------
-
-    def _interpret_source(self, session: DeviceSession):
-        """The chat translations run in: the device's own, apart from its conversation, so that history
-        and the translations never mix. No profile is stamped on it: a chat that is not the device's own
-        can't follow its profile choice (validate_native_profile_route), so the default profile translates."""
-        return self.build_source(
-            chat_id=interpret.chat_id(session.device_id), chat_name=f"{session.name} (interpreter)",
-            chat_type="dm", user_id=session.device_id, user_name=session.name)
-
-    def interpreting(self, device_id: str) -> Optional[interpret.Session]:
-        return self._interpreting.get(device_id)
-
-    async def interpret_start(self, session: DeviceSession, first: Any, second: Any,
-                              auto: bool = False) -> interpret.Session:
-        """Put a paired device in interpreter mode between two languages; the first speaks first.
-        Raises ValueError with a sentence for a bad language or an unpaired device."""
-        if not session.paired:
-            raise ValueError(f"{session.name} is waiting for pairing approval")
-        state = interpret.start(first, second, auto)
-        self._interpreting[session.device_id] = state
-        logger.info("[%s] %s interprets %s", self.name, session.device_id, state.label)
-        await session.send_interpret(state.message())
-        return state
-
-    async def interpret_stop(self, session: DeviceSession) -> bool:
-        """Leave interpreter mode; False when the device was not in it."""
-        if self._interpreting.pop(session.device_id, None) is None:
-            return False
-        logger.info("[%s] %s stopped interpreting", self.name, session.device_id)
-        await session.send_interpret(interpret.OFF)
-        return True
-
-    async def on_interpret_flip(self, session: DeviceSession) -> None:
-        """The device's user switched who speaks next. Not during a turn: its end switches already."""
-        state = self._interpreting.get(session.device_id)
-        if state is None or state.auto or not session.paired or session.device_id in self._turns:
-            return
-        state.flip()
-        await session.send_interpret(state.message())
-
-    def _device_text(self, chat_id: str, session: DeviceSession, content: str) -> str:
-        """``content`` as this device shows it: folded to its charset, and for a translation in a script
-        its font can't draw, a line saying that it is spoken only."""
-        state = self._interpreting.get(session.device_id) if interpret.is_chat(chat_id) else None
-        if state is None:
-            return textfmt.for_device(content, session.charset)
-        return interpret.shown(content, session.charset, None if state.auto else state.target)
+            text=text, source=self._source(session), message_id=self._message_id(session, msg_id),
+            user_id=session.device_id, user_name=session.name, channel_prompt=session.prompt_context(), **kw)
 
     async def _forward(self, session: DeviceSession, event: MessageEvent) -> bool:
         """Hand a device message to Hermes; False when it was dropped here. Work for another profile needs
@@ -1346,37 +1298,179 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         await self.handle_message(event)
         return True
 
+    # -- interpreter mode -------------------------------------------------------------
+    #
+    # The person holding the gadget may be a stranger, so nothing they say reaches the agent: no
+    # MessageEvent is made. The adapter transcribes the recording, asks for the translation through
+    # ctx.llm, a plain completion that carries no tools, and speaks it. No session or memory is involved.
+
+    def interpreting(self, device_id: str) -> Optional[interpret.Session]:
+        """The device's interpreter mode, or None; one left unused for interpret.IDLE_S has ended."""
+        state = self._interpreting.get(device_id)
+        if state is not None and state.expired() and device_id not in self._interpret_tasks:
+            del self._interpreting[device_id]
+            logger.info("[%s] %s stopped interpreting: unused", self.name, device_id)
+            return None
+        return state
+
+    def _plugin_llm(self) -> Any:
+        return self._llm or runtime.llm(self._registry_key)
+
+    async def interpret_start(self, session: DeviceSession, first: Any, second: Any) -> interpret.Session:
+        """Put a paired device in interpreter mode between two languages; the first speaks first.
+        Raises ValueError with a sentence for a bad language, an unpaired device, or a Hermes
+        without the completion API the translations need."""
+        if not session.paired:
+            raise ValueError(f"{session.name} is waiting for pairing approval")
+        if self._plugin_llm() is None:
+            raise ValueError("this Hermes gives plugins no model access (ctx.llm), which interpreter mode "
+                             "translates with; update Hermes")
+        state = interpret.start(first, second)
+        await self._interpret_cancel(session.device_id)  # a translation of the old mode must not touch the new
+        self._interpreting[session.device_id] = state
+        logger.info("[%s] %s interprets %s", self.name, session.device_id, state.label)
+        await session.send_interpret(state.message())
+        return state
+
+    async def interpret_stop(self, device_id: str) -> bool:
+        """Leave interpreter mode, stopping a translation under way; False when the device was not
+        in it. Works for a device that is away: it is told when it is connected."""
+        was_on = self._interpreting.pop(device_id, None) is not None
+        await self._interpret_cancel(device_id)
+        session = self._hub.get(device_id) if self._hub else None
+        if was_on:
+            logger.info("[%s] %s stopped interpreting", self.name, device_id)
+            if session is not None and not session.closed:
+                await session.send_interpret(interpret.OFF)
+        return was_on
+
+    async def _interpret_cancel(self, device_id: str) -> bool:
+        """Stop the device's translation under way and its speech; True when there was one."""
+        task = self._interpret_tasks.get(device_id)
+        if task is None or task.done() or task is asyncio.current_task():
+            return False
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+        return True
+
+    async def on_interpret_flip(self, session: DeviceSession) -> None:
+        """The device's user switched who speaks next. Not during a translation: it switches already."""
+        state = self.interpreting(session.device_id)
+        if state is None or not session.paired or session.device_id in self._turns:
+            return
+        state.flip()
+        await session.send_interpret(state.message())
+
+    def _interpret(self, session: DeviceSession, msg_id: str, state: interpret.Session, *,
+                   text: Optional[str] = None, wav: Optional[bytes] = None) -> None:
+        """Translate one utterance, in place of whichever translation the device was still waiting for."""
+        previous = self._interpret_tasks.get(session.device_id)
+        if previous is not None and not previous.done():
+            previous.cancel()
+        self._interpret_tasks[session.device_id] = session.spawn(
+            self._interpret_turn(session, msg_id, state, text, wav, previous))
+
+    async def _interpret_turn(self, session: DeviceSession, msg_id: str, state: interpret.Session,
+                              text: Optional[str], wav: Optional[bytes], previous: Optional[asyncio.Task]) -> None:
+        device_id, turn, outcome = session.device_id, self._message_id(session, msg_id), "failure"
+        if previous is not None:  # the turn it replaces ends first, so the device sees one turn at a time
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await previous
+        self._turns[device_id] = turn
+        try:
+            await session.turn_start(turn)
+            state.touch()
+            if wav is not None:
+                text = await self._interpret_transcribe(wav, state.speaker)
+                await session.send_transcript(textfmt.for_device(text, session.charset))
+            if not (text or "").strip():
+                outcome = "cancelled"
+                await session.send_notice("Didn't catch that")
+                return
+            request = interpret.messages(state, text)
+            result = await asyncio.to_thread(
+                self._plugin_llm().complete, request, timeout=INTERPRET_LLM_TIMEOUT_S, purpose="gadget interpreter")
+            translation = str(getattr(result, "text", "") or "").strip()
+            if self._interpreting.get(device_id) is not state:  # left, or started again, meanwhile
+                outcome = "cancelled"
+                return
+            if not translation:
+                raise RuntimeError("the model returned no translation")
+            speak = session.has_speaker and self._should_auto_tts_for_chat(device_id)
+            await session.send_reply(
+                interpret.shown(translation, session.charset, state.target, spoken=speak), turn=turn)
+            # The translation is out, so the gadget changes hands now: someone who answers while it
+            # is still being spoken is recorded in their own language.
+            state.flip()
+            await session.send_interpret(state.message())
+            if speak:
+                spoken = await self._speak(device_id, translation, wait=True)
+                if not spoken.success and "interrupted" not in str(spoken.error):
+                    await session.send_notice("Couldn't speak the translation")
+            outcome = "success"
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            with contextlib.suppress(Exception):
+                await session.stop_audio()
+        except Exception as exc:
+            logger.warning("[%s] translation for %s failed: %s", self.name, device_id, exc)
+            with contextlib.suppress(Exception):
+                await session.send_notice("Translation failed")
+        finally:
+            if self._turns.get(device_id) == turn:
+                del self._turns[device_id]
+            if self._interpret_tasks.get(device_id) is asyncio.current_task():
+                del self._interpret_tasks[device_id]
+            if not session.closed:
+                with contextlib.suppress(Exception):
+                    await session.turn_end(turn, outcome)
+
+    async def _interpret_transcribe(self, wav: bytes, language: str) -> str:
+        """What the recording says, transcribed in ``language`` by Hermes's speech-to-text. The
+        recording is deleted afterwards: it may be a stranger's voice, and no turn refers to it."""
+        from tools.transcription_tools import transcribe_audio
+
+        path = await cache_audio_from_bytes_async(wav, ".wav")
+        runtime.note_clip(path, language)  # the pre_transcription hook hands it to the provider (stt.py)
+        try:
+            result = await asyncio.to_thread(transcribe_audio, path, source="gateway")
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(path)
+        if not result.get("success"):
+            raise RuntimeError(result.get("error") or "speech-to-text failed")
+        return str(result.get("transcript") or "").strip()
+
     async def on_text(self, session: DeviceSession, msg_id: str, text: str) -> None:
-        await self._forward(session, self._event(session, msg_id, text, message_type=MessageType.TEXT,
-                                                 interpreting=self._interpreting.get(session.device_id)))
+        if (state := self.interpreting(session.device_id)) is not None:
+            self._interpret(session, msg_id, state, text=text)
+            return
+        await self._forward(session, self._event(session, msg_id, text, message_type=MessageType.TEXT))
 
     async def on_utterance(self, session: DeviceSession, msg_id: str, wav: bytes, seconds: float) -> None:
         """Cache a finished recording and hand it to Hermes as a voice message, noting its STT language."""
+        if (state := self.interpreting(session.device_id)) is not None:
+            self._interpret(session, msg_id, state, wav=wav)
+            return
         path = await cache_audio_from_bytes_async(wav, ".wav")
-        # An interpreter's recording is in the language whose turn it is; with `auto` the provider
-        # detects it, so stt_language, which fixes one language, does not apply to it either.
-        state = self._interpreting.get(session.device_id)
-        language = state.stt_language if state is not None else self._stt_language
-        if language:
-            runtime.note_clip(path, language)
+        if self._stt_language:
+            runtime.note_clip(path, self._stt_language)
         logger.debug("[%s] %.1fs utterance from %s -> %s", self.name, seconds, session.device_id, path)
         await self._forward(session, self._event(
-            session, msg_id, "", message_type=MessageType.VOICE, media_urls=[path], media_types=["audio/wav"],
-            interpreting=state))
+            session, msg_id, "", message_type=MessageType.VOICE, media_urls=[path], media_types=["audio/wav"]))
 
     async def on_cancel(self, session: DeviceSession) -> None:
+        if await self._interpret_cancel(session.device_id):
+            return  # the turn was a translation: it is stopped here, and Hermes has no turn to stop
         if session.device_id not in self._turns:
             # No turn is running (the reply may still be playing after turn.end): the hub
             # already stopped the audio, and a "/stop" now would start a turn of its own.
             return
-        # The turn to stop is a translation when it runs in the interpreter chat.
-        state = (self._interpreting.get(session.device_id)
-                 if interpret.is_chat(self._turn_chats.get(session.device_id)) else None)
-        await self._forward(session, self._event(session, "cancel", "/stop", message_type=MessageType.TEXT,
-                                                 interpreting=state))
+        await self._forward(session, self._event(session, "cancel", "/stop", message_type=MessageType.TEXT))
 
     async def on_new_session(self, session: DeviceSession) -> None:
-        if await self.interpret_stop(session):
+        if await self.interpret_stop(session.device_id):
             # Holding CANCEL leaves interpreter mode instead of starting a new conversation: speech is
             # translated while it is on, so the device needs a way out that is not a spoken request.
             await session.turn_end("", "cancelled")  # the device waits for the turn its request began
@@ -1406,8 +1500,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     async def on_disconnect(self, session: DeviceSession) -> None:
         # A hub already cleared by disconnect() holds no session: the device left all the same.
         if self._hub is None or session.device_id not in self._hub.sessions:
+            await self._interpret_cancel(session.device_id)  # nobody is left to hear it
             self._turns.pop(session.device_id, None)
-            self._turn_chats.pop(session.device_id, None)
             self._pushed_seq.pop(session.device_id, None)
             if self._store is not None:
                 try:  # last seen is when it left, not when it came (hermes gadget devices, the dashboard tab)
@@ -1423,22 +1517,14 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             return
         turn = event.message_id or uuid.uuid4().hex[:12]
         self._turns[session.device_id] = turn
-        self._turn_chats[session.device_id] = str(event.source.chat_id)
         await session.turn_start(turn)
 
     async def on_processing_complete(self, event: MessageEvent, outcome) -> None:
-        device_id = self._device_id(event.source.chat_id)
-        turn = self._turns.pop(device_id, None) or event.message_id or ""
-        self._turn_chats.pop(device_id, None)
+        turn = self._turns.pop(self._device_id(event.source.chat_id), None) or event.message_id or ""
         session = self._session(event.source.chat_id)
         if session is None or not session.paired:
             return
-        result = getattr(outcome, "value", str(outcome))
-        await session.turn_end(turn, result)
-        state = self._interpreting.get(device_id)
-        if state is not None and not state.auto and result == "success" and interpret.is_chat(event.source.chat_id):
-            state.flip()  # the gadget changes hands: the other language is spoken next
-            await session.send_interpret(state.message())
+        await session.turn_end(turn, getattr(outcome, "value", str(outcome)))
 
     def set_status_text(self, chat_id: str, text: Optional[str]) -> None:
         super().set_status_text(chat_id, text)
@@ -1478,7 +1564,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             # Show what speech-to-text heard as the user's line, not as a reply.
             await session.send_transcript(textfmt.for_device(heard, session.charset))
             return SendResult(success=True, message_id=uuid.uuid4().hex[:12])
-        text = self._device_text(chat_id, session, content)
+        text = textfmt.for_device(content, session.charset)
         if text:
             interim = bool((metadata or {}).get("_interim_send"))
             await session.send_reply(text, turn=self._turns.get(session.device_id), interim=interim)
@@ -1540,14 +1626,14 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         session = self._session(chat_id)
         if session is None or not session.paired:
             return SendResult(success=False, error="gadget not connected")
-        await session.send_delta(self._device_text(chat_id, session, content), turn=self._turns.get(session.device_id))
+        await session.send_delta(textfmt.for_device(content, session.charset), turn=self._turns.get(session.device_id))
         return SendResult(success=True)
 
     async def edit_message(self, chat_id: str, message_id: str, content: str, *, finalize: bool = False) -> SendResult:
         session = self._session(chat_id)
         if session is None or not session.paired:
             return SendResult(success=False, error="gadget not connected")
-        text = self._device_text(chat_id, session, content)
+        text = textfmt.for_device(content, session.charset)
         if str(message_id).startswith(PROMPT_PREFIX):
             # Hermes edits a question card when it times out: withdraw it and say why.
             await self._withdraw_prompt(session, str(message_id)[len(PROMPT_PREFIX):])

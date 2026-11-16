@@ -312,7 +312,7 @@ def _cmd_interpret(args) -> None:
     desk = Desk(store.path.parent)
     try:
         req = (desk.post(device_id, "interpret", off=True) if off
-               else desk.post(device_id, "interpret", a=langs[0], b=langs[1], auto=args.auto))
+               else desk.post(device_id, "interpret", a=langs[0], b=langs[1]))
     except ValueError as exc:
         sys.exit(f"Can't start the interpreter: {exc}")
     outcome = desk.wait(req, INTERPRET_TIMEOUT_S)
@@ -321,13 +321,13 @@ def _cmd_interpret(args) -> None:
     if off:
         print(f"{name} is no longer interpreting." if outcome.get("was_on") else f"{name} was not interpreting.")
         return
-    print(f"{name} is interpreting: {outcome.get('label')}. Hold its talk control and speak; it says and shows "
-          "the translation.")
-    if args.auto:
-        print("The speech-to-text provider detects the language of each recording.")
-    else:
-        print("The speakers take turns, the first language first. A short press of CANCEL on the gadget "
-              "switches who speaks next.")
+    print(f"{name} is interpreting: {outcome.get('label')}. Hold its talk control and speak; it "
+          + ("says and shows" if outcome.get("speaks") else "shows") + " the translation.")
+    print("The speakers take turns, the first language first. A short press of CANCEL on the gadget "
+          "switches who speaks next.")
+    if not outcome.get("speaks"):
+        print("This gadget does not speak (no speaker, or voice is off): a translation in a script its "
+              "screen can't draw is lost.")
     if not outcome.get("draws"):
         print("This gadget's firmware doesn't draw the interpreter screen: translations appear as replies, "
               "and only this command switches who speaks next.")
@@ -481,9 +481,6 @@ def setup_argparse(parser) -> None:
     interp.add_argument("languages", nargs="+", metavar="language",
                         help="Two languages, the one spoken first first (codes such as es en, or English names); "
                              "or 'off' to stop")
-    interp.add_argument("--auto", action="store_true",
-                        help="Let the speech-to-text provider detect each recording's language instead of "
-                             "taking turns")
     tile = subs.add_parser("tile", help="Set the status tiles the gadget dashboard shows")
     tile_subs = tile.add_subparsers(dest="tile_command")
     tile_set = tile_subs.add_parser("set", help="Add a tile or change its value")

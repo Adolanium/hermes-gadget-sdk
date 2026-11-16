@@ -1174,12 +1174,11 @@ void App::h_interpret(const json::Value& m) {
   }
   wake_display();
   interpret_ = true;
-  interpret_flip_ = m["flip"].as_bool();
   interpret_label_ = m["label"].as_string().substr(0, 24);
 }
 
 void App::interpret_off() {
-  interpret_ = interpret_flip_ = false;
+  interpret_ = false;
   interpret_label_.clear();
 }
 
@@ -1698,7 +1697,7 @@ void App::on_button(Button button, bool pressed, bool touch) {
       } else if (mode_ == Mode::Listening) cancel_listening("cancelled");
       else if (overlay_ != Overlay::None) dismiss_overlay();
       else if (mode_ == Mode::Thinking || mode_ == Mode::Responding) cancel_turn();
-      else if (interpret_flip_ && can_talk()) send(proto::message("interpret.flip"));  // the other one speaks next
+      else if (interpret_ && can_talk()) send(proto::message("interpret.flip"));  // the other one speaks next
       else if (dashboard_ready_ && paired_) {
         overlay_ = Overlay::Dashboard;
         overlay_until_ = 0;

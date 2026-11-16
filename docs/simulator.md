@@ -49,7 +49,7 @@ A first session, start to finish:
 |---|---|
 | Hold **Space** / TALK button | Push-to-talk |
 | **Esc** / CANCEL | Discard a recording, close a card, stop a turn; on the idle screen, open or close the [dashboard](using-gadget.md#watch-hermes-sessions-on-the-dashboard). With `hermes-gadget devserver`, type `dashboard` there to send sample sessions and tiles |
-| Hold **Esc** / CANCEL for 2 s | Start a new Hermes session (`/new`); a countdown shows in the hint bar. In [interpreter mode](using-gadget.md#interpreter-mode) it leaves the mode instead, and a short press switches who speaks next. With `hermes-gadget devserver`, type `interpret es en` there to try the mode: the translation is a stand-in that labels your text |
+| Hold **Esc** / CANCEL for 2 s | Start a new Hermes session (`/new`); a countdown shows in the hint bar. In [interpreter mode](using-gadget.md#interpreter-mode) it leaves the mode instead, and a short press switches who speaks next. With `hermes-gadget devserver`, type `interpret es en` there to try the mode: the translation is a stand-in that labels your text, and the tone it plays stands in for the speech |
 | Hold **Space + Esc** for 1 s | Open or close the device's settings and local hardware checks |
 | **Space** / **Esc** on a question | Answer yes / no |
 | **Up / Down** | Scroll a long reply (long replies also page by themselves) |

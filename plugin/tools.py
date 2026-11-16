@@ -69,10 +69,11 @@ ACTION_SCHEMA = {
 INTERPRET_SCHEMA = {
     "name": "gadget_interpret",
     "description": "Turn a gadget into an interpreter between two languages, or back. While it is on, everything "
-                   "said to that gadget is translated into the other language, spoken and shown, in a chat of its "
-                   "own: this conversation gets none of it, and a spoken request to stop would be translated too. "
-                   "The user stops it by holding the gadget's cancel control, or you stop it from another chat. "
-                   "After turning it on, say briefly that the interpreter is ready and who speaks first.",
+                   "said to that gadget is translated into the other language, spoken and shown. You are not "
+                   "involved: this conversation gets none of it, and a spoken request to stop would be translated "
+                   "too. The two people take turns, the first language first. The user stops it by holding the "
+                   "gadget's cancel control, or you stop it from another chat. After turning it on, say briefly "
+                   "that the interpreter is ready and who speaks first.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -82,12 +83,6 @@ INTERPRET_SCHEMA = {
                                "speaks first comes first. Omit when stopping.",
             },
             "stop": {"type": "boolean", "description": "true leaves interpreter mode."},
-            "detect": {
-                "type": "string", "enum": ["turns", "auto"],
-                "description": "turns (default): the speakers alternate and each recording is transcribed in "
-                               "the language whose turn it is. auto: the speech-to-text provider detects the "
-                               "language; use it only when asked.",
-            },
             "device": _DEVICE_PARAM,
         },
         "required": [],
@@ -230,13 +225,12 @@ def gadget_interpret(args: dict, **_kw) -> str:
         return _error(err)
     try:
         if args.get("stop"):
-            was_on = _run(adapter, adapter.interpret_stop(session))
+            was_on = _run(adapter, adapter.interpret_stop(session.device_id))
             return json.dumps({"success": True, "device": session.name, "interpreting": False, "was_on": was_on})
         languages = args.get("languages")
         if not isinstance(languages, list) or len(languages) != 2:
             return _error("languages must name two languages, or pass stop: true")
-        state = _run(adapter, adapter.interpret_start(session, languages[0], languages[1],
-                                                      str(args.get("detect") or "") == "auto"))
+        state = _run(adapter, adapter.interpret_start(session, languages[0], languages[1]))
     except ValueError as exc:
         return _error(str(exc))
     except Exception as exc:

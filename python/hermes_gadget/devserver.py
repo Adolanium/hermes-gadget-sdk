@@ -58,9 +58,9 @@ class EchoBrain(HubDelegate):
         self.hub: DeviceHub | None = None
         # Interpreter mode, as the Hermes adapter runs it (plugin/interpret.py), with stand-ins for what
         # Hermes does: `transcribe(seconds, language)` for speech-to-text and `translate(text, session)`
-        # for the agent. The defaults only label the text, so the screens can be developed without a model.
+        # for the model. The defaults only label the text, so the screens can be developed without a model.
         self.interpreting: dict[str, interpret.Session] = {}
-        self.transcribe = lambda seconds, language: f"{seconds:.1f} s of {language or 'detected'} speech"
+        self.transcribe = lambda seconds, language: f"{seconds:.1f} s of {language} speech"
         self.translate = lambda text, session: f"[{session.label}] {text}"
 
     async def is_paired(self, session: DeviceSession) -> bool:
@@ -90,8 +90,8 @@ class EchoBrain(HubDelegate):
             await session.set_paired(True)
         return True
 
-    async def interpret(self, session: DeviceSession, first: str, second: str, auto: bool = False) -> interpret.Session:
-        state = self.interpreting[session.device_id] = interpret.start(first, second, auto)
+    async def interpret(self, session: DeviceSession, first: str, second: str) -> interpret.Session:
+        state = self.interpreting[session.device_id] = interpret.start(first, second)
         await session.send_interpret(state.message())
         return state
 
@@ -104,7 +104,7 @@ class EchoBrain(HubDelegate):
     async def on_interpret_flip(self, session: DeviceSession) -> None:
         state = self.interpreting.get(session.device_id)
         task = self._turns.get(session.device_id)
-        if state is None or state.auto or (task and not task.done()):
+        if state is None or (task and not task.done()):
             return
         state.flip()
         await session.send_interpret(state.message())
@@ -124,11 +124,10 @@ class EchoBrain(HubDelegate):
                 await session.send_delta(" ".join(words[:i]), turn=turn)
                 await asyncio.sleep(self.word_delay)
             await session.send_reply(reply, turn=turn)
-            await session.turn_end(turn, "success")
-            if interpreting is not None and not interpreting.auto and \
-                    self.interpreting.get(session.device_id) is interpreting:
+            if interpreting is not None and self.interpreting.get(session.device_id) is interpreting:
                 interpreting.flip()  # the gadget changes hands
                 await session.send_interpret(interpreting.message())
+            await session.turn_end(turn, "success")
         except asyncio.CancelledError:
             if not session.closed:  # a stopping server has nobody left to tell
                 await session.stop_audio()
@@ -145,8 +144,9 @@ class EchoBrain(HubDelegate):
     def _interpret_turn(self, session: DeviceSession, msg_id: str, state: interpret.Session, said: str,
                         heard: str | None) -> None:
         """A translation in place of an answer: the stand-in's text, as the device can show it, and a tone."""
-        reply = interpret.shown(self.translate(said, state), session.charset, None if state.auto else state.target)
-        audio = tone(session.speaker_rate, 0.25) if session.has_speaker else None
+        reply = interpret.shown(self.translate(said, state), session.charset, state.target,
+                                spoken=session.has_speaker)
+        audio = tone(session.speaker_rate, 0.25) if session.has_speaker else None  # stands in for the speech
         self._start_turn(session, msg_id, reply, audio, heard=heard, interpreting=state)
 
     async def on_text(self, session: DeviceSession, msg_id: str, text: str) -> None:
@@ -159,7 +159,7 @@ class EchoBrain(HubDelegate):
 
     async def on_utterance(self, session: DeviceSession, msg_id: str, wav: bytes, seconds: float) -> None:
         if (state := self.interpreting.get(session.device_id)) is not None:
-            heard = self.transcribe(seconds, state.stt_language)
+            heard = self.transcribe(seconds, state.speaker)
             self._interpret_turn(session, msg_id, state, heard, heard)
             return
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
@@ -207,7 +207,7 @@ HELP = """commands:
   image <path>                 send an image (needs Pillow)
   dashboard [json]             send a dashboard (sample sessions and tiles without json);
                                CANCEL on the idle screen opens it
-  interpret <a> <b> [auto]     interpreter mode between two languages, e.g. interpret es en;
+  interpret <a> <b>            interpreter mode between two languages, e.g. interpret es en;
                                the translation is a stand-in that labels the text
   interpret off                leave interpreter mode
   update <path>                install a firmware image (firmware.bin) over the air
@@ -315,11 +315,11 @@ async def _console(hub: DeviceHub, brain: EchoBrain, stop: asyncio.Event) -> Non
                 for s in sessions:
                     if words == ["off"]:
                         await brain.interpret_off(s)
-                    elif len(words) in (2, 3):
-                        state = await brain.interpret(s, words[0], words[1], words[2:] == ["auto"])
+                    elif len(words) == 2:
+                        state = await brain.interpret(s, words[0], words[1])
                         print(f"  {s.name}: {state.label}")
                     else:
-                        print("  usage: interpret <a> <b> [auto] | interpret off")
+                        print("  usage: interpret <a> <b> | interpret off")
             elif cmd == "update":
                 for s in sessions:
                     s.spawn(_update(s, rest.strip()))

@@ -170,7 +170,9 @@ def test_device_pairs_talks_and_is_driven_by_the_agent(gateway, make_sim):
     assert any(p.endswith("/audio/speech") for p in paths)
 
 
-def test_a_gadget_interprets_between_two_languages_in_a_chat_of_its_own(gateway, make_sim):
+def test_a_gadget_interprets_between_two_languages_without_the_agent(gateway, make_sim):
+    from fakes import fake_openai
+
     sim = make_sim(gateway["url"], name="Interpreter")
     assert sim.wait_for(lambda: sim.status().get("pairing_code"), timeout=60)
     approved = _hermes(gateway["home"], "pairing", "approve", "gadget", sim.status()["pairing_code"])
@@ -182,6 +184,9 @@ def test_a_gadget_interprets_between_two_languages_in_a_chat_of_its_own(gateway,
     def chats():
         return [r for r in api if r["path"].endswith("/chat/completions")]
 
+    def turn_ends():
+        return sum(1 for m in sim.received if m.get("type") == "turn.end")
+
     # Something in the device's own conversation, to look for later.
     sim.type_text("remember the word pineapple")
     assert sim.wait_for(lambda: "pineapple" in (sim.last_received("reply") or {}).get("text", ""), timeout=90)
@@ -192,29 +197,44 @@ def test_a_gadget_interprets_between_two_languages_in_a_chat_of_its_own(gateway,
     assert started.returncode == 0 and "ES > EN" in started.stdout, started.stdout + started.stderr
     assert sim.wait_for(lambda: sim.status().get("interpret") == "ES > EN", timeout=10)
 
-    # The Spanish speaker: transcribed in Spanish, answered with the English translation, spoken.
-    del api[:]
     pcm = b"".join(struct.pack("<h", int(7000 * math.sin(2 * math.pi * 300 * i / 16000))) for i in range(16000))
-    sim.received.clear()
-    sim.speak_pcm(pcm)
-    assert sim.wait_for(lambda: (sim.last_received("reply") or {}).get("text") == "Where is the station?",
-                        timeout=90), sim.received
-    assert sim.last_received("transcript")["text"] == "donde esta la estacion"
-    assert sim.wait_for(lambda: sim.last_received("audio.start") is not None, timeout=30)
-    assert sim.wait_for(lambda: sim.status().get("interpret") == "EN > ES", timeout=30)
-    assert sim.wait_screen("ready", timeout=60)
+    fake_openai.SPEAKERS.update(fake_openai.TRANSCRIPTS)  # two people, told apart by the language asked for
+    try:
+        # The Spanish speaker: transcribed in Spanish although this Hermes fixes English by default
+        # (stt.language), answered with the English translation, spoken.
+        sim.run_for(1.0)
+        del api[:]
+        sim.received.clear()
+        sim.speak_pcm(pcm)
+        assert sim.wait_for(lambda: turn_ends() == 1, timeout=120), sim.received
+        assert sim.last_received("reply")["text"] == "Where is the station?"
+        assert sim.last_received("transcript")["text"] == "donde esta la estacion"
+        assert sim.last_received("audio.start") is not None
+        assert sim.status().get("interpret") == "EN > ES"
+        assert sim.wait_screen("ready", timeout=60)
 
-    # The gadget changed hands: the same sound is now the English speaker's.
-    sim.received.clear()
-    sim.speak_pcm(pcm)
-    assert sim.wait_for(lambda: (sim.last_received("reply") or {}).get("text")
-                        == "Siga recto y gire a la izquierda.", timeout=90), sim.received
-    assert sim.last_received("transcript")["text"] == "go straight and turn left"
-    assert sim.wait_for(lambda: sim.status().get("interpret") == "ES > EN", timeout=30)
+        # The gadget changed hands: the same sound is now the English speaker's.
+        sim.speak_pcm(pcm)
+        assert sim.wait_for(lambda: turn_ends() == 2, timeout=120), sim.received
+        assert sim.last_received("reply")["text"] == "Siga recto y gire a la izquierda."
+        assert sim.last_received("transcript")["text"] == "go straight and turn left"
+        assert sim.status().get("interpret") == "ES > EN"
+        assert sim.wait_screen("ready", timeout=60)
+    finally:
+        fake_openai.SPEAKERS.clear()
     assert [r["language"] for r in api if r["path"].endswith("/audio/transcriptions")] == ["es", "en"]
-    # Every model call of the exchange carried the instruction, and none carried the device's conversation.
-    assert chats() and all(r["interpreter"] for r in chats())
-    assert not any("pineapple" in r["history"] for r in chats())
+
+    # Words that make the agent call a tool in a conversation are only text to translate here.
+    sim.type_text("put a note on my screen")
+    assert sim.wait_for(lambda: turn_ends() == 3, timeout=120), sim.received
+    assert "no translation for" in sim.last_received("reply")["text"]
+    assert sim.last_received("display") is None and sim.last_received("prompt") is None
+    # The model was called once per utterance and for nothing else (no session title, no memory
+    # review): each call was the interpreter's request, with no tools and none of the conversation.
+    assert len(chats()) == 3, chats()
+    for request in chats():
+        assert request["interpreter"] and request["tools"] == [], request
+        assert "pineapple" not in request["history"]
 
     # Holding CANCEL leaves the mode; the device's conversation is as it was, without the translations.
     assert sim.wait_screen("ready", timeout=60)
@@ -226,8 +246,10 @@ def test_a_gadget_interprets_between_two_languages_in_a_chat_of_its_own(gateway,
     sim.type_text("hello again")
     assert sim.wait_for(lambda: "You said: hello again" in (sim.last_received("reply") or {}).get("text", ""),
                         timeout=90)
-    assert not chats()[-1]["interpreter"]
-    assert "pineapple" in chats()[-1]["history"] and "estacion" not in chats()[-1]["history"]
+    answered = [r for r in chats() if "hello again" in r["user"]]
+    assert answered and not answered[-1]["interpreter"]
+    assert "pineapple" in answered[-1]["history"]
+    assert "estacion" not in answered[-1]["history"] and "note on my screen" not in answered[-1]["history"]
     stopped = _hermes(gateway["home"], "gadget", "interpret", device_id, "off")
     assert stopped.returncode == 0 and "was not interpreting" in stopped.stdout, stopped.stdout + stopped.stderr
 

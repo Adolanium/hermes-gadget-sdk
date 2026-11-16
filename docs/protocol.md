@@ -230,7 +230,7 @@ The Hermes plugin makes a profile's thumbnail from its `gadget-face.bin` (the id
 | `{"type": "notice", "text": "...", "ttl_s": 8}` | Transient one-line message |
 | `{"type": "prompt", "id": "q1", "title": "Confirm /new", "text": "...", "ttl_s": 300}` | A yes/no question; see [Questions](#questions) |
 | `{"type": "prompt.close", "id": "q1"}` | The question was withdrawn (timed out or answered elsewhere) |
-| `{"type": "interpret", "on": true, "label": "ES > EN", "flip": true}` | The device interprets between two languages; see [Interpreter mode](#interpreter-mode) |
+| `{"type": "interpret", "on": true, "label": "ES > EN"}` | The device interprets between two languages; see [Interpreter mode](#interpreter-mode) |
 | `{"type": "error", "code": "...", "message": "..."}` | Protocol or auth error; the server usually closes the connection next |
 
 Reply text is already shaped for the device: Markdown is stripped and the text is folded to what its `charset` draws. `"ascii"` gets printable ASCII only. `"latin1"` gets ASCII and Latin-1 (U+00A1 to U+00FF, so accented letters, ¿ ¡ and the like), with no-break spaces as plain spaces; anything else is folded to the nearest letter or dropped. Text is UTF-8 either way, and devices render it as-is. The reference firmware reports `"latin1-cyrillic"`: its font also has the Russian alphabet (U+0410 to U+044F, Ё and ё), which that charset keeps on top of `"latin1"`; other Cyrillic letters are folded or dropped as other scripts are. Firmware from before that reports `"latin1"`, and older firmware still `"ascii"`. A plugin older than `latin1-cyrillic` does not know it and leaves the text unfolded: Russian then shows, but typographic quotes, dashes and emoji that it would have folded draw as `?`. Update the plugin before the firmware. Firmware built with the Chinese font (`HG_CJK_FONT`, [cjk.md](cjk.md)) reports `"cjk"`: Latin-1 plus Chinese, Japanese kana, Korean and fullwidth characters are kept, and the rest folds as for `"latin1"`.
@@ -306,17 +306,18 @@ Hermes asks before some actions: destructive commands such as `/new`, a costly m
 
 ### Interpreter mode
 
-In interpreter mode Hermes translates what is said to the device into another language instead of answering it. The turn itself is an ordinary one: `turn.start`, `transcript` with what was said, `reply` with the translation, reply audio, `turn.end`.
+In interpreter mode Hermes translates what is said to the device into another language instead of answering it. To the device the turn is an ordinary one: `turn.start`, `transcript` with what was said, `reply` with the translation, reply audio, `turn.end`.
 
 - `caps.interpret: 1` in `hello` means the device draws the mode. The reference firmware announces it when it has a screen. The server sends the messages below to every device; one that does not know them ignores them and shows each translation as a reply.
-- `{"type": "interpret", "on": true, "label": "ES > EN", "flip": true}` (server → device) turns the mode on, or updates it. `label` is short ASCII text that names the languages: `ES > EN` when the next recording is taken as Spanish and translated into English, `ES <> EN` when the server detects the language. `flip` says whether the device may ask to switch who speaks next. The server sends the message again after each turn that switches the speaker, and after a reconnect.
+- `{"type": "interpret", "on": true, "label": "ES > EN"}` (server → device) turns the mode on, or updates it. `label` is short ASCII text that names the languages: here the next recording is taken as Spanish and translated into English. The server sends the message again when the speaker switches, which is right after each `reply`, and after a reconnect.
 - `{"type": "interpret", "on": false}` (server → device) turns it off. The device also leaves the mode when the connection ends or it is unpaired.
-- `{"type": "interpret.flip"}` (device → server) asks the server to switch who speaks next. The server answers with a new `interpret` message, and ignores the request during a turn or when `flip` was false. The device shows the new label only when that message arrives.
-- `session.new` from a device in the mode leaves it instead of starting a new conversation: the server sends `interpret` with `on: false`, a `turn.end` with an empty `turn` and outcome `cancelled`, and a `notice`.
+- `{"type": "interpret.flip"}` (device → server) asks the server to switch who speaks next. The server answers with a new `interpret` message, and ignores the request during a turn. The device shows the new label only when that message arrives.
+- `cancel` during a translation stops it: the server sends `turn.end` with outcome `cancelled`, and the speaker stays as it was.
+- `session.new` from a device in the mode leaves it instead of starting a new conversation: the server stops a translation under way and sends `interpret` with `on: false`, a `turn.end` with an empty `turn` and outcome `cancelled`, and a `notice`.
 
-The reference firmware shows `label` as the headline of the idle screen and of the reply. It draws the translation one text size larger when the whole text fits the screen that way, with the `transcript` above it at the usual size. A short CANCEL press on the idle screen sends `interpret.flip` when `flip` is true, in place of opening the dashboard. Holding CANCEL counts down to leaving the mode.
+The reference firmware shows `label` as the headline of the idle screen and of the reply. It draws the translation one text size larger when the whole text fits the screen that way, with the `transcript` above it at the usual size. A short CANCEL press on the idle screen sends `interpret.flip`, in place of opening the dashboard. Holding CANCEL counts down to leaving the mode.
 
-Translations are shaped like replies. For a translation in a script the device's `charset` does not cover, the server sends a line saying that it is spoken only, in place of the text.
+Translations are shaped like replies. When the device's `charset` does not cover the translation's script, the server sends a line in place of the text, or a note under what is left of it; see [Interpreter mode](hermes-integration.md#interpreter-mode).
 
 ### Device actions
 

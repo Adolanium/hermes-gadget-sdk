@@ -92,8 +92,8 @@ class Desk:
             if fields.get("off"):
                 req.update(off=True)
             else:  # checked here, so a bad language is refused where it was typed
-                session = interpret.start(fields.get("a"), fields.get("b"), bool(fields.get("auto")))
-                req.update(a=session.a, b=session.b, auto=session.auto)
+                session = interpret.start(fields.get("a"), fields.get("b"))
+                req.update(a=session.a, b=session.b)
         self.inbox.mkdir(parents=True, exist_ok=True)
         if len(list(self.inbox.glob("*.json"))) >= MAX_PENDING:
             raise ValueError("too many requests are waiting; is the gateway running?")

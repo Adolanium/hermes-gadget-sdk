@@ -9469,13 +9469,13 @@ TEST("interpret: the idle screen names the languages until Hermes turns the mode
   Rig r;
   r.bring_online(true);
   CHECK_EQ(r.app.model().headline, std::string("Hi, I'm Hermes"));
-  r.server(R"({"type":"interpret","on":true,"label":"ES > EN","flip":true})");
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
   CHECK(r.app.screen() == hg::Screen::Ready);
   CHECK_EQ(r.app.model().headline, std::string("ES > EN"));
   CHECK_EQ(r.app.model().detail, std::string("Interpreter"));
   CHECK(r.app.status_json().find("\"interpret\":\"ES > EN\"") != std::string::npos);
   // The turn's end switches who speaks next: Hermes sends the new label.
-  r.server(R"({"type":"interpret","on":true,"label":"EN > ES","flip":true})");
+  r.server(R"({"type":"interpret","on":true,"label":"EN > ES"})");
   CHECK_EQ(r.app.model().headline, std::string("EN > ES"));
   r.server(R"({"type":"interpret","on":false})");
   CHECK_EQ(r.app.model().headline, std::string("Hi, I'm Hermes"));
@@ -9485,7 +9485,7 @@ TEST("interpret: the idle screen names the languages until Hermes turns the mode
 TEST("interpret: the translation is drawn large with what was said above it") {
   Rig r;
   r.bring_online(true);
-  r.server(R"({"type":"interpret","on":true,"label":"ES > EN","flip":true})");
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
   r.server(R"({"type":"turn.start","turn":"a1"})");
   r.server(R"({"type":"transcript","text":"buenos dias"})");
   r.server(R"({"type":"reply","turn":"a1","text":"Good morning"})");
@@ -9496,7 +9496,7 @@ TEST("interpret: the translation is drawn large with what was said above it") {
   CHECK_EQ(r.app.model().headline, std::string("ES > EN"));
   CHECK(!r.app.model().hero);
   r.server(R"({"type":"turn.end","turn":"a1","outcome":"success"})");
-  r.server(R"({"type":"interpret","on":true,"label":"EN > ES","flip":true})");
+  r.server(R"({"type":"interpret","on":true,"label":"EN > ES"})");
   r.advance(200);
   // Back on the idle screen the translation stays up, large, under who speaks next.
   CHECK(r.app.screen() == hg::Screen::Ready);
@@ -9524,7 +9524,7 @@ TEST("interpret: a short CANCEL press asks Hermes to switch who speaks next") {
   Rig r;
   r.bring_online(true);
   r.server(R"({"type":"dashboard","v":1,"sessions":[{"label":"cli 1","state":"idle"}]})");
-  r.server(R"({"type":"interpret","on":true,"label":"ES > EN","flip":true})");
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
   r.app.on_button(hg::Button::Cancel, true);
   r.app.on_button(hg::Button::Cancel, false);
   CHECK(r.fake.last("interpret.flip") != nullptr);
@@ -9533,21 +9533,10 @@ TEST("interpret: a short CANCEL press asks Hermes to switch who speaks next") {
   CHECK_EQ(r.app.model().headline, std::string("ES > EN"));
 }
 
-TEST("interpret: with detected languages CANCEL keeps opening the dashboard") {
-  Rig r;
-  r.bring_online(true);
-  r.server(R"({"type":"dashboard","v":1,"sessions":[{"label":"cli 1","state":"idle"}]})");
-  r.server(R"({"type":"interpret","on":true,"label":"ES <> EN","flip":false})");
-  r.app.on_button(hg::Button::Cancel, true);
-  r.app.on_button(hg::Button::Cancel, false);
-  CHECK(r.fake.last("interpret.flip") == nullptr);
-  CHECK(r.app.screen() == hg::Screen::Dashboard);
-}
-
 TEST("interpret: holding CANCEL counts down to leaving the mode, and a lost connection ends it") {
   Rig r;
   r.bring_online(true);
-  r.server(R"({"type":"interpret","on":true,"label":"ES > EN","flip":true})");
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
   r.app.on_button(hg::Button::Cancel, true);
   r.advance(1200);
   CHECK(r.app.model().hint.find("Interpreter off in") != std::string::npos);
@@ -9560,7 +9549,7 @@ TEST("interpret: holding CANCEL counts down to leaving the mode, and a lost conn
   CHECK(r.app.screen() == hg::Screen::Ready);
   CHECK_EQ(r.app.model().headline, std::string("Hi, I'm Hermes"));
 
-  r.server(R"({"type":"interpret","on":true,"label":"ES > EN","flip":true})");
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
   CHECK(r.app.status_json().find("\"interpret\"") != std::string::npos);
   r.app.on_transport_closed("gone");
   CHECK(r.app.status_json().find("\"interpret\"") == std::string::npos);

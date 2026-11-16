@@ -6,8 +6,8 @@ Serves just enough of the API for Hermes to run a real gateway turn:
   that mention the screen trigger a ``gadget_display`` tool call, messages
   that mention the LED trigger ``gadget_action``; anything else is echoed. Told to
   interpret (the gadget plugin's interpreter instruction), it translates from ``PHRASEBOOK``.
-* ``POST /v1/audio/transcriptions``: returns ``TRANSCRIPT``, or the line of ``TRANSCRIPTS`` for
-  the ``language`` the request fixes.
+* ``POST /v1/audio/transcriptions``: returns ``TRANSCRIPT``. While a test has put speakers in
+  ``SPEAKERS``, a request that fixes one of their languages gets that speaker's line instead.
 * ``POST /v1/audio/speech``: returns a short tone (raw PCM for
   ``response_format=pcm``, WAV otherwise).
 
@@ -28,11 +28,15 @@ import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TRANSCRIPT = "what is on my screen"
-# What the "recording" says when the request fixes its language: one speaker per language.
+# Two people for an interpreter test: what each one's "recording" says, by the language the request
+# fixes. A test copies them into SPEAKERS for the exchange and clears it afterwards. Empty, every
+# recording says TRANSCRIPT: Hermes fixes English by default (stt.language), so the language of a
+# request alone says nothing about who is speaking.
 TRANSCRIPTS = {"es": "donde esta la estacion", "en": "go straight and turn left"}
+SPEAKERS: dict = {}
 PHRASEBOOK = {"donde esta la estacion": "Where is the station?",
               "go straight and turn left": "Siga recto y gire a la izquierda."}
-INTERPRETER_MARK = "live interpreter between"  # plugin/interpret.py, instruction()
+INTERPRETER_MARK = "live interpreter between"  # plugin/interpret.py, messages()
 CRLF = b"\r\n"
 MODEL = "fake-gadget-model"
 
@@ -87,8 +91,7 @@ def plan_reply(body: dict) -> dict:
     """Decide the assistant message: {"content": str} or {"tool_call": (name, args)}."""
     messages = body.get("messages") or []
     if is_interpreting(messages):
-        said = " ".join(line for line in _last_user_text(messages).strip().splitlines()
-                        if line.strip() and not line.startswith("[")).strip().strip('"')
+        said = _last_user_text(messages).partition("\n\n")[2].strip()  # after "Translate from X into Y:"
         return {"content": PHRASEBOOK.get(said, f"(no translation for {said[:80]!r})")}
     tools = {t.get("function", {}).get("name") for t in body.get("tools") or []}
     if messages and messages[-1].get("role") == "tool":
@@ -179,7 +182,7 @@ class Handler(BaseHTTPRequestHandler):
     def _transcription(self, raw: bytes) -> None:
         # Multipart form; only response_format and language matter here.
         fmt = _form_field(raw, "response_format") or "json"
-        transcript = TRANSCRIPTS.get(_form_field(raw, "language") or "", TRANSCRIPT)
+        transcript = SPEAKERS.get(_form_field(raw, "language") or "", TRANSCRIPT)
         if fmt == "text":
             data = transcript.encode()
             self.send_response(200)

@@ -795,10 +795,9 @@ class App {
   std::string status_;
   std::string user_echo_;
   // Interpreter mode (docs/protocol.md#interpreter-mode): Hermes translates what is said instead of
-  // answering. The label names the languages ("ES > EN"); with flip, a short CANCEL press on the
-  // idle screen asks Hermes to switch who speaks next.
+  // answering. The label names the languages ("ES > EN"); a short CANCEL press on the idle screen
+  // asks Hermes to switch who speaks next.
   bool interpret_ = false;
-  bool interpret_flip_ = false;
   std::string interpret_label_;
   void interpret_off();
   void interpret_text(UiModel& m);  // the translation large, what was said small above it
