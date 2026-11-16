@@ -47,7 +47,7 @@ Hermes can ask a question with two to six answers, for example which of three li
 | Up and Down buttons, or a knob | Move the highlight, then press TALK | CANCEL |
 | TALK and CANCEL only | Press CANCEL to move to the next answer, then TALK | Move to the last row, **Cancel**, and press TALK |
 
-Presses in the first half second after the list appears do nothing, so a press meant for something else doesn't answer it. Hermes waits about a minute for the answer, then takes the list away and carries on without it.
+A short question is the screen's title; a longer one wraps above the answers. Presses in the first half second after the list appears do nothing, so a press meant for something else doesn't answer it. Hermes waits about a minute for the answer, then takes the list away and carries on without it.
 
 These choices come from the agent. Hermes's own confirmations, such as approving a risky command, stay yes or no questions: TALK or a tap for yes, CANCEL or a swipe down for no. A board with one button and no touchscreen can't pick from a list, so it shows the answers as a numbered card and Hermes asks you to say which one.
 

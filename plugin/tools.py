@@ -23,6 +23,7 @@ CALL_TIMEOUT_S = 20.0
 ASK_DEFAULT_S = 60    # how long gadget_ask waits for an answer, unless told otherwise
 ASK_MAX_S = 300       # ...and at most: Hermes's own approval timeout
 QR_MAX_BYTES = 287    # the longest text any gadget draws as a code
+ROW_INDENT_COLS = 2   # a list row or an answer starts after a bullet: that much of text_cols is not its own
 
 _DEVICE_PARAM = {
     "type": "string",
@@ -152,6 +153,12 @@ def _resolve(adapter, ref: str | None):
     return None, "several gadgets are connected; pass device: " + ", ".join(s.name for s in sessions)
 
 
+def _row_cols(session) -> int | None:
+    """Characters a list row or an answer has on the device's line, after its bullet."""
+    cols = session.display.get("text_cols")
+    return cols - ROW_INDENT_COLS if isinstance(cols, int) and cols > 4 + ROW_INDENT_COLS else None
+
+
 def _usable(session) -> str | None:
     return None if session.paired else f"{session.name} is waiting for pairing approval"
 
@@ -180,7 +187,7 @@ def gadget_display(args: dict, **_kw) -> str:
         return _error(err)
     text = textfmt.for_device(str(args.get("text") or ""), session.charset)
     title = textfmt.for_device(str(args.get("title") or ""), session.charset)
-    cols = session.display.get("text_cols")
+    cols = _row_cols(session)
     items = args.get("items")
     if items is not None and not isinstance(items, list):
         return _error("items must be a list of short strings")
@@ -214,8 +221,9 @@ def gadget_display(args: dict, **_kw) -> str:
     elif shown_as == "qr_as_text":
         result["note"] = (f"the code is too long for {session.name}'s screen and is shown as text; "
                           f"it draws codes of up to {session.card_qr_bytes} bytes")
-    if len(items) > MAX_CARD_ITEMS:
-        result["items_shown"] = MAX_CARD_ITEMS
+    kept = session.card_items or MAX_CARD_ITEMS  # a plain card lists them all, up to the hub's limit
+    if len(items) > kept:
+        result["items_shown"] = kept
     if shown is False:
         result["held"] = ("the screen is off; the card is shown when it lights up, "
                           "for what is left of its time, unless a newer card or image replaces it")
@@ -234,11 +242,23 @@ def gadget_ask(args: dict, **_kw) -> str:
     given = args.get("options")
     if not isinstance(given, list) or not 2 <= len(given) <= MAX_CHOICE_OPTIONS:
         return _error(f"options must be a list of 2 to {MAX_CHOICE_OPTIONS} short answers")
-    cols = session.display.get("text_cols")
-    options = [textfmt.line(str(option), session.charset, cols) for option in given]
+    options = [textfmt.line(str(option), session.charset, _row_cols(session)) for option in given]
     if not all(options):
         return _error("every option needs text the gadget's screen can draw")
     title = textfmt.line(str(args.get("question") or ""), session.charset)
+    # What the user saw, where it is not what the agent wrote: the turn waits on this screen alone.
+    seen: dict = {}
+    notes = []
+    if (box := session.choice_title_box):
+        title, cut = textfmt.clip(title, *box)
+        if cut:
+            seen["question_shown"] = title
+            notes.append("the question was cut to fit the screen; question_shown is what the user saw")
+    if options != [textfmt.line(str(option), session.charset) for option in given]:
+        seen["options_shown"] = options
+        notes.append("some options were cut to fit the screen; options_shown is what the user saw")
+    if notes:
+        seen["note"] = "; ".join(notes)
     try:
         seconds = max(5, min(ASK_MAX_S, int(args.get("seconds", ASK_DEFAULT_S))))
     except (TypeError, ValueError):
@@ -261,8 +281,8 @@ def gadget_ask(args: dict, **_kw) -> str:
     except Exception as exc:
         return _error(str(exc) or f"{session.name} did not answer")
     if index is None:
-        return json.dumps({"success": True, "device": session.name, "cancelled": True})
-    return json.dumps({"success": True, "device": session.name, "answer": str(given[index]), "index": index})
+        return json.dumps({"success": True, "device": session.name, "cancelled": True, **seen})
+    return json.dumps({"success": True, "device": session.name, "answer": str(given[index]), "index": index, **seen})
 
 
 def gadget_action(args: dict, **_kw) -> str:

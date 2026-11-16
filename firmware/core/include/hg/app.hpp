@@ -488,7 +488,7 @@ class App {
   void answer_prompt(bool yes);
   void clear_prompt();
   // A choice is the question on screen (a yes/no question asked meanwhile goes over it).
-  bool choice_showing() const { return prompt_id_.empty() && prompt_showing(); }
+  bool choice_showing() const { return prompt_id_.empty() && !choice_id_.empty() && prompt_showing(); }
   // How a choice is answered: a highlighted row that TALK picks (boards with Up/Down, and boards
   // with neither those nor touch, where CANCEL steps to the next row and a last row cancels).
   bool choice_keys() const { return profile_.has_scroll_buttons || !profile_.touch_screen; }
@@ -858,7 +858,8 @@ class App {
   std::string choice_id_, choice_title_;
   std::vector<std::string> choice_options_;
   int choice_sel_ = 0, choice_first_ = 0;  // the highlighted row, and the first one on screen
-  uint32_t choice_since_ = 0;
+  uint32_t choice_since_ = 0;  // when it last came to the front: presses just after answer nothing
+  bool choice_front_ = false;  // the Choice screen is what the model shows
   uint32_t choice_until_ = 0;  // 0 = until answered or withdrawn
 
   // transient messages

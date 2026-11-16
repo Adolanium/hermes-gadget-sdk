@@ -9795,3 +9795,147 @@ TEST("choice: a yes/no question asked meanwhile goes first and leaves the choice
   const Value* reply = r.fake.last("choice.reply");
   CHECK(reply && (*reply)["index"].as_int(-1) == 1);
 }
+
+TEST("choice: a choice or a question that arrives over the open profile grid closes it and takes the tap") {
+  Rig r(Rig::touch_profile());
+  r.bring_online_with_profiles();
+  hg::TouchGestures touch(r.app);
+  const auto tap = [&](int x, int y) {
+    touch.update(true, x, y, r.fake.clock);
+    r.advance(40);
+    touch.update(false, 0, 0, r.fake.clock);
+  };
+  CHECK(r.app.open_profile_picker());
+  r.server(R"({"type":"choice","id":"c1","title":"Pick","options":["a","b"]})");
+  r.advance(700);
+  CHECK(r.app.screen() == hg::Screen::Choice);
+  CHECK(!r.app.profile_picker_open());
+  for (int y = 0; y < 240 && !r.fake.last("choice.reply"); y += 8) tap(160, y);
+  const Value* reply = r.fake.last("choice.reply");
+  CHECK(reply && (*reply)["id"].as_string() == "c1" && (*reply)["index"].as_int(-1) == 0);
+  CHECK(r.fake.last("profile.select") == nullptr);
+  CHECK(r.app.screen() != hg::Screen::Profiles);  // the grid does not come back under the answer
+
+  CHECK(r.app.open_profile_picker());
+  r.server(R"({"type":"prompt","id":"q1","title":"Allow?","text":"rm -rf build"})");
+  r.advance(700);
+  CHECK(r.app.screen() == hg::Screen::Prompt);
+  CHECK(!r.app.profile_picker_open());
+  tap(160, 120);
+  const Value* yes = r.fake.last("prompt.reply");
+  CHECK(yes && (*yes)["id"].as_string() == "q1" && (*yes)["answer"].as_string() == "yes");
+  CHECK(r.fake.last("profile.select") == nullptr);
+}
+
+TEST("choice: a question longer than the header wraps above the answers, whole, on every panel") {
+  struct Panel {
+    int w, h;
+    bool round, touch;
+  };
+  for (const Panel& p : {Panel{320, 240, false, false}, Panel{240, 135, false, false}, Panel{466, 466, true, true},
+                         Panel{240, 320, false, true}}) {
+    Rig r(p.touch ? Rig::touch_profile() : scroll_profile());
+    r.fake.make_panel(p.w, p.h, p.round);
+    r.bring_online(true);
+    const Value* hello = r.fake.last("hello");
+    CHECK(hello != nullptr);
+    if (!hello) continue;
+    const int cols = static_cast<int>((*hello)["caps"]["choice"]["title_cols"].as_int());
+    const int lines = static_cast<int>((*hello)["caps"]["choice"]["title_lines"].as_int());
+    CHECK(cols >= 12 && lines >= 2);
+    if (cols < 1 || lines < 1) continue;
+    // A short question is the header, as before.
+    r.server(R"({"type":"choice","id":"s","title":"Pick","options":["a","b"]})");
+    r.advance(50);
+    CHECK_EQ(r.app.model().headline, std::string("Pick"));
+    CHECK(r.app.model().detail.empty());
+    // The longest question the device says it shows: every line full. Its last letter is on screen.
+    std::string question;
+    for (int i = 0; i < lines; ++i) question += std::string(i ? " " : "") + std::string(static_cast<size_t>(cols), 'm');
+    const auto shown = [&](const std::string& title) {
+      r.server(R"({"type":"choice","id":"q","title":")" + title + R"(","options":["a","b","c","d","e","f"]})");
+      r.advance(50);
+      return r.fake.fb;
+    };
+    const std::vector<uint16_t> whole = shown(question);
+    CHECK(r.app.screen() == hg::Screen::Choice);
+    CHECK_EQ(r.app.model().headline, std::string("Hermes asks"));
+    CHECK_EQ(r.app.model().detail, question);
+    question.back() = 'i';
+    CHECK(shown(question) != whole);
+    r.server(R"({"type":"choice.close","id":"q"})");
+    // At least two answers stay on screen under it, and still answer.
+    if (p.touch) {
+      hg::TouchGestures touch(r.app);
+      bool first = false, second = false;
+      for (int y = 0; y < p.h; y += 4) {
+        r.fake.sent.clear();
+        r.server(R"({"type":"choice","id":"t","title":")" + question + R"(","options":["a","b","c","d","e","f"]})");
+        r.advance(700);
+        touch.update(true, p.w / 2, y, r.fake.clock);
+        r.advance(40);
+        touch.update(false, 0, 0, r.fake.clock);
+        const Value* reply = r.fake.last("choice.reply");
+        first |= reply && (*reply)["index"].as_int(-1) == 0;
+        second |= reply && (*reply)["index"].as_int(-1) == 1;
+        r.server(R"({"type":"choice.close","id":"t"})");
+      }
+      CHECK(first && second);
+    }
+  }
+}
+
+TEST("choice: the press guard starts again when the choice comes back to the front") {
+  Rig r(scroll_profile());
+  r.bring_online(true);
+  r.server(R"({"type":"choice","id":"c1","title":"Pick","options":["a","b"]})");
+  r.advance(200);
+  r.server(R"({"type":"prompt","id":"q1","title":"Allow?","text":"rm -rf build"})");
+  r.advance(1500);
+  const auto press = [&](hg::Button b) {
+    r.app.on_button(b, true);
+    r.app.on_button(b, false);
+  };
+  press(hg::Button::Talk);  // yes to the question
+  CHECK(r.fake.last("prompt.reply") != nullptr);
+  CHECK(r.app.screen() == hg::Screen::Choice);
+  r.advance(120);
+  press(hg::Button::Talk);  // a second press meant for the question
+  CHECK(r.fake.last("choice.reply") == nullptr);
+  press(hg::Button::Cancel);
+  CHECK(r.fake.last("choice.reply") == nullptr);
+  r.advance(700);
+  press(hg::Button::Talk);
+  const Value* reply = r.fake.last("choice.reply");
+  CHECK(reply && (*reply)["index"].as_int(-1) == 0);
+}
+
+TEST("choice: options that are not all text are refused, so an index never means another option") {
+  Rig r(scroll_profile());
+  r.bring_online(true);
+  r.server(R"({"type":"choice","id":"c1","title":"Pick","options":["a",7,"b","c"]})");
+  r.advance(50);
+  CHECK(r.app.screen() != hg::Screen::Choice);
+  CHECK(r.app.status_json().find("\"choice\"") == std::string::npos);
+  r.server(R"({"type":"choice","id":"c2","title":"Pick","options":["a",null,"b"]})");
+  r.advance(50);
+  CHECK(r.app.screen() != hg::Screen::Choice);
+}
+
+TEST("cards: a code keeps its size with a progress bar, on the smallest panel too") {
+  Rig r;
+  r.fake.make_panel(240, 135);
+  r.bring_online(true);
+  const Value* hello = r.fake.last("hello");
+  const size_t qr = hello ? static_cast<size_t>((*hello)["caps"]["card"]["qr"].as_int()) : 0;
+  CHECK(qr >= 84);
+  r.server(R"({"type":"display","title":"Link","progress":40,"ttl_s":0,"qr":")" + std::string(qr, 'a') + "\"}");
+  r.advance(50);
+  CHECK(r.app.model().card_qr != nullptr);
+  CHECK_EQ(int(r.app.model().card_progress), 40);
+  const size_t bar = count_pixels(r.fake, kAccentInk);
+  CHECK(bar > 0);
+  r.server(R"({"type":"display","title":"Link","progress":90,"ttl_s":0,"qr":")" + std::string(qr, 'a') + "\"}");
+  r.advance(50);
+  CHECK(count_pixels(r.fake, kAccentInk) > bar);
+}

@@ -71,7 +71,7 @@ Because the id is derived from the key, nobody can claim another device's id wit
 - `caps.speaker.buffer_ms` (`4096`) is how much reply audio, in milliseconds, the device can hold before it plays it. The server then sends audio further ahead of real time, which keeps playback smooth on a link whose delay varies, such as a phone hotspot. It is optional: without it the server keeps its default lead. See [Audio to the device](#audio-to-the-device).
 - `caps.ota` (`{"max_size": 2031616}`) means the device installs firmware updates over this connection, up to `max_size` bytes.
 - `caps.card` (`{"v": 1, "items": 12, "qr": 287}`) means the device draws [structured cards](#structured-cards): lists, a progress bar and QR codes. `items` is how many list rows it keeps from one card. `qr` is the longest text, in bytes, that it draws as a code; a device that draws no codes leaves it out.
-- `caps.choice` (`{"v": 1, "options": 6}`) means the device takes a [choice](#choices): a question with up to `options` answers, one of which the user picks.
+- `caps.choice` (`{"v": 1, "options": 6, "title_cols": 25, "title_lines": 4}`) means the device takes a [choice](#choices): a question with up to `options` answers, one of which the user picks. `title_cols` and `title_lines` are the room the question has: that many lines of that many characters. A device may leave them out.
 - `caps.dashboard` (`{"v": 1, "rows": 6}`) means the device draws the [dashboard](#dashboard). `v` is the newest layout it draws, and `rows` is how many lines fit on its screen at once.
 - `actions` is the device's tool manifest. Each action has a JSON-Schema `params` object and a `description` written for the model.
 - `caps.profiles: true` means the device can switch Hermes profiles (see [Profiles](#profiles)). `profile` is the profile it used last; it is omitted for `default`.
@@ -274,10 +274,10 @@ A device that sends `caps.card` also takes these optional fields in `display`:
 |---|---|
 | `items` | List rows, shown one line each after the body. The device keeps the first `caps.card.items` and cuts a row that is longer than its line |
 | `progress` | A progress bar, 0 to 100; other numbers are held to that range |
-| `qr` | Text the device draws as a QR code, in the content area, with `body` as a caption where it fits. The device draws the code only: `items` are not shown with it |
+| `qr` | Text the device draws as a QR code, in the content area, with `body` as a caption where it fits. The device draws the code only: `items` are not shown with it, and `progress` is a thin bar above it, so the code is as large with a bar as without |
 | `id` | Names the card. A `display` with the `id` of the card on screen replaces it in place: the reader keeps their place in a long list. Any other `display` starts a new card from its top |
 
-- Text is shaped like replies: folded to the device's `charset`, and each row is one line of at most `text_cols` characters. `qr` is sent exactly as given.
+- Text is shaped like replies: folded to the device's `charset`, and each row is one line of at most `text_cols` less 2 characters, the room a row has after its bullet. `qr` is sent exactly as given.
 - The server sends these fields only to a device with `caps.card`. Any other device gets the same content as a plain card: a text bar for the progress (`[####------] 40%`), the body, one `* ` line for each item and the code's text. A `qr` longer than `caps.card.qr` bytes is sent as text in `body` too. So older firmware and other clients show everything, in words.
 - A device that gets a `qr` it cannot draw (it does not encode, or it does not fit the screen) shows its text after the body.
 - The reference firmware encodes a code at medium error correction, up to version 12 (287 bytes). It draws a module at 3 pixels or more with a four-module quiet zone, or at 2 pixels with a two-module quiet zone where that is all that fits, and announces in `caps.card.qr` the largest code that fits its screen that way: 84 bytes on a 240x135 panel.
@@ -336,12 +336,13 @@ A device that sends `caps.choice` also takes a question with a few answers. The 
 {"type": "choice", "id": "c1", "title": "Which list?", "options": ["Groceries", "Hardware", "Pharmacy"], "ttl_s": 60}
 ```
 
-- `options` has 2 to `caps.choice.options` answers, each one line, shaped like replies. A device ignores a choice with fewer than 2 and keeps the first `caps.choice.options` of a longer list.
+- `options` has 2 to `caps.choice.options` answers, each one line, shaped like replies. A device ignores a choice with fewer than 2, or with an option that is not a string, and keeps the first `caps.choice.options` of a longer list, so an `index` always counts in the list as it was sent.
+- `title` is the question, one line of text. The device shows it whole in up to `caps.choice.title_lines` lines of `title_cols` characters; the server cuts a longer one to fit, ending in `...`. The reference firmware puts a question that fits its header there, and wraps a longer one above the answers, in up to four lines and never so many that fewer than two answers stay on screen.
 - The device answers exactly once with `choice.reply`: `index`, the picked option counted from 0, or `cancelled: true`. It sends nothing when the choice expires (`ttl_s`, when present) or is withdrawn with `choice.close`.
 - The server sends one choice at a time to a device and ignores a reply whose `id` is not the choice it is waiting on or whose `index` is not one of its options. When nobody answers in time it sends `choice.close`. A choice ends when the connection drops; it is not asked again.
 - A choice is sent at once and lights the screen, like a question. A `prompt` that arrives meanwhile is shown first; the choice comes back when it is answered.
 - A server sends `choice` only to a device with `caps.choice`. The Hermes plugin shows any other device the options as a numbered plain card and tells the agent to ask for the answer by voice.
-- The reference firmware shows the answers as a list and ignores presses in the first 0.6 s, as for a question:
+- The reference firmware shows the answers as a list and ignores presses in the first 0.6 s after the list comes to the front: when it arrives, and again when it comes back from under a question, a recording or a battery alert. A choice, like a question, closes the profile grid.
   - a touchscreen: a tap on a row answers it, a swipe down cancels, and a swipe up shows the next rows of a list longer than the screen;
   - Up and Down buttons, or a knob: they move the highlight, TALK answers and CANCEL cancels;
   - TALK and CANCEL alone: CANCEL moves to the next row, TALK answers, and a last row, Cancel, cancels.

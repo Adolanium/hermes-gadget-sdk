@@ -367,7 +367,9 @@ class DeviceSession:
         self._ota_inbox: asyncio.Queue | None = None  # the device's ota.* replies, while an update runs
         self._dashboard_sent: dict | None = None  # the last dashboard this connection delivered
         self._dashboards = 0  # dashboards offered, sent or held
-        self._choice: tuple[str, int] | None = None  # the choice on the device's screen: its id and answers
+        # The choice on the device's screen: its id, how many answers it has, and the future a
+        # choice.reply resolves. Kept apart from _pending, whose ids action.result and diag answer.
+        self._choice: tuple[str, int, asyncio.Future] | None = None
 
     # -- capabilities -----------------------------------------------------------
 
@@ -478,6 +480,14 @@ class DeviceSession:
         choice = self.caps.get("choice")
         return min(MAX_CHOICE_OPTIONS, self._cap(choice, "options")) if self._cap(choice, "v") else 0
 
+    @property
+    def choice_title_box(self) -> tuple[int, int] | None:
+        """The room a choice's question has above its answers: (columns, lines), from
+        ``caps.choice.title_cols`` and ``title_lines``; None when the device does not say."""
+        choice = self.caps.get("choice")
+        cols, lines = self._cap(choice, "title_cols"), self._cap(choice, "title_lines")
+        return (cols, lines) if cols and lines else None
+
     def action_names(self) -> list[str]:
         return [a["name"] for a in self.actions]
 
@@ -582,17 +592,14 @@ class DeviceSession:
             raise ActionError(f"{self.name} is already showing a choice")
         choice_id = uuid.uuid4().hex[:12]
         fut = asyncio.get_running_loop().create_future()
-        self._pending[choice_id] = fut
-        self._choice = (choice_id, len(options))
+        self._choice = (choice_id, len(options), fut)
         try:
             await self.send_json(protocol.message(
                 "choice", id=choice_id, title=title, options=list(options), ttl_s=math.ceil(timeout)))
-            index = await asyncio.wait_for(fut, timeout)
-            return index if isinstance(index, int) else None
+            return await asyncio.wait_for(fut, timeout)
         except asyncio.TimeoutError:
             raise ActionError(f"{self.name} got no answer within {timeout:.0f}s") from None
         finally:
-            self._pending.pop(choice_id, None)
             self._choice = None
             if not fut.done() or fut.cancelled():  # timed out or the wait was cancelled: take it off the screen
                 try:
@@ -957,7 +964,8 @@ class DeviceSession:
             self._face_task.cancel()
         if self._thumb_task:
             self._thumb_task.cancel()
-        for fut in self._pending.values():
+        waiting = list(self._pending.values()) + ([self._choice[2]] if self._choice else [])
+        for fut in waiting:
             if not fut.done():
                 fut.set_exception(ActionError(f"{self.name} disconnected"))
         if self._ota_inbox is not None:
@@ -1369,14 +1377,15 @@ class DeviceHub:
             session.spawn(self.delegate.on_prompt_reply(session, prompt_id, answer == "yes"))
 
     async def _h_choice_reply(self, session: DeviceSession, msg: dict) -> None:
-        choice_id = str(msg.get("id") or "")
-        fut = session._pending.get(choice_id)
-        if fut is None or fut.done() or session._choice is None or session._choice[0] != choice_id:
+        if session._choice is None:
+            return
+        choice_id, count, fut = session._choice
+        if fut.done() or str(msg.get("id") or "") != choice_id:
             return
         index = msg.get("index")
         if msg.get("cancelled") is True:
             fut.set_result(None)
-        elif isinstance(index, int) and not isinstance(index, bool) and 0 <= index < session._choice[1]:
+        elif isinstance(index, int) and not isinstance(index, bool) and 0 <= index < count:
             fut.set_result(index)
 
     async def _h_action_result(self, session: DeviceSession, msg: dict) -> None:

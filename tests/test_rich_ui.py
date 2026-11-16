@@ -201,6 +201,30 @@ def test_a_choice_goes_out_and_the_picked_index_comes_back(online, loop_thread):
     assert device.frames() == []  # answered: nothing to withdraw
 
 
+def test_only_a_choice_reply_answers_a_choice(online, loop_thread):
+    """An action.result or a diag that carries the choice's id is not its answer."""
+    _hub, connect = online
+    device, session = connect(caps={"choice": CHOICE})
+    asked = _ask(loop_thread, session, "Pick", ["a", "b"], timeout=30)
+    choice = device.next("choice")
+    device.send("action.result", id=choice["id"], ok=True, result={"index": 1})
+    device.send("action.result", id=choice["id"], ok=False, error="boom")
+    device.send("diag", id=choice["id"], report={}, log="")
+    time.sleep(0.3)
+    assert not asked.done()
+    device.send("choice.reply", id=choice["id"], index=1)
+    assert asked.result(5) == 1
+    # And a choice.reply does not answer an action that happens to be waiting.
+    session.actions = [{"name": "led.set"}]
+    acting = asyncio.run_coroutine_threadsafe(session.invoke_action("led.set", {}, timeout=30), loop_thread.loop)
+    action = device.next("action")
+    device.send("choice.reply", id=action["id"], index=0)
+    time.sleep(0.2)
+    assert not acting.done()
+    device.send("action.result", id=action["id"], ok=True, result={"led": "on"})
+    assert acting.result(5) == {"led": "on"}
+
+
 def test_a_cancelled_choice_returns_none(online, loop_thread):
     _hub, connect = online
     device, session = connect(caps={"choice": CHOICE})
@@ -307,8 +331,8 @@ def test_gadget_display_sends_a_shaped_list_progress_and_code(tool):
     assert result["success"] is True and "note" not in result
     assert device.frames() == [{
         "type": "display", "title": "Shopping", "body": "For tonight", "ttl_s": 0, "id": "shop", "progress": 55,
-        # Markdown stripped, folded to the charset, one line each, cut to the device's line; the emoji-only row is gone.
-        "items": ["Milk - 2 l", "Crème fraîch", "A very long "],
+        # Markdown stripped, folded to the charset, one line each, cut to the device's line less the bullet's two columns; the emoji-only row is gone.
+        "items": ["Milk - 2 l", "Crème fraî", "A very lon"],
         "qr": "https://example.org/list?a=1"}]  # a code holds exactly what was asked for
 
 
@@ -335,6 +359,17 @@ def test_gadget_display_says_when_the_content_went_out_as_text(tool):
     assert "qr" not in device.frames()[0]
 
 
+def test_gadget_display_counts_the_rows_the_device_keeps(tool):
+    device, _session = tool(caps={"card": {"v": 1, "items": 4}})
+    result = json.loads(tools.gadget_display({"title": "List", "items": list("abcdef")}))
+    assert result["items_shown"] == 4
+    assert device.frames()[0]["items"] == ["a", "b", "c", "d"]
+    device, _session = tool(caps={"card": CARD})
+    result = json.loads(tools.gadget_display({"title": "List", "items": [str(n) for n in range(14)]}))
+    assert result["items_shown"] == 12
+    assert "items_shown" not in json.loads(tools.gadget_display({"title": "List", "items": ["a"]}))
+
+
 def test_gadget_display_reports_a_structured_card_held_in_the_dark(tool):
     device, _session = tool(caps={"card": CARD}, sleeping=True)
     result = json.loads(tools.gadget_display({"title": "Build", "progress": 5, "id": "b"}))
@@ -350,10 +385,45 @@ def test_gadget_ask_returns_the_option_as_the_agent_wrote_it(tool):
     asked.start()
     choice = device.next("choice")
     assert choice["title"] == "Which list?"
-    assert choice["options"] == ["Groceries ", "Hardware s"] and choice["ttl_s"] == 30
+    assert choice["options"] == ["Grocerie", "Hardware"] and choice["ttl_s"] == 30  # 10 columns, less the bullet's 2
     device.send("choice.reply", id=choice["id"], index=1)
     asked.join(5)
-    assert answer == {"success": True, "device": "watch", "answer": "Hardware store", "index": 1}
+    assert answer == {"success": True, "device": "watch", "answer": "Hardware store", "index": 1,
+                      "options_shown": ["Grocerie", "Hardware"],
+                      "note": "some options were cut to fit the screen; options_shown is what the user saw"}
+
+
+def _asked(device, args: dict, index: int = 0) -> tuple[dict, dict]:
+    """Runs gadget_ask, answers it, and returns what the device got and what the agent got."""
+    answer = {}
+    asked = threading.Thread(target=lambda: answer.update(json.loads(tools.gadget_ask(args))))
+    asked.start()
+    choice = device.next("choice")
+    device.send("choice.reply", id=choice["id"], index=index)
+    asked.join(5)
+    return choice, answer
+
+
+def test_gadget_ask_sends_a_long_question_whole_where_it_fits(tool):
+    device, _session = tool(caps={"choice": {**CHOICE, "title_cols": 20, "title_lines": 3}})
+    question = "Which of these lists should I open for you now?"  # 3 lines of 20
+    choice, answer = _asked(device, {"question": question, "options": ["a", "b"]})
+    assert choice["title"] == question
+    assert answer == {"success": True, "device": "watch", "answer": "a", "index": 0}
+
+
+def test_gadget_ask_cuts_a_question_too_long_for_the_screen_and_says_so(tool):
+    device, _session = tool(caps={"choice": {**CHOICE, "title_cols": 20, "title_lines": 2}})
+    question = "Which of these lists should I open for you now?"
+    choice, answer = _asked(device, {"question": question, "options": ["a", "b"]})
+    assert choice["title"] == "Which of these lists should I open for..."
+    assert textfmt.wrap(choice["title"], 20) == ["Which of these lists", "should I open for..."]
+    assert answer["answer"] == "a" and answer["question_shown"] == choice["title"]
+    assert "question was cut" in answer["note"]
+    # A device that says nothing about its question's room gets it whole, with nothing to report.
+    other, _session = tool(caps={"choice": CHOICE})
+    choice, answer = _asked(other, {"question": question, "options": ["a", "b"]})
+    assert choice["title"] == question and "note" not in answer
 
 
 def test_gadget_ask_reports_a_cancel_and_a_timeout(tool, monkeypatch):
@@ -406,6 +476,16 @@ def test_a_list_row_is_one_shaped_line():
     assert textfmt.line("Crème fraîche", "ascii", 8) == "Creme fr"
     assert textfmt.line("Crème fraîche", "latin1", 3) == "Crème fraîche"  # no usable width: left whole
     assert textfmt.line("🙂", "latin1", 20) == ""
+
+
+def test_wrap_breaks_lines_as_the_device_does():
+    assert textfmt.wrap("", 10) == []
+    assert textfmt.wrap("one two three", 7) == ["one two", "three"]
+    assert textfmt.wrap("abcdefghij kl", 4) == ["abcd", "efgh", "ij", "kl"]  # a long word is cut at the width
+    assert textfmt.wrap("日本語 ab", 4) == ["日本", "語", "ab"]  # wide characters take two columns
+    assert textfmt.clip("one two three", 7, 2) == ("one two three", False)
+    assert textfmt.clip("one two three four", 7, 2) == ("one two thre...", True)  # "one two" / "thre..."
+    assert textfmt.wrap("one two thre...", 7) == ["one two", "thre..."]
 
 
 def test_the_plain_body_of_a_structured_card():

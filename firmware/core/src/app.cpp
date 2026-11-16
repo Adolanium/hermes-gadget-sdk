@@ -676,6 +676,8 @@ void App::send_hello() {
     if (can_choose()) {
       json::Value choice = json::Value::object();
       choice.set("v", kChoiceVersion).set("options", static_cast<int>(kChoiceMaxOptions));
+      // A question wraps to this many lines of this many characters above the answers.
+      choice.set("title_cols", ui_->layout().body_cols).set("title_lines", ui_->choice_question_lines());
       caps.set("choice", choice);
     }
   }
@@ -1357,7 +1359,7 @@ void App::h_display(const json::Value& m) {
   if (const std::string& text = m["qr"].as_string(); !text.empty()) {
     card_qr_ = qr::encode(text);
     // A code this screen cannot draw large enough to scan shows as its text instead.
-    if (!card_qr_.ok() || !ui_ || !ui_->card_qr_scale(card_qr_.size, card_progress_ >= 0)) {
+    if (!card_qr_.ok() || !ui_ || !ui_->card_qr_scale(card_qr_.size)) {
       card_qr_ = {};
       card_body_ += (card_body_.empty() ? "" : "\n") + text;
     }
@@ -1460,6 +1462,7 @@ void App::h_prompt(const json::Value& m) {
   if (settings_open()) close_settings();
   const std::string& id = m["id"].as_string();
   if (id.empty()) return;
+  if (profile_picker_open()) dismiss_overlay();  // its taps would go to the grid, not the answer
   prompt_id_ = id;
   prompt_title_ = m["title"].as_string();
   prompt_text_ = m["text"].as_string();
@@ -1514,17 +1517,22 @@ void App::h_choice(const json::Value& m) {
   const std::string& id = m["id"].as_string();
   std::vector<std::string> options;
   const json::Value& given = m["options"];
-  for (size_t i = 0; i < given.size() && options.size() < kChoiceMaxOptions; ++i)
-    if (given[i].is_string()) options.push_back(given[i].as_string());
+  // An index answers the list as it was sent: a list with an entry that is not text is refused
+  // whole, since leaving the entry out would shift every index after it.
+  for (size_t i = 0; i < given.size(); ++i) {
+    if (!given[i].is_string()) return;
+    if (options.size() < kChoiceMaxOptions) options.push_back(given[i].as_string());
+  }
   if (id.empty() || options.size() < 2 || !can_choose()) return;
   close_setup_screens();
   wake_display();
   if (settings_open()) close_settings();
+  if (profile_picker_open()) dismiss_overlay();  // its taps would go to the grid, not the answers
   choice_id_ = id;
   choice_title_ = m["title"].as_string();
   choice_options_ = std::move(options);
   choice_sel_ = choice_first_ = 0;
-  choice_since_ = now();
+  choice_front_ = false;  // update_model starts the press guard when it shows
   double ttl = m["ttl_s"].as_number(0);
   choice_until_ = ttl <= 0 ? 0 : now() + static_cast<uint32_t>(ttl * 1000);
   if (alarm_) {  // as for a question: the alarm rings again once the choice is gone
@@ -1539,14 +1547,16 @@ void App::h_choice_close(const json::Value& m) {
 }
 
 bool App::choice_armed(uint32_t pressed_at) const {
-  return static_cast<int32_t>(pressed_at - choice_since_) >= static_cast<int32_t>(kPromptArmMs);
+  // Counted from when the choice last came to the front: from under a yes/no question, a
+  // recording or a battery alert it is as new to the user as when it arrived.
+  return choice_front_ && static_cast<int32_t>(pressed_at - choice_since_) >= static_cast<int32_t>(kPromptArmMs);
 }
 
 void App::choice_move(int delta, bool wrap) {
   const int n = choice_row_count();
   if (n <= 0) return;
   choice_sel_ = wrap ? ((choice_sel_ + delta) % n + n) % n : std::clamp(choice_sel_ + delta, 0, n - 1);
-  const int rows = ui_ ? ui_->choice_rows() : n;
+  const int rows = ui_ ? ui_->choice_rows(model_) : n;
   if (choice_sel_ < choice_first_) choice_first_ = choice_sel_;
   if (choice_sel_ >= choice_first_ + rows) choice_first_ = choice_sel_ - rows + 1;
 }
@@ -1565,7 +1575,7 @@ void App::choice_tap(int x, int y) {
 
 bool App::choice_page_step() {
   if (!choice_touch_live() || !ui_) return false;
-  const int rows = ui_->choice_rows(), n = choice_row_count();
+  const int rows = ui_->choice_rows(model_), n = choice_row_count();
   if (n <= rows) return false;
   choice_first_ = choice_first_ + rows >= n ? 0 : std::min(n - rows, choice_first_ + rows);
   update_model();
@@ -1592,6 +1602,7 @@ void App::clear_choice() {
   choice_options_.clear();
   choice_sel_ = choice_first_ = 0;
   choice_until_ = 0;
+  choice_front_ = false;
 }
 
 void App::h_action(const json::Value& m) {
@@ -2629,6 +2640,9 @@ void App::tick() {
 
 void App::update_model() {
   UiModel& m = model_;
+  // Whether the choice was in front until now; the screens that return early below leave it behind.
+  const bool choice_was_front = choice_front_;
+  choice_front_ = false;
   // A recording held through a lost connection keeps its screen over the connecting ones.
   const bool held = recording_held() && (mode_ == Mode::Listening || mode_ == Mode::Thinking);
   if (mode_ != Mode::Responding) reply_shown_ = false;
@@ -2868,7 +2882,11 @@ void App::update_model() {
     m.hint = tr(Msg::HermesWaiting);
   } else if (!choice_id_.empty()) {
     m.screen = Screen::Choice;
-    m.headline = choice_title_.empty() ? std::string(tr(Msg::HermesAsks)) : choice_title_;
+    // A question the header cannot hold whole wraps above the answers instead.
+    const bool wraps = ui_ && ui_->choice_question_lines() > 0 &&
+                       static_cast<int>(font::length(choice_title_)) > ui_->header_cols();
+    m.headline = choice_title_.empty() || wraps ? std::string(tr(Msg::HermesAsks)) : choice_title_;
+    if (wraps) m.detail = choice_title_;
     m.items = choice_options_;
     if (choice_steps()) m.items.push_back(tr(Msg::ChoiceCancel));
     m.item_sel = choice_keys() ? static_cast<int16_t>(choice_sel_) : int16_t(-1);
@@ -3019,6 +3037,9 @@ void App::update_model() {
       *power_status_->battery_percent <= 10 && power_status_->external_power == false)
     m.detail = tr(Msg::LowBattery);
   if (!hint_flash_.empty()) m.hint = hint_flash_;
+  // The press guard counts from when the choice comes to the front (choice_armed).
+  choice_front_ = m.screen == Screen::Choice;
+  if (choice_front_ && !choice_was_front) choice_since_ = now();
   if (!display_sleeping_) render(m);
 }
 

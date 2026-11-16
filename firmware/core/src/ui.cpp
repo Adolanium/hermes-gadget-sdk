@@ -905,9 +905,13 @@ void Ui::draw_header(Canvas& c, const UiModel& m) {
   draw_indicator(c, m, cx, cy, r);
   int tx = cx + r + 4 * s;
   int hs = s + 1;
-  int cols = cols_for(info_.width - tx - 2 * s, hs);
-  c.text(tx, cy - (font::kGlyphHeight * hs) / 2, fit(m.headline, cols), hs, kText);
+  c.text(tx, cy - (font::kGlyphHeight * hs) / 2, fit(m.headline, header_cols()), hs, kText);
   c.fill_rect(4 * s, y0 + hh - 1, info_.width - 8 * s, 1, kFaint);
+}
+
+int Ui::header_cols() const {
+  const int s = layout_.scale, r = layout_.header_h / 2 - 2 * s;
+  return cols_for(info_.width - (4 * s + r + r + 4 * s) - 2 * s, s + 1);  // as draw_header lays it out
 }
 
 int Ui::body_rows(const UiModel& m) const {
@@ -1081,26 +1085,32 @@ int Ui::card_rows(const UiModel& m) const {
   return std::max(1, (content_h - 4 * s - card_progress_h(m.card_progress >= 0, s)) / Canvas::line_height(s));
 }
 
-int Ui::card_qr_scale(int modules, bool progress) const {
+int Ui::card_qr_scale(int modules) const {
   const int s = layout_.scale;
   const int content_h = info_.height - layout_.top_h - layout_.header_h - layout_.bottom_h;
   int pad = 0;
-  return qr_fit(modules, info_.width - 8 * s, content_h - 8 * s - card_progress_h(progress, s), pad);
+  return qr_fit(modules, info_.width - 8 * s, content_h - 8 * s, pad);
 }
 
 int Ui::card_qr_version() const {
   for (int v = qr::kMaxVersion; v >= 1; --v)
-    if (card_qr_scale(17 + 4 * v, false)) return v;
+    if (card_qr_scale(17 + 4 * v)) return v;
   return 0;
 }
 
 // A structured card: a progress bar, then either a code with the body as its caption, or the
-// body's lines and the list's rows, scrolled together from line `scroll`.
+// body's lines and the list's rows, scrolled together from line `scroll`. Over a code the
+// progress is a thin bar in the top margin, so the code is as large with it as without.
 void Ui::draw_card(Canvas& c, const UiModel& m, int y0, int y1) {
   const int s = layout_.scale, w = info_.width, margin = 4 * s, lh = Canvas::line_height(s);
   const int glyph_h = font::kGlyphHeight * s;
+  const bool code = m.card_qr && m.card_qr->ok() && card_qr_scale(m.card_qr->size) > 0;
   int y = y0 + margin;
-  if (m.card_progress >= 0) {
+  if (m.card_progress >= 0 && code) {
+    const int pct = std::min<int>(100, m.card_progress), bar_w = w - 2 * margin, bar_h = std::max(2, s);
+    c.fill_rect(margin, y0 + s, bar_w, bar_h, kFaint);
+    c.fill_rect(margin, y0 + s, bar_w * pct / 100, bar_h, pct >= 100 ? kGreen : kAccent);
+  } else if (m.card_progress >= 0) {
     const int pct = std::min<int>(100, m.card_progress);
     const std::string label = std::to_string(pct) + "%";
     const int bar_w = w - 2 * margin - Canvas::text_width("100%", s) - 2 * s, bar_h = std::max(3, glyph_h / 2);
@@ -1111,7 +1121,7 @@ void Ui::draw_card(Canvas& c, const UiModel& m, int y0, int y1) {
     c.text(w - margin - Canvas::text_width(label, s), y, label, s, ink);
     y += card_progress_h(true, s);
   }
-  if (m.card_qr && m.card_qr->ok()) {
+  if (code) {
     const int n = m.card_qr->size, avail_w = w - 2 * margin, avail_h = y1 - y - margin;
     // The caption stays only where the code is as large beside it as without it.
     std::vector<std::string> lines;
@@ -1169,26 +1179,56 @@ int Ui::choice_row_h() const {
   return std::max(Canvas::line_height(s) + 2 * s, touch_px_ * 2 / 3);
 }
 
-int Ui::choice_rows() const {
+// A long question gets up to four lines, fewer where two answers would not fit under them.
+int Ui::choice_question_lines() const {
+  const int s = layout_.scale;
   const int content_h = info_.height - layout_.top_h - layout_.header_h - layout_.bottom_h;
-  return std::max(1, (content_h - 2 * layout_.scale) / choice_row_h());
+  return std::max(0, std::min(4, (content_h - 4 * s - 2 * choice_row_h()) / Canvas::line_height(s)));
+}
+
+std::vector<std::string> Ui::choice_question(const UiModel& m) const {
+  std::vector<std::string> lines;
+  const int max = choice_question_lines();
+  if (m.detail.empty() || max <= 0) return lines;
+  lines = wrap_text(m.detail, layout_.body_cols);
+  if (static_cast<int>(lines.size()) > max) {
+    lines.resize(static_cast<size_t>(max));
+    lines.back() = fit(lines.back() + "...", layout_.body_cols);  // cut: the line ends in ".."
+  }
+  return lines;
+}
+
+int Ui::choice_list_top(const UiModel& m) const {
+  const int s = layout_.scale, lines = static_cast<int>(choice_question(m).size());
+  return layout_.top_h + layout_.header_h + s + (lines ? lines * Canvas::line_height(s) + 2 * s : 0);
+}
+
+int Ui::choice_rows(const UiModel& m) const {
+  return std::max(1, (info_.height - layout_.bottom_h - layout_.scale - choice_list_top(m)) / choice_row_h());
 }
 
 int Ui::choice_row_hit(const UiModel& m, int x, int y) const {
   if (m.screen != Screen::Choice) return -1;
-  const int total = static_cast<int>(m.items.size()), rows = choice_rows();
+  const int total = static_cast<int>(m.items.size()), rows = choice_rows(m);
   const int first = std::max(0, std::min(m.scroll, std::max(0, total - rows)));
-  const int top = oy_ + layout_.top_h + layout_.header_h + layout_.scale;
+  const int top = oy_ + choice_list_top(m);
   if (x < ox_ || x >= ox_ + info_.width || y < top) return -1;
   const int row = (y - top) / choice_row_h();
   return row < rows && first + row < total ? first + row : -1;
 }
 
-// The answers to a choice: one row each, the selected one on a bar.
+// The answers to a choice: one row each, the selected one on a bar, under the question's
+// lines when it is too long for the header.
 void Ui::draw_choice(Canvas& c, const UiModel& m, int y0, int y1) {
   const int s = layout_.scale, w = info_.width, margin = 4 * s;
   const int glyph_h = font::kGlyphHeight * s, row_h = choice_row_h();
-  const int total = static_cast<int>(m.items.size()), rows = choice_rows();
+  const int total = static_cast<int>(m.items.size()), rows = choice_rows(m);
+  int qy = y0 + s;
+  for (const std::string& line : choice_question(m)) {
+    c.text(margin, qy, line, s, kText);
+    qy += Canvas::line_height(s);
+  }
+  y0 = choice_list_top(m) - s;
   const int max_first = std::max(0, total - rows);
   const int first = std::max(0, std::min(m.scroll, max_first));
   const bool scrolls = total > rows;

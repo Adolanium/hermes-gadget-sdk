@@ -132,7 +132,8 @@ struct UiModel {
   // Card screen, a structured card (docs/protocol.md#display): `items` are list rows after the body's
   // lines, `card_progress` a bar above them (0..100; -1: none) and `card_qr` a code that takes the
   // content band (borrowed like `qr`). Choice screen: `items` are the answers, `item_sel` the
-  // highlighted one (-1: none). Both draw from line or row `scroll`.
+  // highlighted one (-1: none), and `detail` a question too long for the header, wrapped above
+  // them. Both draw from line or row `scroll`.
   std::vector<std::string> items;
   int8_t card_progress = -1;
   const qr::Code* card_qr = nullptr;
@@ -223,10 +224,15 @@ class Ui {
   static bool card_rich(const UiModel& m) { return !m.items.empty() || m.card_progress >= 0 || m.card_qr; }
   int card_lines(const UiModel& m) const;
   int card_rows(const UiModel& m) const;
-  int card_qr_scale(int modules, bool progress) const;
+  int card_qr_scale(int modules) const;
   int card_qr_version() const;
-  // The Choice list: rows that fit the content band, and the answer under a panel point (-1: none).
-  int choice_rows() const;
+  // Characters the header's headline holds.
+  int header_cols() const;
+  // The Choice list: the lines a question in `detail` may take above it (at least two answers
+  // stay on screen under them), the rows that fit under this model's question, and the answer
+  // under a panel point (-1: none).
+  int choice_question_lines() const;
+  int choice_rows(const UiModel& m) const;
   int choice_row_hit(const UiModel& m, int x, int y) const;
   // The largest size the Ready screen draws the face at (one caption line, no name panel): a colour face
   // is sent at this size and scaled down where there is less room.
@@ -290,6 +296,8 @@ class Ui {
   void draw_card(Canvas& c, const UiModel& m, int y0, int y1);
   void draw_choice(Canvas& c, const UiModel& m, int y0, int y1);
   int choice_row_h() const;
+  std::vector<std::string> choice_question(const UiModel& m) const;  // wrapped, cut to what fits
+  int choice_list_top(const UiModel& m) const;  // area row of the first answer
   void draw_profiles(Canvas& c, const UiModel& m);
   void draw_settings(Canvas& c, const UiModel& m, int y0, int y1);
   std::vector<std::string> settings_desc(const UiModel& m) const;  // the selected row's description lines

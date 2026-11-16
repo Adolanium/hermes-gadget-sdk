@@ -151,7 +151,7 @@ The Hermes desktop app gets a **Gadgets** page: a sidebar row, a route at `/gadg
 | Images from the agent | `send_image_file()` / `send_image()` | Converted to RGB565 to fit the screen (needs Pillow) |
 | Confirmations (`/new`, `/undo`, model switches) | `send_slash_confirm()` + `tools.slash_confirm.resolve()` | Shown as a `prompt`; TALK resolves `once`, CANCEL `cancel`. The handler's reply goes back with `send()` |
 | Dangerous-command approvals | `_send_exec_approval_prompt(ExecApprovalPrompt)` + `tools.approval.resolve_gateway_approval()` | Shown as a `prompt`; TALK resolves `once`, CANCEL `deny`. The prompt's `ttl_s` is Hermes's approval timeout (`approvals.timeout`, read by `compat.approval_timeout_s()`), so the device and the adapter both drop it when that time passes. On timeout Hermes calls `edit_message()` on the prompt, which withdraws it |
-| Agent questions (the `clarify` tool) | `send_clarify()` | Hermes's text fallback (the question with numbered choices; the next message, spoken or typed, is the answer), also spoken with Hermes's text-to-speech when the device speaks replies. The device has no multiple-choice prompt |
+| Agent questions (the `clarify` tool) | `send_clarify()` | Hermes's text fallback (the question with numbered choices; the next message, spoken or typed, is the answer), also spoken with Hermes's text-to-speech when the device speaks replies. `clarify` does not use the device's [choice screen](protocol.md#choices); the agent reaches that with the `gadget_ask` tool |
 | Pairing | Hermes DM pairing (`gateway/pairing.py`, `hermes pairing approve`; `hermes gadget pair` approves through the same `PairingStore`) | See below |
 | Authorization state | `BasePlatformAdapter._is_sender_authorized()` | The runner-installed check; used to mirror approval and revocation to the device |
 | Agent tools | `ctx.register_tool(toolset="gadget")` | Part of the implicit `hermes-gadget` toolset; also usable from other chats |
@@ -221,7 +221,9 @@ The four tools:
 | `gadget_ask` | Shows `question` with 2 to 6 `options`, waits up to `seconds` (60 by default, 300 at most) and returns the option the user picked, as the agent wrote it, with its `index`; `cancelled: true` when the user cancelled; an error when nobody answered |
 | `gadget_action` | Runs an action the device declared |
 
-`gadget_display` and `gadget_ask` shape their text for the device: Markdown is stripped, characters are folded to its `charset`, and each list row or answer is one line of at most `text_cols` characters. A QR code's text is sent unchanged.
+`gadget_display` and `gadget_ask` shape their text for the device: Markdown is stripped, characters are folded to its `charset`, and each list row or answer is one line of at most `text_cols` less 2 characters, the room left after its bullet. A QR code's text is sent unchanged.
+
+The agent learns when the user saw something else than it wrote. `gadget_ask` blocks the turn, so its screen is all the user has to go on: a question longer than the device shows (`caps.choice.title_cols` by `title_lines`) is cut to fit and returned as `question_shown`, options that were cut come back as `options_shown`, and `note` says so. `gadget_display` returns `items_shown` when the device keeps fewer rows than the list has.
 
 What a device cannot draw still reaches the user. A gadget without `caps.card` (older firmware, the Linux client) gets a list, a progress value and a code's text as a plain card, and the tool's result says so in `note`. A gadget without `caps.choice` gets the options as a numbered card; `gadget_ask` then fails with `shown_as_card: true` and tells the agent to ask for the answer by voice. See [structured cards](protocol.md#structured-cards) and [choices](protocol.md#choices).
 
