@@ -541,8 +541,9 @@ class Playback:
                 while out.backlog_s > BACKLOG_S and not out.done.is_set():
                     await asyncio.sleep(0.1)
             out.finish()
-            # The last of it is queued, not played: it stays this playback's, for a stop to end,
-            # until the device has played it.
+            # The last of it is queued, not played: it stays this playback's until the device has
+            # played it, so a stop ends what is not sent yet. What the device already holds after
+            # audio.end plays out: the firmware ignores an abort for a stream it has ended.
             await out.wait_played()
             if out.aborted:  # a spoken reply, a new recording or CANCEL on the device
                 self.outcome = "interrupted"
