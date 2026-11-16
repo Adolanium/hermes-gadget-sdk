@@ -212,7 +212,8 @@ TEST("face: face.set checks its expression and its seconds") {
   CHECK(res != nullptr && !(*res)["ok"].as_bool());
   for (const char* bad : {R"({"expression":"happy","seconds":0})", R"({"expression":"happy","seconds":3601})",
                           R"({"expression":"happy","seconds":"ten"})", R"({"expression":"happy","seconds":2.9})",
-                          R"({"expression":"happy","seconds":true})"}) {
+                          R"({"expression":"happy","seconds":true})", R"({"expression":"happy","seconds":1e300})",
+                          R"({"expression":"happy","seconds":-1e300})"}) {
     res = r.action(bad);
     CHECK(res != nullptr && !(*res)["ok"].as_bool());
     if (res) CHECK_EQ((*res)["error"].as_string(), std::string("seconds must be between 1 and 3600"));

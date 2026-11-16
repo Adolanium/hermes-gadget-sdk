@@ -46,8 +46,10 @@ void App::add_face_actions() {
   set.params.set("type", "object").set("properties", props).set("required", req);
   set.handler = [this](const json::Value& args, json::Value& result, std::string& error) {
     const bool timed = !args["seconds"].is_null();
-    // A whole number: 2.9 is refused, not cut to 2.
-    if (timed && (!args["seconds"].is_number() || args["seconds"].as_number() != std::floor(args["seconds"].as_number()))) {
+    // A whole number in range, checked as the number that arrived: 2.9 is refused, not cut to 2,
+    // and 1e300 never reaches a conversion to an integer it does not fit.
+    const double secs = timed && args["seconds"].is_number() ? args["seconds"].as_number() : 0;
+    if (timed && !(secs >= 1 && secs <= static_cast<double>(kMaxExpressionS) && secs == std::floor(secs))) {
       error = "seconds must be between 1 and 3600";
       return false;
     }

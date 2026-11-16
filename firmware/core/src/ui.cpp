@@ -1576,6 +1576,11 @@ Ui::Rect Ui::mark_rect(const HeroGeom& g, const mascot::Anchors& a) const {
 // A glyph or two in a 7k x 8k box: a pair of sparkles, "?", "!" or "zZ". Each has two steps (mark_phase).
 void Ui::draw_mark(Canvas& c, const UiModel& m, const Rect& r) {
   const int k = r.w / 7, phase = mark_phase(m);
+  // A glyph's top row at y, whatever the font: the CJK build draws narrow glyphs lower in their
+  // line, which would hang them below the box that a step of the mark redraws.
+  auto glyph = [&](int x, int y, const char* s, int scale, uint16_t color) {
+    c.text(x, y - font::kAsciiYOffset * scale, s, scale, color);
+  };
   switch (expression(m)) {
     case mascot::Expression::Happy: {
       // Two four-point sparkles that swap sizes.
@@ -1588,15 +1593,15 @@ void Ui::draw_mark(Canvas& c, const UiModel& m, const Rect& r) {
       break;
     }
     case mascot::Expression::Confused:
-      c.text(r.x + (phase ? k : 0), r.y, "?", k, kBlue);  // tilts from side to side
+      glyph(r.x + (phase ? k : 0), r.y, "?", k, kBlue);  // tilts from side to side
       break;
     case mascot::Expression::Alert:
-      c.text(r.x, r.y, "!", k, phase ? kRedDim : kRed);
+      glyph(r.x, r.y, "!", k, phase ? kRedDim : kRed);
       break;
     case mascot::Expression::Sleepy: {
       const int small = std::max(1, k / 2);
-      c.text(r.x, r.y + r.h - 7 * small, "z", small, kDim);
-      c.text(r.x + 3 * small, r.y, "Z", std::max(1, k - small), phase ? kDim : kFaint);
+      glyph(r.x, r.y + r.h - 7 * small, "z", small, kDim);
+      glyph(r.x + 3 * small, r.y, "Z", std::max(1, k - small), phase ? kDim : kFaint);
       break;
     }
     case mascot::Expression::Neutral: break;
