@@ -1399,3 +1399,18 @@ def test_an_image_still_being_converted_when_the_mode_starts_is_not_shown(gadget
     sim.run_for(0.5)
     assert sim.last_received("image.start") is None and sim.device.screen() != "image"
     assert "The owner's photo" not in _replies(sim)
+
+
+@requires_hermes
+def test_whoever_holds_an_interpreting_gadget_cannot_switch_its_profile(gadget, make_sim):
+    from hermes_fixtures import _paired_sim
+
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+    adapter, session = gadget.adapter, gadget.adapter.hub.get(device_id)
+    adapter._llm = _Llm()
+    gadget.run(adapter.interpret_start(session, "es", "en"))
+    # The settings menu still offers the profiles: the answer is the one a turn under way gets.
+    assert gadget.run(adapter.select_profile(session, "default")) == "busy"
+    gadget.run(adapter.interpret_stop(device_id))
+    assert gadget.run(adapter.select_profile(session, "default")) != "busy"

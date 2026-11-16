@@ -621,6 +621,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 and session.paired and self._owner_trusts(session.device_id))
 
     async def select_profile(self, session: DeviceSession, profile: str) -> Optional[str]:
+        if self.interpreting(session.device_id) is not None:
+            return "busy"  # whoever holds an interpreting gadget does not choose who it answers to
         if self._routed(session):
             return "routed"
         if not self._switches(session):
