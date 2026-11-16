@@ -48,6 +48,7 @@ class Vad {
   float noise_ = 0;
   uint32_t elapsed_ms_ = 0;
   uint32_t speech_ms_ = 0;
+  uint32_t carry_ = 0;  // samples * 1000 not yet a whole millisecond
   uint32_t silence_ms_ = 0;
 };
 

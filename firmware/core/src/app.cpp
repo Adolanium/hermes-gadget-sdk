@@ -1796,10 +1796,10 @@ void App::finish_listening() {
 // A held recording the microphone heard no speech in is not sent, on a board that asks for it
 // (DeviceProfile::drop_silent_recordings): a speech-to-text model makes words out of silence
 // ("Thank you."), and Hermes would answer them. Speech is what tap mode calls speech: 200 ms
-// above the board's floor. A recording with no audio at all (a port that delivered nothing)
-// goes as before.
+// above the board's floor. A recording with less audio than that (a port that delivered little
+// or nothing) could not have held it, and goes as before.
 void App::end_held_recording() {
-  if (profile_.drop_silent_recordings && vad_.heard_ms() >= kMinUtteranceMs && !vad_.spoke()) {
+  if (profile_.drop_silent_recordings && vad_.heard_ms() >= Vad::kMinSpeechMs && !vad_.spoke()) {
     cancel_listening("no speech");
     set_hint_flash(tr(i18n::Msg::DidntHearAnything));
     return;

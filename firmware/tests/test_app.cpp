@@ -748,6 +748,28 @@ TEST("app: a held recording with no speech in it is not sent, on a board that as
   deaf.app.on_button(hg::Button::Talk, false);
   CHECK(deaf.fake.last("audio.end") != nullptr);
 
+  // Audio that arrives late: 300 ms of it in a 400 ms press is enough to hold 200 ms of speech,
+  // so silence in it is dropped; 100 ms is not, and goes as before.
+  const auto late = [](Rig& r, int blocks) {
+    r.bring_online(true);
+    r.app.on_button(hg::Button::Talk, true);
+    std::vector<int16_t> pcm(1600);
+    for (size_t i = 0; i < pcm.size(); ++i) pcm[i] = (i / 8) % 2 ? 20 : -20;
+    r.advance(400 - 100 * blocks);
+    for (int i = 0; i < blocks; ++i) {
+      r.app.on_mic_samples(pcm.data(), pcm.size());
+      r.advance(100);
+    }
+    r.app.on_button(hg::Button::Talk, false);
+  };
+  Rig brief(measured);
+  late(brief, 3);
+  CHECK(brief.fake.last("audio.end") == nullptr);
+  CHECK(brief.fake.last("audio.cancel") != nullptr);
+  Rig scant(measured);
+  late(scant, 1);
+  CHECK(scant.fake.last("audio.end") != nullptr);
+
   Rig other;  // a board that does not ask sends the silence, as hold mode always did
   hold(other, 20, 15);
   CHECK(other.fake.last("audio.end") != nullptr);
