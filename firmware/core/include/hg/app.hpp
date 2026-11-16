@@ -506,6 +506,12 @@ class App {
   json::Value timer_value() const;      // the `timer` object of status and timer.status
   void start_alarm();
   void dismiss_alarm();
+  // the face's expression (app_face.cpp)
+  void add_face_actions();
+  // False with `error` for an unknown name, or for `timed` seconds outside 1..3600.
+  bool set_expression(std::string_view name, int64_t seconds, bool timed, std::string& error);
+  mascot::Expression expression_now();  // ends it first when its time is up or the user's next turn began
+  std::string face_command(std::string_view args);
   bool alarm_flash() const;
   void beep_pattern();
 
@@ -865,6 +871,12 @@ class App {
   uint32_t next_beep_at_ = 0;
   std::string timer_label_;
   std::vector<int16_t> beep_pcm_;  // built on the first beep
+
+  // the face's expression (app_face.cpp): RAM only
+  mascot::Expression expression_ = mascot::Expression::Neutral;
+  bool expression_timed_ = false;       // it ends at expression_until_
+  uint32_t expression_until_ = 0;
+  Mode expression_mode_ = Mode::Idle;   // the mode it was last seen in (expression_now)
 
   // frame timing: the running statistics while `perf` is on, and the bench
   std::unique_ptr<FrameStats> frame_stats_;

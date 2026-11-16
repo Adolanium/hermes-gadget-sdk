@@ -12,6 +12,7 @@ The screenshots come from the desktop simulator, which runs the same device core
 - **Tap to talk.** A tap starts a recording and a pause in your speech ends it. Choose it with **Talk mode** in settings. [Device settings](using-gadget.md#device-settings-and-hardware-checks)
 - **Spoken replies.** Hermes reads its reply aloud on boards with a speaker, and the text shows on screen. [Enable speech](connect-hermes.md#4-enable-speech)
 - **A face that talks.** While Hermes speaks, the face moves its mouth with the reply's latest two lines under it, and the whole text follows. [The mascot](architecture.md#the-mascot)
+- **A face with moods.** The agent can make the face look happy, confused, alert or sleepy, for a few seconds or until you next talk to it. [The mascot](architecture.md#the-mascot)
 - **Interrupt and cancel.** Hold TALK to talk over a reply, tap CANCEL to discard a recording or stop a turn, and hold CANCEL for a fresh conversation. [Talk, type, and interrupt](using-gadget.md)
 - **Read a reply before the speech ends.** Tap the screen, or press Up or Down, to see the whole text at once. [Talk, type, and interrupt](using-gadget.md)
 - **A reply you missed comes back.** If the screen went dark before you read a reply, the next wake shows it again from the top. [Device settings](using-gadget.md#device-settings-and-hardware-checks)

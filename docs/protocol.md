@@ -321,6 +321,28 @@ A device with a camera may advertise `camera.capture` in `hello.actions`; it tak
 
 `image_b64` is Base64-encoded, tightly packed, row-major RGB565 pixels in little-endian byte order, with no row padding. For the 7B port, the maximum dimensions are 640×512 (655,360 decoded bytes; 873,816 Base64 characters). For the CoreS3 port, the maximum dimensions are 640×480 (614,400 decoded bytes; 819,200 Base64 characters). The full result stays below the gateway's current 1 MiB action-frame limit. Other camera ports must keep the serialized result within their transport's frame limit. On capture failure, the device uses the existing `action.result` error form; no new message type is introduced. The plugin saves a successful result as a PNG under `~/.hermes/gadgetpix/` and gives the agent the file's path, width, height and size, never `image_b64`.
 
+#### The `face.set` action
+
+A device with a display advertises `face.set` in `hello.actions`. It gives the face on the screen an expression:
+
+| Argument | Meaning |
+|---|---|
+| `expression` | Required: `neutral`, `happy`, `confused`, `alert` or `sleepy`. `neutral` clears the expression |
+| `seconds` | Optional, an integer from 1 to 3600: the face goes back to neutral after that long |
+
+```json
+{"type": "action", "id": "x2", "name": "face.set", "args": {"expression": "happy", "seconds": 10}}
+{"type": "action.result", "id": "x2", "ok": true, "result": {"expression": "happy", "seconds": 10}}
+```
+
+- Without `seconds`, the expression lasts until the user's next turn: a recording, or a message typed while the device is idle. An expression set during a turn stays through that turn's reply.
+- A new `face.set` replaces the expression and its time. A restart forgets it; a lost connection does not.
+- The device draws the expression on its idle, thinking and speaking screens. On any other screen, and while the screen is off or shows the resting clock, it is kept but not drawn. The action does not wake the screen.
+- An unknown `expression`, or `seconds` that is not an integer from 1 to 3600, fails with `ok: false` and changes nothing.
+- While an expression is set, the console's `status` carries it as `expression`.
+
+[The mascot](architecture.md#the-mascot) says what each expression looks like.
+
 ### Telemetry and events (device → server)
 
 | Message | Meaning |

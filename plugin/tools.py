@@ -54,6 +54,8 @@ DISPLAY_SCHEMA = {
 ACTION_SCHEMA = {
     "name": "gadget_action",
     "description": "Invoke an action a gadget exposes (for example an LED, relay, buzzer, volume control or camera capture). "
+                   "face.set, where a device lists it, gives the face on its screen an expression "
+                   "(happy, confused, alert, sleepy; neutral clears it): use it to show a mood, sparingly. "
                    "Use gadget_devices first if you do not know the action names and parameters.",
     "parameters": {
         "type": "object",

@@ -380,6 +380,7 @@ void App::begin() {
   }
 
   add_timer_actions();  // timer.start/status/cancel, beside the built-in actions
+  add_face_actions();   // face.set
   if (hal_.display) ui_ = std::make_unique<Ui>(*hal_.display);
   if (ui_ && profile_.faces && profile_.colour_face_alloc && !colour_) {
     const int px = std::min(256, ui_->face_px());
@@ -2486,6 +2487,7 @@ void App::update_model() {
   m.no.clear();
   m.qr = nullptr;
   m.face = face_ ? &*face_ : nullptr;
+  m.expression = expression_now();
   m.dash.clear();
   m.hero = false;
   m.name_target = false;
@@ -2885,6 +2887,7 @@ json::Value App::status_value() const {
   if (!unpaired_reason_.empty()) s.set("unpaired_reason", unpaired_reason_);
   if (!prompt_id_.empty()) s.set("prompt", prompt_id_);
   if (timer_active()) s.set("timer", timer_value());
+  if (expression_ != mascot::Expression::Neutral) s.set("expression", mascot::expression_name(expression_));
   if (on_phone_pair) s.set("phone", phone_value());
   if (!fatal_.empty()) s.set("error", fatal_);
   if (ota_ != Ota::Idle) {
@@ -2965,7 +2968,7 @@ std::string App::console(std::string_view raw) {
       for (const char* k : kTailnetKeys) keys += std::string(" ") + k;
     return "@help commands: status | diag [log] | log <tag | *> <level> | get <key> | set <key> <value> | say <text> | talk | release | "
            "cancel | new-session | camera [close] | settings [close] | wifi-setup [close] | wifi [list | add <ssid> [password] | join <ssid> | "
-           "forget <ssid>] | phone [pair [close] | forget] | perf [on | off | reset | budget <us> | bench [scroll | mascot | redraw | all]] | yes | no | reconnect | forget-key | factory-reset   keys:" + keys;
+           "forget <ssid>] | phone [pair [close] | forget] | perf [on | off | reset | budget <us> | bench [scroll | mascot | redraw | all]] | face [<expression> [seconds]] | yes | no | reconnect | forget-key | factory-reset   keys:" + keys;
   }
   if (cmd == "status") return "@status " + status_json();
   if (cmd == "phone") {
@@ -2995,6 +2998,7 @@ std::string App::console(std::string_view raw) {
     return open_camera() ? "@ok camera" : "@error camera unavailable (no camera, or during a prompt, update or pairing)";
   }
   if (cmd == "perf") return perf_command(rest);
+  if (cmd == "face") return face_command(rest);
   if (cmd == "diag" && rest.empty()) return diag_report();
   if (cmd == "diag" && rest == "log") {
     if (!recent_log) return "@error this device keeps no log";
