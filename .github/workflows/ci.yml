@@ -6,7 +6,6 @@ on:
   pull_request:
     # A draft stays up for review. CI starts when the pull request is marked ready.
     types: [opened, synchronize, reopened, ready_for_review]
-  merge_group:
   workflow_dispatch:
 
 permissions:
@@ -48,7 +47,7 @@ jobs:
 
   changes:
     name: Changed areas
-    # A pull request or merge group runs only the jobs its files can affect. A push to main and a
+    # A pull request runs only the jobs its files can affect. A push to main and a
     # manual run build everything, which also catches what a filter misses.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
@@ -64,9 +63,9 @@ jobs:
       - id: areas
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          if [ "$EVENT" != pull_request ] && [ "$EVENT" != merge_group ]; then
+          if [ "$EVENT" != pull_request ]; then
             printf 'firmware=true\npython=true\nsite=true\n' | tee -a "$GITHUB_OUTPUT"
             exit 0
           fi
