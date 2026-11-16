@@ -6,6 +6,7 @@ on:
   pull_request:
     # A draft stays up for review. CI starts when the pull request is marked ready.
     types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
   workflow_dispatch:
 
 permissions:
@@ -45,9 +46,50 @@ jobs:
             exit 1
           fi
 
+  changes:
+    name: Changed areas
+    # A pull request or merge group runs only the jobs its files can affect. A push to main and a
+    # manual run build everything, which also catches what a filter misses.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      firmware: ${{ steps.areas.outputs.firmware }}
+      python: ${{ steps.areas.outputs.python }}
+      site: ${{ steps.areas.outputs.site }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+      - id: areas
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          if [ "$EVENT" != pull_request ] && [ "$EVENT" != merge_group ]; then
+            printf 'firmware=true\npython=true\nsite=true\n' | tee -a "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(git diff --name-only "$BASE...HEAD")
+          printf '%s\n' "$files"
+          changed() { printf '%s\n' "$files" | grep -qE "$1" && echo true || echo false; }
+          # A change to this workflow runs everything.
+          workflow='^\.github/workflows/ci\.yml$'
+          {
+            # The host core, the board images and the ESP-IDF builds.
+            echo "firmware=$(changed "$workflow|^firmware/")"
+            # pytest builds the simulator from firmware/ and checks the docs' commands, so only a
+            # change confined to the installer site skips it.
+            echo "python=$(printf '%s\n' "$files" | grep -qvE '^site/' && echo true || echo false)"
+            # The site renders docs/ and checks their links into the repository, and builds the
+            # dashboard tab.
+            echo "site=$(changed "$workflow|^site/|^docs/|^plugin/dashboard/|^[^/]+\.md$")"
+          } | tee -a "$GITHUB_OUTPUT"
+
   boards:
     name: Discover firmware boards
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    needs: changes
+    if: needs.changes.outputs.firmware == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -69,7 +111,8 @@ jobs:
 
   core:
     name: Firmware core (${{ matrix.os }})
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    needs: changes
+    if: needs.changes.outputs.firmware == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
@@ -87,7 +130,8 @@ jobs:
 
   python:
     name: ${{ matrix.name }}
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -118,7 +162,7 @@ jobs:
           HERMES_GADGET_UI_TESTS: "1"
           # libopus is installed above, so test_opus fails instead of skipping if it can't load.
           HG_REQUIRE_LIBOPUS: "1"
-        run: xvfb-run -a pytest -q -rs
+        run: xvfb-run -a pytest -q -rs -n auto
       - name: Build the Linux installation package
         if: matrix.name == 'Linux ARM64'
         run: |
@@ -139,7 +183,8 @@ jobs:
 
   site:
     name: Installer site
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    needs: changes
+    if: needs.changes.outputs.site == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -168,7 +213,6 @@ jobs:
   esp32:
     name: ESP32 firmware (${{ matrix.board }})
     needs: boards
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -200,7 +244,8 @@ jobs:
           if-no-files-found: error
   esp32p4:
     name: ESP32-P4 firmware (ESP-IDF 6.1.0)
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    needs: changes
+    if: needs.changes.outputs.firmware == 'true'
     runs-on: ubuntu-24.04
     container: espressif/idf:v6.1@sha256:f81b6e077e6af93c312181cd7d4e7936cfbafc5c7f77cbacba8fdd34994f218a
     timeout-minutes: 45
@@ -243,3 +288,20 @@ jobs:
           source /opt/esp/idf/export.sh
           idf.py -B build/ws-p4-touch-lcd-3.4c -D SDKCONFIG=build/ws-p4-touch-lcd-3.4c/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/ws-p4-touch-lcd-3.4c/sdkconfig.defaults" set-target esp32p4
           idf.py -B build/ws-p4-touch-lcd-3.4c -D SDKCONFIG=build/ws-p4-touch-lcd-3.4c/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/ws-p4-touch-lcd-3.4c/sdkconfig.defaults" build
+
+  result:
+    name: CI passed
+    # The one required check: it passes when every job above passed or was skipped as unaffected.
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    needs: [changes, boards, core, python, site, esp32, esp32p4]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for r in $RESULTS; do
+            case "$r" in success|skipped) ;; *) echo "::error::a CI job ended as $r"; exit 1 ;; esac
+          done

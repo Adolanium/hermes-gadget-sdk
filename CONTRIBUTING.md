@@ -46,7 +46,7 @@ Use the [physical test checklist](docs/hardware-validation.md#record-a-physical-
 
 - **Keep each PR to one change.** A title like `Board: add the Waveshare ESP32-S3-LCD-1.54` or `Plugin: show the firmware version in hermes gadget devices` says what it does.
 - **Say why, then what, then how you know it works.** Tests you ran, boards you tried it on, anything you couldn't check.
-- **CI must pass before a PR is merged.** `main` is protected. For a first-time contributor, CI waits until a maintainer approves the run.
+- **CI must pass before a PR is merged.** `main` is protected. A PR runs only the jobs its files can affect, as [development](docs/development.md#test-suites) describes. For a first-time contributor, CI waits until a maintainer approves the run.
 - **Update the docs** that describe what you changed, and add a line under `## Unreleased` in [CHANGELOG.md](CHANGELOG.md). CI checks for the changelog line; label the PR `no-changelog` when nothing user-facing changed.
 - **Code style:** match the code around you. The core's conventions (single-threaded, no exceptions or RTTI, deterministic UI) are in [docs/development.md](docs/development.md#working-on-the-firmware).
 

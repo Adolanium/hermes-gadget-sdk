@@ -21,7 +21,7 @@ assets/mascot/          The mascot master image and its attribution
 | Suite | Command | Needs |
 |---|---|---|
 | Core (C++) | `hermes-gadget build-sim --test`, or `ctest --test-dir build/host -C Release` | CMake + compiler |
-| Plugin units, simulator ↔ hub, desktop controls | `pytest` | Built simulator library; a desktop or Xvfb for window tests |
+| Plugin units, simulator ↔ hub, desktop controls | `pytest`, or `pytest -n auto` to run the tests in parallel (pytest-xdist, in the `dev` extra) | Built simulator library; a desktop or Xvfb for window tests |
 | Adapter on real Hermes classes | `HERMES_AGENT_DIR=../hermes-agent ../hermes-agent/.venv/bin/python -m pytest tests/test_adapter_hermes.py tests/test_profile_select_hermes.py tests/test_profile_gateway_hermes.py` | A Hermes checkout and its virtualenv |
 | Full gateway end to end | `HERMES_GADGET_E2E=1 pytest tests/test_gateway_e2e.py` | The above; spawns `hermes gateway run` with a temporary `HERMES_HOME` |
 | Browser installer | `npm ci && npm test` in `site/` | Node.js 22 |
@@ -29,7 +29,16 @@ assets/mascot/          The mascot master image and its attribution
 
 For the gateway end to end, fetch only the pinned commit, as CI does: `git init hermes-agent && cd hermes-agent && git fetch --depth 1 https://github.com/NousResearch/hermes-agent <HERMES_REF> && git checkout FETCH_HEAD`. In a full clone, `hermes --version` reports the last release tag before that commit, such as 0.21.5, and the gateway skips the plugin because of its `requires_hermes`.
 
-The Python jobs in `.github/workflows/ci.yml` run under `xvfb-run` so the desktop controls run against the simulator core and development hub. On a headless Linux machine, use `xvfb-run -a pytest`. Without a display, the window tests skip; set `HERMES_GADGET_UI_TESTS=1` to require them.
+The Python jobs in `.github/workflows/ci.yml` run under `xvfb-run` so the desktop controls run against the simulator core and development hub. On a headless Linux machine, use `xvfb-run -a pytest`. Without a display, the window tests skip; set `HERMES_GADGET_UI_TESTS=1` to require them. CI runs them in parallel with `pytest -n auto`.
+
+A pull request runs only the CI jobs its files can affect. The **Changed areas** job compares the pull request with its base:
+
+- A change under `firmware/` runs the host core tests and every board build.
+- Any change outside `site/` runs the Python tests, because they build the simulator from `firmware/` and check the commands in the docs.
+- A change under `site/`, `docs/`, `plugin/dashboard/` or a root Markdown file runs the installer site's tests and build.
+- A change to `.github/workflows/ci.yml` runs everything.
+
+A push to `main` and a manual run always run every job. Branch protection requires one check from this workflow, **CI passed**, which passes when every job passed or was skipped as unaffected.
 
 CI runs the adapter and gateway suites in `.github/workflows/hermes.yml`: against the Hermes commit pinned there (`HERMES_REF`) on every push and pull request, and against Hermes `main` once a day. To move the pin, run that workflow by hand with `hermes_ref: main`. When it passes, put the commit it printed into `HERMES_REF` and into `TESTED_HERMES_COMMIT` in `plugin/compat.py`; a test checks that the two agree.
 
