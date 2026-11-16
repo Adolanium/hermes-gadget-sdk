@@ -1239,6 +1239,11 @@ void App::h_interpret(const json::Value& m) {
     scroll_ = -1;
     reply_until_ = now();
     dismiss_overlay();
+    // And what was said to the owner in passing: a notice ("Approved") and the phrase of a turn
+    // still working for them.
+    notice_.clear();
+    notice_until_ = 0;
+    status_.clear();
   }
   interpret_ = true;
   interpret_label_ = m["label"].as_string().substr(0, 24);

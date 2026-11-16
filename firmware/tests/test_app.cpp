@@ -10878,3 +10878,27 @@ TEST("interpret: the owner's last reply and card are gone when the mode starts; 
   CHECK(r.app.screen() != hg::Screen::Card);
   CHECK_EQ(r.app.model().headline, std::string("ES > EN"));
 }
+
+TEST("interpret: an owner's notice and working-state phrase are gone when the mode starts") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"notice","text":"Approved","ttl_s":30})");
+  r.advance(20);
+  CHECK_EQ(r.app.model().detail, std::string("Approved"));
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  r.advance(20);
+  CHECK_EQ(r.app.model().detail, std::string("Interpreter"));
+  r.advance(1000);
+  CHECK_EQ(r.app.model().detail, std::string("Interpreter"));
+  r.server(R"({"type":"interpret","on":false})");
+
+  // An owner's turn is still working when the gadget changes hands: its phrase is not left up.
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(R"({"type":"status","text":"Checking your bank account"})");
+  r.advance(20);
+  CHECK_EQ(r.app.model().detail, std::string("Checking your bank account"));
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  r.advance(20);
+  CHECK(r.app.model().detail.find("bank") == std::string::npos);
+  CHECK(r.app.model().body.find("bank") == std::string::npos);
+}
