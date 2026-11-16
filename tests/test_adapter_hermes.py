@@ -134,7 +134,7 @@ def test_speaking_devices_default_to_spoken_replies(gadget, make_sim):
     assert a._should_auto_tts_for_chat(talker.status()["device_id"]) is False
 
 
-def _fake_tts(monkeypatch, tmp_path, *, fail=False):
+def _fake_tts(monkeypatch, tmp_path, *, fail=False, seconds=0.5):
     """Hermes's text_to_speech_tool, recording what it was asked to say."""
     import tools.tts_tool as tts_tool
     from hermes_gadget_plugin import audio
@@ -146,7 +146,7 @@ def _fake_tts(monkeypatch, tmp_path, *, fail=False):
         if fail:
             return json.dumps({"success": False, "error": "no TTS provider"})
         path = tmp_path / f"spoken-{len(said)}.wav"
-        path.write_bytes(audio.wav_bytes(b"\x10\x00" * 8000, 16000))  # 0.5 s
+        path.write_bytes(audio.wav_bytes(b"\x10\x00" * int(16000 * seconds), 16000))
         return json.dumps({"success": True, "file_path": str(path)})
 
     monkeypatch.setattr(tts_tool, "text_to_speech_tool", fake)
@@ -195,6 +195,99 @@ def test_a_question_still_shows_when_speech_fails_or_is_off(gadget, make_sim, mo
                                                   clarify_id="c4", session_key="sk")).success
     sim.run_for(0.5)
     assert said == []
+
+
+def _types(sim, kind):
+    return [m for m in list(sim.received) if m.get("type") == kind]
+
+
+def test_a_message_sent_outside_a_turn_is_spoken(gadget, make_sim, monkeypatch, tmp_path):
+    said = _fake_tts(monkeypatch, tmp_path)
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+    cron_output = ("Cronjob Response: Bedtime\n(job_id: abc123)\n-------------\n\n"
+                   "**Time for bed.** Lights out at nine.\n\n"
+                   "To stop or manage this job, send me a new message (e.g. \"stop reminder Bedtime\").")
+    assert gadget.run(gadget.adapter.send(device_id, cron_output, metadata={"job_id": "abc123"})).success
+    assert sim.wait_for(lambda: said == ["Time for bed. Lights out at nine."], timeout=5)
+    assert sim.wait_for(lambda: sim.last_received("audio.end") is not None, timeout=10)
+    # Only cron output loses the wrapper: an ordinary message is read as written.
+    said.clear()
+    gadget.run(gadget.adapter.send(device_id, "Cronjob Response: is a funny phrase"))
+    assert sim.wait_for(lambda: said == ["Cronjob Response: is a funny phrase"], timeout=10)
+
+
+def test_messages_sent_together_play_one_after_another(gadget, make_sim, monkeypatch, tmp_path):
+    said = _fake_tts(monkeypatch, tmp_path, seconds=4)  # longer than any playback lead: still sending when the next is ready
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+    for text in ("First.", "Second.", "Third."):
+        gadget.run(gadget.adapter.send(device_id, text))
+    assert sim.wait_for(lambda: len(_types(sim, "audio.end")) == 3, timeout=30)
+    assert said == ["First.", "Second.", "Third."]
+    assert _types(sim, "audio.abort") == []  # none cut off the one before it
+
+
+def test_cron_output_that_arrives_during_a_turn_is_spoken_after_it(gadget, make_sim, monkeypatch, tmp_path):
+    said = _fake_tts(monkeypatch, tmp_path)
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+
+    async def still_working(event):  # the turn is still running when the cron output arrives
+        if event.text == "long task":
+            await asyncio.sleep(2)
+
+    gadget.reply = still_working
+    sim.type_text("long task")
+    assert sim.wait_for(lambda: _types(sim, "turn.start"), timeout=5)
+    assert gadget.run(gadget.adapter.send(device_id, "Dinner is ready.", metadata={"job_id": "abc123"})).success
+    assert said == [] and _types(sim, "audio.start") == []  # nothing is spoken over the turn
+    assert sim.wait_for(lambda: _types(sim, "audio.end"), timeout=15)
+    assert said == ["Dinner is ready."]
+    kinds = [m["type"] for m in list(sim.received)]
+    assert kinds.index("turn.end") < kinds.index("audio.start")
+
+
+def test_a_message_is_not_spoken_when_the_device_stays_busy(gadget, make_sim, monkeypatch, tmp_path):
+    from hermes_gadget_plugin import adapter as adapter_module
+
+    said = _fake_tts(monkeypatch, tmp_path)
+    monkeypatch.setattr(adapter_module, "SPEECH_QUEUE_WAIT_S", 0.5)
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+
+    async def still_working(event):
+        if event.text == "long task":
+            await asyncio.sleep(3)
+
+    gadget.reply = still_working
+    sim.type_text("long task")
+    assert sim.wait_for(lambda: _types(sim, "turn.start"), timeout=5)
+    gadget.run(gadget.adapter.send(device_id, "Dinner is ready.", metadata={"job_id": "abc123"}))
+    assert sim.wait_for(lambda: "Dinner is ready." in json.dumps(list(sim.received)), timeout=5)  # still shown
+    assert sim.wait_for(lambda: _types(sim, "turn.end"), timeout=10)
+    sim.run_for(1.0)
+    assert said == [] and _types(sim, "audio.start") == []
+
+
+def test_some_messages_are_not_spoken(gadget, make_sim, monkeypatch, tmp_path):
+    from hermes_gadget_plugin import audio
+
+    said = _fake_tts(monkeypatch, tmp_path)
+    sim = _paired_sim(gadget, make_sim)
+    mute = _paired_sim(gadget, make_sim, state="mute", board="sim-240x240-nospeaker")
+    device_id = sim.status()["device_id"]
+    gadget.run(gadget.adapter.send(device_id, "checking...", metadata={"_interim_send": True}))
+    gadget.run(gadget.adapter.send(mute.status()["device_id"], "No speaker here."))
+    clip = tmp_path / "clip.wav"
+    clip.write_bytes(audio.wav_bytes(b"\x10\x00" * 8000, 16000))
+    gadget.run(gadget.adapter.send_voice(device_id, str(clip), caption="A voice note"))  # the clip plays, not the caption
+    gadget.adapter._auto_tts_disabled_chats.add(device_id)  # "/voice off"
+    gadget.run(gadget.adapter.send(device_id, "Voice is off."))
+    assert sim.wait_for(lambda: "Voice is off." in json.dumps(sim.received), timeout=5)
+    sim.run_for(1.0)
+    assert said == []
+    assert len(_types(sim, "audio.start")) == 1 and _types(sim, "audio.abort") == []
 
 
 def test_whole_file_tts_is_decoded_resampled_and_played(gadget, make_sim, tmp_path):

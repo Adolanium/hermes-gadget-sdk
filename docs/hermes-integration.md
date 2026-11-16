@@ -160,11 +160,13 @@ The Hermes desktop app gets a **Gadgets** page: a sidebar row, a route at `/gadg
 | Web dashboard tab | `dashboard/manifest.json`, `dashboard/plugin_api.py` (a FastAPI `router` under `/api/plugins/gadget/`), `window.__HERMES_PLUGIN_SDK__` | The **Gadgets** tab. Reads the plugin's data files; never calls the gateway. See [The Gadgets tab](#the-gadgets-tab-in-the-hermes-dashboard) |
 | Desktop page | `desktop/plugin.js` with `@hermes/plugin-sdk` (`ROUTES_AREA`, `SIDEBAR_NAV_AREA`, `PALETTE_AREA`, `ctx.rest`, `ctx.storage`) | The **Gadgets** page, on the same routes. See [The Gadgets page in Hermes Desktop](#the-gadgets-page-in-hermes-desktop) |
 | Host CLI | `ctx.register_cli_command("gadget", ...)` | `hermes gadget devices / forget / info / pair / update`. `pair` waits for a device to show a code and approves it after asking. `update` stages an image in the plugin's data directory (a file, or with `--latest` the newest release's image for the device's board, checked against the release manifest); the gateway's adapter installs it once the device is online and writes progress back for the command |
-| Send and cron targets | `parse_target_ref_fn`, `cron_deliver_env_var` | `gadget:hg-0123456789abcdef` works with send_message and cron delivery; `GADGET_HOME_CHANNEL` supplies a default cron device |
+| Send and cron targets | `parse_target_ref_fn`, `cron_deliver_env_var` | `gadget:hg-0123456789abcdef` works with send_message and cron delivery; `GADGET_HOME_CHANNEL` supplies a default cron device. On a device that speaks replies, such a message is also spoken (see [Scheduled delivery](#scheduled-delivery)) |
 
 ### Scheduled delivery
 
 Set a cron job's `deliver` to `gadget:hg-0123456789abcdef`, replacing the example ID with one from `hermes gadget devices`. The gadget must be paired and online, with the gateway running, to receive the scheduled message.
+
+On a device that speaks replies, a message sent outside a turn, by cron or by `send_message`, is also read aloud with Hermes's text-to-speech: Hermes itself speaks only replies to voice turns, and a speaker with no screen would otherwise stay silent. Markdown is removed, and for cron output so are Hermes's header, footer and truncation note. Messages play one at a time per device, each after any audio already playing. Cron output that arrives during a turn is spoken after the turn. A message that has waited two minutes for the device stays text only. The caption of a voice file and the text of a clarify question are not spoken again. `/voice off` in the device's chat, or `speak_replies: false`, keeps these messages silent too.
 
 To use `deliver="gadget"`, configure the gadget home channel. By default, `auto_home: true` makes the first approved device the home channel. An explicit `GADGET_HOME_CHANNEL` device ID in the profile's `.env` overrides that default. A target with an explicit device ID does not require this environment variable.
 
