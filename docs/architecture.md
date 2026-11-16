@@ -76,7 +76,7 @@ Every screen that isn't showing reply text uses a **hero layout**: the Hermes Ag
 
 ### Interaction
 
-- **Push-to-talk (default):** hold to speak, release to send. A press under 350 ms is discarded as a tap, and recording stops at 30 s.
+- **Push-to-talk (default):** hold to speak, release to send. A press under 350 ms is discarded as a tap, and recording stops at 60 s, the server's default `max_utterance_s`.
 - **Tap mode** (`set talk_mode tap`): tap to start; the VAD (or a second tap) ends the utterance.
 - **Barge-in:** pressing talk while a reply plays stops playback immediately. The new message reaches Hermes, whose default "interrupt" busy mode stops the old turn.
 - **Cancel** acts on release: it discards a recording, dismisses an overlay, or stops a turn (Hermes `/stop`).
@@ -85,10 +85,10 @@ Every screen that isn't showing reply text uses a **hero layout**: the Hermes Ag
 
 ### The recording buffer
 
-On boards with PSRAM to spare (`DeviceProfile::recording_alloc`), a recording is kept whole on the device while it uploads (`hg::RecordingBuffer`, 1 MB for the 30 s limit at 16 kHz, 1.5 MB at 24 kHz, set aside at start-up, and only when about 1 MB of PSRAM stays free after it; start-up logs `recording buffer on` or why not). The microphone writes to the buffer, and the app sends from it in 40 ms frames as the link takes them:
+On boards with PSRAM to spare (`DeviceProfile::recording_alloc`), a recording is kept whole on the device while it uploads (`hg::RecordingBuffer`, 2 MB for the 60 s limit at 16 kHz, 3 MB at 24 kHz, set aside at start-up, and only when about 1 MB of PSRAM stays free after it; start-up logs `recording buffer on` or why not). The microphone writes to the buffer, and the app sends from it in 40 ms frames as the link takes them:
 
 - **A slow link** delays frames instead of dropping them. `audio.end` waits until the link has taken all of the recording.
-- **A lost connection mid-recording** doesn't end it. The screen stays on Listening with "Offline, still recording", and the recording ends as usual: release, a tap, the VAD, or the 30 s limit. The app reconnects in the background, starting at the shortest backoff.
+- **A lost connection mid-recording** doesn't end it. The screen stays on Listening with "Offline, still recording", and the recording ends as usual: release, a tap, the VAD, or the 60 s limit. The app reconnects in the background, starting at the shortest backoff.
 - **Back online** (welcome, paired), the whole recording goes again on a new stream: `audio.start` with the same `id` plus `resent` and `age_ms`, every frame as fast as the link takes them, then `audio.end`. A connection back before the recording ends sends what was held and streams on.
 - **Ended while offline,** the device shows Thinking with "Reconnecting to send..." and waits up to 45 s (`App::kRecordingWaitMs`, about three connection attempts). Failed attempts don't extend the wait. After that it drops the recording and says "Couldn't send the recording".
 - **CANCEL** discards a held recording, while recording or while waiting. A device that comes back unpaired drops it. The buffer is RAM only, so a restart loses it.

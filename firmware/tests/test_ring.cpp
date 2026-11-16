@@ -148,7 +148,7 @@ std::vector<std::pair<int, int>> pixels_of(const Panel& p, uint16_t colour) {
 
 }  // namespace
 
-TEST("ring: listening fills from 12 o'clock, green, and turns amber for the last 5 s") {
+TEST("ring: listening fills from 12 o'clock, green, and turns amber for the last sixth") {
   Panel p(466, 466);
   hg::UiModel m = ring_model(Screen::Listening, 3);
   m.level = 40;
