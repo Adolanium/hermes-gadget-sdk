@@ -150,6 +150,10 @@ HELP = """commands:
   approve <CODE>               approve a pairing code
   say <text>                   push a reply to every device
   card <title> | <body>        show a card
+  show <json>                  show a structured card, e.g.
+                               show {"title":"Build","progress":40,"items":["core","sim"],"id":"b"}
+                               show {"title":"Join","qr":"https://example.org"}
+  choose <title> | <a> | <b>.. ask for one of 2 to 6 answers and print the one picked
   notice <text>                show a notice line
   ask <title> | <question>     ask a yes/no question (TALK = yes, CANCEL = no)
   action <name> [json-args]    invoke a device action, e.g. action led.set {"color":"red"}
@@ -227,6 +231,17 @@ async def _console(hub: DeviceHub, brain: EchoBrain, stop: asyncio.Event) -> Non
                 title, _, body = rest.partition("|")
                 for s in sessions:
                     await s.show_card(title.strip(), body.strip())
+            elif cmd == "show":
+                given = json.loads(rest)
+                for s in sessions:
+                    await s.show_card(
+                        str(given.get("title") or ""), str(given.get("body") or ""), given.get("seconds", 0),
+                        items=[str(i) for i in given.get("items") or []], progress=given.get("progress"),
+                        qr=given.get("qr"), card_id=given.get("id"))
+            elif cmd == "choose":
+                title, *options = [part.strip() for part in rest.split("|")]
+                for s in sessions:
+                    s.spawn(_choose(s, title, options))
             elif cmd == "notice":
                 for s in sessions:
                     await s.send_notice(rest)
@@ -265,6 +280,15 @@ async def _console(hub: DeviceHub, brain: EchoBrain, stop: asyncio.Event) -> Non
                 print("unknown command; type help")
         except Exception as exc:
             print(f"  error: {exc}")
+
+
+async def _choose(session, title: str, options: list[str]) -> None:
+    """Asks one device and prints what it answered; the console stays free meanwhile."""
+    try:
+        index = await session.ask_choice(title, options)
+        print(f"  {session.name}: " + ("cancelled" if index is None else options[index]))
+    except Exception as exc:
+        print(f"  {session.name}: {exc}")
 
 
 async def serve(host: str, port: int, path: str, state_dir: Path, *, require_pairing: bool,

@@ -12,7 +12,7 @@ Hermes's gateway runs "platform adapters": Telegram, Slack and about twenty othe
 | `__init__.py` | `register(ctx)`: platform entry, agent tools, `hermes gadget` CLI |
 | `adapter.py` | `GadgetAdapter(BasePlatformAdapter)`: the Hermes-facing side |
 | `hub.py` | WebSocket server, auth, audio, images, actions (no Hermes imports) |
-| `tools.py` | `gadget_devices`, `gadget_display`, `gadget_action` |
+| `tools.py` | `gadget_devices`, `gadget_display`, `gadget_ask`, `gadget_action` |
 | `store.py`, `status.py`, `protocol.py`, `audio.py`, `textfmt.py`, `imaging.py` | Support modules (no Hermes imports) |
 | `dashboard/` | The **Gadgets** tab of the Hermes web dashboard: `manifest.json`, the backend routes in `plugin_api.py`, and the tab's bundle in `dist/`, built from `src/` (see [The Gadgets tab](#the-gadgets-tab-in-the-hermes-dashboard)) |
 | `desktop/plugin.js`, `desk.py` | The **Gadgets** page of the Hermes desktop app, built from `desktop-src/`, and the queue that carries its cards and actions to the gateway (see [The Gadgets page in Hermes Desktop](#the-gadgets-page-in-hermes-desktop)) |
@@ -211,6 +211,21 @@ Hermes asks before destructive commands (`/new`, `/undo`), costly model switches
 ### Agent tools and Hermes tool search
 
 Hermes keeps the core tool schema narrow. Plugin tools are therefore deferred behind its tool-search bridge (`tool_search` / `tool_describe` / `tool_call`), and their names and descriptions appear in the bridge's manifest. A model invokes `gadget_action` through `tool_call`, and the end-to-end test exercises exactly that. The per-device context names the available actions so the model knows they exist.
+
+The four tools:
+
+| Tool | What it does |
+|---|---|
+| `gadget_devices` | Lists connected gadgets with their screen, audio, actions and sensor readings |
+| `gadget_display` | Shows a card: `title` and `text`, and optionally `items` (a list), `progress` (0 to 100) or `qr` (text to show as a QR code). A card sent again with the same `id` replaces the one on screen in place, which is how a progress bar moves |
+| `gadget_ask` | Shows `question` with 2 to 6 `options`, waits up to `seconds` (60 by default, 300 at most) and returns the option the user picked, as the agent wrote it, with its `index`; `cancelled: true` when the user cancelled; an error when nobody answered |
+| `gadget_action` | Runs an action the device declared |
+
+`gadget_display` and `gadget_ask` shape their text for the device: Markdown is stripped, characters are folded to its `charset`, and each list row or answer is one line of at most `text_cols` characters. A QR code's text is sent unchanged.
+
+What a device cannot draw still reaches the user. A gadget without `caps.card` (older firmware, the Linux client) gets a list, a progress value and a code's text as a plain card, and the tool's result says so in `note`. A gadget without `caps.choice` gets the options as a numbered card; `gadget_ask` then fails with `shown_as_card: true` and tells the agent to ask for the answer by voice. See [structured cards](protocol.md#structured-cards) and [choices](protocol.md#choices).
+
+`gadget_ask` is separate from [confirmations](#confirmations). A dangerous command is still approved through Hermes's own yes/no question, with the rules above; an agent cannot stand in for that approval with a choice.
 
 ## Making replies fast
 

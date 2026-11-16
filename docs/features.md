@@ -18,6 +18,8 @@ The screenshots come from the desktop simulator, which runs the same device core
 - **Long tasks.** Once Hermes starts a turn, the device waits up to 30 minutes for it to end, with the screen lit. [Device settings](using-gadget.md#device-settings-and-hardware-checks)
 - **Confirmation questions.** Hermes asks before risky commands; TALK or a tap means yes, CANCEL or a swipe down means no. [Confirmations](hermes-integration.md#confirmations)
 - **Cards and pictures.** The agent can put a reminder, a note or a picture on the screen. A card that arrives while the screen is dark waits for it to light. [Talk, type, and interrupt](using-gadget.md)
+- **Lists, progress and QR codes.** A card can carry a list, a progress bar that the agent updates in place, or a QR code to scan with a phone. [Lists, progress and QR codes](using-gadget.md#lists-progress-and-qr-codes)
+- **Pick an answer.** The agent can ask a question with up to six answers; tap one, or choose it with the buttons or the knob. [Pick an answer](using-gadget.md#pick-an-answer)
 - **Timers.** Ask for a timer by voice. The time left shows on every screen, and the alarm beeps for a minute on boards with a speaker. [Timers](using-gadget.md#timers)
 - **Device actions.** Hermes can change the volume, the brightness or the screen language, or run actions a board adds, such as an LED. [Device actions](protocol.md#device-actions)
 - **Scheduled messages.** A Hermes cron job can deliver its result to a gadget. [Scheduled delivery](hermes-integration.md#scheduled-delivery)

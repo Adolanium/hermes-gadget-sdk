@@ -331,6 +331,7 @@ const char* screen_name(Screen s) {
     case Screen::LowBattery: return "low_battery";
     case Screen::Charging: return "charging";
     case Screen::Charged: return "charged";
+    case Screen::Choice: return "choice";
   }
   return "unknown";
 }
@@ -599,6 +600,11 @@ void Ui::draw_frame(const UiModel& m) {
   Hash content;
   content.val(m.screen).add(m.detail).add(m.body).add(m.code).val(m.scroll).val(m.color_test)
       .val(m.qr ? m.qr->size : 0);
+  if (!m.items.empty() || m.card_progress >= 0 || m.card_qr) {
+    content.val(m.card_progress).val(m.item_sel);
+    for (const std::string& item : m.items) content.add(item);
+    if (m.card_qr) content.add(m.card_qr->modules.data(), m.card_qr->modules.size());
+  }
   for (const DashRow& row : m.dash) content.add(row.label).add(row.value).val(row.tone).val(row.heading);
   if (m.screen == Screen::Settings) {
     content.val(m.settings_sel).val(m.settings_scroll);
@@ -858,6 +864,7 @@ void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
     case Screen::Card:
       c.fill_round_rect(cx - r, cy - r, 2 * r, 2 * r, r / 3, kAccent);
       break;
+    case Screen::Choice:
     case Screen::Prompt: {
       c.fill_circle(cx, cy, r, kAccent);
       int tw = Canvas::text_width("?", s);
@@ -931,6 +938,14 @@ void Ui::draw_content(Canvas& c, const UiModel& m) {
     return;
   }
 
+  if (m.screen == Screen::Card && card_rich(m)) {
+    draw_card(c, m, y0, y1);
+    return;
+  }
+  if (m.screen == Screen::Choice) {
+    draw_choice(c, m, y0, y1);
+    return;
+  }
   if (m.qr && m.qr->ok() && draw_qr(c, m, y0, y1)) return;
   if (m.screen == Screen::Dashboard) {
     draw_dashboard(c, m, y0, y1);
@@ -1031,6 +1046,169 @@ void Ui::draw_dashboard(Canvas& c, const UiModel& m, int y0, int y1) {
     const int thumb_y = track_y + (track_h - thumb_h) * first / std::max(1, max_first);
     c.fill_rect(w - 2 * s, track_y, s, track_h, kFaint);
     c.fill_rect(w - 2 * s, thumb_y, s, thumb_h, kDim);
+  }
+}
+
+// --- Structured cards and choices (docs/protocol.md#display, #questions) ---
+
+namespace {
+
+// A card's progress bar and its percentage take one text line and a gap.
+int card_progress_h(bool progress, int s) { return progress ? Canvas::line_height(s) + 2 * s : 0; }
+
+// A code of `n` modules in a `w` x `h` box: the pixels per module, or 0 when it does not fit. It
+// keeps the standard four-module quiet zone where modules still get 3 px, else two modules of it
+// and 2 px a module, below which a phone camera does not read the panel.
+int qr_fit(int n, int w, int h, int& pad) {
+  pad = 4;
+  int scale = std::min(w, h) / (n + 2 * pad);
+  if (scale >= 3) return scale;
+  pad = 2;
+  scale = std::min(w, h) / (n + 2 * pad);
+  return scale >= 2 ? scale : 0;
+}
+
+}  // namespace
+
+int Ui::card_lines(const UiModel& m) const {
+  const int body = m.body.empty() ? 0 : static_cast<int>(wrap_text(m.body, layout_.body_cols).size());
+  return body + static_cast<int>(m.items.size());
+}
+
+int Ui::card_rows(const UiModel& m) const {
+  const int s = layout_.scale;
+  const int content_h = info_.height - layout_.top_h - layout_.header_h - layout_.bottom_h;
+  return std::max(1, (content_h - 4 * s - card_progress_h(m.card_progress >= 0, s)) / Canvas::line_height(s));
+}
+
+int Ui::card_qr_scale(int modules, bool progress) const {
+  const int s = layout_.scale;
+  const int content_h = info_.height - layout_.top_h - layout_.header_h - layout_.bottom_h;
+  int pad = 0;
+  return qr_fit(modules, info_.width - 8 * s, content_h - 8 * s - card_progress_h(progress, s), pad);
+}
+
+int Ui::card_qr_version() const {
+  for (int v = qr::kMaxVersion; v >= 1; --v)
+    if (card_qr_scale(17 + 4 * v, false)) return v;
+  return 0;
+}
+
+// A structured card: a progress bar, then either a code with the body as its caption, or the
+// body's lines and the list's rows, scrolled together from line `scroll`.
+void Ui::draw_card(Canvas& c, const UiModel& m, int y0, int y1) {
+  const int s = layout_.scale, w = info_.width, margin = 4 * s, lh = Canvas::line_height(s);
+  const int glyph_h = font::kGlyphHeight * s;
+  int y = y0 + margin;
+  if (m.card_progress >= 0) {
+    const int pct = std::min<int>(100, m.card_progress);
+    const std::string label = std::to_string(pct) + "%";
+    const int bar_w = w - 2 * margin - Canvas::text_width("100%", s) - 2 * s, bar_h = std::max(3, glyph_h / 2);
+    const int by = y + (glyph_h - bar_h) / 2, fill = bar_w * pct / 100;
+    const uint16_t ink = pct >= 100 ? kGreen : kAccent;
+    c.fill_round_rect(margin, by, bar_w, bar_h, bar_h / 2, kFaint);
+    if (fill > 0) c.fill_round_rect(margin, by, std::max(fill, bar_h), bar_h, bar_h / 2, ink);
+    c.text(w - margin - Canvas::text_width(label, s), y, label, s, ink);
+    y += card_progress_h(true, s);
+  }
+  if (m.card_qr && m.card_qr->ok()) {
+    const int n = m.card_qr->size, avail_w = w - 2 * margin, avail_h = y1 - y - margin;
+    // The caption stays only where the code is as large beside it as without it.
+    std::vector<std::string> lines;
+    if (!m.body.empty()) lines = wrap_text(m.body, layout_.body_cols);
+    int pad = 0, bare_pad = 0;
+    int reserve = lines.empty() ? 0 : static_cast<int>(lines.size()) * lh + 2 * s;
+    int scale = qr_fit(n, avail_w, avail_h - reserve, pad);
+    const int bare = qr_fit(n, avail_w, avail_h, bare_pad);
+    if (bare > scale) {
+      scale = bare, pad = bare_pad, reserve = 0;
+      lines.clear();
+    }
+    if (scale > 0) {
+      const int side = (n + 2 * pad) * scale, x0 = (w - side) / 2;
+      const int py = y + std::max(0, (avail_h - side - reserve) / 2);
+      c.fill_rect(x0, py, side, side, rgb565(255, 255, 255));
+      for (int qy = 0; qy < n; ++qy)
+        for (int qx = 0; qx < n; ++qx)
+          if (m.card_qr->at(qx, qy))
+            c.fill_rect(x0 + (qx + pad) * scale, py + (qy + pad) * scale, scale, scale, rgb565(0, 0, 0));
+      int ty = py + side + 2 * s;
+      for (const std::string& line : lines) {
+        c.text((w - Canvas::text_width(line, s)) / 2, ty, line, s, kDim);
+        ty += lh;
+      }
+      return;
+    }
+  }
+  std::vector<std::string> body;
+  if (!m.body.empty()) body = wrap_text(m.body, layout_.body_cols);
+  const int n_body = static_cast<int>(body.size()), total = n_body + static_cast<int>(m.items.size());
+  const int rows = card_rows(m), max_first = std::max(0, total - rows);
+  const int first = std::max(0, std::min(m.scroll, max_first));
+  const int r = std::max(1, glyph_h / 4), item_x = margin + 2 * r + 3 * s;
+  const int item_cols = cols_for(w - margin - item_x - (total > rows ? 2 * s : 0), s);
+  for (int i = 0; i < rows && first + i < total; ++i) {
+    const int line = first + i, ty = y + i * lh;
+    if (line < n_body) {
+      c.text(margin, ty, body[static_cast<size_t>(line)], s, m.items.empty() ? kText : kDim);
+      continue;
+    }
+    c.fill_circle(margin + r, ty + glyph_h / 2, r, kAccent);
+    c.text(item_x, ty, fit(m.items[static_cast<size_t>(line - n_body)], item_cols), s, kText);
+  }
+  if (total > rows) {
+    const int track_h = rows * lh, thumb_h = std::max(2 * s, track_h * rows / total);
+    c.fill_rect(w - 2 * s, y, s, track_h, kFaint);
+    c.fill_rect(w - 2 * s, y + (track_h - thumb_h) * first / std::max(1, max_first), s, thumb_h, kDim);
+  }
+}
+
+// A Choice row is a line of text with room around it, and a finger's height on a touchscreen.
+int Ui::choice_row_h() const {
+  const int s = layout_.scale;
+  return std::max(Canvas::line_height(s) + 2 * s, touch_px_ * 2 / 3);
+}
+
+int Ui::choice_rows() const {
+  const int content_h = info_.height - layout_.top_h - layout_.header_h - layout_.bottom_h;
+  return std::max(1, (content_h - 2 * layout_.scale) / choice_row_h());
+}
+
+int Ui::choice_row_hit(const UiModel& m, int x, int y) const {
+  if (m.screen != Screen::Choice) return -1;
+  const int total = static_cast<int>(m.items.size()), rows = choice_rows();
+  const int first = std::max(0, std::min(m.scroll, std::max(0, total - rows)));
+  const int top = oy_ + layout_.top_h + layout_.header_h + layout_.scale;
+  if (x < ox_ || x >= ox_ + info_.width || y < top) return -1;
+  const int row = (y - top) / choice_row_h();
+  return row < rows && first + row < total ? first + row : -1;
+}
+
+// The answers to a choice: one row each, the selected one on a bar.
+void Ui::draw_choice(Canvas& c, const UiModel& m, int y0, int y1) {
+  const int s = layout_.scale, w = info_.width, margin = 4 * s;
+  const int glyph_h = font::kGlyphHeight * s, row_h = choice_row_h();
+  const int total = static_cast<int>(m.items.size()), rows = choice_rows();
+  const int max_first = std::max(0, total - rows);
+  const int first = std::max(0, std::min(m.scroll, max_first));
+  const bool scrolls = total > rows;
+  const int right = w - margin - (scrolls ? 2 * s : 0);
+  const int r = std::max(1, glyph_h / 4), text_x = margin + 2 * r + 3 * s;
+  int y = y0 + s;
+  for (int i = 0; i < rows && first + i < total; ++i, y += row_h) {
+    const int idx = first + i;
+    const bool sel = idx == m.item_sel;
+    const int ty = y + (row_h - glyph_h) / 2;
+    if (sel) c.fill_round_rect(2 * s, y, right - 2 * s + margin / 2, row_h, 2 * s, kBar);
+    else if (touch_px_ && i && idx - 1 != m.item_sel) c.fill_rect(margin, y, right - margin, 1, kFaint);  // rows are targets
+    c.fill_circle(margin + r, ty + glyph_h / 2, r, sel ? kAccent : kFaint);
+    c.text(text_x, ty, fit(m.items[static_cast<size_t>(idx)], cols_for(right - text_x, s)), s, sel ? kAccent : kText);
+  }
+  if (scrolls) {
+    const int track_y = y0 + s, track_h = std::min(rows * row_h, y1 - track_y);
+    const int thumb_h = std::max(2 * s, track_h * rows / total);
+    c.fill_rect(w - 2 * s, track_y, s, track_h, kFaint);
+    c.fill_rect(w - 2 * s, track_y + (track_h - thumb_h) * first / std::max(1, max_first), s, thumb_h, kDim);
   }
 }
 

@@ -27,6 +27,30 @@ On a Waveshare P4 7B with an OV5647 module attached, ask Hermes to take a pictur
 
 If speech is missing, check [audio setup](connect-hermes.md#4-enable-speech). For connection problems, use [troubleshooting](troubleshooting.md). To change Wi-Fi or install firmware updates, see [Manage an existing gadget](setup-board.md#manage-an-existing-gadget).
 
+## Lists, progress and QR codes
+
+A card can be more than a title and text. Ask Hermes for one of these:
+
+- **A list**, such as "put the shopping list on the screen". Each item is one row. A list longer than the screen turns its own pages, and Up and Down scroll it on boards that have them.
+- **A progress bar**, such as "show me how far the download is". Hermes updates the same card as the work goes on, so the bar moves and the list under it stays where you were reading.
+- **A QR code**, such as "show a QR code for that link". Point a phone's camera at the screen. Short text gives larger squares, which scan more easily; a 240x135 screen fits about 80 characters. Text too long for the screen is shown as text instead.
+
+Close any card with CANCEL, or a swipe down on a touchscreen. Firmware from before these cards shows the same content as plain text.
+
+## Pick an answer
+
+Hermes can ask a question with two to six answers, for example which of three lists to open. The answers appear as a list:
+
+| Board | Pick | Cancel |
+|---|---|---|
+| Touchscreen | Tap the answer. Swipe up for more answers when the list is longer than the screen | Swipe down |
+| Up and Down buttons, or a knob | Move the highlight, then press TALK | CANCEL |
+| TALK and CANCEL only | Press CANCEL to move to the next answer, then TALK | Move to the last row, **Cancel**, and press TALK |
+
+Presses in the first half second after the list appears do nothing, so a press meant for something else doesn't answer it. Hermes waits about a minute for the answer, then takes the list away and carries on without it.
+
+These choices come from the agent. Hermes's own confirmations, such as approving a risky command, stay yes or no questions: TALK or a tap for yes, CANCEL or a swipe down for no. A board with one button and no touchscreen can't pick from a list, so it shows the answers as a numbered card and Hermes asks you to say which one.
+
 ## Watch Hermes sessions on the dashboard
 
 The dashboard lists the Hermes agent's sessions, from every platform the gateway serves, and any status tiles you set on the host. When the host offers [several profiles](hermes-integration.md#running-against-a-profile-or-a-multiplexed-gateway), a device that can switch also lists the sessions of each offered profile that has the gadget plugin enabled. Each session shows its state:
