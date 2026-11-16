@@ -14,6 +14,7 @@ Three layers, each with what it needs:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import concurrent.futures
 import json
 import math
@@ -966,8 +967,7 @@ def test_the_mode_outlives_a_gateway_restart(gadget, make_sim, monkeypatch, tmp_
     ends = _turn_ends(it.sim)
     it.sim.speak_pcm(_tone(1.0), tail_s=0.2)
     assert it.sim.wait_for(lambda: _turn_ends(it.sim) > ends, timeout=20)
-    assert it.sim.last_received("reply")["text"] == "Go straight and turn left." or \
-        it.sim.last_received("reply")["text"] == "Siga recto y gire a la izquierda."
+    assert it.sim.last_received("reply")["text"] == "Siga recto y gire a la izquierda."  # translated, into Spanish
     assert it.stt == [("en", True)] and gadget.events == []
 
 
@@ -1166,3 +1166,236 @@ def test_the_mode_is_refused_on_a_hermes_without_the_speech_functions_it_uses(ga
     assert gadget.adapter.interpreting(session.device_id) is None
     sim.run_for(0.2)
     assert "interpret" not in sim.status()
+
+
+# -- review findings: what could still cross between the owner and whoever holds the gadget -----------
+
+
+def _replies(sim) -> list[str]:
+    return [m["text"] for m in sim.received if m.get("type") == "reply"]
+
+
+@requires_hermes
+@requires_sim
+@hermes
+def test_speech_queued_before_the_mode_is_not_played_to_whoever_holds_the_gadget_next(gadget, make_sim, monkeypatch,
+                                                                                    tmp_path):
+    import tools.tts_tool as tts_tool
+    from hermes_fixtures import _paired_sim
+    from hermes_gadget_plugin import audio
+
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+    adapter, session = gadget.adapter, gadget.adapter.hub.get(device_id)
+    adapter._llm = _Llm()
+    synthesis, called, said = threading.Event(), threading.Event(), []
+
+    def slow_tts(text, output_path=None, **kw):
+        said.append(text)
+        called.set()
+        assert synthesis.wait(20)
+        path = tmp_path / f"speech-{len(said)}.wav"
+        path.write_bytes(audio.wav_bytes(b"\x10\x00" * 3200, 16000))
+        return json.dumps({"success": True, "file_path": str(path)})
+
+    monkeypatch.setattr(tts_tool, "text_to_speech_tool", slow_tts)
+    # A reminder arrives and is shown; its speech is still being made when the gadget changes hands.
+    assert gadget.run(adapter.send(device_id, "Reminder: call the bank about the loan")).success
+    assert sim.wait_for(called.is_set, timeout=10)
+    gadget.run(adapter.interpret_start(session, "es", "en"))
+    assert sim.wait_for(lambda: sim.status().get("interpret") == "ES > EN", timeout=5)
+    synthesis.set()
+    sim.run_for(1.0)
+    assert sim.last_received("audio.start") is None  # made, and thrown away unplayed
+
+    # A question the agent speaks without queueing it (send_clarify) is not spoken in the mode either,
+    # and is not even synthesized.
+    spoken = gadget.run(adapter._speak(device_id, "Which account? One, checking. Two, savings."))
+    assert not spoken.success and "interpreter mode" in spoken.error
+    sim.run_for(0.5)
+    assert sim.last_received("audio.start") is None and len(said) == 1
+
+    # The translation is still spoken: that audio is the mode's own.
+    ends = _turn_ends(sim)
+    sim.type_text("buenos días")
+    assert sim.wait_for(lambda: _turn_ends(sim) > ends, timeout=20)
+    assert sim.last_received("turn.end")["outcome"] == "success"
+    assert said[-1] == "good morning" and sim.last_received("audio.start") is not None
+
+
+@requires_hermes
+@requires_sim
+@hermes
+def test_a_translation_cancelled_while_it_waits_for_the_one_before_it_does_no_work(gadget, make_sim, monkeypatch,
+                                                                                tmp_path):
+    it = _interpreter(gadget, make_sim, monkeypatch, tmp_path)
+    adapter, state = gadget.adapter, gadget.adapter.interpreting(it.device_id)
+
+    async def scenario():
+        cleaned_up = asyncio.Event()
+
+        async def earlier():  # the translation before it, cancelled and still cleaning up
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                await cleaned_up.wait()
+
+        previous = asyncio.ensure_future(earlier())
+        await asyncio.sleep(0)
+        previous.cancel()
+        waiting = asyncio.ensure_future(adapter._interpret_turn(it.session, "m2", state, "buenos días", None, previous))
+        await asyncio.sleep(0.05)
+        waiting.cancel()  # CANCEL on the device, or the mode left: this one is not wanted any more
+        await asyncio.sleep(0.05)
+        cleaned_up.set()
+        await asyncio.wait({waiting, previous}, timeout=10)
+        return waiting.done()
+
+    assert gadget.run(scenario())
+    it.sim.run_for(0.6)
+    assert it.llm.requests == [] and it.said == []  # neither translated nor spoken
+    assert it.sim.last_received("reply") is None
+    assert it.sim.last_received("turn.end")["outcome"] == "cancelled"
+    assert adapter.interpreting(it.device_id).label == "ES > EN"  # and the speaker did not switch
+
+
+@requires_hermes
+@requires_sim
+@hermes
+def test_a_mode_that_cannot_be_saved_does_not_start(gadget, make_sim, monkeypatch):
+    from hermes_fixtures import _paired_sim
+
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+    adapter, session = gadget.adapter, gadget.adapter.hub.get(device_id)
+    adapter._llm = _Llm()
+    real_save = adapter._interpret_store.save
+
+    def full_disk(sessions):
+        raise OSError(28, "No space left on device")
+
+    # Unsaved, the mode would be forgotten by a gateway restart while the gadget is in other hands.
+    monkeypatch.setattr(adapter._interpret_store, "save", full_disk)
+    with pytest.raises(ValueError, match="could not be saved"):
+        gadget.run(adapter.interpret_start(session, "es", "en"))
+    assert adapter.interpreting(device_id) is None
+    sim.run_for(0.3)
+    assert "interpret" not in sim.status()  # the device was not told a mode that is not kept
+    assert interpret.Store(adapter._interpret_store.path.parent).load() == {}
+
+    # A device already in a saved mode stays in that one.
+    monkeypatch.setattr(adapter._interpret_store, "save", real_save)
+    gadget.run(adapter.interpret_start(session, "es", "en"))
+    monkeypatch.setattr(adapter._interpret_store, "save", full_disk)
+    with pytest.raises(ValueError, match="could not be saved"):
+        gadget.run(adapter.interpret_start(session, "fr", "de"))
+    assert adapter.interpreting(device_id).label == "ES > EN"
+    assert list(interpret.Store(adapter._interpret_store.path.parent).load()) == [device_id]
+    sim.run_for(0.3)
+    assert sim.status().get("interpret") == "ES > EN"
+
+
+@requires_hermes
+@requires_sim
+@hermes
+def test_a_revoked_gadget_gets_none_of_the_messages_that_waited(gadget, make_sim, monkeypatch, tmp_path):
+    it = _interpreter(gadget, make_sim, monkeypatch, tmp_path)
+    adapter = gadget.adapter
+    adapter._auto_tts_disabled_chats.add(it.device_id)
+    assert gadget.run(adapter.send(it.device_id, "Reminder: call the bank")).success  # held for the owner
+    gadget.authorized.discard(it.device_id)  # the gadget was lost while it interpreted: its pairing is revoked
+    assert it.sim.wait_screen("pairing", timeout=10)
+    it.sim.run_for(0.3)
+    assert "Reminder: call the bank" not in _replies(it.sim)
+    assert not adapter._held_pushes.get(it.device_id)
+    gadget.authorized.add(it.device_id)  # approved again later: what was held then is not kept for it
+    assert it.sim.wait_screen("ready", timeout=10)
+    it.sim.run_for(0.3)
+    assert "Reminder: call the bank" not in _replies(it.sim)
+
+
+@requires_hermes
+@requires_sim
+@hermes
+def test_a_held_message_that_could_not_be_delivered_stays_held(gadget, make_sim, monkeypatch, tmp_path):
+    import hermes_gadget_plugin.adapter as adapter_module
+
+    it = _interpreter(gadget, make_sim, monkeypatch, tmp_path)
+    adapter = gadget.adapter
+    adapter._auto_tts_disabled_chats.add(it.device_id)
+    assert gadget.run(adapter.send(it.device_id, "Reminder: call the bank")).success
+    assert gadget.run(adapter.send(it.device_id, "Backup done", metadata={"job_id": "j1"})).success
+    real_send, failures = adapter.send, [1]
+
+    async def send(chat_id, content, reply_to=None, metadata=None):
+        if failures and content == "Reminder: call the bank":
+            failures.pop()  # the connection dropped under the first one
+            return adapter_module.SendResult(success=False, error="the connection dropped")
+        return await real_send(chat_id, content, reply_to=reply_to, metadata=metadata)
+
+    monkeypatch.setattr(adapter, "send", send)
+    gadget.run(adapter.interpret_stop(it.device_id))
+    it.sim.run_for(0.4)
+    assert _replies(it.sim) == []  # the second did not overtake the first
+    assert [content for _chat, content, _meta in adapter._held_pushes[it.device_id]] == [
+        "Reminder: call the bank", "Backup done"]
+    gadget.run(adapter._interpret_release(it.session))  # the next release: the device is back (on_ready)
+    assert it.sim.wait_for(lambda: _replies(it.sim) == ["Reminder: call the bank", "Backup done"], timeout=5)
+    assert it.device_id not in adapter._held_pushes
+
+
+@requires_hermes
+@requires_sim
+@hermes
+def test_a_translation_cancelled_before_it_began_does_not_leave_the_device_busy(gadget, make_sim, monkeypatch,
+                                                                             tmp_path):
+    it = _interpreter(gadget, make_sim, monkeypatch, tmp_path)
+    adapter, state = gadget.adapter, gadget.adapter.interpreting(it.device_id)
+
+    async def scenario():
+        adapter._interpret(it.session, "m1", state, text="buenos días")
+        return await adapter._interpret_cancel(it.device_id)  # before the translation ran a single step
+
+    assert gadget.run(scenario()) is True
+    assert it.device_id not in adapter._interpret_tasks and not adapter._busy(it.device_id)
+    assert it.llm.requests == []
+    # The device is not stuck: the speaker can be switched, and an unused mode still expires.
+    gadget.run(adapter.on_interpret_flip(it.session))
+    assert adapter.interpreting(it.device_id).label == "EN > ES"
+    state.touched -= interpret.IDLE_S + 1
+    assert it.sim.wait_for(lambda: adapter.interpreting(it.device_id) is None, timeout=10)
+
+
+@requires_hermes
+@requires_sim
+@hermes
+def test_an_image_still_being_converted_when_the_mode_starts_is_not_shown(gadget, make_sim, monkeypatch, tmp_path):
+    PIL = pytest.importorskip("PIL.Image")
+    import hermes_gadget_plugin.adapter as adapter_module
+    from hermes_fixtures import _paired_sim
+
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+    adapter, session = gadget.adapter, gadget.adapter.hub.get(device_id)
+    adapter._llm = _Llm()
+    adapter._auto_tts_disabled_chats.add(device_id)
+    path = tmp_path / "pic.png"
+    PIL.new("RGB", (800, 600), (0, 0, 255)).save(path)
+    converting, go, convert = threading.Event(), threading.Event(), adapter_module.imaging.to_rgb565
+
+    def slow(*args):
+        converting.set()
+        assert go.wait(20)
+        return convert(*args)
+
+    monkeypatch.setattr(adapter_module.imaging, "to_rgb565", slow)
+    sending = asyncio.run_coroutine_threadsafe(
+        adapter.send_image_file(device_id, str(path), caption="The owner's photo"), gadget.loop)
+    assert sim.wait_for(converting.is_set, timeout=10)
+    gadget.run(adapter.interpret_start(session, "es", "en"))  # the gadget changes hands meanwhile
+    go.set()
+    result = sending.result(10)
+    assert not result.success and "interpreter mode" in result.error
+    sim.run_for(0.5)
+    assert sim.last_received("image.start") is None and sim.device.screen() != "image"
+    assert "The owner's photo" not in _replies(sim)
