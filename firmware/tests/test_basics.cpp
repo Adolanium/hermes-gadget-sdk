@@ -252,6 +252,18 @@ TEST("vad: a whistle above the voice band is neither speech nor silence broken")
   CHECK(r == hg::Vad::Result::EndOfSpeech);
 }
 
+TEST("vad: blocks that are not whole milliseconds add up to the time they hold") {
+  hg::Vad vad;
+  hg::Vad::Config cfg;
+  cfg.sample_rate = 24000;
+  vad.reset(cfg);
+  std::vector<int16_t> loud(320);  // 13.33 ms at 24 kHz
+  for (size_t i = 0; i < loud.size(); ++i) loud[i] = static_cast<int16_t>((i / 12) % 2 ? 6000 : -6000);  // 1 kHz
+  for (int i = 0; i < 15; ++i) vad.feed(loud.data(), loud.size());
+  CHECK_EQ(vad.heard_ms(), 200u);  // 195 with each block cut to 13 ms
+  CHECK(vad.spoke());
+}
+
 TEST("vad: silence alone gives up") {
   hg::Vad vad;
   hg::Vad::Config cfg;

@@ -87,7 +87,7 @@ Every screen that isn't showing reply text uses a **hero layout**: the Hermes Ag
 
 ### Interaction
 
-- **Push-to-talk (default):** hold to speak, release to send. A press under 350 ms is discarded as a tap, and recording stops at 60 s, the server's default `max_utterance_s`.
+- **Push-to-talk (default):** hold to speak, release to send. A press under 350 ms is discarded as a tap, and recording stops at 60 s, the server's default `max_utterance_s`. A board profile that sets `codec.drop_silent_recordings` drops a held recording with less than 200 ms of speech over its `codec.vad_min_rms` and shows "Didn't hear anything".
 - **Tap mode** (`set talk_mode tap`): tap to start; the VAD (or a second tap) ends the utterance.
 - **Barge-in:** pressing talk while a reply plays stops playback immediately. The new message reaches Hermes, whose default "interrupt" busy mode stops the old turn.
 - **Cancel** acts on release: it discards a recording, dismisses an overlay, or stops a turn (Hermes `/stop`).

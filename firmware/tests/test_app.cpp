@@ -711,6 +711,70 @@ TEST("app: tap mode hears speech at the board's microphone level") {
   CHECK(d.fake.last("audio.cancel") != nullptr);
 }
 
+TEST("app: a held recording with no speech in it is not sent, on a board that asks for it") {
+  // Speech-to-text makes words out of silence, and Hermes would answer them.
+  const auto hold = [](Rig& r, int16_t level, int blocks) {
+    r.bring_online(true);
+    r.app.on_button(hg::Button::Talk, true);
+    std::vector<int16_t> pcm(1600);  // 100 ms blocks
+    for (size_t i = 0; i < pcm.size(); ++i) pcm[i] = (i / 8) % 2 ? level : static_cast<int16_t>(-level);
+    for (int i = 0; i < blocks; ++i) {
+      r.app.on_mic_samples(pcm.data(), pcm.size());
+      r.advance(100);
+    }
+    r.app.on_button(hg::Button::Talk, false);
+  };
+  hg::DeviceProfile measured = Rig::profile("ws://hermes.local:8765/gadget");
+  measured.vad_min_rms = 180;
+  measured.drop_silent_recordings = true;
+
+  Rig silent(measured);
+  hold(silent, 20, 15);  // room noise for 1.5 s
+  CHECK(silent.fake.last("audio.end") == nullptr);
+  const Value* cancel = silent.fake.last("audio.cancel");
+  CHECK(cancel != nullptr);
+  if (cancel) CHECK_EQ((*cancel)["reason"].as_string(), std::string("no speech"));
+  CHECK(silent.app.screen() == hg::Screen::Ready);
+
+  Rig spoken(measured);  // speech over the board's floor goes
+  hold(spoken, 300, 15);
+  CHECK(spoken.fake.last("audio.end") != nullptr);
+  CHECK(spoken.app.screen() == hg::Screen::Thinking);
+
+  Rig deaf(measured);  // a port that delivered no audio at all: sent as before
+  deaf.bring_online(true);
+  deaf.app.on_button(hg::Button::Talk, true);
+  deaf.advance(1000);
+  deaf.app.on_button(hg::Button::Talk, false);
+  CHECK(deaf.fake.last("audio.end") != nullptr);
+
+  // Audio that arrives late: 300 ms of it in a 400 ms press is enough to hold 200 ms of speech,
+  // so silence in it is dropped; 100 ms is not, and goes as before.
+  const auto late = [](Rig& r, int blocks) {
+    r.bring_online(true);
+    r.app.on_button(hg::Button::Talk, true);
+    std::vector<int16_t> pcm(1600);
+    for (size_t i = 0; i < pcm.size(); ++i) pcm[i] = (i / 8) % 2 ? 20 : -20;
+    r.advance(400 - 100 * blocks);
+    for (int i = 0; i < blocks; ++i) {
+      r.app.on_mic_samples(pcm.data(), pcm.size());
+      r.advance(100);
+    }
+    r.app.on_button(hg::Button::Talk, false);
+  };
+  Rig brief(measured);
+  late(brief, 3);
+  CHECK(brief.fake.last("audio.end") == nullptr);
+  CHECK(brief.fake.last("audio.cancel") != nullptr);
+  Rig scant(measured);
+  late(scant, 1);
+  CHECK(scant.fake.last("audio.end") != nullptr);
+
+  Rig other;  // a board that does not ask sends the silence, as hold mode always did
+  hold(other, 20, 15);
+  CHECK(other.fake.last("audio.end") != nullptr);
+}
+
 TEST("app: a short tap is discarded instead of sent") {
   Rig r;
   r.bring_online(true);
@@ -8624,7 +8688,7 @@ TEST("recording buffer: at 24 kHz the buffered upload goes in 960-sample (40 ms)
   Rig r(p);
   r.bring_online(true);
   r.app.on_button(hg::Button::Talk, true);
-  std::vector<int16_t> pcm(320, 7);  // the codec boards' 13 ms deliveries
+  std::vector<int16_t> pcm(320, 1000);  // the codec boards' 13 ms deliveries, at speech level
   for (int i = 0; i < 31; ++i) {
     r.app.on_mic_samples(pcm.data(), pcm.size());
     r.advance(10);

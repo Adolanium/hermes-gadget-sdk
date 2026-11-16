@@ -25,6 +25,7 @@ void Vad::reset(const Config& cfg) {
   cfg_ = cfg;
   noise_ = 0;
   elapsed_ms_ = speech_ms_ = silence_ms_ = 0;
+  carry_ = 0;
   z1_ = z2_ = 0;
   b0_ = 1;
   b1_ = b2_ = a1_ = a2_ = 0;
@@ -55,7 +56,11 @@ float Vad::voice_rms(const int16_t* samples, size_t count) {
 
 Vad::Result Vad::feed(const int16_t* samples, size_t count) {
   if (count == 0 || cfg_.sample_rate == 0) return Result::Continue;
-  uint32_t ms = static_cast<uint32_t>(count * 1000 / cfg_.sample_rate);
+  // Whole milliseconds, with the rest carried: blocks that are not a whole number of
+  // milliseconds (320 samples at 24 kHz) would otherwise count short every time.
+  const uint64_t scaled = static_cast<uint64_t>(count) * 1000 + carry_;
+  const uint32_t ms = static_cast<uint32_t>(scaled / cfg_.sample_rate);
+  carry_ = static_cast<uint32_t>(scaled % cfg_.sample_rate);
   float r = voice_rms(samples, count);
   elapsed_ms_ += ms;
   // Track the noise floor quickly downwards, slowly upwards. It starts at the
