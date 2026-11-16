@@ -1709,6 +1709,7 @@ void App::start_listening(bool hands_free) {
   }
   // Talking over a recording still uploading replaces it: the hub drops its part first.
   if (rec_on_) cancel_upload("replaced");
+  end_expression();
   hands_free_ = hands_free;
   mic_stream_ = static_cast<uint8_t>(mic_stream_ % 250 + 1);
   mic_seq_ = 0;
@@ -1922,6 +1923,7 @@ void App::start_new_session() {
   close_camera();
   clear_prompt();
   send(proto::message("session.new"));
+  end_expression();
   reply_.clear();
   user_echo_.clear();
   status_ = tr(i18n::Msg::StartingNewSession);
@@ -1997,6 +1999,7 @@ void App::submit_text(std::string_view text) {
   }
   stop_playback();
   dismiss_overlay();
+  end_expression();
   request_id_ = next_id('t');
   json::Value msg = proto::message("text");
   msg.set("id", request_id_).set("text", t);
@@ -2488,6 +2491,7 @@ void App::update_model() {
   m.qr = nullptr;
   m.face = face_ ? &*face_ : nullptr;
   m.expression = expression_now();
+  m.expression_still = expression_still();
   m.dash.clear();
   m.hero = false;
   m.name_target = false;

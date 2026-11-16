@@ -250,8 +250,11 @@ mascot::Expression expression(const UiModel& m) {
   }
 }
 
-// The step of an expression's mark: it changes twice a second, and stands still with animation off.
-int mark_phase(const UiModel& m) { return m.animate ? static_cast<int>((m.frame / 5) % 2) : 0; }
+// The step of an expression's mark: it changes twice a second, and stands still with animation
+// off and once the app says it has moved for long enough.
+int mark_phase(const UiModel& m) {
+  return m.animate && !m.expression_still ? static_cast<int>((m.frame / 5) % 2) : 0;
+}
 
 mascot::Frame mascot_frame(const UiModel& m) {
   // With animation off the Updating mascot never blinks, so the screen stands still.
@@ -646,11 +649,12 @@ void Ui::draw_frame(const UiModel& m) {
     int y0 = y_header, y1 = y_bottom;
     bool redraw = !valid_ || !hero_valid_ || stat != hero_static_;
     if (!redraw && anim != hero_anim_) {
-      hero_anim_rows(m, hero_expression_, y0, y1);  // only what can move
+      hero_anim_rows(m, hero_expression_, hero_frame_, y0, y1);  // only what can move
       redraw = true;
     }
     if (redraw) draw_bands(y0, y1, &Ui::draw_hero, m);
     hero_expression_ = expression(m);
+    hero_frame_ = mascot_frame(m);
     hero_static_ = stat;
     hero_anim_ = anim;
     hero_valid_ = true;
@@ -1599,10 +1603,12 @@ void Ui::draw_mark(Canvas& c, const UiModel& m, const Rect& r) {
   }
 }
 
-void Ui::hero_anim_rows(const UiModel& m, mascot::Expression was, int& y0, int& y1) const {
+void Ui::hero_anim_rows(const UiModel& m, mascot::Expression was, mascot::Frame was_frame, int& y0,
+                        int& y1) const {
   const HeroGeom g = hero_geom(m);
   const int size = g.size, my = g.y;
   const mascot::Anchors& a = mascot::anchors(m.face);
+  const mascot::Expression now = expression(m);
   // A colour face's band, as the rows Canvas::picture draws it on at `size`.
   auto band_rows = [&](mascot::Frame frame, int& lo, int& hi) {
     if (!m.face || !m.face->rgb565 || !m.face->band(frame).rows) return;
@@ -1613,6 +1619,12 @@ void Ui::hero_anim_rows(const UiModel& m, mascot::Expression was, int& y0, int& 
   };
   int top = my + size * a.eyes_y0 / 1000, bottom = my + size * a.eyes_y1 / 1000;
   band_rows(mascot::Frame::Blink, top, bottom);
+  // A step of an expression's mark with the face's frame as it was: the eyes stay out of it.
+  if (now != mascot::Expression::Neutral && now == was && mascot_frame(m) == was_frame) {
+    const Rect r = mark_rect(g, a);
+    top = r.y;
+    bottom = r.y + r.h;
+  }
   auto add = [&](int lo, int hi) {
     top = std::min(top, lo);
     bottom = std::max(bottom, hi);
@@ -1633,6 +1645,8 @@ void Ui::hero_anim_rows(const UiModel& m, mascot::Expression was, int& y0, int& 
       break;
     }
     case Screen::Thinking:
+      if (now != mascot::Expression::Neutral && now == was) break;  // no dots under a mark
+      [[fallthrough]];
     case Screen::Connecting:
     case Screen::Updating: {
       int ty = my + size * a.head_top_right.y / 1000;
@@ -1641,11 +1655,11 @@ void Ui::hero_anim_rows(const UiModel& m, mascot::Expression was, int& y0, int& 
     }
     default: break;
   }
-  for (mascot::Expression e : {expression(m), was}) {
+  for (mascot::Expression e : {now, was}) {
     if (e == mascot::Expression::Neutral) continue;
     const Rect r = mark_rect(g, a);
     add(r.y, r.y + r.h);
-    if (e == mascot::Expression::Alert) {  // the mouth it holds open
+    if (e == mascot::Expression::Alert && now != was) {  // the mouth it holds open, as it opens or shuts
       int lo = my + size * a.mouth_y0 / 1000, hi = my + size * a.mouth_y1 / 1000;
       band_rows(mascot::Frame::Talk, lo, hi);
       add(lo, hi);

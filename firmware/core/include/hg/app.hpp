@@ -510,7 +510,11 @@ class App {
   void add_face_actions();
   // False with `error` for an unknown name, or for `timed` seconds outside 1..3600.
   bool set_expression(std::string_view name, int64_t seconds, bool timed, std::string& error);
-  mascot::Expression expression_now();  // ends it first when its time is up or the user's next turn began
+  // The user's next turn ends it: called where a recording starts, a typed message is sent and a
+  // new session is asked for. A turn Hermes starts by itself does not.
+  void end_expression();
+  mascot::Expression expression_now();  // ends it first when its seconds are over
+  bool expression_still() const;        // its mark has moved for long enough
   std::string face_command(std::string_view args);
   bool alarm_flash() const;
   void beep_pattern();
@@ -876,7 +880,7 @@ class App {
   mascot::Expression expression_ = mascot::Expression::Neutral;
   bool expression_timed_ = false;       // it ends at expression_until_
   uint32_t expression_until_ = 0;
-  Mode expression_mode_ = Mode::Idle;   // the mode it was last seen in (expression_now)
+  uint32_t expression_since_ = 0;       // when it was set: the mark moves for a minute from then
 
   // frame timing: the running statistics while `perf` is on, and the bench
   std::unique_ptr<FrameStats> frame_stats_;

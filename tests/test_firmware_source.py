@@ -171,3 +171,27 @@ def test_tailnet_relay_certificate_is_verified():
     found = [str(p.relative_to(REPO)) for p in sorted(esp32.rglob("sdkconfig.defaults*"))
              if ".pio" not in p.parts and off.search(p.read_text())]
     assert not found, found
+
+
+def test_every_console_command_the_core_answers_is_registered_on_the_esp32():
+    # ESP-IDF's console runs only the names registered in port_console.cpp's kCommands: a command the
+    # core answers but that list lacks works in the simulator and is "Unrecognized command" on a
+    # board. `face` shipped that way, with the docs saying it worked.
+    core = set()
+    for path in sorted((FIRMWARE / "core" / "src").glob("app*.cpp")):
+        if path.name == "app.cpp":
+            for _, code in _code_lines(path):
+                core.update(re.findall(r'\bcmd == "([a-z-]+)"', code))
+    assert {"help", "status", "perf", "face"} <= core  # the pattern still finds App::console's commands
+
+    port = (FIRMWARE / "esp32" / "main" / "port_console.cpp").read_text(encoding="utf-8")
+    listed = re.search(r"kCommands\[\]\s*=\s*\{(.*?)\};", port, re.S)
+    assert listed, "port_console.cpp no longer lists its commands in kCommands"
+    registered = set(re.findall(r'"([a-z-]+)"', listed.group(1)))
+
+    # `yes` and `no` answer a question on the screen; they were never registered. Take a name off
+    # this list when it is registered, and add none.
+    unregistered = {"yes", "no"}
+    assert unregistered.isdisjoint(registered), "registered now: take them off the list above"
+    assert core - registered == unregistered
+    assert registered <= core, f"registered but not answered by the core: {sorted(registered - core)}"

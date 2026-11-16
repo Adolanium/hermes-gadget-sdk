@@ -1417,6 +1417,7 @@ A device refused for a gateway route has `"unpaired_reason": "routed"` in `statu
 | `wifi forget <ssid>` | Remove a saved network |
 | `phone` / `phone pair` / `phone pair close` / `phone forget` | On boards with Bluetooth: phone app state, open or close pairing, or remove every paired phone ([protocol](protocol.md#phone-app-over-bluetooth)) |
 | `perf` / `perf on` / `perf off` / `perf bench` | Frame timing and the renderer bench ([measure frame timing](development.md#measure-frame-timing)) |
+| `face` / `face <expression> [seconds]` | Report the face's [expression](architecture.md#the-mascot) as `@face` JSON, or set it: `neutral`, `happy`, `confused`, `alert` or `sleepy`, for 1 to 3600 seconds or until the next turn |
 | `yes` / `no` | Answer the question on screen |
 | `reconnect` | Drop and re-open the Hermes connection |
 | `forget-key` | New device identity on next boot (re-enrollment and re-pairing) |

@@ -335,10 +335,12 @@ A device with a display advertises `face.set` in `hello.actions`. It gives the f
 {"type": "action.result", "id": "x2", "ok": true, "result": {"expression": "happy", "seconds": 10}}
 ```
 
-- Without `seconds`, the expression lasts until the user's next turn: a recording, or a message typed while the device is idle. An expression set during a turn stays through that turn's reply.
+- Without `seconds`, the expression lasts until the user's next turn. That is one of three things the user does on the device, in any state: starting a recording (even one that is then discarded), sending a typed message, or starting a new session. Nothing else ends it: not the reply to the turn it was set in, and not a turn Hermes starts by itself (`turn.start` with no recording or message before it, as for a device event that notifies Hermes).
+- With `seconds`, the user's next turn still ends it, when that comes first.
 - A new `face.set` replaces the expression and its time. A restart forgets it; a lost connection does not.
 - The device draws the expression on its idle, thinking and speaking screens. On any other screen, and while the screen is off or shows the resting clock, it is kept but not drawn. The action does not wake the screen.
-- An unknown `expression`, or `seconds` that is not an integer from 1 to 3600, fails with `ok: false` and changes nothing.
+- An unknown `expression`, or `seconds` that is not an integer from 1 to 3600 (2.9 and `"10"` are refused, not rounded), fails with `ok: false` and changes nothing.
+- The mark beside the head moves for 60 s after each `face.set`, then stands still for as long as the expression lasts.
 - While an expression is set, the console's `status` carries it as `expression`.
 
 [The mascot](architecture.md#the-mascot) says what each expression looks like.

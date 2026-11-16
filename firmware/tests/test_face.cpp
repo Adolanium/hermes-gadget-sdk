@@ -19,28 +19,28 @@ using hg::mascot::Expression;
 
 namespace {
 
-// A 320x240 panel that counts the rows flushed to it.
+// A panel, 320x240 unless said otherwise, that counts the rows flushed to it.
 struct Panel : hg::Display {
   static constexpr int kW = 320, kH = 240;
-  std::vector<uint16_t> fb = std::vector<uint16_t>(kW * kH, 0);
-  int flushes = 0, rows = 0, row_lo = kH, row_hi = 0;  // the flushed rows span [row_lo, row_hi)
+  int w, h;
+  bool round;
+  std::vector<uint16_t> fb;
+  int flushes = 0, rows = 0;
+  explicit Panel(int width = kW, int height = kH, bool round_panel = false)
+      : w(width), h(height), round(round_panel), fb(static_cast<size_t>(width * height), 0) {}
   hg::DisplayInfo info() const override {
     hg::DisplayInfo d;
-    d.width = kW;
-    d.height = kH;
+    d.width = static_cast<uint16_t>(w);
+    d.height = static_cast<uint16_t>(h);
+    d.round = round;
     return d;
   }
   uint16_t* framebuffer() override { return fb.data(); }
   void flush(uint16_t y0, uint16_t y1) override {
     ++flushes;
     rows += y1 - y0;
-    row_lo = std::min<int>(row_lo, y0);
-    row_hi = std::max<int>(row_hi, y1);
   }
-  void reset() {
-    flushes = rows = row_hi = 0;
-    row_lo = kH;
-  }
+  void reset() { flushes = rows = 0; }
 };
 
 // The idle screen's hero model at a frame where the eyes are open and nothing else moves.
@@ -59,8 +59,8 @@ hg::UiModel hero(Screen screen, Expression e, uint32_t frame = 10) {
 }
 
 // The pixels a fresh Ui draws for `m`: what a whole repaint shows.
-std::vector<uint16_t> fresh(const hg::UiModel& m) {
-  Panel p;
+std::vector<uint16_t> fresh(const hg::UiModel& m, int w = Panel::kW, int h = Panel::kH, bool round = false) {
+  Panel p(w, h, round);
   hg::Ui ui(p);
   ui.render(m);
   return p.fb;
@@ -78,7 +78,10 @@ void differing_rows(const std::vector<uint16_t>& a, const std::vector<uint16_t>&
   if (hi == 0) lo = 0;
 }
 
-struct FaceHal : Panel, hg::Transport, hg::Storage, hg::System {
+struct FaceHal : Panel, hg::AudioIn, hg::Transport, hg::Storage, hg::System {
+  bool start(uint32_t) override { return true; }
+  void stop() override {}
+
   uint32_t clock = 1000;
   uint32_t now_ms() override { return clock; }
   void random_bytes(uint8_t* out, size_t len) override {
@@ -128,6 +131,7 @@ struct Rig {
     h.system = &f;
     h.transport = &f;
     h.storage = &f;
+    h.mic = &f;
     if (display) h.display = &f;
     return h;
   }
@@ -207,7 +211,8 @@ TEST("face: face.set checks its expression and its seconds") {
   res = r.action(R"({"expression":"angry"})");
   CHECK(res != nullptr && !(*res)["ok"].as_bool());
   for (const char* bad : {R"({"expression":"happy","seconds":0})", R"({"expression":"happy","seconds":3601})",
-                          R"({"expression":"happy","seconds":"ten"})"}) {
+                          R"({"expression":"happy","seconds":"ten"})", R"({"expression":"happy","seconds":2.9})",
+                          R"({"expression":"happy","seconds":true})"}) {
     res = r.action(bad);
     CHECK(res != nullptr && !(*res)["ok"].as_bool());
     if (res) CHECK_EQ((*res)["error"].as_string(), std::string("seconds must be between 1 and 3600"));
@@ -265,9 +270,134 @@ TEST("face: an expression set during a turn outlasts its reply, and the user's n
   CHECK(r.app.screen() == Screen::Ready);
   CHECK(r.app.model().expression == Expression::Happy);
 
-  r.app.console("say and another thing");  // a message typed while idle: the next turn
+  r.app.console("say and another thing");  // a typed message: the next turn
   CHECK(r.app.screen() == Screen::Thinking);
   CHECK(r.app.model().expression == Expression::Neutral);
+}
+
+TEST("face: a recording ends an expression, in any mode") {
+  Rig r;
+  r.online();
+  r.action(R"({"expression":"happy"})");
+  r.app.console("talk");  // from idle
+  CHECK(r.app.screen() == Screen::Listening);
+  CHECK(r.app.model().expression == Expression::Neutral);
+  r.app.console("cancel");
+  r.app.console("release");
+  r.idle(1000);
+
+  // Talking over a reply: the expression set in that turn goes with the new recording.
+  r.app.console("say hello");
+  r.action(R"({"expression":"confused"})");
+  r.server(R"({"type":"turn.start","turn":"t1"})");
+  r.server(R"({"type":"reply","turn":"t1","text":"Here is the answer.","final":true})");
+  CHECK(r.app.screen() == Screen::Responding);
+  CHECK(r.app.model().expression == Expression::Confused);
+  r.app.console("talk");
+  CHECK(r.app.screen() == Screen::Listening);
+  CHECK(r.app.model().expression == Expression::Neutral);
+}
+
+TEST("face: a message typed while a reply shows ends an expression, and so does a new session") {
+  Rig r;
+  r.online();
+  r.app.console("say hello");
+  r.server(R"({"type":"turn.start","turn":"t1"})");
+  r.server(R"({"type":"reply","turn":"t1","text":"Here is the answer.","final":true})");
+  r.action(R"({"expression":"happy"})");
+  CHECK(r.app.screen() == Screen::Responding);
+  r.app.console("say and another thing");  // Responding to Thinking: not from idle
+  CHECK(r.app.model().expression == Expression::Neutral);
+  r.server(R"({"type":"turn.end","turn":"t1","outcome":"success"})");
+  r.idle(1000);
+
+  r.action(R"({"expression":"alert"})");
+  CHECK(r.app.model().expression == Expression::Alert);
+  r.app.console("new-session");
+  CHECK(r.app.model().expression == Expression::Neutral);
+}
+
+TEST("face: a turn Hermes starts by itself leaves the expression") {
+  Rig r;
+  r.online();
+  r.action(R"({"expression":"sleepy"})");
+  r.server(R"({"type":"turn.start","turn":"e1"})");  // as for a device event that notifies Hermes
+  CHECK(r.app.screen() == Screen::Thinking);
+  CHECK(r.app.model().expression == Expression::Sleepy);
+  r.server(R"({"type":"turn.end","turn":"e1","outcome":"success"})");
+  r.idle(1000);
+  CHECK(r.app.screen() == Screen::Ready);
+  CHECK(r.app.model().expression == Expression::Sleepy);
+}
+
+TEST("face: a typed message that cannot be sent leaves the expression") {
+  Rig r;
+  r.online();
+  r.action(R"({"expression":"happy"})");
+  r.app.on_transport_closed("lost");
+  r.app.console("say hello");
+  CHECK_EQ(r.app.console("face"), std::string(R"(@face {"expression":"happy"})"));
+}
+
+TEST("face: a new face.set replaces the time of the one before") {
+  Rig r;
+  r.online();
+  r.action(R"({"expression":"happy","seconds":2})");
+  r.idle(1000);
+  r.action(R"({"expression":"alert"})");  // no seconds: the first one's two must not end it
+  r.idle(3000);
+  CHECK(r.app.model().expression == Expression::Alert);
+
+  r.action(R"({"expression":"happy","seconds":2})");
+  r.idle(1000);
+  r.action(R"({"expression":"confused","seconds":10})");
+  r.idle(3000);
+  CHECK(r.app.model().expression == Expression::Confused);
+  r.idle(7500);
+  CHECK(r.app.model().expression == Expression::Neutral);
+}
+
+TEST("face: an expression's seconds run across the clock's wrap") {
+  Rig r;
+  r.fake.clock = 0xFFFFFFFFu - 20000;  // 20 s before the 32-bit millisecond clock wraps
+  r.online();
+  r.idle(15000);
+  r.action(R"({"expression":"alert","seconds":10})");  // ends after the wrap
+  r.idle(2000);
+  CHECK(r.app.model().expression == Expression::Alert);
+  r.idle(6000);  // the clock has wrapped
+  CHECK(r.fake.clock < 0x80000000u);
+  CHECK(r.app.model().expression == Expression::Alert);
+  r.idle(2500);
+  CHECK(r.app.model().expression == Expression::Neutral);
+}
+
+TEST("face: the mark moves for a minute, then stands still") {
+  Rig r;
+  r.online();
+  r.action(R"({"expression":"happy"})");
+  CHECK(!r.app.model().expression_still);
+  r.idle(59000);
+  CHECK(!r.app.model().expression_still);
+  r.idle(1500);
+  CHECK(r.app.model().expression_still);
+  CHECK(r.app.model().expression == Expression::Happy);
+  r.action(R"({"expression":"happy"})");  // set again: it moves again
+  CHECK(!r.app.model().expression_still);
+}
+
+TEST("face: the mascot bench draws the same frames whatever expression is set") {
+  auto bench = [](const char* expression) {
+    Rig r;
+    r.online();
+    if (expression) r.app.console(std::string("face ") + expression);
+    r.app.console("perf bench mascot");
+    r.advance(300);  // a few of its frames
+    return r.fake.fb;
+  };
+  const std::vector<uint16_t> plain = bench(nullptr);
+  CHECK(bench("alert") == plain);
+  CHECK(bench("sleepy") == plain);
 }
 
 TEST("face: the console sets, reports and refuses expressions") {
@@ -315,6 +445,22 @@ TEST("face: sleepy shuts the eyes and alert never blinks") {
   CHECK(rows(alert) == rows(open));
 }
 
+TEST("face: sleepy shuts the eyes while thinking and under a reply too, and alert keeps them open") {
+  // Frames 0 (a blink) and 8 (open eyes) show the same thinking dots.
+  for (Screen s : {Screen::Thinking, Screen::Responding}) {
+    const std::vector<uint16_t> open = fresh(hero(s, Expression::Neutral, 8));
+    const std::vector<uint16_t> shut = fresh(hero(s, Expression::Neutral, 0));
+    int lo, hi;
+    differing_rows(open, shut, lo, hi);
+    CHECK(hi > lo);
+    auto rows = [&](const std::vector<uint16_t>& fb) {
+      return std::vector<uint16_t>(fb.begin() + lo * Panel::kW, fb.begin() + hi * Panel::kW);
+    };
+    CHECK(rows(fresh(hero(s, Expression::Sleepy, 8))) == rows(shut));
+    CHECK(rows(fresh(hero(s, Expression::Alert, 0))) == rows(open));
+  }
+}
+
 TEST("face: a change of expression redraws only its rows, and leaves what a whole repaint would") {
   Panel p;
   hg::Ui ui(p);
@@ -352,6 +498,87 @@ TEST("face: a mark's step flushes only the mark's rows, and stands still with an
   m.frame = 20;
   ui.render(m);
   CHECK_EQ(p.flushes, 0);
+
+  // Moving again, then stopped by the app after its minute: no more steps.
+  m.animate = true;
+  ui.render(m);
+  m.expression_still = true;
+  ui.render(m);
+  CHECK(p.fb == fresh(m));
+  p.reset();
+  for (uint32_t f = 21; f < 44; ++f) {  // up to the next blink
+    m.frame = f;
+    ui.render(m);
+  }
+  CHECK_EQ(p.flushes, 0);
+}
+
+TEST("face: a step of the mark flushes the mark's rows alone, for alert as for the others") {
+  // The mark's box is 8 rows per text scale, 4 at this face's 144 px, and a flush adds 3 rows of margin.
+  // The eyes and alert's open mouth lie below it and have not changed.
+  const int mark_rows = 8 * 4 + 3;
+  for (Expression e : {Expression::Happy, Expression::Confused, Expression::Alert, Expression::Sleepy}) {
+    Panel p;
+    hg::Ui ui(p);
+    hg::UiModel m = hero(Screen::Ready, e, 10);
+    ui.render(m);
+    for (uint32_t f : {15u, 20u, 25u}) {
+      p.reset();
+      m.frame = f;
+      ui.render(m);
+      CHECK_EQ(p.flushes, 1);
+      CHECK(p.rows <= mark_rows);
+      CHECK(p.fb == fresh(m));
+    }
+  }
+}
+
+TEST("face: a blink under an expression still repaints the eyes") {
+  Panel p;
+  hg::Ui ui(p);
+  hg::UiModel m = hero(Screen::Ready, Expression::Happy, 44);
+  ui.render(m);
+  for (uint32_t f : {45u, 46u, 47u, 50u}) {  // the eyes shut for two frames, open, then the mark steps
+    m.frame = f;
+    ui.render(m);
+    CHECK(p.fb == fresh(m));
+  }
+}
+
+TEST("face: the mark stays whole on small, narrow and round panels, wherever the face puts its anchor") {
+  // A still colour face whose thinking-dots anchor is in a corner: the mark must come back onto
+  // the panel and under the top bar, with every pixel a mark in the middle of the face has.
+  const int px = 96;
+  std::vector<uint16_t> picture(static_cast<size_t>(px * px), hg::rgb565(60, 60, 200));
+  // The pixels the widest mark, the sparkles, changes: the same number wherever it is drawn whole.
+  auto changed = [&](int w, int h, bool round, int16_t ax, int16_t ay) {
+    hg::mascot::Face face;
+    face.hash = "corner";
+    face.rgb565 = picture.data();
+    face.px = px;
+    face.anchors = hg::mascot::anchors();
+    face.anchors.head_top_right = {ax, ay};
+    hg::UiModel m = hero(Screen::Ready, Expression::Happy);
+    m.face = &face;
+    const std::vector<uint16_t> fb = fresh(m, w, h, round);
+    m.expression = Expression::Neutral;
+    const std::vector<uint16_t> plain = fresh(m, w, h, round);
+    size_t n = 0;
+    for (size_t i = 0; i < fb.size(); ++i) n += fb[i] != plain[i];
+    return n;
+  };
+  struct Size {
+    int w, h;
+    bool round;
+  };
+  for (const Size& s : {Size{320, 240, false}, Size{240, 135, false}, Size{240, 320, false}, Size{128, 128, false},
+                        Size{240, 240, true}, Size{466, 466, true}}) {
+    const auto whole = changed(s.w, s.h, s.round, 500, 500);
+    CHECK(whole > 0);
+    CHECK_EQ(changed(s.w, s.h, s.round, 1000, 0), whole);     // top right corner
+    CHECK_EQ(changed(s.w, s.h, s.round, 1000, 1000), whole);  // bottom right
+    CHECK_EQ(changed(s.w, s.h, s.round, 0, 0), whole);        // top left
+  }
 }
 
 TEST("face: while thinking the mark takes the dots' place") {

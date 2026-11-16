@@ -1378,6 +1378,8 @@ def test_agent_sets_the_face_expression_through_the_hub(loop_thread, devserver, 
     assert call({"expression": "alert", "seconds": 1}).result() == {"expression": "alert", "seconds": 1}
     assert sim.wait_for(lambda: "expression" not in sim.status(), timeout=3)
 
+    assert "seconds must be between 1 and 3600" in str(call({"expression": "happy", "seconds": 2.9}).exception())
+
     # Without them it lasts until the user's next turn.
     assert call({"expression": "happy"}).result() == {"expression": "happy"}
     sim.run_for(1.5)

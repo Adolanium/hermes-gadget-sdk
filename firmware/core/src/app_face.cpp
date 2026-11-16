@@ -1,7 +1,8 @@
 // The face's expression, set by Hermes with the face.set action ("look happy") or from the
 // console (`face happy 10`). The renderer draws it on the idle, thinking and speaking screens
-// (ui.cpp, draw_mark). It lasts for the seconds asked for, or until the user's next turn.
-// RAM only: a restart forgets it.
+// (ui.cpp, draw_mark). It lasts for the seconds asked for, or until the user's next turn
+// (end_expression). RAM only: a restart forgets it.
+#include <cmath>
 #include <cstdlib>
 
 #include "hg/app.hpp"
@@ -10,6 +11,9 @@ namespace hg {
 namespace {
 
 constexpr int64_t kMaxExpressionS = 3600;
+// The mark moves for this long after face.set, then stands still: an expression with no
+// seconds can stay for hours, and a lit screen should not be redrawn twice a second for it.
+constexpr uint32_t kMarkMovesMs = 60000;
 
 std::string expression_names() {
   std::string names;
@@ -42,7 +46,8 @@ void App::add_face_actions() {
   set.params.set("type", "object").set("properties", props).set("required", req);
   set.handler = [this](const json::Value& args, json::Value& result, std::string& error) {
     const bool timed = !args["seconds"].is_null();
-    if (timed && !args["seconds"].is_number()) {
+    // A whole number: 2.9 is refused, not cut to 2.
+    if (timed && (!args["seconds"].is_number() || args["seconds"].as_number() != std::floor(args["seconds"].as_number()))) {
       error = "seconds must be between 1 and 3600";
       return false;
     }
@@ -67,26 +72,24 @@ bool App::set_expression(std::string_view name, int64_t seconds, bool timed, std
   expression_ = e;
   expression_timed_ = timed && e != mascot::Expression::Neutral;
   expression_until_ = now() + static_cast<uint32_t>(seconds) * 1000u;
-  expression_mode_ = mode_;
+  expression_since_ = now();
   update_model();
   return true;
 }
 
+void App::end_expression() {
+  expression_ = mascot::Expression::Neutral;
+  expression_timed_ = false;
+}
+
 mascot::Expression App::expression_now() {
-  if (expression_ == mascot::Expression::Neutral) return expression_;
-  // Signed age, like the timer's: a late read must not look like a wrapped clock.
-  bool over = expression_timed_ && static_cast<int32_t>(now() - expression_until_) >= 0;
-  if (mode_ != expression_mode_) {
-    // The user's next turn ends it: a recording, or a message typed while idle. A reply that
-    // follows the turn it was set in does not.
-    over = over || mode_ == Mode::Listening || (expression_mode_ == Mode::Idle && mode_ == Mode::Thinking);
-    expression_mode_ = mode_;
-  }
-  if (over) {
-    expression_ = mascot::Expression::Neutral;
-    expression_timed_ = false;
-  }
+  // Signed age, like the timer's: the clock wraps, and a late read must not look like it.
+  if (expression_timed_ && static_cast<int32_t>(now() - expression_until_) >= 0) end_expression();
   return expression_;
+}
+
+bool App::expression_still() const {
+  return expression_ != mascot::Expression::Neutral && now() - expression_since_ >= kMarkMovesMs;
 }
 
 std::string App::face_command(std::string_view rest) {
