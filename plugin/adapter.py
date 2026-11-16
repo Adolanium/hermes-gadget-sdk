@@ -860,7 +860,9 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if verdict is None:
             return served
         state = self._interpreting.get(session.device_id)
-        if state is not None and state.expired() and session.device_id not in self._interpret_tasks:
+        # Not for a device that is no longer trusted: leaving the mode here would deliver what was
+        # held for its owner while it still counts as paired. The revocation below ends its mode.
+        if verdict and state is not None and state.expired() and session.device_id not in self._interpret_tasks:
             await self.interpret_stop(session.device_id)  # left in the mode, unused: the device is told
             await session.send_notice("Interpreter off")
         if session.profile != "default":
@@ -1416,8 +1418,15 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         shown = self._prompts.get(session.device_id) or []
         if shown:  # the gadget is about to change hands: its question waits (see _show_prompt)
             await session.close_prompt(shown[0].id)
-        await session.send_interpret(state.message())
+        await self._interpret_tell(session)
         return state
+
+    async def _interpret_tell(self, session: DeviceSession) -> None:
+        """Tell the device the mode it is in now, on or off. Always read here and never carried
+        across an await: a start and a stop that overlap must not leave the device, and the mirror
+        of its screen (DeviceSession.private), believing something else than this side."""
+        state = self._interpreting.get(session.device_id)
+        await session.send_interpret(state.message() if state is not None else interpret.OFF)
 
     async def interpret_stop(self, device_id: str) -> bool:
         """Leave interpreter mode, stopping a translation under way; False when the device was not
@@ -1429,7 +1438,9 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             self._interpret_save()
             logger.info("[%s] %s stopped interpreting", self.name, device_id)
             if session is not None and not session.closed:
-                await session.send_interpret(interpret.OFF)
+                # A mode may have been started again while the translation was ending: then the
+                # device is told that one, and nothing is released.
+                await self._interpret_tell(session)
                 await self._interpret_release(session)
         return was_on
 
@@ -1442,20 +1453,26 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         await self._show_prompt(session)
         # One at a time, oldest first, and a message leaves the queue for good only once it was sent:
         # after a send that failed (the connection dropped), it and the rest wait for the next release.
-        while self._held_pushes.get(device_id):
+        # The list itself says whether the queue is still the one this began with: a revocation
+        # discards it, and nothing is delivered from, or put back into, a queue that was discarded.
+        queue = self._held_pushes.get(device_id)
+        while queue and self._held_pushes.get(device_id) is queue:
             if device_id in self._interpreting or not session.paired or session.closed:
                 return  # the mode is on again, or the device left: they go on waiting
-            held = self._held_pushes[device_id].pop(0)
+            held = queue.pop(0)
             chat_id, content, metadata = held
             try:
                 sent = (await self.send(chat_id, content, metadata=metadata)).success
             except Exception as exc:
                 logger.warning("[%s] could not deliver a held message to %s: %s", self.name, device_id, exc)
                 sent = False
+            if self._held_pushes.get(device_id) is not queue:
+                return  # revoked while it was being sent: what failed is not kept for a later approval
             if not sent:
-                self._held_pushes.setdefault(device_id, []).insert(0, held)
+                queue.insert(0, held)
                 return
-        self._held_pushes.pop(device_id, None)
+        if queue is not None and not queue and self._held_pushes.get(device_id) is queue:
+            del self._held_pushes[device_id]
 
     def _hold_push(self, chat_id: str, content: str, metadata: Optional[Dict[str, Any]]) -> SendResult:
         """Keep a message pushed to an interpreting gadget until the mode ends: whoever holds the
@@ -1501,6 +1518,12 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         """CANCEL held on a device in the mode. Whether or not the mode was still on here, the device
         is told it is off and nothing else happens: never a new session."""
         await self.interpret_stop(session.device_id)
+        if session.device_id in self._interpreting:
+            # Started again while this was being left: the device is in that mode, and its hold of
+            # CANCEL ends without an "Interpreter off" that would not be true.
+            await self._interpret_tell(session)
+            await session.turn_end("", "cancelled")
+            return
         await session.refuse_interpreted("Interpreter off")
         await self._interpret_release(session)
 

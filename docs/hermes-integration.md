@@ -215,7 +215,7 @@ What it does not enforce: the words go to the configured STT, model and TTS prov
 - The agent cannot ask the gadget a question either. `gadget_ask` answers with an error while the mode is on, and a choice that is on the screen when the mode starts is withdrawn and its tool call fails: a tap by whoever holds the gadget is never returned to the agent as the user's answer. The hub enforces this where the choice is made and where an answer arrives, on the gateway's loop. It asks its delegate (`HubDelegate.interprets`) before it creates a choice, so a mode that starts after the tool looked still refuses it, and it drops a `choice.reply` or `prompt.reply` from a device that interprets.
 - The gadget's profile cannot be switched from its settings while the mode is on: the request is answered `busy`.
 - A device event with `notify` starts no turn while the mode is on.
-- A message sent to the device outside a turn the owner started (`send_message`, cron delivery) is held, up to 20, and delivered when the mode ends. A message leaves that queue only when it was sent: after a send that fails, it and the later ones wait for the next time the device connects or leaves the mode. Unpairing the device discards them.
+- A message sent to the device outside a turn the owner started (`send_message`, cron delivery) is held, up to 20, and delivered when the mode ends. A message leaves that queue only when it was sent: after a send that fails, it and the later ones wait for the next time the device connects or leaves the mode. Unpairing the device discards them, also when the mode expires or a send fails at the same moment.
 - `send_voice`, `play_tts` and images are refused with an error, an image also when the mode started while it was being converted.
 - Only a translation of the device's current mode is played. Hermes's own speech, such as a message spoken outside a turn or a spoken `clarify` question, is checked again right before the audio starts: speech that was queued or still being synthesized when the mode started is dropped. Its text was shown before the mode started. Audio that is already playing when the mode starts is not stopped.
 - Holding CANCEL sends `interpret.stop`, never `session.new`, so it cannot reset the owner's conversation.
@@ -232,6 +232,7 @@ What is kept: nothing of a translation is written to a session or to memory. The
 - The `gadget_interpret` agent tool does the same from a conversation.
 - On the device, holding CANCEL sends `interpret.stop`. Firmware that does not know that message sends `session.new`; while the device interprets, the adapter leaves the mode on it and sends no `/new`. A translation under way is stopped.
 - The mode ends after 30 minutes without a translation or a switch of speaker, and when the device is unpaired. The device is told.
+- The device is always told the mode the adapter holds at that moment. When a stop and a new start overlap, for example CANCEL held while the mode is started again with other languages, the device ends in the new mode and gets no "Interpreter off".
 - The mode is refused when it is started on a Hermes without `ctx.llm` or without the speech functions above, and when it cannot be saved to `interpret.json`.
 
 The adapter tells the device with an [`interpret` message](protocol.md#interpreter-mode).

@@ -1416,3 +1416,89 @@ def test_whoever_holds_an_interpreting_gadget_cannot_switch_its_profile(gadget, 
     assert gadget.run(adapter.select_profile(session, "default")) == "busy"
     gadget.run(adapter.interpret_stop(device_id))
     assert gadget.run(adapter.select_profile(session, "default")) != "busy"
+
+
+@requires_hermes
+@requires_sim
+@hermes
+def test_a_gadget_revoked_as_its_mode_expires_gets_none_of_the_messages_that_waited(gadget, make_sim, monkeypatch,
+                                                                                  tmp_path):
+    it = _interpreter(gadget, make_sim, monkeypatch, tmp_path)
+    adapter = gadget.adapter
+    adapter._auto_tts_disabled_chats.add(it.device_id)
+    assert gadget.run(adapter.send(it.device_id, "Reminder: call the bank")).success
+
+    async def lost_and_left_unused():  # both are true by the pairing watch's next look
+        adapter.interpreting(it.device_id).touched -= interpret.IDLE_S + 1
+        gadget.authorized.discard(it.device_id)
+
+    gadget.run(lost_and_left_unused())
+    assert it.sim.wait_screen("pairing", timeout=10)
+    it.sim.run_for(0.3)
+    assert adapter.interpreting(it.device_id) is None
+    assert "Reminder: call the bank" not in _replies(it.sim)
+    assert not adapter._held_pushes.get(it.device_id)
+
+
+@requires_hermes
+@requires_sim
+@hermes
+def test_leaving_the_old_mode_does_not_turn_off_one_started_meanwhile(gadget, make_sim, monkeypatch, tmp_path):
+    it = _interpreter(gadget, make_sim, monkeypatch, tmp_path)
+    adapter = gadget.adapter
+    it.llm.hold.clear()
+    it.sim.type_text("buenos días")
+    assert it.sim.wait_for(lambda: len(it.llm.requests) == 1, timeout=10)
+
+    async def scenario():
+        # CANCEL held on the device asks to leave the mode, and waits for the translation to end; the
+        # mode is started again with other languages meanwhile, and waits for the same end.
+        stop = asyncio.ensure_future(adapter.on_interpret_stop(it.session))
+        await asyncio.sleep(0)
+        start = asyncio.ensure_future(adapter.interpret_start(it.session, "fr", "de"))
+        await asyncio.gather(start, stop)
+
+    gadget.run(scenario())
+    it.llm.hold.set()
+    it.sim.run_for(0.6)
+    # The adapter is in the new mode, so the device is told that mode and not "off": otherwise it
+    # would stop marking what it sends, and the mirror would get the translations.
+    assert adapter.interpreting(it.device_id).label == "FR > DE"
+    assert it.sim.status().get("interpret") == "FR > DE"
+    assert it.session.private is True
+    assert it.sim.wait_screen("ready", timeout=5)  # and the hold of CANCEL was settled
+    assert gadget.events == []
+
+
+@requires_hermes
+@requires_sim
+@hermes
+def test_a_held_message_whose_send_fails_is_not_kept_for_a_gadget_revoked_meanwhile(gadget, make_sim, monkeypatch,
+                                                                                  tmp_path):
+    import hermes_gadget_plugin.adapter as adapter_module
+
+    it = _interpreter(gadget, make_sim, monkeypatch, tmp_path)
+    adapter = gadget.adapter
+    adapter._auto_tts_disabled_chats.add(it.device_id)
+    gadget.run(adapter.cancel_background_tasks())  # the pairing watch runs here, by hand
+    assert gadget.run(adapter.send(it.device_id, "Reminder: call the bank")).success
+    real_send = adapter.send
+
+    async def send(chat_id, content, reply_to=None, metadata=None):
+        if content != "Reminder: call the bank":
+            return await real_send(chat_id, content, reply_to=reply_to, metadata=metadata)
+        # While this send is under way the pairing is revoked, and then the send fails.
+        gadget.authorized.discard(it.device_id)
+        await adapter._sync_pairing(it.session)
+        return adapter_module.SendResult(success=False, error="the connection dropped")
+
+    monkeypatch.setattr(adapter, "send", send)
+    gadget.run(adapter.interpret_stop(it.device_id))
+    assert not adapter._held_pushes.get(it.device_id)  # revocation discarded the queue: nothing goes back in
+    monkeypatch.setattr(adapter, "send", real_send)
+    gadget.authorized.add(it.device_id)  # approved again later
+    gadget.run(adapter._sync_pairing(it.session))
+    assert it.sim.wait_screen("ready", timeout=10)
+    gadget.run(adapter._interpret_release(it.session))
+    it.sim.run_for(0.3)
+    assert "Reminder: call the bank" not in _replies(it.sim)
