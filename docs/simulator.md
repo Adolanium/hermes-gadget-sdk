@@ -84,6 +84,8 @@ The **Telemetry battery %** slider remains an independent generic sensor, not th
 
 Rebuilding the window for a board change or starting a new simulator resets the power fixture to unavailable. Firmware settings persist in `nvs.json`; fixtures do not. Rebuild the simulator library after this ABI 8 update, which adds the host's wall-clock time for the resting clock; Linux native-core clients still default to no power device.
 
+To hear a sound file on the simulated speaker, type `play <path>` in the dev server's console and `stop` to end it (WAV, or anything `ffmpeg` decodes). With Hermes, ask the agent, which uses [`gadget_play`](hermes-integration.md#playing-audio).
+
 Like a board, the simulated device takes firmware updates (`hermes gadget update`, or `update <path>` in the dev server). It checks the image the way the core does and keeps only ESP32 app images. Then it "restarts": it drops the connection and connects again, still running the simulator.
 
 ## Boards

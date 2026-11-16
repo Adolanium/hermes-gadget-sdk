@@ -15,7 +15,7 @@ import json
 import threading
 from typing import Any
 
-from . import runtime, textfmt
+from . import playback, runtime, textfmt
 
 TOOLSET = "gadget"
 CALL_TIMEOUT_S = 20.0
@@ -68,6 +68,30 @@ ACTION_SCHEMA = {
     },
 }
 
+PLAY_SCHEMA = {
+    "name": "gadget_play",
+    "description": "Play audio on a gadget's speaker: a sound file on the Hermes computer, or the http(s) URL "
+                   "of an audio file, a podcast episode or an internet radio stream. It starts once the gadget "
+                   "has finished speaking the current reply and plays in the background until it ends, "
+                   "is stopped (stop: true, or CANCEL on the gadget), or the user talks to the gadget. "
+                   "For spoken text, reply as usual; this tool is for other audio.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "source": {"type": "string",
+                       "description": "A file path on the Hermes computer, inside a folder playback is allowed "
+                                      "from, or an http(s) URL of the audio itself (not a web page)."},
+            "stop": {"type": "boolean", "description": "Stop what gadget_play is playing instead of starting something."},
+            "volume": {"type": "integer",
+                       "description": "Loudness of this playback, 1-100 percent of the source's level. Default 100. "
+                                      "The speaker's own volume is the device's speaker.volume action."},
+            "title": {"type": "string", "description": "Optional short name shown on the screen."},
+            "device": _DEVICE_PARAM,
+        },
+        "required": [],
+    },
+}
+
 
 def _error(message: str) -> str:
     return json.dumps({"success": False, "error": message})
@@ -87,7 +111,12 @@ def _run(adapter, coro) -> Any:
     if getattr(loop, "_thread_id", None) == threading.get_ident():
         coro.close()
         raise RuntimeError("gadget tools cannot block the gateway event loop")
-    return asyncio.run_coroutine_threadsafe(coro, loop).result(CALL_TIMEOUT_S)
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    try:
+        return future.result(CALL_TIMEOUT_S)
+    except BaseException:
+        future.cancel()  # the caller reports a failure: the work must not finish behind its back
+        raise
 
 
 def _resolve(adapter, ref: str | None):
@@ -193,6 +222,60 @@ def gadget_action(args: dict, **_kw) -> str:
     return json.dumps({"success": True, "device": session.name, "action": action, "result": result})
 
 
+def _play_roots(extra: dict) -> list:
+    """Where gadget_play reads local files: Hermes's audio cache (its own text-to-speech and
+    received audio) and the folders ``play_dirs`` names. Nothing else on the host is opened."""
+    from gateway.platforms.base import get_audio_cache_dir
+
+    return [get_audio_cache_dir(), *playback.play_dirs(extra)]
+
+
+def gadget_play(args: dict, **_kw) -> str:
+    adapter = _adapter()
+    if adapter is None:
+        return _error("gadget hub is not running in this process")
+    session, err = _resolve(adapter, args.get("device"))
+    if err:
+        return _error(err)
+    if (err := _usable(session)):
+        return _error(err)
+    try:
+        if args.get("stop"):
+            stopped = _run(adapter, playback.stop(session))
+            return json.dumps({"success": True, "device": session.name, "stopped": bool(stopped)})
+        if not session.has_speaker:
+            return _error(f"{session.name} has no speaker")
+        source = str(args.get("source") or "").strip()
+        if not source:
+            return _error("source is required: a file path or an http(s) URL (or stop: true)")
+        try:
+            volume = int(args.get("volume", 100))
+        except (TypeError, ValueError):
+            volume = 100
+        extra = getattr(getattr(adapter, "config", None), "extra", None) or {}
+        max_s = playback.max_seconds(extra)
+        # Fetching and decoding start here, in the tool's own thread, so a source that cannot be
+        # played is the tool's error and not a silent device.
+        opened = playback.open_source(source, session.speaker_rate, roots=_play_roots(extra),
+                                      fetch=playback.hermes_fetch)
+        title = textfmt.for_device(str(args.get("title") or ""), session.charset) or playback.title_of(source)
+        try:
+            _run(adapter, playback.play(
+                session, opened, title=title[:40], volume=volume, max_s=max_s,
+                idle=lambda deadline: adapter._device_idle(session.device_id, deadline)))
+        except BaseException:
+            opened.close()
+            raise
+    except playback.PlaybackError as exc:
+        return _error(str(exc))
+    except Exception as exc:
+        return _error(f"could not reach {session.name}: {exc}")
+    return json.dumps({
+        "success": True, "device": session.name, "playing": title[:40],
+        "starts": "when the gadget has finished the current reply",
+        "stops": f"at the end, after {max_s / 60:g} minutes, on stop: true, or when the gadget is used"})
+
+
 def available() -> bool:
     """Reachability: tools work only in the process hosting the gadget hub."""
     return runtime.any_active()
@@ -203,6 +286,7 @@ def register_tools(ctx) -> None:
         (DEVICES_SCHEMA, gadget_devices, "📟"),
         (DISPLAY_SCHEMA, gadget_display, "🖥️"),
         (ACTION_SCHEMA, gadget_action, "🎛️"),
+        (PLAY_SCHEMA, gadget_play, "🔊"),
     ):
         ctx.register_tool(
             name=schema["name"], toolset=TOOLSET, schema=schema, handler=handler,

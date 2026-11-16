@@ -12,7 +12,8 @@ Hermes's gateway runs "platform adapters": Telegram, Slack and about twenty othe
 | `__init__.py` | `register(ctx)`: platform entry, agent tools, `hermes gadget` CLI |
 | `adapter.py` | `GadgetAdapter(BasePlatformAdapter)`: the Hermes-facing side |
 | `hub.py` | WebSocket server, auth, audio, images, actions (no Hermes imports) |
-| `tools.py` | `gadget_devices`, `gadget_display`, `gadget_action` |
+| `tools.py` | `gadget_devices`, `gadget_display`, `gadget_action`, `gadget_play` |
+| `playback.py` | What `gadget_play` may open, decoding a chunk at a time, and the playback task (see [Playing audio](#playing-audio)) |
 | `store.py`, `status.py`, `protocol.py`, `audio.py`, `textfmt.py`, `imaging.py` | Support modules (no Hermes imports) |
 | `dashboard/` | The **Gadgets** tab of the Hermes web dashboard: `manifest.json`, the backend routes in `plugin_api.py`, and the tab's bundle in `dist/`, built from `src/` (see [The Gadgets tab](#the-gadgets-tab-in-the-hermes-dashboard)) |
 | `desktop/plugin.js`, `desk.py` | The **Gadgets** page of the Hermes desktop app, built from `desktop-src/`, and the queue that carries its cards and actions to the gateway (see [The Gadgets page in Hermes Desktop](#the-gadgets-page-in-hermes-desktop)) |
@@ -38,6 +39,8 @@ platforms:
       # heartbeat_s: 20
       # max_utterance_s: 60
       # opus_bitrate: 24000    # Opus speaker audio for devices that decode it; 0 = PCM16 only
+      # play_dirs: [~/Music]   # folders gadget_play may read sound files from (see Playing audio)
+      # play_max_minutes: 60   # the longest one gadget_play playback runs
       # dashboard: true        # Hermes's sessions and status tiles on devices that draw them
       # profiles: [work, home] # profiles gadgets may switch to, or "all"; off without it (see below)
       # profile_mode: virtual  # each picked profile gets its own routed chat; no Hermes hook needed (see below)
@@ -211,6 +214,34 @@ Hermes asks before destructive commands (`/new`, `/undo`), costly model switches
 ### Agent tools and Hermes tool search
 
 Hermes keeps the core tool schema narrow. Plugin tools are therefore deferred behind its tool-search bridge (`tool_search` / `tool_describe` / `tool_call`), and their names and descriptions appear in the bridge's manifest. A model invokes `gadget_action` through `tool_call`, and the end-to-end test exercises exactly that. The per-device context names the available actions so the model knows they exist.
+
+### Playing audio
+
+`gadget_play` plays something other than speech on a gadget's speaker: a sound file on the Hermes computer, or the `http://` or `https://` URL of an audio file, a podcast episode or an internet radio stream. Ask for it in words ("play the BBC World Service on the kitchen gadget", "stop the music").
+
+| Argument | Meaning |
+|---|---|
+| `source` | A file path on the Hermes computer, or an http(s) URL of the audio itself |
+| `stop` | `true` stops what `gadget_play` is playing |
+| `volume` | 1 to 100: the level of this playback, as a percentage of the source's own. The speaker's volume is still the device's `speaker.volume` action |
+| `title` | A short name for the notice on the screen; the file name or the host otherwise |
+| `device` | Which gadget, as for the other tools |
+
+How it plays:
+
+- **On the Hermes computer.** The plugin decodes the source and sends it through the same paced stream as a spoken reply ([Audio to the device](protocol.md#audio-to-the-device)), so it needs no firmware support beyond a speaker. Plain PCM WAV is read in Python. Every other format, and every URL, needs `ffmpeg` on the Hermes computer.
+- **A chunk at a time.** The source is decoded about a second ahead of what the device has been sent, and a URL is downloaded only as fast as it plays. A long file or an endless stream is never held in memory.
+- **After the reply.** The tool answers once the source has been opened and its first audio decoded, so a URL that does not answer or a file that is not audio is the tool's error. A source that gives no audio within 15 seconds of the tool call is given up on, and the download and `ffmpeg` started for it are ended. The audio starts when the gadget has finished the turn and its spoken reply; a gadget that stays busy for two minutes never starts it. The screen shows `Playing <title>` as a notice.
+- **Until something else needs the speaker.** Playback ends at the end of the source, at `play_max_minutes` (60 by default, counted both as audio played and as time on the clock, so a stream that arrives slowly ends on time too), when a stream sends no audio for 20 seconds, on `stop: true`, when the device disconnects, on CANCEL on the device, when you start talking to the gadget, or when Hermes speaks: a reply, or a message sent outside a turn such as a reminder, which does not wait for the music to end. It does not resume afterwards. A playback that is still waiting for the reply to end is ended the same way by CANCEL, by a new recording and by `stop: true`, and never starts. After the source has ended, `stop: true` still ends the audio that has not been sent to the device. What the device has already been sent, half a second of audio and up to 3 seconds on a device with a large buffer, plays out: the firmware ignores `audio.abort` for a stream whose `audio.end` it has received. A second `gadget_play` replaces the first.
+
+What it may open:
+
+- **Local files** only inside Hermes's audio cache (where its text-to-speech files and received audio are kept) and the folders listed in `platforms.gadget.extra.play_dirs`. The path is resolved first, so a symbolic link or `..` that leads elsewhere is refused, with the same answer whether or not the path exists. A playlist file (`.m3u`, `.m3u8`, `.pls`, or a file that begins like one) is refused, because it names other files. Without `play_dirs`, nothing else on the host can be played.
+- **URLs** only with the `http` or `https` scheme, without a user name or password. They are fetched with Hermes's own guarded HTTP client under Hermes's URL policy: private, loopback and link-local addresses are refused when the name is resolved, when the connection is made and on every redirect, unless Hermes's `security.allow_private_urls` is `true`; cloud metadata addresses are refused always. When Hermes runs behind a proxy (`HTTP_PROXY`, `HTTPS_PROXY` or `ALL_PROXY` is set), it leaves name resolution to the proxy: the check when the connection is made does not apply, and a name the Hermes computer cannot resolve itself is passed to the proxy unchecked. Restrict what the proxy may reach in that case. To play from a media server on your own network, set that Hermes option. One URL sends at most 512 MB.
+- **`ffmpeg` gets no access of its own.** A URL's data is piped into it and it may open nothing else (`-protocol_whitelist pipe`); for a local file it may open files only. In both cases it reads audio containers only (`-format_whitelist`: MP3, AAC, Ogg, FLAC, WAV, MP4/M4A, Matroska/WebM, MPEG-TS, ASF/WMA, AIFF, AU, CAF, AC-3, AMR, APE, TTA, WavPack), not the playlist formats that open other files or URLs by name, so a playlist or container cannot make the Hermes computer read or fetch anything else.
+- **Playlists are not followed.** For an `.m3u` or `.pls` URL the tool returns up to three of the stream URLs the playlist lists, and the agent picks one. That text comes from the remote server: only plain `http(s)` URLs of at most 200 characters are passed on. HLS streams (`.m3u8`) are not supported.
+- **Errors say little.** What `ffmpeg` prints about data it could not decode, and the details of a failed download, go to the gateway log, not to the agent.
+- **Only a tool call fetches.** Nothing a device sends, and no message text, makes the plugin open a file or a URL.
 
 ## Making replies fast
 
