@@ -105,7 +105,7 @@ void begin() {
   // StopWatch logged 0 s of it in 45 minutes of doze, and its usual share from the first plug-in
   // on, when the read blocks and stays blocked after the cable is gone. So the console starts
   // once a host is there. The wait looks twice a second, which light sleep fits between.
-  xTaskCreate(
+  const BaseType_t waiting = xTaskCreate(
       [](void* arg) {
         do vTaskDelay(pdMS_TO_TICKS(500));
         while (!usb_serial_jtag_is_connected());
@@ -114,6 +114,13 @@ void begin() {
         vTaskDelete(nullptr);
       },
       "hg-console-wait", 3072, repl, 1, nullptr);
+  if (waiting != pdPASS) {
+    // No memory for the wait: start as before, and say so. Without a host the console then asks
+    // every 10 ms, which is the lesser loss beside having no console.
+    ESP_LOGW(TAG, "no task to wait for a USB host; the console starts now");
+    ESP_ERROR_CHECK(esp_console_start_repl(repl));
+    ESP_LOGI(TAG, "console ready (type: help)");
+  }
 #else
   ESP_ERROR_CHECK(esp_console_start_repl(repl));
   ESP_LOGI(TAG, "console ready (type: help)");
