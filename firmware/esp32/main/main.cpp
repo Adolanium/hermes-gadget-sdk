@@ -581,7 +581,7 @@ extern "C" void app_main(void) {
   // From PSRAM only, after the framebuffer: without room there, one-colour faces.
   if (profile.faces)
     profile.colour_face_alloc = [](size_t n) { return heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); };
-  // The recording buffer (1 MB for 30 s at 16 kHz, 1.5 MB at 24 kHz), PSRAM only, and only when
+  // The recording buffer (2 MB for 60 s at 16 kHz, 3 MB at 24 kHz), PSRAM only, and only when
   // about 1 MB of PSRAM stays free after it (RecordingBuffer::leaves_headroom). Otherwise the board
   // streams as before, and a connection lost mid-recording ends the recording.
   if (esp_psram_is_initialized())

@@ -205,6 +205,24 @@ def test_agent_invokes_device_actions(loop_thread, devserver, make_sim):
     assert "color is required" in str(bad.exception())
 
 
+def test_the_hub_takes_a_diagnostics_report_without_a_cable(loop_thread, devserver, make_sim):
+    hub, _brain, url = devserver()
+    sim = make_sim(url)
+    assert sim.wait_screen("ready", timeout=10)
+    session = next(iter(hub.sessions.values()))
+
+    import asyncio
+
+    got = asyncio.run_coroutine_threadsafe(session.request_diag(), loop_thread.loop)
+    assert sim.wait_for(got.done, timeout=5)
+    report = got.result()["report"]
+    # The same report the console's `diag` prints.
+    assert report["device_id"] == session.device_id
+    assert report["app"]["phase"] == "online"
+    assert isinstance(report["connection"]["closes_total"], int)
+    assert isinstance(got.result()["log"], str)
+
+
 def test_cards_and_images_take_over_the_screen(loop_thread, devserver, make_sim):
     hub, _brain, url = devserver()
     sim = make_sim(url)

@@ -514,14 +514,14 @@ TEST("ring: the listening arc grows with the seconds and turns amber in the last
   CHECK(r.app.screen() == hg::Screen::Listening);
   const auto at = [&](int x, int y) { return r.fake.fb[static_cast<size_t>(y * 466 + x)]; };
 
-  r.advance(15000);  // half of the 30 s recording limit (the last frame may lag a little)
+  r.advance(hg::App::kMaxUtteranceMs / 2);  // half of the recording limit (the last frame may lag a little)
   const int16_t half = r.app.model().progress_permille;
   CHECK(half >= 490 && half <= 500);
   CHECK_EQ(at(456, 233), kGreen);    // 3 o'clock, on the arc
   CHECK_EQ(at(10, 233), kGreenDim);  // 9 o'clock, past it
 
-  r.advance(11000);  // 26 s in: the last 5 s of the limit
-  CHECK(r.app.model().progress_permille >= 834);
+  r.advance(hg::App::kMaxUtteranceMs / 2 - 4000);  // 4 s before the limit: in its last 5 s
+  CHECK(r.app.model().progress_permille >= 900);
   CHECK_EQ(at(456, 233), kAccent);  // amber now
   CHECK(r.app.screen() == hg::Screen::Listening);
   r.app.on_button(hg::Button::Talk, false);
@@ -911,6 +911,37 @@ TEST("app: diag reports the core's state plus what the port adds") {
   r.app.on_transport_closed("server went away");
   CHECK(hg::json::parse(r.app.console("diag").substr(6), v));
   CHECK_EQ(v["connection"]["last_close"].as_string(), std::string("server went away"));
+}
+
+TEST("app: the hub's diag request gets the console's report and the recent log") {
+  Rig r;
+  r.bring_online(true);
+  r.fake.sent.clear();
+  r.server(R"({"type":"diag","id":"d1"})");
+  const Value* reply = r.fake.last("diag");
+  CHECK(reply != nullptr);
+  if (!reply) return;
+  CHECK_EQ((*reply)["id"].as_string(), std::string("d1"));
+  CHECK_EQ((*reply)["report"]["board"].as_string(), std::string("test-board"));
+  CHECK_EQ((*reply)["report"]["app"]["phase"].as_string(), std::string("online"));
+  CHECK_EQ((*reply)["log"].as_string(), std::string());  // this device keeps no log
+
+  r.app.on_diag = [](Value& report) { report.set("reset_reason", "task watchdog"); };
+  // A log longer than the reply carries keeps its newest lines, whole.
+  std::string log;
+  for (int i = 0; i < 2000; ++i) log += "I (" + std::to_string(i) + ") hg: line\n";
+  r.app.recent_log = [log] { return log; };
+  r.fake.sent.clear();
+  r.server(R"({"type":"diag"})");
+  reply = r.fake.last("diag");
+  CHECK(reply != nullptr);
+  if (!reply) return;
+  CHECK((*reply)["id"].is_null());
+  CHECK_EQ((*reply)["report"]["reset_reason"].as_string(), std::string("task watchdog"));
+  const std::string& got = (*reply)["log"].as_string();
+  CHECK(got.size() <= 16 * 1024);
+  CHECK(got.rfind("I (", 0) == 0);
+  CHECK(got.find("I (1999) hg: line\n") == got.size() - std::string("I (1999) hg: line\n").size());
 }
 
 TEST("app: log sets a tag's level through the port and refuses unknown levels") {

@@ -61,7 +61,7 @@ On a round display, a thin ring just inside the glass edge shows what the device
 
 - **Timer alarm, low battery alert, charging and full battery screens:** no ring.
 - **Resting clock:** 60 marks around the edge, in the grey of the date: the 12 hour marks are wider and run across the whole band, and the minute marks sit in the band's outer half. An amber dot, about twice as wide as the band, moves to the current second, once a second.
-- **Listening:** a green arc grows clockwise from 12 o'clock over a dim green track, showing the part of the 30-second recording limit used. It turns amber in the last 5 seconds. In tap-to-talk mode, a pause usually ends the recording before the arc fills.
+- **Listening:** a green arc grows clockwise from 12 o'clock over a dim green track, showing the part of the 60-second recording limit used. It turns amber in the last 10 seconds. In tap-to-talk mode, a pause usually ends the recording before the arc fills.
 - **Firmware update:** an amber arc over a dim amber track shows the part of the image received. It is full while the device restarts.
 - **Running timer:** the countdown arc, amber over dim amber, shrinking clockwise from 12 o'clock.
 - **Thinking:** a blue comet laps the ring every 2.4 seconds.

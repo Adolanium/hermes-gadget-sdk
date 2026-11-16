@@ -1,3 +1,4 @@
+#include <cmath>
 #include <cstring>
 #include <string>
 
@@ -202,12 +203,52 @@ TEST("vad: speech followed by silence ends the utterance") {
   hg::Vad::Config cfg;
   vad.reset(cfg);
   std::vector<int16_t> quiet(320, 20), loud(320);
-  for (size_t i = 0; i < loud.size(); ++i) loud[i] = static_cast<int16_t>((i % 2) ? 6000 : -6000);
+  for (size_t i = 0; i < loud.size(); ++i) loud[i] = static_cast<int16_t>((i / 8) % 2 ? 6000 : -6000);  // 1 kHz
   for (int i = 0; i < 10; ++i) CHECK(vad.feed(quiet.data(), quiet.size()) == hg::Vad::Result::Continue);
   for (int i = 0; i < 25; ++i) vad.feed(loud.data(), loud.size());
   CHECK(vad.heard_speech());
   hg::Vad::Result r = hg::Vad::Result::Continue;
   for (int i = 0; i < 60 && r == hg::Vad::Result::Continue; ++i) r = vad.feed(quiet.data(), quiet.size());
+  CHECK(r == hg::Vad::Result::EndOfSpeech);
+}
+
+TEST("vad: a whistle above the voice band is neither speech nor silence broken") {
+  // A StopWatch records a 10.4 kHz tone from its own electronics in bursts, about 300 RMS: as
+  // loud as speech through that microphone, and above its speech floor of 180.
+  const auto tone = [](double hz, double amplitude, std::vector<int16_t>& out, size_t at) {
+    for (size_t i = 0; i < out.size(); ++i)
+      out[i] = static_cast<int16_t>(out[i] + amplitude * std::sin(2 * 3.14159265358979 * hz * double(at + i) / 24000.0));
+  };
+  hg::Vad::Config cfg;
+  cfg.sample_rate = 24000;
+  cfg.min_threshold = 180;
+  cfg.no_speech_ms = 2000;
+  hg::Vad whistle;
+  whistle.reset(cfg);
+  hg::Vad::Result r = hg::Vad::Result::Continue;
+  for (int i = 0; i < 200 && r == hg::Vad::Result::Continue; ++i) {
+    std::vector<int16_t> block(320, 0);
+    tone(10420, 430, block, size_t(i) * 320);
+    r = whistle.feed(block.data(), block.size());
+  }
+  CHECK(r == hg::Vad::Result::NoSpeech);
+  CHECK(!whistle.spoke());
+
+  hg::Vad voice;  // a 300 Hz voice at the same level, with the whistle on top, is still heard
+  voice.reset(cfg);
+  for (int i = 0; i < 40; ++i) {
+    std::vector<int16_t> block(320, 0);
+    tone(300, 430, block, size_t(i) * 320);
+    tone(10420, 430, block, size_t(i) * 320);
+    voice.feed(block.data(), block.size());
+  }
+  CHECK(voice.spoke());
+  r = hg::Vad::Result::Continue;  // ...and the whistle alone afterwards counts as the pause that ends it
+  for (int i = 40; i < 200 && r == hg::Vad::Result::Continue; ++i) {
+    std::vector<int16_t> block(320, 0);
+    tone(10420, 430, block, size_t(i) * 320);
+    r = voice.feed(block.data(), block.size());
+  }
   CHECK(r == hg::Vad::Result::EndOfSpeech);
 }
 

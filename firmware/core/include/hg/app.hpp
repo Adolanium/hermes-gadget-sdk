@@ -87,7 +87,7 @@ struct DeviceProfile {
   // releases them. Without it, or when it returns null, the board offers one-colour faces.
   void* (*colour_face_alloc)(size_t) = nullptr;
   // Keeps each recording whole while it uploads: begin() takes RecordingBuffer::bytes_for(the
-  // utterance limit, mic_rate) bytes (1 MB for 30 s at 16 kHz, 1.5 MB at 24 kHz) from this, released with
+  // utterance limit, mic_rate) bytes (2 MB for 60 s at 16 kHz, 3 MB at 24 kHz) from this, released with
   // std::free. A connection lost mid-recording then loses nothing: recording goes on, and the
   // whole of it is sent again once the device is back online. Without it, or when it returns
   // null, audio streams straight to the link and a lost connection ends the recording.
@@ -253,7 +253,7 @@ class App {
   // Dozing (System::set_dozing): the port's loop may wait this long for events.
   static constexpr uint32_t kDozeWaitMs = 100;
   // The longest recording; the recording buffer holds this much (RecordingBuffer::bytes_for).
-  static constexpr uint32_t kMaxUtteranceMs = 30000;
+  static constexpr uint32_t kMaxUtteranceMs = 60000;
   // A recording that ended with the connection lost waits this long for it to come back
   // (about three connection attempts), then is dropped.
   static constexpr uint32_t kRecordingWaitMs = 45000;
@@ -364,6 +364,7 @@ class App {
   void h_image_end(const json::Value& m);
   void h_action(const json::Value& m);
   void h_ping(const json::Value& m);
+  void h_diag(const json::Value& m);
   void h_notice(const json::Value& m);
   void h_error(const json::Value& m);
   void h_prompt(const json::Value& m);
@@ -429,6 +430,8 @@ class App {
   bool clock_blocked() const;
   void clock_tick();
   json::Value status_value() const;
+  // The diagnostics report: the console's `diag` prints it, and the hub's `diag` request gets it.
+  json::Value diag_value();
   std::string diag_report();
   // frame timing (app_perf.cpp)
   std::string perf_command(std::string_view args);

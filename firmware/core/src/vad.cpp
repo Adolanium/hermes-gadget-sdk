@@ -25,12 +25,38 @@ void Vad::reset(const Config& cfg) {
   cfg_ = cfg;
   noise_ = 0;
   elapsed_ms_ = speech_ms_ = silence_ms_ = 0;
+  z1_ = z2_ = 0;
+  b0_ = 1;
+  b1_ = b2_ = a1_ = a2_ = 0;
+  if (cfg.lowpass_hz && cfg.sample_rate > 2 * cfg.lowpass_hz) {
+    // Butterworth, by the bilinear transform.
+    const float k = std::tan(3.14159265f * static_cast<float>(cfg.lowpass_hz) / static_cast<float>(cfg.sample_rate));
+    const float norm = 1.0f / (1.0f + 1.41421356f * k + k * k);
+    b0_ = k * k * norm;
+    b1_ = 2 * b0_;
+    b2_ = b0_;
+    a1_ = 2 * (k * k - 1) * norm;
+    a2_ = (1 - 1.41421356f * k + k * k) * norm;
+  }
+}
+
+float Vad::voice_rms(const int16_t* samples, size_t count) {
+  double acc = 0;
+  for (size_t i = 0; i < count; ++i) {
+    // Transposed direct form II.
+    const float x = samples[i];
+    const float y = b0_ * x + z1_;
+    z1_ = b1_ * x - a1_ * y + z2_;
+    z2_ = b2_ * x - a2_ * y;
+    acc += double(y) * y;
+  }
+  return static_cast<float>(std::sqrt(acc / double(count)));
 }
 
 Vad::Result Vad::feed(const int16_t* samples, size_t count) {
   if (count == 0 || cfg_.sample_rate == 0) return Result::Continue;
   uint32_t ms = static_cast<uint32_t>(count * 1000 / cfg_.sample_rate);
-  float r = rms(samples, count);
+  float r = voice_rms(samples, count);
   elapsed_ms_ += ms;
   // Track the noise floor quickly downwards, slowly upwards. It starts at the
   // quiet end so speech that begins with the first block is still detected.
@@ -47,8 +73,8 @@ Vad::Result Vad::feed(const int16_t* samples, size_t count) {
   }
   // Require a little sustained speech before an end-of-speech can trigger, so a
   // single click does not count as an utterance.
-  if (speech_ms_ >= 200 && silence_ms_ >= cfg_.end_silence_ms) return Result::EndOfSpeech;
-  if (speech_ms_ < 200 && elapsed_ms_ >= cfg_.no_speech_ms) return Result::NoSpeech;
+  if (spoke() && silence_ms_ >= cfg_.end_silence_ms) return Result::EndOfSpeech;
+  if (!spoke() && elapsed_ms_ >= cfg_.no_speech_ms) return Result::NoSpeech;
   return Result::Continue;
 }
 
