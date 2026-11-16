@@ -152,7 +152,7 @@ def cmd_build_sim(args) -> int:
         configure += [f"-DCMAKE_BUILD_TYPE={args.config}"]
     if args.cjk:
         configure += ["-DHG_CJK_FONT=ON"]
-    for step in (configure, [cmake, "--build", str(build), "--config", args.config]):
+    for step in (configure, [cmake, "--build", str(build), "--config", args.config, "--parallel"]):
         print("+", " ".join(step))
         if subprocess.run(step).returncode != 0:
             return 1
