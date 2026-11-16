@@ -266,7 +266,9 @@ def cmd_provision(args) -> int:
 
 def _diag_summary(report: dict) -> list[str]:
     """A few lines from a ``diag`` report, for the terminal."""
-    out = [f"firmware {report.get('firmware')} on {report.get('board')} ({report.get('device_id')})"]
+    out = []
+    if "firmware" in report:  # the app's part; a report from the port alone has no firmware line
+        out.append(f"firmware {report.get('firmware')} on {report.get('board')} ({report.get('device_id')})")
     if "reset_reason" in report:
         out.append(f"reset reason: {report['reset_reason']}, up {report.get('uptime_s', '?')} s")
     parts = report.get("parts")
@@ -284,6 +286,23 @@ def _diag_summary(report: dict) -> list[str]:
     if isinstance(wifi, dict):
         out.append(f"Wi-Fi: joined {wifi.get('ssid')} ({wifi.get('rssi')} dBm), {wifi.get('ip', 'no address')}"
                    if wifi.get("joined") else "Wi-Fi: not joined")
+    touch = report.get("touch")
+    if isinstance(touch, dict) and "reads" in touch:
+        out.append(f"touch: {touch.get('controller')} read on {touch.get('read_on')}, {touch.get('reads')} reads, "
+                   f"{touch.get('read_errors')} failed ({touch.get('error_streak')} in a row), last good read "
+                   f"{touch.get('last_read_ms_ago')} ms ago, task last ran {touch.get('task_ms_ago')} ms ago, "
+                   f"{touch.get('events_dropped')} events dropped")
+    events = report.get("events")
+    if isinstance(events, dict) and events.get("dropped"):
+        out.append(f"event queue: {events['dropped']} events dropped, peak {events.get('peak')} of {events.get('depth')}")
+    crash = report.get("crash")
+    if isinstance(crash, dict) and crash.get("state") == "saved":
+        build = "this build" if crash.get("this_build") else f"build {crash.get('elf_sha256')}"
+        out.append(f"last crash: task {crash.get('task')} at {crash.get('pc')} ({build}); "
+                   "the full report lists its backtrace")
+    if report.get("app") == "not answering":
+        out.append("Hermes: the app task did not answer; this report comes from the port alone")
+        return out
     app, conn = report.get("app") or {}, report.get("connection") or {}
     line = f"Hermes: {app.get('phase')}, {'paired' if app.get('paired') else 'not paired'}"
     if app.get("unpaired_reason"):
