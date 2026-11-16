@@ -41,30 +41,52 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           path: hermes-gadget-sdk
+          fetch-depth: 0
+      - name: Changed areas
+        # A pull request that can't change what the plugin does on Hermes passes here without
+        # running the tests: this job is a required check, so it reports instead of being skipped.
+        id: areas
+        working-directory: hermes-gadget-sdk
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          run=true
+          if [ -n "$BASE" ]; then
+            git diff --name-only "$BASE...HEAD" | tee /dev/stderr | grep -qE \
+              '^(plugin/|python/|tests/|firmware/(core|sim)/|firmware/CMakeLists\.txt$|pyproject\.toml$|\.github/workflows/hermes\.yml$)' || run=false
+          fi
+          echo "run=$run" | tee -a "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        if: steps.areas.outputs.run == 'true'
         with:
           repository: NousResearch/hermes-agent
           ref: ${{ github.event_name == 'schedule' && 'main' || inputs.hermes_ref || env.HERMES_REF }}
           path: hermes-agent
       - name: Show the Hermes commit under test
+        if: steps.areas.outputs.run == 'true'
         working-directory: hermes-agent
         run: git log -1 --format='Hermes Agent %H (%cs) %s'
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        if: steps.areas.outputs.run == 'true'
         with:
           enable-cache: true
           cache-dependency-glob: hermes-agent/uv.lock
       - name: Install Hermes Agent
+        if: steps.areas.outputs.run == 'true'
         working-directory: hermes-agent
         run: uv sync --locked --python 3.14 --group dev
       - name: Add the SDK to the Hermes environment
+        if: steps.areas.outputs.run == 'true'
         run: uv pip install --python hermes-agent/.venv/bin/python -e "./hermes-gadget-sdk[dev]"
       - name: Build the simulator library
+        if: steps.areas.outputs.run == 'true'
         working-directory: hermes-gadget-sdk
         run: ../hermes-agent/.venv/bin/hermes-gadget build-sim
       - name: Test
         # The tests find the Hermes checkout beside this one (HERMES_AGENT_DIR defaults to
         # ../hermes-agent) and the end-to-end test runs the gateway from its .venv.
+        if: steps.areas.outputs.run == 'true'
         working-directory: hermes-gadget-sdk
         env:
           HERMES_GADGET_E2E: "1"
-        run: ../hermes-agent/.venv/bin/python -m pytest -q -rs
+        run: ../hermes-agent/.venv/bin/python -m pytest -q -rs -n auto

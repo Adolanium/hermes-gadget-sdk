@@ -86,27 +86,40 @@ jobs:
           } | tee -a "$GITHUB_OUTPUT"
 
   boards:
-    name: Discover firmware boards
+    name: Pick firmware boards
+    # A pull request builds the boards its diff can affect (firmware/esp32/tools/ci_boards.py);
+    # the full-ci label, a push to main and a manual run build every board.
     needs: changes
     if: needs.changes.outputs.firmware == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      boards: ${{ steps.list.outputs.boards }}
+      pio: ${{ steps.list.outputs.pio }}
+      idf: ${{ steps.list.outputs.idf }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
       - id: list
         working-directory: firmware/esp32
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          python - <<'PY' >> "$GITHUB_OUTPUT"
-          import json
-          from pathlib import Path
-          from tools.package_release import environments
-          print("boards=" + json.dumps(list(environments(Path(".")))))
-          PY
+          # Labels are read live, so adding full-ci and re-running the job builds every board.
+          if [ -n "$PR" ] && gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json labels -q '.labels[].name' | grep -qx full-ci; then
+            echo "full-ci label: every board"; BASE=
+          fi
+          picked=$(python tools/ci_boards.py ${BASE:+--base "$BASE"})
+          echo "$picked"
+          {
+            echo "pio=$(echo "$picked" | python -c 'import json, sys; print(json.dumps(json.load(sys.stdin)["pio"]))')"
+            echo "idf=$(echo "$picked" | python -c 'import json, sys; print(json.dumps(json.load(sys.stdin)["idf"]))')"
+          } >> "$GITHUB_OUTPUT"
 
   core:
     name: Firmware core (${{ matrix.os }})
@@ -212,12 +225,13 @@ jobs:
   esp32:
     name: ESP32 firmware (${{ matrix.board }})
     needs: boards
+    if: needs.boards.outputs.pio != '[]'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        board: ${{ fromJSON(needs.boards.outputs.boards) }}
+        board: ${{ fromJSON(needs.boards.outputs.pio) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
@@ -242,51 +256,49 @@ jobs:
           path: firmware/esp32/dist/
           if-no-files-found: error
   esp32p4:
-    name: ESP32-P4 firmware (ESP-IDF 6.1.0)
-    needs: changes
-    if: needs.changes.outputs.firmware == 'true'
+    name: ESP32-P4 firmware (${{ matrix.board }})
+    needs: boards
+    if: needs.boards.outputs.idf != '[]'
     runs-on: ubuntu-24.04
     container: espressif/idf:v6.1@sha256:f81b6e077e6af93c312181cd7d4e7936cfbafc5c7f77cbacba8fdd34994f218a
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        board: ${{ fromJSON(needs.boards.outputs.idf) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-      - name: Build CrowPanel P4
+      - name: Build
         shell: bash
         working-directory: firmware/esp32
+        env:
+          BOARD: ${{ matrix.board }}
         run: |
           source /opt/esp/idf/export.sh
-          idf.py -B build/crowpanel-p4-101 -D SDKCONFIG=build/crowpanel-p4-101/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/crowpanel-p4-101/sdkconfig.defaults" set-target esp32p4
-          idf.py -B build/crowpanel-p4-101 -D SDKCONFIG=build/crowpanel-p4-101/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/crowpanel-p4-101/sdkconfig.defaults" build
-      - name: Build Waveshare P4 7B
-        shell: bash
-        working-directory: firmware/esp32
-        run: |
-          source /opt/esp/idf/export.sh
-          idf.py -B build/ws-p4-touch-lcd-7b -D SDKCONFIG=build/ws-p4-touch-lcd-7b/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/ws-p4-touch-lcd-7b/sdkconfig.defaults" set-target esp32p4
-          idf.py -B build/ws-p4-touch-lcd-7b -D SDKCONFIG=build/ws-p4-touch-lcd-7b/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/ws-p4-touch-lcd-7b/sdkconfig.defaults" build
+          idf.py -B "build/$BOARD" -D SDKCONFIG="build/$BOARD/sdkconfig" -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/$BOARD/sdkconfig.defaults" set-target esp32p4
+          idf.py -B "build/$BOARD" -D SDKCONFIG="build/$BOARD/sdkconfig" -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/$BOARD/sdkconfig.defaults" build
       - name: Package
         # The same images and manifests a release ships, so a contributor can flash CI builds.
+        # A board outside IDF_BOARDS is experimental: built, not released.
+        id: package
         shell: bash
         working-directory: firmware/esp32
+        env:
+          BOARD: ${{ matrix.board }}
         run: |
           source /opt/esp/idf/export.sh
-          python tools/stage_idf_build.py crowpanel-p4-101 build/crowpanel-p4-101
-          python tools/stage_idf_build.py ws-p4-touch-lcd-7b build/ws-p4-touch-lcd-7b
-          python tools/package_release.py --board crowpanel-p4-101 --board ws-p4-touch-lcd-7b --out dist
+          if python -c 'import os, sys; sys.path.insert(0, "tools"); from package_release import IDF_BOARDS; sys.exit(os.environ["BOARD"] not in IDF_BOARDS)'; then
+            python tools/stage_idf_build.py "$BOARD" "build/$BOARD"
+            python tools/package_release.py --board "$BOARD" --out dist
+            echo "packaged=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Keep the images
+        if: steps.package.outputs.packaged == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
-          name: firmware-esp32p4
+          name: firmware-${{ matrix.board }}
           path: firmware/esp32/dist/
           if-no-files-found: error
-      - name: Build Waveshare P4 Touch-LCD-3.4C
-        # Built, not released: the board is experimental and not in IDF_BOARDS.
-        shell: bash
-        working-directory: firmware/esp32
-        run: |
-          source /opt/esp/idf/export.sh
-          idf.py -B build/ws-p4-touch-lcd-3.4c -D SDKCONFIG=build/ws-p4-touch-lcd-3.4c/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/ws-p4-touch-lcd-3.4c/sdkconfig.defaults" set-target esp32p4
-          idf.py -B build/ws-p4-touch-lcd-3.4c -D SDKCONFIG=build/ws-p4-touch-lcd-3.4c/sdkconfig -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/ws-p4-touch-lcd-3.4c/sdkconfig.defaults" build
 
   result:
     name: CI passed

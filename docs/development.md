@@ -33,12 +33,19 @@ The Python jobs in `.github/workflows/ci.yml` run under `xvfb-run` so the deskto
 
 A pull request runs only the CI jobs its files can affect. The **Changed areas** job compares the pull request with its base:
 
-- A change under `firmware/` runs the host core tests and every board build.
+- A change under `firmware/` runs the host core tests and builds the boards the diff can affect. `firmware/esp32/tools/ci_boards.py` picks them:
+  - a file under `boards/<board>/` selects that board;
+  - a changed line inside `#if CONFIG_HG_BOARD_...`, or a line in `Kconfig.projbuild` or an environment in `platformio.ini` that names a board, selects the boards named;
+  - any other change to `firmware/core/`, `firmware/drivers/` or `firmware/esp32/main/` is shared code. It selects five boards: `esp32s3-breadboard`, `esp32s3-touch-amoled-175`, `esp32s3-lcd-154`, `esp32-2432s028-cyd` and `crowpanel-p4-101`;
+  - a change to the build itself (`sdkconfig.defaults`, the partition table, `components/`, `tools/`, `idf_component.yml`) selects every board.
+- The `full-ci` label on a pull request builds every board. Add it, then re-run the **Pick firmware boards** job.
 - Any change outside `site/` runs the Python tests, because they build the simulator from `firmware/` and check the commands in the docs.
 - A change under `site/`, `docs/`, `plugin/dashboard/` or a root Markdown file runs the installer site's tests and build.
 - A change to `.github/workflows/ci.yml` runs everything.
 
-A push to `main` and a manual run always run every job. Branch protection requires one check from this workflow, **CI passed**, which passes when every job passed or was skipped as unaffected.
+The adapter and gateway suites in `hermes.yml` run when `plugin/`, `python/`, `tests/`, `firmware/core/`, `firmware/sim/` or `pyproject.toml` change; otherwise that job passes without running them.
+
+A push to `main` and a manual run always run every job and build every board, so a break in a board that a pull request did not build shows on `main` after the merge. Branch protection requires one check from this workflow, **CI passed**, which passes when every job passed or was skipped as unaffected.
 
 CI runs the adapter and gateway suites in `.github/workflows/hermes.yml`: against the Hermes commit pinned there (`HERMES_REF`) on every push and pull request, and against Hermes `main` once a day. To move the pin, run that workflow by hand with `hermes_ref: main`. When it passes, put the commit it printed into `HERMES_REF` and into `TESTED_HERMES_COMMIT` in `plugin/compat.py`; a test checks that the two agree.
 
@@ -171,7 +178,7 @@ Two checks stop a firmware build that would run with settings nobody asked for. 
 - **`hermes-gadget-<board>-<version>.bin`:** bootloader, partition table, OTA data and app in one image, from address 0. It is byte for byte what `esptool merge_bin` makes from the same build. Flashed at `0x0`, it also erases the device's settings.
 - **`hermes-gadget-<board>-<version>-app.bin`:** the app alone, for `hermes gadget update`.
 
-It also writes `SHA256SUMS` and `manifest.json`, which tells the browser installer each board's chip, flash size and PSRAM, and where the settings partition is. The installer writes everything around the settings, so a device you reinstall keeps its Wi-Fi, server and key. CI packages every board on every change and keeps the files as workflow artifacts.
+It also writes `SHA256SUMS` and `manifest.json`, which tells the browser installer each board's chip, flash size and PSRAM, and where the settings partition is. The installer writes everything around the settings, so a device you reinstall keeps its Wi-Fi, server and key. CI packages every board it builds and keeps the files as workflow artifacts.
 
 To publish a release:
 
