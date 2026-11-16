@@ -171,6 +171,26 @@ def test_script_power_readings_use_native_status(devserver, tmp_path, capsys):
     assert captured.err == ""
 
 
+def test_the_faces_example_script_shows_each_expression(devserver, tmp_path, capsys, monkeypatch):
+    from pathlib import Path
+
+    from hermes_gadget.sim import Simulator
+
+    _, _, url = devserver()
+    sim = Simulator(url=url, state_dir=tmp_path / "device")
+    script = Path(__file__).resolve().parents[1] / "examples" / "scripts" / "faces.txt"
+    monkeypatch.chdir(tmp_path)  # the script saves its screenshots where it runs
+
+    assert cli.run_script(sim, script) == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    replies = [line for line in captured.out.splitlines() if line.startswith("@")]
+    assert replies == ["@ok face happy", "@ok face confused", "@ok face alert", "@ok face sleepy",
+                       '@face {"expression":"sleepy"}', '@face {"expression":"neutral"}']
+    shots = {(tmp_path / f"face-{name}.png").read_bytes() for name in ("happy", "confused", "alert", "sleepy")}
+    assert len(shots) == 4
+
+
 @pytest.mark.parametrize("reading", [
     '{"battery_mv":',
     '[]',

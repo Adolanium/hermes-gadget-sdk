@@ -107,6 +107,9 @@ struct UiModel {
   uint8_t caption_lines = 1;  // hero: lines the detail may wrap to (then "..")
   bool name_target = false;   // hero: the caption sits in a panel that a tap opens the profile list from
   const mascot::Face* face = nullptr;  // drawn instead of the mascot; borrowed like `qr`
+  // hero, on Ready, Thinking and Responding: the face's expression (face.set). Other screens ignore it.
+  mascot::Expression expression = mascot::Expression::Neutral;
+  bool expression_still = false;  // its mark has stopped moving (App::expression_still)
   // Profiles screen: profiles per page asked for (4, 6, 9 or 16; the panel may fit fewer), and the
   // items whose icon is `face` and the mascot (-1: none). The others show their initial.
   uint8_t grid = 4;
@@ -302,8 +305,13 @@ class Ui {
   };
   HeroGeom hero_geom(const UiModel& m) const;
   void draw_hero(Canvas& c, const UiModel& m);
-  // Rows [y0, y1) that hero animations may touch for this screen.
-  void hero_anim_rows(const UiModel& m, int& y0, int& y1) const;
+  // Rows [y0, y1) that hero animations may touch for this screen, given the expression and the
+  // frame drawn last: a changed expression takes its mark and mouth with it, and a step of the
+  // mark alone leaves the eyes out.
+  void hero_anim_rows(const UiModel& m, mascot::Expression was, mascot::Frame was_frame, int& y0, int& y1) const;
+  // Area coordinates: where an expression's mark is drawn, beside the head at the thinking dots' anchor.
+  Rect mark_rect(const HeroGeom& g, const mascot::Anchors& a) const;
+  void draw_mark(Canvas& c, const UiModel& m, const Rect& r);
   // Round panels: the edge ring (set_ring derives what its pixels need once per frame;
   // paint_ring paints it over rows; update_ring writes and sends only what changed in a
   // rectangle, which comet_box narrows to what a comet's step can change), and the
@@ -333,6 +341,9 @@ class Ui {
   uint32_t hero_static_ = 0, hero_anim_ = 0;
   uint32_t battery_hash_ = 0;
   bool hero_valid_ = false;
+  // The expression and the frame the hero band shows.
+  mascot::Expression hero_expression_ = mascot::Expression::Neutral;
+  mascot::Frame hero_frame_ = mascot::Frame::Idle;
   bool valid_ = false;
   // frame timing (measure)
   FrameStats* stats_ = nullptr;

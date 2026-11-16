@@ -63,6 +63,8 @@ A first session, start to finish:
 | **Developer tools**, serial console | The same commands as the board's UART console (`help`, `status`, `set server ...`) |
 | **Developer tools**, Power (simulated) | Supply a complete power-driver reading, independently of the generic telemetry sliders |
 
+The face's [expressions](architecture.md#the-mascot) are in the core, so the simulator draws them. In the serial console, `face happy` sets one, `face sleepy 10` sets one for 10 seconds, `face neutral` clears it and `face` reports it; the `face.set` action does the same from Hermes.
+
 The simulated device registers two demo actions the agent can use: `led.set` (a virtual LED in the window) and `buzzer.beep`.
 
 The [device settings menu](using-gadget.md#device-settings-and-hardware-checks) runs in the native firmware core. On touch profiles, hold the device title bar to open it; on `sim-466x466-round`, hold the **SETTINGS** target under the status dot. You can also enter `settings` in the serial console. The desktop **Settings** dialog configures the simulator host; the device menu changes saved volume, brightness, talk mode, and (when Hermes offers several) the Hermes profile.
@@ -143,6 +145,12 @@ screenshot /tmp/hg-battery-50.png
 power null
 sleep 5.2
 status
+```
+
+`console face <expression> [seconds]` sets the face's expression in a script, and `status` reports it as `expression` while one is set. `examples/scripts/faces.txt` shows each one and saves a screenshot of it:
+
+```bash
+hermes-gadget sim --headless --url ws://127.0.0.1:8765/gadget --script examples/scripts/faces.txt
 ```
 
 Power objects accept only `battery_present`, `battery_mv`, `battery_percent`, `charging`, and `external_power`. Missing fields or JSON `null` values are unknown; `{}` is an available reading with every field unknown. Booleans must be `true`/`false`, voltage an integer 0–65535, and percentage an integer 0–100; booleans are not numeric inputs. Invalid JSON, keys, types, or ranges stop a script with a line-numbered error and leave the applied fixture unchanged. Voltage-only `status.power` never gains a derived `battery_percent`, even when the header displays an estimate.
