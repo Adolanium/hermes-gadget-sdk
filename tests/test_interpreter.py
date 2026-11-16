@@ -1402,6 +1402,8 @@ def test_an_image_still_being_converted_when_the_mode_starts_is_not_shown(gadget
 
 
 @requires_hermes
+@requires_sim
+@hermes
 def test_whoever_holds_an_interpreting_gadget_cannot_switch_its_profile(gadget, make_sim):
     from hermes_fixtures import _paired_sim
 
