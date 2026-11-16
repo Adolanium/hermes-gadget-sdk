@@ -149,6 +149,25 @@ class EchoBrain(HubDelegate):
         audio = tone(session.speaker_rate, 0.25) if session.has_speaker else None  # stands in for the speech
         self._start_turn(session, msg_id, reply, audio, heard=heard, interpreting=state)
 
+    # A device marks what is typed or recorded in the mode; that is translated or refused, never echoed.
+
+    async def on_interpret_text(self, session: DeviceSession, msg_id: str, text: str) -> None:
+        if (state := self.interpreting.get(session.device_id)) is None:
+            await session.refuse_interpreted()
+            return
+        self._interpret_turn(session, msg_id, state, text, None)
+
+    async def on_interpret_utterance(self, session: DeviceSession, msg_id: str, wav: bytes, seconds: float) -> None:
+        if (state := self.interpreting.get(session.device_id)) is None:
+            await session.refuse_interpreted()
+            return
+        heard = self.transcribe(seconds, state.speaker)
+        self._interpret_turn(session, msg_id, state, heard, heard)
+
+    async def on_interpret_stop(self, session: DeviceSession) -> None:
+        self.interpreting.pop(session.device_id, None)
+        await session.refuse_interpreted("Interpreter off")
+
     async def on_text(self, session: DeviceSession, msg_id: str, text: str) -> None:
         if (state := self.interpreting.get(session.device_id)) is not None:
             self._interpret_turn(session, msg_id, state, text, None)

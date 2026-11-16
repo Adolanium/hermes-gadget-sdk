@@ -22,10 +22,14 @@ user switch it.
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import tempfile
 import time
 import unicodedata
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from . import textfmt
@@ -33,6 +37,9 @@ from . import textfmt
 # The mode ends by itself after this long without a translation or a switch of speaker, so a gadget
 # left in it, or switched off while in it, answers again the next time someone talks to it.
 IDLE_S = 30 * 60
+# A translation longer than this is cut: what one person says in a recording never needs more, and a
+# model talked into writing an essay must not hold the speaker for minutes.
+MAX_TRANSLATION_CHARS = 800
 
 # English names for the request, and so a name ("spanish") is accepted where a code is. Only
 # these languages are taken: a typo such as "the" is refused instead of being sent on as a code.
@@ -83,7 +90,7 @@ class Session:
     a: str
     b: str
     speaker: str = ""  # the language the next recording is transcribed in (a or b)
-    touched: float = field(default_factory=time.monotonic)  # the last use, for IDLE_S
+    touched: float = field(default_factory=time.time)  # the last use (wall clock: it outlives the gateway)
 
     def __post_init__(self) -> None:
         if self.speaker not in (self.a, self.b):
@@ -100,10 +107,10 @@ class Session:
         self.touch()
 
     def touch(self) -> None:
-        self.touched = time.monotonic()
+        self.touched = time.time()
 
     def expired(self, now: Optional[float] = None) -> bool:
-        return (time.monotonic() if now is None else now) - self.touched > IDLE_S
+        return (time.time() if now is None else now) - self.touched > IDLE_S
 
     @property
     def label(self) -> str:
@@ -119,6 +126,47 @@ class Session:
 
 
 OFF = {"type": "interpret", "on": False}
+
+
+class Store:
+    """Which devices interpret, kept on disk so the mode outlives the gateway.
+
+    A gadget in the mode may be in a stranger's hands. If a restart forgot the mode, the next thing
+    said to it would be answered by the agent, so the gateway reads this file when it starts."""
+
+    def __init__(self, directory: Path | str):
+        self.path = Path(directory) / "interpret.json"
+
+    def load(self) -> Dict[str, Session]:
+        """The sessions saved and not yet expired; a file that can't be read holds none."""
+        try:
+            saved = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        sessions: Dict[str, Session] = {}
+        for device_id, rec in (saved.items() if isinstance(saved, dict) else ()):
+            try:
+                session = start(rec["a"], rec["b"])
+                session.speaker = rec["speaker"] if rec["speaker"] in (session.a, session.b) else session.a
+                session.touched = float(rec["touched"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not session.expired():
+                sessions[str(device_id)] = session
+        return sessions
+
+    def save(self, sessions: Dict[str, Session]) -> None:
+        data = {device_id: {"a": s.a, "b": s.b, "speaker": s.speaker, "touched": s.touched}
+                for device_id, s in sessions.items()}
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".interpret.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            os.replace(tmp, self.path)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
 
 
 def start(first: object, second: object) -> Session:

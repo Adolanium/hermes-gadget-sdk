@@ -9533,7 +9533,7 @@ TEST("interpret: a short CANCEL press asks Hermes to switch who speaks next") {
   CHECK_EQ(r.app.model().headline, std::string("ES > EN"));
 }
 
-TEST("interpret: holding CANCEL counts down to leaving the mode, and a lost connection ends it") {
+TEST("interpret: holding CANCEL counts down and asks to leave the mode, never for a new session") {
   Rig r;
   r.bring_online(true);
   r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
@@ -9541,16 +9541,87 @@ TEST("interpret: holding CANCEL counts down to leaving the mode, and a lost conn
   r.advance(1200);
   CHECK(r.app.model().hint.find("Interpreter off in") != std::string::npos);
   r.advance(1000);
-  CHECK(r.fake.last("session.new") != nullptr);  // Hermes leaves the mode on this message
+  CHECK(r.fake.last("interpret.stop") != nullptr);
+  CHECK(r.fake.last("session.new") == nullptr);
   CHECK(r.fake.last("interpret.flip") == nullptr);
   r.app.on_button(hg::Button::Cancel, false);
+  // Still in the mode until Hermes says so.
+  CHECK(r.app.status_json().find("\"interpret\"") != std::string::npos);
   r.server(R"({"type":"interpret","on":false})");
   r.server(R"({"type":"turn.end","turn":"","outcome":"cancelled"})");
   CHECK(r.app.screen() == hg::Screen::Ready);
   CHECK_EQ(r.app.model().headline, std::string("Hi, I'm Hermes"));
+  // Outside the mode the same hold asks for a new session.
+  r.app.on_button(hg::Button::Cancel, true);
+  r.advance(2200);
+  r.app.on_button(hg::Button::Cancel, false);
+  CHECK(r.fake.last("session.new") != nullptr);
+}
+
+TEST("interpret: what is typed or recorded in the mode says so") {
+  Rig r;
+  r.bring_online(true);
+  r.app.console("say hello");
+  const Value* text = r.fake.last("text");
+  CHECK(text != nullptr && !(*text)["interpret"].as_bool());
+  r.server(R"({"type":"turn.end","turn":"","outcome":"cancelled"})");
+  r.app.on_button(hg::Button::Talk, true);
+  const Value* start = r.fake.last("audio.start");
+  CHECK(start != nullptr && !(*start).has("interpret"));
+  r.app.on_button(hg::Button::Cancel, true);  // discard it
+  r.app.on_button(hg::Button::Cancel, false);
+  r.app.on_button(hg::Button::Talk, false);
 
   r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
-  CHECK(r.app.status_json().find("\"interpret\"") != std::string::npos);
+  r.app.console("say hola");
+  text = r.fake.last("text");
+  CHECK(text != nullptr && (*text)["interpret"].as_bool());
+  r.server(R"({"type":"turn.end","turn":"","outcome":"cancelled"})");
+  r.advance(2000);  // not a double press of TALK
+  r.app.on_button(hg::Button::Talk, true);
+  start = r.fake.last("audio.start");
+  CHECK(start != nullptr && (*start)["interpret"].as_bool());
+}
+
+TEST("interpret: the mode outlives a lost connection, and only Hermes ends it") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
   r.app.on_transport_closed("gone");
+  CHECK(r.app.status_json().find("\"interpret\":\"ES > EN\"") != std::string::npos);
+  // Back online, what is typed is still marked: a Hermes that forgot the mode must not answer it.
+  reconnect(r);
+  r.app.console("say hola");
+  const Value* text = r.fake.last("text");
+  CHECK(text != nullptr && (*text)["interpret"].as_bool());
+  r.server(R"({"type":"interpret","on":false})");
   CHECK(r.app.status_json().find("\"interpret\"") == std::string::npos);
+}
+
+TEST("interpret: a recording made in the mode is marked when it is sent again, even after the mode ended") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  const Value* first = r.fake.last("audio.start");
+  CHECK(first && (*first)["interpret"].as_bool());
+  sp.talk(r, 5);
+  r.app.on_transport_closed("disconnected");  // the recording is held
+  sp.talk(r, 5);
+  r.app.on_button(hg::Button::Talk, false);
+  reconnect(r);
+  r.server(R"({"type":"interpret","on":false})");  // Hermes left the mode while the gadget was away
+  r.advance(20);
+  const Value* again = r.fake.last("audio.start");
+  CHECK(again && again != first);
+  if (!again) return;
+  CHECK_EQ((*again)["resent"].as_int(), int64_t(1));
+  CHECK((*again)["interpret"].as_bool());  // it still says where it was made: never something to answer
+  // What is recorded from now on is ordinary again.
+  r.server(R"({"type":"turn.end","turn":"","outcome":"cancelled"})");
+  r.advance(200);
+  r.app.on_button(hg::Button::Talk, true);
+  const Value* next = r.fake.last("audio.start");
+  CHECK(next && next != again && !(*next).has("interpret"));
 }

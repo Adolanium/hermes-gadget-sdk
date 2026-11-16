@@ -201,16 +201,33 @@ What this enforces, by construction and not by a prompt:
 - No Hermes session exists for a translation, so nothing is written to the session store, no session title is generated, no memory review runs, no memory provider sees a turn, and `session_search` has nothing to find.
 - The device's conversation is never in a translation request, and no translation is ever in the conversation.
 
-What it does not enforce: the words go to the configured STT, model and TTS providers, and Hermes writes its usual audit line for a plugin completion (plugin, provider, model, token count; no text) to the gateway log. A translation that fails logs the error text.
+What it does not enforce: the words go to the configured STT, model and TTS providers, and Hermes writes its usual audit line for a plugin completion (plugin, provider, model, token count; no text) to the gateway log. Hermes retries a failed completion, and where the configuration lists fallback providers for auxiliary calls, may send it to one of them. A translation that fails logs the error text.
 
-**Entering and leaving.** The adapter keeps the mode per device, in memory: the two languages and which one speaks next.
+**Failing closed.** A gadget in the mode may be in someone else's hands, so doubt about whether the mode is on is resolved toward "not an agent turn":
+
+- The mode is kept in `interpret.json` in the plugin's data folder and read when the gateway starts. A restart does not end it.
+- The device keeps the mode through a lost connection, and marks what is typed or recorded in it (`interpret: true` in `text` and `audio.start`), a recording it sends again after reconnecting included. The hub hands a marked message to `on_interpret_text` or `on_interpret_utterance`, never to `on_text` or `on_utterance`. The adapter translates it while the mode is on, and otherwise drops it and tells the device the mode is off. A mode that expires on a message drops that message too.
+- When a device connects, the adapter states the mode in so many words, on or off, before anything else.
+- While the mode is on, the adapter shows no Hermes question on the device (`prompt`) and ignores an answer from it; the question stays queued, and is shown when the mode ends unless it was answered elsewhere. A question on screen when the mode starts is withdrawn from the device.
+- A device event with `notify` starts no turn while the mode is on.
+- A message sent to the device outside a turn the owner started (`send_message`, cron delivery) is held, up to 20, and delivered when the mode ends. `send_voice`, `play_tts` and images are refused with an error.
+- Holding CANCEL sends `interpret.stop`, never `session.new`, so it cannot reset the owner's conversation.
+
+One turn is let through: if the agent turned the mode on with `gadget_interpret`, the rest of that turn, its reply included, still reaches the device.
+
+What is kept: nothing of a translation is written to a session or to memory. The recording is written to a temporary file that the same worker deletes when speech-to-text returns, also when the turn was cancelled meanwhile; a speech file whose synthesis outlives a cancelled turn is deleted when it is done. While the mode is on, what was heard and replied is left out of `status.json`, which the Desktop page mirrors.
+
+**Bounds.** Speech-to-text has 60 seconds. The completion is asked for at most 512 tokens with a 20 second timeout per attempt, and 45 seconds for all attempts together; the translation is cut to 800 characters.
+
+**Entering and leaving.** The adapter keeps the mode per device: the two languages and which one speaks next.
 
 - `hermes gadget interpret <device> <language> <language>` posts a request to the gateway through the same file queue as `hermes gadget diag`. `off` in place of the languages leaves the mode, also for a device that is not connected.
 - The `gadget_interpret` agent tool does the same from a conversation.
-- On the device, holding CANCEL sends `session.new`. While the device interprets, the adapter leaves the mode on that message and sends no `/new`. A translation under way is stopped.
-- The mode ends after 30 minutes without a translation or a switch of speaker, when the device is unpaired, and when the gateway restarts.
+- On the device, holding CANCEL sends `interpret.stop`. Firmware that does not know that message sends `session.new`; while the device interprets, the adapter leaves the mode on it and sends no `/new`. A translation under way is stopped.
+- The mode ends after 30 minutes without a translation or a switch of speaker, and when the device is unpaired. The device is told.
+- The mode is refused when it is started on a Hermes without `ctx.llm` or without the speech functions above.
 
-The adapter tells the device with an [`interpret` message](protocol.md#interpreter-mode) and sends it again when the device reconnects.
+The adapter tells the device with an [`interpret` message](protocol.md#interpreter-mode).
 
 **The language of each recording.** Hermes's speech-to-text takes at most one language per recording and does not report which language it heard. Hermes's default configuration fixes English (`stt.language: en`), and a `pre_transcription` hook can replace a language but not clear one, so a plugin cannot ask for detection either. The mode therefore does not detect who is speaking: the speakers take turns. The adapter notes each recording with the language whose turn it is, and the hook hands that language to the STT provider. The speaker switches when the translation is sent to the device, before it is spoken, so someone who answers during the speech is recorded in their own language. A turn that fails or is cancelled switches nothing. The device's `interpret.flip` message, a short CANCEL press, switches the speaker by hand.
 
@@ -218,11 +235,11 @@ The adapter tells the device with an [`interpret` message](protocol.md#interpret
 
 Limits:
 
-- **The gateway's profile translates.** The model, STT and TTS settings are those of the profile that runs the gadget platform, whichever profile the device selected or a route sends it to.
-- **Needs `ctx.llm`.** On a Hermes whose plugin context has none, the mode is refused when it is started.
+- **The gateway's profile translates.** The adapter calls `ctx.llm` and the speech functions from the gateway process, as the profile that runs the gadget platform, whichever profile the device selected or a route sends it to. This is verified on a gateway that serves one profile; on a multiplexed gateway it is untested which profile's settings those calls read.
 - **Each utterance is translated alone.** The model gets no earlier sentences, so it cannot use them to resolve a pronoun or a name.
 - **One voice.** Hermes has one text-to-speech voice per profile, and the plugin cannot choose a voice per language. Speech is made as a whole file, not streamed.
 - **A wrong turn is not detected.** A recording transcribed in the other person's language comes back as a wrong translation.
+- **Firmware that does not mark.** A device without `caps.interpret` sends nothing marked, so for it only the gateway's own record of the mode keeps a message from the agent.
 - **54 languages.** `interpret.LANGUAGES` lists the codes the mode accepts; your STT, model and TTS must each support the pair.
 
 ### Pairing

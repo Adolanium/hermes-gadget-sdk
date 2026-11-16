@@ -796,8 +796,11 @@ class App {
   std::string user_echo_;
   // Interpreter mode (docs/protocol.md#interpreter-mode): Hermes translates what is said instead of
   // answering. The label names the languages ("ES > EN"); a short CANCEL press on the idle screen
-  // asks Hermes to switch who speaks next.
+  // asks Hermes to switch who speaks next. Only Hermes ends the mode: it outlives a lost connection,
+  // and what is typed or recorded in it says so (`interpret` in `text` and `audio.start`), so Hermes
+  // never takes it for something to answer, even after it has forgotten the mode.
   bool interpret_ = false;
+  bool rec_interpret_ = false;  // the recording under way or held was made in the mode
   std::string interpret_label_;
   void interpret_off();
   void interpret_text(UiModel& m);  // the translation large, what was said small above it

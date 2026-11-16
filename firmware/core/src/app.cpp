@@ -529,7 +529,6 @@ const char* App::activity() const {
 
 void App::drop_session(std::string_view reason) {
   last_close_ = std::string(reason);
-  interpret_off();  // Hermes says it again on the next connection if it still holds
   // Every end of a session, whoever noticed it: the transport, a timeout or the network.
   ++closes_total_;
   if (closes_.size() >= kCloseHistory) closes_.erase(closes_.begin());
@@ -1754,6 +1753,7 @@ void App::start_listening(bool hands_free) {
   rec_resends_ = 0;
   rec_backlog_ms_ = 0;
   rec_started_at_ = now();
+  rec_interpret_ = interpret_;
   // Buffered, a start that didn't go leaves the recording held: tick() sends it all on a new stream.
   rec_live_ = send_audio_start();
   mode_ = Mode::Listening;
@@ -1869,6 +1869,8 @@ bool App::send_audio_start() {
       .set("mode", hands_free_ ? "tap" : "hold");
   // Sent again after a lost connection: how long ago it began. Hermes may ignore it.
   if (rec_resends_) start.set("resent", rec_resends_).set("age_ms", now() - rec_started_at_);
+  // Said to be translated, whenever it arrives: Hermes never answers it (interpreter mode).
+  if (rec_interpret_) start.set("interpret", true);
   return send(start);
 }
 
@@ -1948,10 +1950,10 @@ void App::start_new_session() {
   dismiss_overlay();
   close_camera();
   clear_prompt();
-  send(proto::message("session.new"));
+  // In interpreter mode the hold asks to leave it; a new session is never asked for from the mode.
+  send(proto::message(interpret_ ? "interpret.stop" : "session.new"));
   reply_.clear();
   user_echo_.clear();
-  // In interpreter mode the hold leaves it instead: Hermes takes the same message that way.
   status_ = tr(interpret_ ? i18n::Msg::InterpreterOff : i18n::Msg::StartingNewSession);
   scroll_ = -1;
   mode_ = Mode::Thinking;
@@ -2028,6 +2030,7 @@ void App::submit_text(std::string_view text) {
   request_id_ = next_id('t');
   json::Value msg = proto::message("text");
   msg.set("id", request_id_).set("text", t);
+  if (interpret_) msg.set("interpret", true);
   send(msg);
   user_echo_ = t;
   reply_.clear();

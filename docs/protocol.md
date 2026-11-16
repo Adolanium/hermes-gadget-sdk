@@ -210,7 +210,7 @@ The Hermes plugin makes a profile's thumbnail from its `gadget-face.bin` (the id
 | `{"type": "audio.cancel", "id": "a4", "stream": 4, "reason": "too short"}` | Discard the utterance |
 | `{"type": "cancel"}` | Stop the current turn (Hermes `/stop`). With no turn running it only stops the reply audio the server is still sending, and no `/stop` is sent |
 | `{"type": "session.new"}` | Start a fresh conversation (Hermes `/new`). The reference firmware sends it when CANCEL is held for 2 s |
-| `{"type": "interpret.flip"}` | Switch who speaks next; see [Interpreter mode](#interpreter-mode) |
+| `{"type": "interpret.flip"}`, `{"type": "interpret.stop"}` | Switch who speaks next, or leave the mode; see [Interpreter mode](#interpreter-mode). In the mode, `text` and `audio.start` carry `"interpret": true` |
 | `{"type": "prompt.reply", "id": "q1", "answer": "yes"}` | The answer (`yes` or `no`) to a `prompt` |
 
 - Utterances shorter than 0.25 s are dropped with a `notice`, and the server then sends a `turn.end` with an empty `turn` and outcome `cancelled`, so the device stops waiting.
@@ -308,14 +308,19 @@ Hermes asks before some actions: destructive commands such as `/new`, a costly m
 
 In interpreter mode Hermes translates what is said to the device into another language instead of answering it. To the device the turn is an ordinary one: `turn.start`, `transcript` with what was said, `reply` with the translation, reply audio, `turn.end`.
 
-- `caps.interpret: 1` in `hello` means the device draws the mode. The reference firmware announces it when it has a screen. The server sends the messages below to every device; one that does not know them ignores them and shows each translation as a reply.
-- `{"type": "interpret", "on": true, "label": "ES > EN"}` (server → device) turns the mode on, or updates it. `label` is short ASCII text that names the languages: here the next recording is taken as Spanish and translated into English. The server sends the message again when the speaker switches, which is right after each `reply`, and after a reconnect.
-- `{"type": "interpret", "on": false}` (server → device) turns it off. The device also leaves the mode when the connection ends or it is unpaired.
-- `{"type": "interpret.flip"}` (device → server) asks the server to switch who speaks next. The server answers with a new `interpret` message, and ignores the request during a turn. The device shows the new label only when that message arrives.
-- `cancel` during a translation stops it: the server sends `turn.end` with outcome `cancelled`, and the speaker stays as it was.
-- `session.new` from a device in the mode leaves it instead of starting a new conversation: the server stops a translation under way and sends `interpret` with `on: false`, a `turn.end` with an empty `turn` and outcome `cancelled`, and a `notice`.
+The person using the device in this mode may not be its owner, so both sides keep the mode from ending unnoticed.
 
-The reference firmware shows `label` as the headline of the idle screen and of the reply. It draws the translation one text size larger when the whole text fits the screen that way, with the `transcript` above it at the usual size. A short CANCEL press on the idle screen sends `interpret.flip`, in place of opening the dashboard. Holding CANCEL counts down to leaving the mode.
+- `caps.interpret: 1` in `hello` means the device draws the mode and marks what it sends from it. The reference firmware announces it when it has a screen. The server sends the messages below to every device; one that does not know them ignores them and shows each translation as a reply.
+- `{"type": "interpret", "on": true, "label": "ES > EN"}` (server → device) turns the mode on, or updates it. `label` is short ASCII text that names the languages: here the next recording is taken as Spanish and translated into English. The server sends the message again when the speaker switches, which is right after each `reply`.
+- `{"type": "interpret", "on": false}` (server → device) turns it off.
+- After every `welcome` to a paired device the server sends one of the two, so the device knows the mode from the server's word and not from its own memory. The device keeps the mode through a lost connection until then. It also leaves the mode when it is unpaired.
+- A `text` or an `audio.start` sent while the device is in the mode carries `"interpret": true`. A recording keeps the mark it began with: one that is sent again after a lost connection carries it even if the mode has ended since. The server never answers a marked message. It translates it while the mode is on; otherwise it drops it and sends `interpret` with `on: false`, a `turn.end` with an empty `turn` and outcome `cancelled`, and a `notice`.
+- `{"type": "interpret.flip"}` (device → server) asks the server to switch who speaks next. The server answers with a new `interpret` message, and ignores the request during a translation. The device shows the new label only when that message arrives.
+- `{"type": "interpret.stop"}` (device → server) asks to leave the mode. The server stops a translation under way and answers as for a dropped message, whether or not the mode was still on. A device in the mode sends this in place of `session.new`. From firmware that does not know it, the server takes `session.new` the same way while the mode is on.
+- `cancel` during a translation stops it with a `turn.end` of outcome `cancelled`. The speaker switches when the `reply` is sent: a `cancel` before it leaves the speaker as it was, and one during the speech comes after the switch.
+- While the mode is on the server sends the device no `prompt` and ignores a `prompt.reply`.
+
+The reference firmware shows `label` as the headline of the idle screen and of the reply. It draws the translation one text size larger when the whole text fits the screen that way, with the `transcript` above it at the usual size. A short CANCEL press on the idle screen sends `interpret.flip`, in place of opening the dashboard. Holding CANCEL counts down and sends `interpret.stop`.
 
 Translations are shaped like replies. When the device's `charset` does not cover the translation's script, the server sends a line in place of the text, or a note under what is left of it; see [Interpreter mode](hermes-integration.md#interpreter-mode).
 
