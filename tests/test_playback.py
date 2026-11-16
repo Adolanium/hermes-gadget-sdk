@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import os
 import re
 import shutil
 import struct
@@ -22,7 +23,14 @@ from hermes_gadget_plugin import hub as hubmod
 from hermes_gadget_plugin import playback, tools
 
 RATE = 16000
-requires_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is not installed")
+# CI sets HG_REQUIRE_FFMPEG=1 after installing ffmpeg, so a missing ffmpeg fails there instead of skipping.
+requires_ffmpeg = pytest.mark.skipif(
+    shutil.which("ffmpeg") is None and not os.environ.get("HG_REQUIRE_FFMPEG"), reason="ffmpeg is not installed")
+
+
+@pytest.mark.skipif(not os.environ.get("HG_REQUIRE_FFMPEG"), reason="ffmpeg not required here")
+def test_ffmpeg_present_when_required():
+    assert shutil.which("ffmpeg"), "HG_REQUIRE_FFMPEG is set but ffmpeg is not on PATH"
 
 
 def _tone(seconds: float, rate: int = RATE, channels: int = 1, freq: float = 440.0) -> bytes:
@@ -79,14 +87,20 @@ class Endless(playback.Source):
         self.closed = False
         self._chunk = _tone(playback.CHUNK_S, rate)
 
-    def _read(self) -> bytes:
+    def _read(self, wait: float) -> bytes:
         if self.closed:
             return b""
         self.read_s += playback.CHUNK_S
         return self._chunk
 
-    def close(self) -> None:
-        self.closed = True
+
+def _all(source: playback.Source) -> bytes:
+    """Everything a source decodes, to its end."""
+    pcm = b""
+    while (chunk := source.read(5.0)) != b"":
+        assert chunk is not None, "the source gave nothing for 5 s"
+        pcm += chunk
+    return pcm
 
 
 async def _until(condition, timeout: float = 5.0) -> None:
@@ -121,15 +135,16 @@ def test_a_local_file_plays_only_from_an_allowed_folder(tmp_path):
     inside, outside = _wav(allowed / "chime.wav", 0.3), _wav(elsewhere / "secret.wav", 0.3)
 
     assert playback.check_path(str(inside), [allowed]) == inside.resolve()
-    for refused in (outside, allowed / ".." / "private" / "secret.wav"):
-        with pytest.raises(playback.PlaybackError, match="outside the folders"):
-            playback.open_source(str(refused), RATE, roots=[allowed])
-    with pytest.raises(playback.PlaybackError, match="no such file"):
+    said = set()
+    for refused, roots in ((outside, [allowed]), (allowed / ".." / "private" / "secret.wav", [allowed]),
+                           (elsewhere / "missing.wav", [allowed]), (allowed, [allowed]), (inside, [])):
+        with pytest.raises(playback.PlaybackError) as refusal:
+            playback.open_source(str(refused), RATE, roots=roots)
+        said.add(str(refusal.value))
+    # One answer whether the path exists or not, and it names no folder on the host.
+    assert said == {playback.REFUSED_PATH} and str(tmp_path) not in playback.REFUSED_PATH
+    with pytest.raises(playback.PlaybackError, match="no such file in the folders"):
         playback.open_source(str(allowed / "missing.wav"), RATE, roots=[allowed])
-    with pytest.raises(playback.PlaybackError, match="not a file"):
-        playback.open_source(str(allowed), RATE, roots=[allowed])
-    with pytest.raises(playback.PlaybackError, match="nowhere"):
-        playback.open_source(str(inside), RATE, roots=[])
 
 
 def test_a_link_out_of_an_allowed_folder_is_not_followed(tmp_path):
@@ -141,7 +156,7 @@ def test_a_link_out_of_an_allowed_folder_is_not_followed(tmp_path):
         link.symlink_to(_wav(elsewhere / "secret.wav", 0.3))
     except OSError:
         pytest.skip("this account cannot create symbolic links")
-    with pytest.raises(playback.PlaybackError, match="outside the folders"):
+    with pytest.raises(playback.PlaybackError, match="cannot be played"):
         playback.open_source(str(link), RATE, roots=[allowed])
 
 
@@ -212,9 +227,7 @@ def test_compressed_files_are_decoded_through_ffmpeg_at_the_device_rate(tmp_path
     path = _encoded(tmp_path, name, 0.8)
     source = playback.open_source(str(path), 24000, roots=[tmp_path])
     assert isinstance(source, playback.FfmpegSource) and (source.rate, source.channels) == (24000, 1)
-    pcm = b""
-    while chunk := source.read():
-        pcm += chunk
+    pcm = _all(source)
     source.close()
     assert source.error is None
     assert abs(_seconds(pcm, 24000) - 0.8) < 0.1 and _peak(pcm) > 5000
@@ -294,9 +307,7 @@ def test_fetched_data_cannot_make_the_decoder_open_files_or_urls(tmp_path):
 def test_a_url_sends_no_more_than_its_size_limit(tmp_path):
     data = _encoded(tmp_path, "long.mp3", 20.0).read_bytes()
     source = playback.FfmpegSource(RATE, body=Body(data), max_bytes=len(data) // 4).prime()
-    pcm = source.read()
-    while chunk := source.read():
-        pcm += chunk
+    pcm = _all(source)
     source.close()
     assert "the most one URL may send" in source.error
     assert 2.0 < _seconds(pcm) < 10.0  # about a quarter of it was decoded, then the stream ended
@@ -335,11 +346,11 @@ def test_a_long_stream_is_decoded_only_as_fast_as_it_is_paced_and_ends_at_the_li
         ahead_of_sent, ahead_of_time = [], []
         read = source._read
 
-        def watched():
+        def watched(wait):
             out = device._audio_out
             ahead_of_sent.append(source.read_s - out.sent_seconds)
             ahead_of_time.append(out.sent_seconds - (clock.now - 1000.0))
-            return read()
+            return read(wait)
 
         source._read = watched
         played = await playback.play(device, source, title="radio", max_s=limit_s)
@@ -419,7 +430,9 @@ def test_cancel_on_the_device_and_a_new_recording_both_end_a_playback(tmp_path):
             task.cancel()
         return device, source, played
 
-    for message in ({"type": "cancel"}, {"type": "audio.start", "stream": 3, "rate": RATE, "format": "pcm16"}):
+    for message in ({"type": "cancel"}, {"type": "audio.start", "stream": 3, "rate": RATE, "format": "pcm16"},
+                    # A recording the server refuses still means the device stopped its speaker to make it.
+                    {"type": "audio.start", "stream": 4, "rate": RATE, "format": "flac"}):
         device, source, played = asyncio.run(run(message))
         assert "audio.abort" in device.types() and played.outcome == "interrupted" and source.closed
 
@@ -520,7 +533,7 @@ def test_the_tool_refuses_what_it_may_not_play(tool, tmp_path):
     try:
         for args, says in (
             ({}, "source is required"),
-            ({"source": str(outside)}, "outside the folders"),
+            ({"source": str(outside)}, "cannot be played"),
             ({"source": "file:///etc/passwd"}, "only http and https"),
             ({"source": "https://example.com/page"}, "no audio|ffmpeg"),  # fetched, and it was a web page
         ):
@@ -645,7 +658,7 @@ def test_through_hermes_a_playback_asked_for_in_a_turn_starts_after_it_and_cance
         assert sim.wait_for(lambda: sim.last_received("audio.start") is not None, timeout=20)
         order = [m["type"] for m in sim.received]
         assert order.index("turn.end") < order.index("audio.start")  # it did not start inside the turn
-        assert "outside the folders" in answers[0]["error"] and "URL policy refuses" in answers[1]["error"]
+        assert "cannot be played" in answers[0]["error"] and "URL policy refuses" in answers[1]["error"]
         assert answers[2]["success"] is True and answers[2]["playing"] == "gadget-play-test.wav"
         assert sim.wait_for(lambda: sim.speaker.busy(), timeout=5)
         session = gadget.adapter.hub.get(device_id)

@@ -332,6 +332,7 @@ class DeviceSession:
         self._upload: _Upload | None = None
         self._audio_out: AudioOut | None = None
         self.playback = None  # a gadget_play playback, waiting or playing (playback.Playback)
+        self.playback_lock = asyncio.Lock()  # one gadget_play start or stop at a time
         self._stream_counter = 0
         self._pending: dict[str, asyncio.Future] = {}
         self._tasks: set[asyncio.Task] = set()
@@ -867,6 +868,9 @@ class DeviceSession:
                 protocol.message("ota.error", code="disconnected", message=f"{self.name} disconnected"))
         if self._audio_out and self._audio_out._task:
             self._audio_out._task.cancel()
+        if self.playback is not None:  # its source (a download, ffmpeg) ends with the connection
+            self.playback.end("the device disconnected")
+            self.playback = None
 
     # -- description ----------------------------------------------------------------
 
@@ -1203,6 +1207,9 @@ class DeviceHub:
             session.spawn(self.delegate.on_text(session, str(msg.get("id") or ""), text[:4000]))
 
     async def _h_audio_start(self, session: DeviceSession, msg: dict) -> None:
+        # The device stops its speaker to record, whatever becomes of the recording: stop sending
+        # it a stream it no longer plays.
+        await session.stop_audio()
         fmt = msg.get("format", "pcm16")
         if fmt != "pcm16":
             await session.send_notice(f"Unsupported audio format {fmt!r}")
@@ -1211,8 +1218,6 @@ class DeviceHub:
         if not 4000 <= rate <= 48000:
             await session.send_notice(f"Unsupported sample rate {rate}")
             return
-        # The device stops its speaker to record: stop sending it a stream it no longer plays.
-        await session.stop_audio()
         session._upload = _Upload(
             id=str(msg.get("id") or ""), stream=int(msg.get("stream") or 0), rate=rate, started=time.monotonic())
         _note(session, state="listening", heard="", reply="", status="")

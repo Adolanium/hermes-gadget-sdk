@@ -111,7 +111,12 @@ def _run(adapter, coro) -> Any:
     if getattr(loop, "_thread_id", None) == threading.get_ident():
         coro.close()
         raise RuntimeError("gadget tools cannot block the gateway event loop")
-    return asyncio.run_coroutine_threadsafe(coro, loop).result(CALL_TIMEOUT_S)
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    try:
+        return future.result(CALL_TIMEOUT_S)
+    except BaseException:
+        future.cancel()  # the caller reports a failure: the work must not finish behind its back
+        raise
 
 
 def _resolve(adapter, ref: str | None):
