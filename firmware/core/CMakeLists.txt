@@ -7,6 +7,7 @@ set(HG_CORE_SOURCES
     src/app_perf.cpp
     src/app_phone.cpp
     src/app_timer.cpp
+    src/app_face.cpp
     src/canvas.cpp
     src/crypto.cpp
     src/font5x7.cpp

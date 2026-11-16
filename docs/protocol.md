@@ -249,7 +249,7 @@ Reply text is already shaped for the device: Markdown is stripped and the text i
 
 `format` is `"pcm16"` (little-endian mono samples) unless the device lists `"opus"` in `caps.speaker.formats`: then the server may send `"opus"`, and each binary frame carries one Opus packet (mono, at `rate`, one 40 ms frame; the last frame of a reply is padded with silence). The plugin sends Opus at 24 kbps when the host has libopus, about a tenth of PCM16 at 16 kHz, and falls back to PCM16 without it.
 
-The server resamples to the device's declared speaker rate. It also paces frames to real time, at most half of `caps.speaker.buffer_ms` ahead, and never less than 0.5 s or more than 3 s. A device that doesn't announce its buffer gets the 0.5 s lead, so a jitter buffer of about 1 s is enough for it. A new `audio.start` replaces the stream that is playing.
+The server resamples to the device's declared speaker rate. It also paces frames to real time, at most half of `caps.speaker.buffer_ms` ahead, and never less than 0.5 s or more than 3 s. A device that doesn't announce its buffer gets the 0.5 s lead, so a jitter buffer of about 1 s is enough for it. A new `audio.start` replaces the stream that is playing. The same stream carries audio the agent plays with `gadget_play`, which can last an hour: `seq` wraps at 65536 and the device does not check it. When the device starts a recording (`audio.start` from the device), the server stops the stream it was sending, with `audio.abort`.
 
 ### Display
 
@@ -368,6 +368,30 @@ A device with a camera may advertise `camera.capture` in `hello.actions`; it tak
 ```
 
 `image_b64` is Base64-encoded, tightly packed, row-major RGB565 pixels in little-endian byte order, with no row padding. For the 7B port, the maximum dimensions are 640×512 (655,360 decoded bytes; 873,816 Base64 characters). For the CoreS3 port, the maximum dimensions are 640×480 (614,400 decoded bytes; 819,200 Base64 characters). The full result stays below the gateway's current 1 MiB action-frame limit. Other camera ports must keep the serialized result within their transport's frame limit. On capture failure, the device uses the existing `action.result` error form; no new message type is introduced. The plugin saves a successful result as a PNG under `~/.hermes/gadgetpix/` and gives the agent the file's path, width, height and size, never `image_b64`.
+
+#### The `face.set` action
+
+A device with a display advertises `face.set` in `hello.actions`. It gives the face on the screen an expression:
+
+| Argument | Meaning |
+|---|---|
+| `expression` | Required: `neutral`, `happy`, `confused`, `alert` or `sleepy`. `neutral` clears the expression |
+| `seconds` | Optional, an integer from 1 to 3600: the face goes back to neutral after that long |
+
+```json
+{"type": "action", "id": "x2", "name": "face.set", "args": {"expression": "happy", "seconds": 10}}
+{"type": "action.result", "id": "x2", "ok": true, "result": {"expression": "happy", "seconds": 10}}
+```
+
+- Without `seconds`, the expression lasts until the user's next turn. That is one of three things the user does on the device, in any state: starting a recording (even one that is then discarded), sending a typed message, or starting a new session. Nothing else ends it: not the reply to the turn it was set in, and not a turn Hermes starts by itself (`turn.start` with no recording or message before it, as for a device event that notifies Hermes).
+- With `seconds`, the user's next turn still ends it, when that comes first.
+- A new `face.set` replaces the expression and its time. A restart forgets it; a lost connection does not.
+- The device draws the expression on its idle, thinking and speaking screens. On any other screen, and while the screen is off or shows the resting clock, it is kept but not drawn. The action does not wake the screen.
+- An unknown `expression`, or `seconds` that is not an integer from 1 to 3600 (2.9 and `"10"` are refused, not rounded), fails with `ok: false` and changes nothing.
+- The mark beside the head moves for 60 s after each `face.set`, then stands still for as long as the expression lasts.
+- While an expression is set, the console's `status` carries it as `expression`.
+
+[The mascot](architecture.md#the-mascot) says what each expression looks like.
 
 ### Telemetry and events (device → server)
 

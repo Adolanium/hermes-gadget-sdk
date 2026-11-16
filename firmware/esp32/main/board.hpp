@@ -181,6 +181,7 @@ struct CodecAudioConfig {
   float amp_supply_v = 5.0f;  // amplifier supply; the ES8311 driver sets its output level from it
   float mic_gain_db = 24.0f;
   float vad_min_rms = 500.0f;  // tap mode's speech floor for this mic (DeviceProfile::vad_min_rms)
+  bool drop_silent_recordings = false;  // vad_min_rms was measured here: hold mode drops recordings without speech
   SpeakerCodec speaker = SpeakerCodec::Es8311;
   MicCodec mic = MicCodec::Es7210;
   bool stereo32 = false;      // two 32-bit I2S slots per frame instead of one 16-bit slot

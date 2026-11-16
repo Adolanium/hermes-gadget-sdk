@@ -167,13 +167,15 @@ jobs:
         with:
           node-version: 22
       - name: Install virtual display
-        run: sudo apt-get update && sudo apt-get install -y xvfb shellcheck libopus0
+        run: sudo apt-get update && sudo apt-get install -y xvfb shellcheck libopus0 ffmpeg
       - name: Test
         # Tests that need a Hermes Agent checkout skip themselves here; hermes.yml runs them.
         env:
           HERMES_GADGET_UI_TESTS: "1"
           # libopus is installed above, so test_opus fails instead of skipping if it can't load.
           HG_REQUIRE_LIBOPUS: "1"
+          # ffmpeg is installed above too, so the gadget_play decoding tests fail instead of skipping without it.
+          HG_REQUIRE_FFMPEG: "1"
         # In parallel; a test that fails is run again on its own, since a busy runner can make a
         # simulator wait time out. A test that fails twice fails the job.
         run: |

@@ -11,6 +11,16 @@ namespace hg::mascot {
 
 enum class Frame : uint8_t { Idle, Blink, Talk };
 
+// What Hermes puts on the face with the face.set action (docs/protocol.md#the-faceset-action).
+// The renderer draws each one from the three frames and a small mark beside the head, so a
+// custom face and a colour face show them too.
+enum class Expression : uint8_t { Neutral, Happy, Confused, Alert, Sleepy };
+constexpr Expression kExpressions[] = {Expression::Neutral, Expression::Happy, Expression::Confused,
+                                       Expression::Alert, Expression::Sleepy};
+const char* expression_name(Expression e);
+// False, leaving `out` alone, when `name` is none of the names above.
+bool parse_expression(std::string_view name, Expression& out);
+
 // Square, row-major, MSB-first, rows padded to whole bytes. A set bit is ink
 // (the white artwork); clear bits are transparent.
 struct Bitmap {

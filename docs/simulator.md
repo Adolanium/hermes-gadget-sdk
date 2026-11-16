@@ -64,6 +64,8 @@ A first session, start to finish:
 | **Developer tools**, serial console | The same commands as the board's UART console (`help`, `status`, `set server ...`) |
 | **Developer tools**, Power (simulated) | Supply a complete power-driver reading, independently of the generic telemetry sliders |
 
+The face's [expressions](architecture.md#the-mascot) are in the core, so the simulator draws them. In the serial console, `face happy` sets one, `face sleepy 10` sets one for 10 seconds, `face neutral` clears it and `face` reports it; the `face.set` action does the same from Hermes.
+
 The simulated device registers two demo actions the agent can use: `led.set` (a virtual LED in the window) and `buzzer.beep`.
 
 The [device settings menu](using-gadget.md#device-settings-and-hardware-checks) runs in the native firmware core. On touch profiles, hold the device title bar to open it; on `sim-466x466-round`, hold the **SETTINGS** target under the status dot. You can also enter `settings` in the serial console. The desktop **Settings** dialog configures the simulator host; the device menu changes saved volume, brightness, talk mode, and (when Hermes offers several) the Hermes profile.
@@ -82,6 +84,8 @@ Power starts unavailable. In **Developer tools → Power (simulated)**, select *
 The **Telemetry battery %** slider remains an independent generic sensor, not the header battery source. No estimator or indicator is automatically enabled. To preview the LCD-1.54's approximate display estimate, use `sim-240x240`, name `Waveshare 1.54`, enter `set battery_estimate liion` then `set battery_display percentage` in the console, and apply 3750 mV with no native percentage: the header shows 50%. See the [fitted-battery caveat and estimate limitations](using-gadget.md#device-settings-and-hardware-checks) before enabling this on hardware.
 
 Rebuilding the window for a board change or starting a new simulator resets the power fixture to unavailable. Firmware settings persist in `nvs.json`; fixtures do not. Rebuild the simulator library after this ABI 8 update, which adds the host's wall-clock time for the resting clock; Linux native-core clients still default to no power device.
+
+To hear a sound file on the simulated speaker, type `play <path>` in the dev server's console and `stop` to end it (WAV, or anything `ffmpeg` decodes). With Hermes, ask the agent, which uses [`gadget_play`](hermes-integration.md#playing-audio).
 
 Like a board, the simulated device takes firmware updates (`hermes gadget update`, or `update <path>` in the dev server). It checks the image the way the core does and keeps only ESP32 app images. Then it "restarts": it drops the connection and connects again, still running the simulator.
 
@@ -144,6 +148,12 @@ screenshot /tmp/hg-battery-50.png
 power null
 sleep 5.2
 status
+```
+
+`console face <expression> [seconds]` sets the face's expression in a script, and `status` reports it as `expression` while one is set. `examples/scripts/faces.txt` shows each one and saves a screenshot of it:
+
+```bash
+hermes-gadget sim --headless --url ws://127.0.0.1:8765/gadget --script examples/scripts/faces.txt
 ```
 
 Power objects accept only `battery_present`, `battery_mv`, `battery_percent`, `charging`, and `external_power`. Missing fields or JSON `null` values are unknown; `{}` is an available reading with every field unknown. Booleans must be `true`/`false`, voltage an integer 0–65535, and percentage an integer 0–100; booleans are not numeric inputs. Invalid JSON, keys, types, or ranges stop a script with a line-numbered error and leave the applied fixture unchanged. Voltage-only `status.power` never gains a derived `battery_percent`, even when the header displays an estimate.

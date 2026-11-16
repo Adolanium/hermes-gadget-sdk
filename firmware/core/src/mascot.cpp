@@ -27,6 +27,27 @@ size_t offset(int size, Frame frame) {
 
 }  // namespace
 
+const char* expression_name(Expression e) {
+  switch (e) {
+    case Expression::Happy: return "happy";
+    case Expression::Confused: return "confused";
+    case Expression::Alert: return "alert";
+    case Expression::Sleepy: return "sleepy";
+    case Expression::Neutral: break;
+  }
+  return "neutral";
+}
+
+bool parse_expression(std::string_view name, Expression& out) {
+  for (Expression e : kExpressions) {
+    if (name == expression_name(e)) {
+      out = e;
+      return true;
+    }
+  }
+  return false;
+}
+
 bool parse(std::string_view base64, Face& out) {
   const size_t n = bits_bytes(), total = n + kAnchorBytes;
   if (base64.size() != (total + 2) / 3 * 4) return false;

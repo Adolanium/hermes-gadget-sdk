@@ -387,6 +387,7 @@ void App::begin() {
   }
 
   add_timer_actions();  // timer.start/status/cancel, beside the built-in actions
+  add_face_actions();   // face.set
   if (hal_.display) ui_ = std::make_unique<Ui>(*hal_.display);
   if (ui_ && profile_.faces && profile_.colour_face_alloc && !colour_) {
     const int px = std::min(256, ui_->face_px());
@@ -1790,7 +1791,7 @@ void App::on_button(Button button, bool pressed, bool touch) {
           set_hint_flash(profile_.touch_screen && touch_talk_ ? std::string(tr(i18n::Msg::HoldScreenWhileSpeaking))
                                                : tr(i18n::Msg::HoldButtonWhileSpeaking, {control(profile_.talk_label)}));
         } else {
-          finish_listening();
+          end_held_recording();
         }
       }
       break;
@@ -1855,6 +1856,7 @@ void App::start_listening(bool hands_free) {
   }
   // Talking over a recording still uploading replaces it: the hub drops its part first.
   if (rec_on_) cancel_upload("replaced");
+  end_expression();
   hands_free_ = hands_free;
   mic_stream_ = static_cast<uint8_t>(mic_stream_ % 250 + 1);
   mic_seq_ = 0;
@@ -1938,6 +1940,20 @@ void App::finish_listening() {
   last_turn_rx_ = now();
   turn_started_ = false;
   status_ = tr(i18n::Msg::Sending);
+}
+
+// A held recording the microphone heard no speech in is not sent, on a board that asks for it
+// (DeviceProfile::drop_silent_recordings): a speech-to-text model makes words out of silence
+// ("Thank you."), and Hermes would answer them. Speech is what tap mode calls speech: 200 ms
+// above the board's floor. A recording with less audio than that (a port that delivered little
+// or nothing) could not have held it, and goes as before.
+void App::end_held_recording() {
+  if (profile_.drop_silent_recordings && vad_.heard_ms() >= Vad::kMinSpeechMs && !vad_.spoke()) {
+    cancel_listening("no speech");
+    set_hint_flash(tr(i18n::Msg::DidntHearAnything));
+    return;
+  }
+  finish_listening();
 }
 
 void App::cancel_listening(std::string_view why) {
@@ -2069,6 +2085,7 @@ void App::start_new_session() {
   clear_prompt();
   answer_choice(-1);
   send(proto::message("session.new"));
+  end_expression();
   reply_.clear();
   user_echo_.clear();
   status_ = tr(i18n::Msg::StartingNewSession);
@@ -2118,8 +2135,11 @@ void App::on_mic_samples(const int16_t* samples, size_t count) {
     off += n;
     if (mic_pending_.size() == frame) send_mic_frame();
   }
+  // A held recording ends with the button; on a board that drops silent ones, the detector
+  // only notes whether anyone spoke. The other boards skip its filter in hold mode.
+  if (!hands_free_ && !profile_.drop_silent_recordings) return;
+  const Vad::Result r = vad_.feed(samples, count);
   if (hands_free_) {
-    Vad::Result r = vad_.feed(samples, count);
     if (r == Vad::Result::EndOfSpeech) {
       finish_listening();
       update_model();
@@ -2144,6 +2164,7 @@ void App::submit_text(std::string_view text) {
   }
   stop_playback();
   dismiss_overlay();
+  end_expression();
   request_id_ = next_id('t');
   json::Value msg = proto::message("text");
   msg.set("id", request_id_).set("text", t);
@@ -2556,7 +2577,8 @@ void App::tick() {
     }
   }
   if (mode_ == Mode::Listening && elapsed(t, mode_since_) > kMaxUtteranceMs) {
-    finish_listening();
+    if (hands_free_) finish_listening();
+    else end_held_recording();
     update_model();
   }
   if (!prompt_id_.empty() || !choice_id_.empty()) last_turn_rx_ = t;  // Hermes is waiting for the user, not stuck
@@ -2657,6 +2679,8 @@ void App::update_model() {
   m.no.clear();
   m.qr = nullptr;
   m.face = face_ ? &*face_ : nullptr;
+  m.expression = expression_now();
+  m.expression_still = expression_still();
   m.dash.clear();
   m.items.clear();
   m.card_progress = -1;
@@ -3084,6 +3108,7 @@ json::Value App::status_value() const {
   if (!prompt_id_.empty()) s.set("prompt", prompt_id_);
   if (!choice_id_.empty()) s.set("choice", choice_id_);
   if (timer_active()) s.set("timer", timer_value());
+  if (expression_ != mascot::Expression::Neutral) s.set("expression", mascot::expression_name(expression_));
   if (on_phone_pair) s.set("phone", phone_value());
   if (!fatal_.empty()) s.set("error", fatal_);
   if (ota_ != Ota::Idle) {
@@ -3164,7 +3189,7 @@ std::string App::console(std::string_view raw) {
       for (const char* k : kTailnetKeys) keys += std::string(" ") + k;
     return "@help commands: status | diag [log] | log <tag | *> <level> | get <key> | set <key> <value> | say <text> | talk | release | "
            "cancel | new-session | camera [close] | settings [close] | wifi-setup [close] | wifi [list | add <ssid> [password] | join <ssid> | "
-           "forget <ssid>] | phone [pair [close] | forget] | perf [on | off | reset | budget <us> | bench [scroll | mascot | redraw | all]] | yes | no | choose <n> | choose cancel | reconnect | forget-key | factory-reset   keys:" + keys;
+           "forget <ssid>] | phone [pair [close] | forget] | perf [on | off | reset | budget <us> | bench [scroll | mascot | redraw | all]] | face [<expression> [seconds]] | yes | no | choose <n> | choose cancel | reconnect | forget-key | factory-reset   keys:" + keys;
   }
   if (cmd == "status") return "@status " + status_json();
   if (cmd == "phone") {
@@ -3194,6 +3219,7 @@ std::string App::console(std::string_view raw) {
     return open_camera() ? "@ok camera" : "@error camera unavailable (no camera, or during a prompt, update or pairing)";
   }
   if (cmd == "perf") return perf_command(rest);
+  if (cmd == "face") return face_command(rest);
   if (cmd == "diag" && rest.empty()) return diag_report();
   if (cmd == "diag" && rest == "log") {
     if (!recent_log) return "@error this device keeps no log";

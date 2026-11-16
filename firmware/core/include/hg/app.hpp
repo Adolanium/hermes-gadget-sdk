@@ -44,6 +44,9 @@ struct DeviceProfile {
   std::string default_access_token;
   uint32_t mic_rate = 16000;
   float vad_min_rms = 500.0f;  // tap mode: the quietest block that counts as speech (a quiet mic wants less)
+  // A held recording in which the microphone heard no speech is dropped, not sent: for boards whose
+  // vad_min_rms was measured on the board. Off, hold mode sends whatever was recorded.
+  bool drop_silent_recordings = false;
   uint32_t speaker_rate = 16000;
   bool has_cancel_button = true;
   bool has_scroll_buttons = false;
@@ -456,6 +459,7 @@ class App {
   bool can_talk() const;
   void start_listening(bool hands_free);
   void finish_listening();
+  void end_held_recording();
   void cancel_listening(std::string_view why);
   // The recording buffer (profile_.recording_alloc): see rec_ below.
   bool send_audio_start();
@@ -527,6 +531,16 @@ class App {
   json::Value timer_value() const;      // the `timer` object of status and timer.status
   void start_alarm();
   void dismiss_alarm();
+  // the face's expression (app_face.cpp)
+  void add_face_actions();
+  // False with `error` for an unknown name, or for `timed` seconds outside 1..3600.
+  bool set_expression(std::string_view name, int64_t seconds, bool timed, std::string& error);
+  // The user's next turn ends it: called where a recording starts, a typed message is sent and a
+  // new session is asked for. A turn Hermes starts by itself does not.
+  void end_expression();
+  mascot::Expression expression_now();  // ends it first when its seconds are over
+  bool expression_still() const;        // its mark has moved for long enough
+  std::string face_command(std::string_view args);
   bool alarm_flash() const;
   void beep_pattern();
 
@@ -900,6 +914,12 @@ class App {
   uint32_t next_beep_at_ = 0;
   std::string timer_label_;
   std::vector<int16_t> beep_pcm_;  // built on the first beep
+
+  // the face's expression (app_face.cpp): RAM only
+  mascot::Expression expression_ = mascot::Expression::Neutral;
+  bool expression_timed_ = false;       // it ends at expression_until_
+  uint32_t expression_until_ = 0;
+  uint32_t expression_since_ = 0;       // when it was set: the mark moves for a minute from then
 
   // frame timing: the running statistics while `perf` is on, and the bench
   std::unique_ptr<FrameStats> frame_stats_;

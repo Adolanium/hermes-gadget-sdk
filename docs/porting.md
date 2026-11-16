@@ -187,6 +187,8 @@ The firmware ships `speaker.volume` and `screen.brightness` when the hardware al
 
 The firmware also ships `timer.start`, `timer.status` and `timer.cancel` on every board with a display or a speaker. The alarm beeps only where the board has a speaker. See [timers](using-gadget.md#timers) for what the device shows.
 
+Every board with a display also ships [`face.set`](protocol.md#the-faceset-action), which gives the face an expression. It needs nothing from the port.
+
 For runnable Linux examples, see [Home Assistant and MQTT](home-automation.md). They expose fixed lamp targets, report temperature availability and return a job ID for work that completes asynchronously.
 
 ## A non-ESP32 device

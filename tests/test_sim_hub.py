@@ -1346,6 +1346,49 @@ def test_timer_runs_and_rings_through_the_hub(loop_thread, devserver, make_sim):
     assert not any(m.get("type") == "audio.start" for m in sim.sent[-5:])
 
 
+def test_agent_sets_the_face_expression_through_the_hub(loop_thread, devserver, make_sim, tmp_path):
+    import asyncio
+
+    hub, _brain, url = devserver()
+    sim = make_sim(url)
+    assert sim.wait_screen("ready", timeout=10)
+    session = next(iter(hub.sessions.values()))
+    assert "face.set" in session.action_names()
+    sim.run_for(0.3)
+    neutral = sim.screenshot(tmp_path / "neutral.png").read_bytes()
+
+    def call(args):
+        # The device answers on its own thread, so step the simulator while the hub waits.
+        future = asyncio.run_coroutine_threadsafe(session.invoke_action("face.set", args), loop_thread.loop)
+        assert sim.wait_for(future.done, timeout=5)
+        return future
+
+    shots = {"neutral": neutral}
+    for name in ("happy", "confused", "alert", "sleepy"):
+        assert call({"expression": name}).result() == {"expression": name}
+        assert sim.status()["expression"] == name
+        sim.run_for(0.3)
+        shots[name] = sim.screenshot(tmp_path / f"{name}.png").read_bytes()
+    assert len(set(shots.values())) == 5  # each one draws a face of its own
+
+    assert "expression must be one of" in str(call({"expression": "furious"}).exception())
+    assert sim.status()["expression"] == "sleepy"  # a refused call leaves the face alone
+
+    # With seconds it goes back to neutral by itself.
+    assert call({"expression": "alert", "seconds": 1}).result() == {"expression": "alert", "seconds": 1}
+    assert sim.wait_for(lambda: "expression" not in sim.status(), timeout=3)
+
+    assert "seconds must be between 1 and 3600" in str(call({"expression": "happy", "seconds": 2.9}).exception())
+
+    # Without them it lasts until the user's next turn.
+    assert call({"expression": "happy"}).result() == {"expression": "happy"}
+    sim.run_for(1.5)
+    assert sim.status()["expression"] == "happy"
+    sim.type_text("hello")
+    assert sim.wait_screen("thinking", "responding", timeout=5)
+    assert "expression" not in sim.status()
+
+
 class _Thumbs(_TwoProfiles):
     """Three profiles; ``colours`` gives each one with a thumbnail its colour, named by it."""
 

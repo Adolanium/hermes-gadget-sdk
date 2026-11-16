@@ -1020,6 +1020,9 @@ BoardConfig make() {
   // room noise 25-100, both below 3.4 kHz: under tap mode's default floor of 500 most
   // speech counted as silence and a recording ended after 900 ms mid-sentence.
   b.codec.vad_min_rms = 180.0f;
+  // Measured on recordings from one unit, levels below 3.4 kHz: speech is over this floor for
+  // 20-43% of a recording, room noise for under 200 ms in 8 of 10 silent ones.
+  b.codec.drop_silent_recordings = true;
   b.touch.enabled = true;
   b.touch.controller = TouchController::Cst816;  // the CST820 sends the same report
   b.touch.addr = 0x15;

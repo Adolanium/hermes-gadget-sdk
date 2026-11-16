@@ -235,7 +235,13 @@ class AudioOut:
             await self._session.send_json(protocol.message("audio.abort", stream=self.stream))
         except Exception:
             pass
-        self.done.set()
+        finally:
+            self.done.set()
+
+    @property
+    def backlog_s(self) -> float:
+        """Audio written but not yet sent. A long source is written no faster than this drains."""
+        return self._queue.qsize() * AUDIO_FRAME_MS / 1000
 
     @property
     def playing(self) -> bool:
@@ -345,6 +351,8 @@ class DeviceSession:
         self._send_lock = asyncio.Lock()
         self._upload: _Upload | None = None
         self._audio_out: AudioOut | None = None
+        self.playback = None  # a gadget_play playback, waiting or playing (playback.Playback)
+        self.playback_lock = asyncio.Lock()  # one gadget_play start or stop at a time
         self._stream_counter = 0
         self._pending: dict[str, asyncio.Future] = {}
         self._tasks: set[asyncio.Task] = set()
@@ -384,8 +392,12 @@ class DeviceSession:
 
     @property
     def audio_playing(self) -> bool:
-        """An outbound audio stream is still being sent or played; a new one would cut it off."""
-        return self._audio_out is not None and self._audio_out.playing
+        """Speech is still being sent or played; a new stream would cut it off. Audio the agent
+        plays with gadget_play does not count: speech waits for speech, and takes over from that."""
+        out = self._audio_out
+        if out is None or not out.playing:
+            return False
+        return self.playback is None or self.playback.out is not out
 
     @property
     def speaker_formats(self) -> list[str]:
@@ -879,7 +891,13 @@ class DeviceSession:
             await self._audio_out.abort()
         out = AudioOut(self, self._next_stream(), src_rate, channels)
         self._audio_out = out
-        await out.start(turn=turn)
+        try:
+            await out.start(turn=turn)
+        except BaseException:
+            # Cancelled or failed while audio.start went out: its pump never started, so nothing
+            # else would end the stream, and the speaker would look busy from then on.
+            await out.abort()
+            raise
         return out
 
     async def play_pcm(self, pcm: bytes, rate: int, *, turn: str | None = None) -> AudioOut:
@@ -891,6 +909,13 @@ class DeviceSession:
     async def stop_audio(self) -> None:
         if self._audio_out:
             await self._audio_out.abort()
+
+    def end_playback(self, outcome: str) -> None:
+        """End a gadget_play playback, playing or still waiting for the speaker. One that waits has
+        no stream for ``stop_audio`` to abort, and would start once the device was free."""
+        if self.playback is not None:
+            self.playback.end(outcome)
+            self.playback = None
 
     async def invoke_action(self, name: str, args: dict | None = None, timeout: float = 10.0) -> dict:
         if name not in self.action_names():
@@ -973,6 +998,7 @@ class DeviceSession:
                 protocol.message("ota.error", code="disconnected", message=f"{self.name} disconnected"))
         if self._audio_out and self._audio_out._task:
             self._audio_out._task.cancel()
+        self.end_playback("the device disconnected")  # its source (a download, ffmpeg) ends with the connection
 
     # -- description ----------------------------------------------------------------
 
@@ -1309,6 +1335,10 @@ class DeviceHub:
             session.spawn(self.delegate.on_text(session, str(msg.get("id") or ""), text[:4000]))
 
     async def _h_audio_start(self, session: DeviceSession, msg: dict) -> None:
+        # The device stops its speaker to record, whatever becomes of the recording: stop sending
+        # it a stream it no longer plays.
+        session.end_playback("interrupted")
+        await session.stop_audio()
         fmt = msg.get("format", "pcm16")
         if fmt != "pcm16":
             await session.send_notice(f"Unsupported audio format {fmt!r}")
@@ -1363,10 +1393,12 @@ class DeviceHub:
         _note(session, state="ready")
 
     async def _h_cancel(self, session: DeviceSession, msg: dict) -> None:
+        session.end_playback("interrupted")
         await session.stop_audio()
         session.spawn(self.delegate.on_cancel(session))
 
     async def _h_session_new(self, session: DeviceSession, msg: dict) -> None:
+        session.end_playback("interrupted")
         await session.stop_audio()
         session.spawn(self.delegate.on_new_session(session))
 
