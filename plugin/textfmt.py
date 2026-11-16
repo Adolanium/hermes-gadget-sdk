@@ -158,6 +158,65 @@ def fold_cjk(text: str) -> str:
     return "".join(out)
 
 
+def _columns(text: str) -> int:
+    return sum(2 if _is_wide(ch) else 1 for ch in text)
+
+
+def _cut(word: str, cols: int) -> int:
+    """How many characters of ``word`` fit ``cols`` columns: one at least."""
+    used = 0
+    for n, ch in enumerate(word):
+        used += 2 if _is_wide(ch) else 1
+        if used > cols:
+            return max(1, n)
+    return len(word)
+
+
+def wrap(text: str, cols: int) -> list[str]:
+    """The lines the device breaks one line of text into (the firmware's ``wrap_text``): words
+    joined by a space while they fit, a word longer than the line cut at its width."""
+    lines: list[str] = []
+    current = ""
+    for word in text.split():
+        while _columns(word) > cols:
+            if current:
+                lines.append(current)
+                current = ""
+            n = _cut(word, cols)
+            lines.append(word[:n])
+            word = word[n:]
+        if not word:
+            continue
+        if current and _columns(current) + 1 + _columns(word) > cols:
+            lines.append(current)
+            current = word
+        else:
+            current = f"{current} {word}" if current else word
+    if current:
+        lines.append(current)
+    return lines
+
+
+def clip(text: str, cols: int, lines: int) -> tuple[str, bool]:
+    """``text`` as it fits ``lines`` lines of ``cols`` columns on the device, and whether it was
+    cut. A cut text ends in "..." and still fits."""
+    if len(wrap(text, cols)) <= lines:
+        return text, False
+    kept = " ".join(wrap(text, cols)[:lines])
+    while kept and len(wrap(kept + "...", cols)) > lines:
+        kept = kept[:-1].rstrip()
+    return kept + "...", True
+
+
+def line(text: str, charset: str = "ascii", cols: int | None = None) -> str:
+    """One row of a list (a card's item, a choice's answer): shaped like ``for_device``, on one
+    line, and no longer than the device's line when it reports ``text_cols``."""
+    text = " ".join(for_device(text, charset).split())
+    # By columns, as the device counts them: a wide character takes two, and what the device cut
+    # further would be cut unseen by the agent.
+    return text[:_cut(text, cols)] if isinstance(cols, int) and cols > 4 else text
+
+
 def for_device(text: str, charset: str = "ascii") -> str:
     text = strip_markdown(text or "")
     if charset == "cjk":

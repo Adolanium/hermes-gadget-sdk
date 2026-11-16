@@ -218,6 +218,12 @@ class App {
   static constexpr uint32_t kProfileReplyMs = 15000;
   int profile_row_hit(int x, int y) const;
   void profile_tap(int x, int y);
+  // A choice from Hermes on a touchscreen (TouchGestures): whether its list takes the touch, a tap
+  // on an answer, and a swipe up, which shows the next page of a list longer than the screen.
+  bool choice_touch_live() const;
+  // held_ms: how long the finger was down. The press guard counts from when it went down.
+  void choice_tap(int x, int y, uint32_t held_ms = 0);
+  bool choice_page_step();
   // The roster a welcome may bring: the device keeps the first kMaxProfiles entries.
   static constexpr size_t kMaxProfiles = 32;
   // Profile thumbnails' side: the grid's largest icon, held to this range (docs/protocol.md#profile-thumbnails).
@@ -372,6 +378,8 @@ class App {
   void h_error(const json::Value& m);
   void h_prompt(const json::Value& m);
   void h_prompt_close(const json::Value& m);
+  void h_choice(const json::Value& m);
+  void h_choice_close(const json::Value& m);
   void h_dashboard(const json::Value& m);
   void h_ota_offer(const json::Value& m);
   void h_ota_begin(const json::Value& m);
@@ -484,6 +492,20 @@ class App {
   bool prompt_armed(uint32_t pressed_at) const;
   void answer_prompt(bool yes);
   void clear_prompt();
+  // A choice is the question on screen (a yes/no question asked meanwhile goes over it).
+  bool choice_showing() const { return prompt_id_.empty() && !choice_id_.empty() && prompt_showing(); }
+  // How a choice is answered: a highlighted row that TALK picks (boards with Up/Down, and boards
+  // with neither those nor touch, where CANCEL steps to the next row and a last row cancels).
+  bool choice_keys() const { return profile_.has_scroll_buttons || !profile_.touch_screen; }
+  bool choice_steps() const { return !profile_.has_scroll_buttons && !profile_.touch_screen; }
+  bool can_choose() const {
+    return ui_ && (profile_.has_scroll_buttons || profile_.touch_screen || profile_.has_cancel_button);
+  }
+  int choice_row_count() const { return static_cast<int>(choice_options_.size()) + (choice_steps() ? 1 : 0); }
+  bool choice_armed(uint32_t pressed_at) const;
+  void choice_move(int delta, bool wrap);
+  void answer_choice(int index);  // an option's index; anything else cancels
+  void clear_choice();
   void flush_sensors();
   // Tells Hermes when the screen goes dark or lights up (docs/protocol.md#screen-sleep).
   void flush_display_state();
@@ -824,6 +846,12 @@ class App {
   uint32_t overlay_until_ = 0;  // 0 = until dismissed
   std::string card_title_, card_body_;
   int card_scroll_ = 0;
+  // a structured card (docs/protocol.md#display): its id, list, progress (-1: none) and code
+  std::string card_id_;
+  std::vector<std::string> card_items_;
+  int8_t card_progress_ = -1;
+  qr::Code card_qr_;
+  bool card_rich() const { return !card_items_.empty() || card_progress_ >= 0 || card_qr_.ok(); }
   int image_stream_ = -1;
   int image_w_ = 0, image_h_ = 0, image_x_ = 0, image_y_ = 0;
   size_t image_px_ = 0;
@@ -840,6 +868,14 @@ class App {
   std::string prompt_id_, prompt_title_, prompt_text_;
   uint32_t prompt_since_ = 0;
   uint32_t prompt_until_ = 0;  // 0 = until answered or withdrawn
+
+  // a choice from the agent: a title and a few answers (docs/protocol.md#questions)
+  std::string choice_id_, choice_title_;
+  std::vector<std::string> choice_options_;
+  int choice_sel_ = 0, choice_first_ = 0;  // the highlighted row, and the first one on screen
+  uint32_t choice_since_ = 0;  // when it last came to the front: presses just after answer nothing
+  bool choice_front_ = false;  // the Choice screen is what the model shows
+  uint32_t choice_until_ = 0;  // 0 = until answered or withdrawn
 
   // transient messages
   std::string notice_;

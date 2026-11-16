@@ -12,7 +12,7 @@ Hermes's gateway runs "platform adapters": Telegram, Slack and about twenty othe
 | `__init__.py` | `register(ctx)`: platform entry, agent tools, `hermes gadget` CLI |
 | `adapter.py` | `GadgetAdapter(BasePlatformAdapter)`: the Hermes-facing side |
 | `hub.py` | WebSocket server, auth, audio, images, actions (no Hermes imports) |
-| `tools.py` | `gadget_devices`, `gadget_display`, `gadget_action`, `gadget_play` |
+| `tools.py` | `gadget_devices`, `gadget_display`, `gadget_ask`, `gadget_action`, `gadget_play` |
 | `playback.py` | What `gadget_play` may open, decoding a chunk at a time, and the playback task (see [Playing audio](#playing-audio)) |
 | `store.py`, `status.py`, `protocol.py`, `audio.py`, `textfmt.py`, `imaging.py` | Support modules (no Hermes imports) |
 | `dashboard/` | The **Gadgets** tab of the Hermes web dashboard: `manifest.json`, the backend routes in `plugin_api.py`, and the tab's bundle in `dist/`, built from `src/` (see [The Gadgets tab](#the-gadgets-tab-in-the-hermes-dashboard)) |
@@ -154,7 +154,7 @@ The Hermes desktop app gets a **Gadgets** page: a sidebar row, a route at `/gadg
 | Images from the agent | `send_image_file()` / `send_image()` | Converted to RGB565 to fit the screen (needs Pillow) |
 | Confirmations (`/new`, `/undo`, model switches) | `send_slash_confirm()` + `tools.slash_confirm.resolve()` | Shown as a `prompt`; TALK resolves `once`, CANCEL `cancel`. The handler's reply goes back with `send()` |
 | Dangerous-command approvals | `_send_exec_approval_prompt(ExecApprovalPrompt)` + `tools.approval.resolve_gateway_approval()` | Shown as a `prompt`; TALK resolves `once`, CANCEL `deny`. The prompt's `ttl_s` is Hermes's approval timeout (`approvals.timeout`, read by `compat.approval_timeout_s()`), so the device and the adapter both drop it when that time passes. On timeout Hermes calls `edit_message()` on the prompt, which withdraws it |
-| Agent questions (the `clarify` tool) | `send_clarify()` | Hermes's text fallback (the question with numbered choices; the next message, spoken or typed, is the answer), also spoken with Hermes's text-to-speech when the device speaks replies. The device has no multiple-choice prompt |
+| Agent questions (the `clarify` tool) | `send_clarify()` | Hermes's text fallback (the question with numbered choices; the next message, spoken or typed, is the answer), also spoken with Hermes's text-to-speech when the device speaks replies. `clarify` does not use the device's [choice screen](protocol.md#choices); the agent reaches that with the `gadget_ask` tool |
 | Pairing | Hermes DM pairing (`gateway/pairing.py`, `hermes pairing approve`; `hermes gadget pair` approves through the same `PairingStore`) | See below |
 | Authorization state | `BasePlatformAdapter._is_sender_authorized()` | The runner-installed check; used to mirror approval and revocation to the device |
 | Agent tools | `ctx.register_tool(toolset="gadget")` | Part of the implicit `hermes-gadget` toolset; also usable from other chats |
@@ -214,6 +214,24 @@ Hermes asks before destructive commands (`/new`, `/undo`), costly model switches
 ### Agent tools and Hermes tool search
 
 Hermes keeps the core tool schema narrow. Plugin tools are therefore deferred behind its tool-search bridge (`tool_search` / `tool_describe` / `tool_call`), and their names and descriptions appear in the bridge's manifest. A model invokes `gadget_action` through `tool_call`, and the end-to-end test exercises exactly that. The per-device context names the available actions so the model knows they exist.
+
+The five tools:
+
+| Tool | What it does |
+|---|---|
+| `gadget_devices` | Lists connected gadgets with their screen, audio, actions and sensor readings |
+| `gadget_display` | Shows a card: `title` and `text`, and optionally `items` (a list), `progress` (0 to 100) or `qr` (text to show as a QR code). A card sent again with the same `id` replaces the one on screen in place, which is how a progress bar moves |
+| `gadget_ask` | Shows `question` with 2 to 6 `options`, waits up to `seconds` (60 by default, 300 at most) and returns the option the user picked, as the agent wrote it, with its `index`; `cancelled: true` when the user cancelled; an error when nobody answered |
+| `gadget_action` | Runs an action the device declared |
+| `gadget_play` | Plays a sound file or an audio stream on the device's speaker, and stops it (see [Playing audio](#playing-audio)) |
+
+`gadget_display` and `gadget_ask` shape their text for the device: Markdown is stripped, characters are folded to its `charset`, and each list row or answer is one line of at most `text_cols` less 2 characters, the room left after its bullet. A QR code's text is sent unchanged.
+
+The agent learns when the user saw something else than it wrote. `gadget_ask` blocks the turn, so its screen is all the user has to go on: a question longer than the device shows (`caps.choice.title_cols` by `title_lines`) is cut to fit and returned as `question_shown`, options that were cut come back as `options_shown`, and `note` says so. `gadget_display` returns `items_shown` when the device keeps fewer rows than the list has.
+
+What a device cannot draw still reaches the user. A gadget without `caps.card` (older firmware, the Linux client) gets a list, a progress value and a code's text as a plain card, and the tool's result says so in `note`. A gadget without `caps.choice` gets the options as a numbered card; `gadget_ask` then fails with `shown_as_card: true` and tells the agent to ask for the answer by voice. See [structured cards](protocol.md#structured-cards) and [choices](protocol.md#choices).
+
+`gadget_ask` is separate from [confirmations](#confirmations). A dangerous command is still approved through Hermes's own yes/no question, with the rules above; an agent cannot stand in for that approval with a choice.
 
 ### Playing audio
 

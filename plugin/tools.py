@@ -1,5 +1,5 @@
-"""Agent tools for gadgets: inspect devices, show content on a screen, invoke
-device-declared actions.
+"""Agent tools for gadgets: inspect devices, show content on a screen, ask the
+user to pick an answer there, invoke device-declared actions.
 
 Schemas are static (prompt caching); what a device can do is discovered at run
 time through ``gadget_devices`` and the per-device context Hermes receives with
@@ -16,9 +16,14 @@ import threading
 from typing import Any
 
 from . import playback, runtime, textfmt
+from .hub import MAX_CARD_ITEMS, MAX_CHOICE_OPTIONS
 
 TOOLSET = "gadget"
 CALL_TIMEOUT_S = 20.0
+ASK_DEFAULT_S = 60    # how long gadget_ask waits for an answer, unless told otherwise
+ASK_MAX_S = 300       # ...and at most: Hermes's own approval timeout
+QR_MAX_BYTES = 287    # the longest text any gadget draws as a code
+ROW_INDENT_COLS = 2   # a list row or an answer starts after a bullet: that much of text_cols is not its own
 
 _DEVICE_PARAM = {
     "type": "string",
@@ -35,19 +40,49 @@ DEVICES_SCHEMA = {
 
 DISPLAY_SCHEMA = {
     "name": "gadget_display",
-    "description": "Show a short card (title and text) on a gadget's screen, e.g. a list or note. "
+    "description": "Show a short card on a gadget's screen: a title and text, and optionally a list (items), "
+                   "a progress bar (progress) or a QR code the user can scan with a phone (qr). To update a "
+                   "card that is still on screen, such as a progress bar, send it again with the same id. "
                    "For timers use the device's timer.* actions through gadget_action when it lists them. "
                    "Screens are small: keep text brief and plain (no Markdown). While the screen is off "
                    "the card waits and appears when it lights up.",
     "parameters": {
         "type": "object",
         "properties": {
-            "text": {"type": "string", "description": "Body text to show."},
+            "text": {"type": "string", "description": "Body text to show. With qr it is the caption under the code."},
             "title": {"type": "string", "description": "Optional short title."},
+            "items": {"type": "array", "items": {"type": "string"},
+                      "description": "Optional list rows, one short line each (up to 12), e.g. a shopping list."},
+            "progress": {"type": "integer", "description": "Optional progress bar, 0 to 100."},
+            "qr": {"type": "string",
+                   "description": "Optional text to show as a QR code, e.g. a link (short: small screens fit "
+                                  "about 40 characters). The card then shows the code, not the items."},
+            "id": {"type": "string",
+                   "description": "Optional name for this card. A later card with the same id replaces it in place."},
             "seconds": {"type": "integer", "description": "How long to show it; 0 keeps it until dismissed. Default 20."},
             "device": _DEVICE_PARAM,
         },
-        "required": ["text"],
+        "required": [],
+    },
+}
+
+ASK_SCHEMA = {
+    "name": "gadget_ask",
+    "description": "Ask the user to pick one of a few answers on a gadget's screen and wait for the choice. "
+                   "Use it for a quick decision between 2 to 6 short options; the user taps one or picks it "
+                   "with the buttons, or cancels. Returns the chosen option. Not for yes/no confirmations of "
+                   "risky actions: Hermes asks those itself.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "question": {"type": "string", "description": "The question, a few words: it is the screen's title."},
+            "options": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 6,
+                        "description": "2 to 6 short answers, one line each."},
+            "seconds": {"type": "integer",
+                        "description": "How long to wait for the answer, up to 300. Default 60."},
+            "device": _DEVICE_PARAM,
+        },
+        "required": ["question", "options"],
     },
 }
 
@@ -103,7 +138,7 @@ def _adapter():
     return runtime.active(get_session_env("HERMES_SESSION_PROFILE") or None)
 
 
-def _run(adapter, coro) -> Any:
+def _run(adapter, coro, timeout: float | None = None) -> Any:
     loop = adapter.loop
     if loop is None or loop.is_closed():
         coro.close()
@@ -113,9 +148,11 @@ def _run(adapter, coro) -> Any:
         raise RuntimeError("gadget tools cannot block the gateway event loop")
     future = asyncio.run_coroutine_threadsafe(coro, loop)
     try:
-        return future.result(CALL_TIMEOUT_S)
+        return future.result(CALL_TIMEOUT_S if timeout is None else timeout)
     except BaseException:
-        future.cancel()  # the caller reports a failure: the work must not finish behind its back
+        # The caller reports a failure: the work must not finish behind its back, and a choice left
+        # on screen is withdrawn.
+        future.cancel()
         raise
 
 
@@ -142,6 +179,12 @@ def _resolve(adapter, ref: str | None):
     if not sessions:
         return None, "no gadget is connected"
     return None, "several gadgets are connected; pass device: " + ", ".join(s.name for s in sessions)
+
+
+def _row_cols(session) -> int | None:
+    """Characters a list row or an answer has on the device's line, after its bullet."""
+    cols = session.display.get("text_cols")
+    return cols - ROW_INDENT_COLS if isinstance(cols, int) and cols > 4 + ROW_INDENT_COLS else None
 
 
 def _usable(session) -> str | None:
@@ -172,22 +215,104 @@ def gadget_display(args: dict, **_kw) -> str:
         return _error(err)
     text = textfmt.for_device(str(args.get("text") or ""), session.charset)
     title = textfmt.for_device(str(args.get("title") or ""), session.charset)
-    if not text and not title:
+    cols = _row_cols(session)
+    items = args.get("items")
+    if items is not None and not isinstance(items, list):
+        return _error("items must be a list of short strings")
+    items = [row for row in (textfmt.line(str(item), session.charset, cols) for item in items or []) if row]
+    progress = args.get("progress")
+    if progress is not None:
+        try:
+            progress = max(0, min(100, int(progress)))
+        except (TypeError, ValueError):
+            return _error("progress must be a number from 0 to 100")
+    qr = str(args.get("qr") or "")  # as given, spaces too: a code must hold exactly what was asked for
+    if not qr.strip():
+        qr = ""
+    if len(qr.encode()) > QR_MAX_BYTES:
+        return _error(f"qr holds at most {QR_MAX_BYTES} bytes")
+    if not (text or title or items or progress is not None or qr):
         return _error("text is required")
     seconds = args.get("seconds", 20)
     try:
         seconds = max(0, int(seconds))
     except (TypeError, ValueError):
         seconds = 20
+    extras = {"items": items[:MAX_CARD_ITEMS], "progress": progress, "qr": qr}
     try:
-        shown = _run(adapter, session.show_card(title, text, seconds))
+        shown = _run(adapter, session.show_card(
+            title, text, seconds, card_id=str(args.get("id") or "").strip()[:64], **extras))
     except Exception as exc:
         return _error(f"could not reach {session.name}: {exc}")
     result = {"success": True, "device": session.name, "shown_for_s": seconds or "until dismissed"}
+    shown_as = session.card_shown_as(**extras)
+    if shown_as == "text":
+        result["note"] = f"{session.name} draws plain cards only: the list, progress and code are shown as text"
+    elif shown_as == "qr_as_text":
+        result["note"] = (f"the code is too long for {session.name}'s screen and is shown as text; "
+                          f"it draws codes of up to {session.card_qr_bytes} bytes")
+    kept = session.card_items or MAX_CARD_ITEMS  # a plain card lists them all, up to the hub's limit
+    if len(items) > kept:
+        result["items_shown"] = kept
     if shown is False:
         result["held"] = ("the screen is off; the card is shown when it lights up, "
                           "for what is left of its time, unless a newer card or image replaces it")
     return json.dumps(result)
+
+
+def gadget_ask(args: dict, **_kw) -> str:
+    adapter = _adapter()
+    if adapter is None:
+        return _error("gadget hub is not running in this process")
+    session, err = _resolve(adapter, args.get("device"))
+    if err:
+        return _error(err)
+    if (err := _usable(session)):
+        return _error(err)
+    given = args.get("options")
+    if not isinstance(given, list) or not 2 <= len(given) <= MAX_CHOICE_OPTIONS:
+        return _error(f"options must be a list of 2 to {MAX_CHOICE_OPTIONS} short answers")
+    options = [textfmt.line(str(option), session.charset, _row_cols(session)) for option in given]
+    if not all(options):
+        return _error("every option needs text the gadget's screen can draw")
+    title = textfmt.line(str(args.get("question") or ""), session.charset)
+    # What the user saw, where it is not what the agent wrote: the turn waits on this screen alone.
+    seen: dict = {}
+    notes = []
+    if (box := session.choice_title_box):
+        title, cut = textfmt.clip(title, *box)
+        if cut:
+            seen["question_shown"] = title
+            notes.append("the question was cut to fit the screen; question_shown is what the user saw")
+    if options != [textfmt.line(str(option), session.charset) for option in given]:
+        seen["options_shown"] = options
+        notes.append("some options were cut to fit the screen; options_shown is what the user saw")
+    if notes:
+        seen["note"] = "; ".join(notes)
+    try:
+        seconds = max(5, min(ASK_MAX_S, int(args.get("seconds", ASK_DEFAULT_S))))
+    except (TypeError, ValueError):
+        seconds = ASK_DEFAULT_S
+    limit = session.choice_options
+    if len(options) > limit:
+        # No list to pick from on this screen: the options go up as a plain card instead.
+        if limit:
+            return _error(f"{session.name} takes at most {limit} options")
+        body = "\n".join(f"{n}. {option}" for n, option in enumerate(options, 1))
+        try:
+            _run(adapter, session.show_card(title, body, seconds))
+        except Exception as exc:
+            return _error(f"could not reach {session.name}: {exc}")
+        return json.dumps({"success": False, "device": session.name, "shown_as_card": True,
+                           "error": f"{session.name} cannot take a choice on its screen. The options are "
+                                    "shown there as a numbered card: ask the user to say their answer."})
+    try:
+        index = _run(adapter, session.ask_choice(title, options, timeout=seconds), timeout=seconds + 5)
+    except Exception as exc:
+        return _error(str(exc) or f"{session.name} did not answer")
+    if index is None:
+        return json.dumps({"success": True, "device": session.name, "cancelled": True, **seen})
+    return json.dumps({"success": True, "device": session.name, "answer": str(given[index]), "index": index, **seen})
 
 
 def gadget_action(args: dict, **_kw) -> str:
@@ -285,6 +410,7 @@ def register_tools(ctx) -> None:
     for schema, handler, emoji in (
         (DEVICES_SCHEMA, gadget_devices, "📟"),
         (DISPLAY_SCHEMA, gadget_display, "🖥️"),
+        (ASK_SCHEMA, gadget_ask, "🔘"),
         (ACTION_SCHEMA, gadget_action, "🎛️"),
         (PLAY_SCHEMA, gadget_play, "🔊"),
     ):

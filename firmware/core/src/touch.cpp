@@ -47,6 +47,9 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
       case State::List: app_.settings_tap(x0_, y0_); break;
       case State::ListDrag: app_.settings_lift(); break;
       case State::Camera: app_.camera_tap(); break;
+      case State::Choice:  // a tap picks; a finger that rested on the glass picks nothing
+        if (static_cast<int32_t>(now_ms - t0_) < static_cast<int32_t>(kTapMaxMs)) app_.choice_tap(x0_, y0_, now_ms - t0_);
+        break;
       case State::Side:  // a sideways swipe: travel enough, and more sideways than down or up
         if (std::abs(dx_) >= cfg_.swipe_px && std::abs(dx_) > 2 * std::abs(dy_)) {
           if (in_picker_) app_.profile_page_step(dx_ < 0 ? 1 : -1);  // the next page comes in from the right
@@ -70,6 +73,7 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
     app_.mark_reply_read();  // what was on screen, before a notice over the reply closes
     app_.close_notices_for_input();  // a low battery alert goes, and the touch acts on what is under it
     state_ = app_.profile_picker_open() ? State::Picker
+              : app_.choice_touch_live() ? State::Choice
               : !from_clock_ && app_.settings_title_hit(x, y) ? State::Settings
               : app_.settings_list_live() ? State::List
               : app_.camera_tap_live() ? State::Camera
@@ -84,7 +88,7 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
 
   const int dx = x - x0_, dy = y - y0_;
   const bool swiped_down = (cfg_.swipe_cancel || app_.settings_open() || app_.wifi_setup_open() ||
-                           app_.phone_pairing_open() || app_.profile_picker_open()) &&
+                           app_.phone_pairing_open() || app_.profile_picker_open() || app_.choice_touch_live()) &&
                           dy >= cfg_.swipe_px && std::abs(dx) < dy;
   switch (state_) {
     case State::Picker:  // a tap picks a cell, a swipe sideways turns the page and a swipe down closes the grid
@@ -98,6 +102,18 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
         dx_ = dx, dy_ = dy;
       } else if (std::abs(dx) > cfg_.slop_px || std::abs(dy) > cfg_.slop_px) {
         state_ = dy < 0 || std::abs(dx) >= std::abs(dy) ? State::Ignored : State::PickerDrag;
+      }
+      break;
+    case State::Choice:  // a tap picks an answer; a swipe down cancels and a swipe up shows more
+    case State::ChoiceDrag:
+      if (swiped_down) {
+        state_ = State::Swipe;
+        press(Button::Cancel);
+      } else if (-dy >= cfg_.swipe_px && std::abs(dx) < -dy) {
+        state_ = State::Ignored;
+        app_.choice_page_step();
+      } else if (std::abs(dx) > cfg_.slop_px || std::abs(dy) > cfg_.slop_px) {
+        state_ = State::ChoiceDrag;  // no longer a tap
       }
       break;
     case State::List:  // still a tap until the finger leaves the slop

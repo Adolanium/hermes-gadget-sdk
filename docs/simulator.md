@@ -52,6 +52,7 @@ A first session, start to finish:
 | Hold **Esc** / CANCEL for 2 s | Start a new Hermes session (`/new`); a countdown shows in the hint bar |
 | Hold **Space + Esc** for 1 s | Open or close the device's settings and local hardware checks |
 | **Space** / **Esc** on a question | Answer yes / no |
+| A [choice](using-gadget.md#pick-an-answer) | Click an answer on a touch board; otherwise **Up / Down** then **Space**, and **Esc** cancels. On a board with neither, **Esc** moves to the next answer. `choose 2` or `choose cancel` in the device console answers it too |
 | **Up / Down** | Scroll a long reply (long replies also page by themselves) |
 | **Ctrl+S** | Save a PNG screenshot into the state directory |
 | Text box | Send a typed message, as from a keyboard device |

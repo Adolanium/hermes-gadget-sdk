@@ -99,7 +99,8 @@ void CardputerKeyboard::poll(hg::App& app, hg::CardputerCompose& display) {
           const std::string message = display.draft();
           display.close();
           if (!message.empty() && app.online() && !app.in_turn()) app.submit_text(message);
-        } else if (app.settings_open() || app.screen() == hg::Screen::Prompt || app.profile_picker_open()) {
+        } else if (app.settings_open() || app.screen() == hg::Screen::Prompt || app.screen() == hg::Screen::Choice ||
+                   app.profile_picker_open()) {
           pulse(hg::Button::Talk);
         }
         break;
