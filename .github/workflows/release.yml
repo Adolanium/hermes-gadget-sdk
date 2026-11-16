@@ -157,6 +157,16 @@ jobs:
           python tools/package_release.py --all --board crowpanel-p4-101 --board ws-p4-touch-lcd-7b --notices notices
           --out dist --expect-version "${TAG#v}"
           --notes "$RUNNER_TEMP/notes.md" --commit "$(git rev-parse HEAD)" --changelog ../../CHANGELOG.md
+      - name: Keep the firmware ELFs
+        # A `diag` report's core dump lists code addresses; these files turn them into
+        # function names and lines (docs/troubleshooting.md#read-a-core-dump). Too large to publish.
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: firmware-elf
+          path: firmware/esp32/.pio/build/*/firmware.elf
+          retention-days: 90
+          include-hidden-files: true  # .pio
+          if-no-files-found: error
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8
         with:
           name: linux-arm64

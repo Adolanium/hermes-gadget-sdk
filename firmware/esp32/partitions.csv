@@ -6,5 +6,9 @@
 nvs,      data, nvs,     0x9000,   0x6000
 otadata,  data, ota,     0xf000,   0x2000
 phy_init, data, phy,     0x11000,  0x1000
+# The last crash, for `diag`: the free space before the first app slot, which must
+# start on a 64 KB boundary. A board updated over the air keeps its old table and
+# has no core dump until it is flashed over USB again.
+coredump, data, coredump, 0x12000, 0xE000
 ota_0,    app,  ota_0,   0x20000,  0x1f0000
 ota_1,    app,  ota_1,   0x210000, 0x1f0000
