@@ -43,7 +43,7 @@ Complete the [board contribution checklist](../CONTRIBUTING.md#adding-a-board), 
 - Confirm pin functions against the manufacturer's schematic for the exact board revision. Guard absent pins before GPIO access or bit shifts. Record voltage-divider ratios and signal polarity explicitly.
 - Expose only capabilities the circuit supports. A panel power rail does not imply device shutdown, and a battery ADC does not establish charging state or battery percentage.
 - Check timing against the configured FreeRTOS tick rate. `pdMS_TO_TICKS(3)` is zero at 100 Hz; use a delay that guarantees the hardware's minimum interval. Exercise immediate sleep/wake and repeated brightness changes, not only a normal boot.
-- Use the APIs from this project's ESP-IDF version. Build the affected profile locally, and require the full firmware matrix for shared code changes.
+- Use the APIs from this project's ESP-IDF version. Build the affected profile locally. For a shared code change, add the `full-ci` label so CI builds every board, as [development](development.md#test-suites) describes.
 - Pin the manufacturer's source revision for initialization sequences and drivers. Follow the [licensing requirements](../CONTRIBUTING.md#licensing), including source notices and distribution packages.
 - Record physical results with the [hardware checklist](hardware-validation.md#record-a-physical-test). If hardware is unavailable or testing is incomplete, state that limitation and retain experimental status.
 

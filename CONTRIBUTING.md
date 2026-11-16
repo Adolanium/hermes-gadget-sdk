@@ -33,7 +33,7 @@ pytest                                # Python tests; Hermes ones skip without a
 - [ ] `firmware/esp32/boards/<board>/sdkconfig.defaults`: target, flash size, PSRAM mode and the board choice. The build checks that every line took effect.
 - [ ] `firmware/esp32/boards/<board>/board.json`: the name and one-line description the browser installer shows
 - [ ] `firmware/esp32/platformio.ini`: an environment for it, which also puts it in the next release
-- [ ] Confirm CI discovers and builds the environment; its firmware matrix comes from `platformio.ini`
+- [ ] Confirm CI builds the environment; it finds boards in `platformio.ini`, and a PR that adds one builds it
 - [ ] `docs/hardware.md`: a section with the pins and a first-flash checklist
 - [ ] `docs/supported-hardware.md`: the board's controls, audio, and setup link
 - [ ] `docs/hardware-validation.md`: capabilities, exact revision, and experimental or verified status
@@ -46,7 +46,7 @@ Use the [physical test checklist](docs/hardware-validation.md#record-a-physical-
 
 - **Keep each PR to one change.** A title like `Board: add the Waveshare ESP32-S3-LCD-1.54` or `Plugin: show the firmware version in hermes gadget devices` says what it does.
 - **Say why, then what, then how you know it works.** Tests you ran, boards you tried it on, anything you couldn't check.
-- **CI must pass before a PR is merged.** `main` is protected. For a first-time contributor, CI waits until a maintainer approves the run.
+- **CI must pass before a PR is merged.** `main` is protected. A PR runs only the jobs its files can affect, as [development](docs/development.md#test-suites) describes. For a first-time contributor, CI waits until a maintainer approves the run.
 - **Update the docs** that describe what you changed, and add a line under `## Unreleased` in [CHANGELOG.md](CHANGELOG.md). CI checks for the changelog line; label the PR `no-changelog` when nothing user-facing changed.
 - **Code style:** match the code around you. The core's conventions (single-threaded, no exceptions or RTTI, deterministic UI) are in [docs/development.md](docs/development.md#working-on-the-firmware).
 
@@ -54,7 +54,7 @@ Use the [physical test checklist](docs/hardware-validation.md#record-a-physical-
 
 | Change | Documentation to review | Verification |
 |---|---|---|
-| Board or hardware driver | Complete the board checklist above and review [driver requirements](docs/porting.md#check-a-hardware-driver) | Build the affected firmware with this project's ESP-IDF version. Shared driver changes must pass every firmware profile in CI. Record physical checks separately. |
+| Board or hardware driver | Complete the board checklist above and review [driver requirements](docs/porting.md#check-a-hardware-driver) | Build the affected firmware with this project's ESP-IDF version. A shared driver change needs the `full-ci` label, so that it passes every firmware profile in CI. Record physical checks separately. |
 | CLI or simulator behavior | Update the command examples and the relevant [desktop](docs/desktop.md), [simulator](docs/simulator.md), or feature guide | Exercise the changed command or interaction, including a regression test when fixing a bug. |
 | Plugin, protocol, or Linux client | Review [Hermes setup](docs/connect-hermes.md), [protocol](docs/protocol.md), and [Linux](docs/linux.md) instructions as applicable | Run the relevant integration tests. Say whether a real Hermes gateway, peripherals, or test doubles were used. |
 | Website or published guide | Keep setup instructions and links consistent; register new guides in `site/scripts/docs.mjs` for navigation and search | Run the site tests and build; run browser tests for interaction or layout changes. |
