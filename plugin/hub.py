@@ -176,8 +176,10 @@ class AudioOut:
         self._task: asyncio.Task | None = None
         self.closed = False
         self.aborted = False
+        self.failed = False  # the connection dropped before the stream was all sent
         self.sent_seconds = 0.0
-        self.done = asyncio.Event()
+        self.done = asyncio.Event()  # everything was sent (or the stream was aborted or failed)
+        self._played_at = 0.0  # loop time at which the device has played what was sent
 
     async def start(self, *, turn: str | None = None) -> None:
         _note(self._session, state="speaking")
@@ -216,6 +218,23 @@ class AudioOut:
             pass
         self.done.set()
 
+    @property
+    def playing(self) -> bool:
+        """Still being sent, or sent and still in the device's buffer. A new stream now would cut it off."""
+        if not self.done.is_set():
+            return True
+        return not (self.aborted or self.failed) and asyncio.get_running_loop().time() < self._played_at
+
+    async def wait_played(self) -> None:
+        """Wait until the device has played the whole stream, not just received it: frames go out up to
+        the playback lead ahead of real time, and a device drops what it has buffered when the next
+        stream starts."""
+        await self.done.wait()
+        if not (self.aborted or self.failed):
+            remaining = self._played_at - asyncio.get_running_loop().time()
+            if remaining > 0:
+                await asyncio.sleep(remaining)
+
     async def _pump(self) -> None:
         loop = asyncio.get_running_loop()
         seq = 0
@@ -248,8 +267,10 @@ class AudioOut:
         except asyncio.CancelledError:
             pass
         except Exception as exc:  # connection dropped mid-stream
+            self.failed = True
             log.debug("audio pump stopped: %s", exc)
         finally:
+            self._played_at = (base if base is not None else loop.time()) + self.sent_seconds
             if self._encoder:
                 self._encoder.close()
             # The device plays what it buffered after the last frame goes out; the mirror says so.
@@ -341,8 +362,8 @@ class DeviceSession:
 
     @property
     def audio_playing(self) -> bool:
-        """An outbound audio stream is still being sent; a new one would cut it off."""
-        return self._audio_out is not None and not self._audio_out.done.is_set()
+        """An outbound audio stream is still being sent or played; a new one would cut it off."""
+        return self._audio_out is not None and self._audio_out.playing
 
     @property
     def speaker_formats(self) -> list[str]:

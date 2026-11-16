@@ -1403,23 +1403,41 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     async def speak_queued(self, chat_id: str, text: str) -> SendResult:
         """Speak ``text`` after anything the device is already saying or doing, one message at a time.
 
-        Waits (up to SPEECH_QUEUE_WAIT_S) for a turn in progress and for audio already playing, so a
-        message never cuts off a spoken reply or an earlier message. A device that stays busy that
-        long keeps the message as text only."""
+        Waits for a turn in progress and for audio already playing, so a message never cuts off a
+        spoken reply or an earlier message. A message that has waited SPEECH_QUEUE_WAIT_S since it
+        was queued, behind other messages or a busy device, stays text only."""
         device_id = self._device_id(chat_id)
         lock = self._speech_locks.setdefault(device_id, asyncio.Lock())
-        async with lock:
-            deadline = time.monotonic() + SPEECH_QUEUE_WAIT_S
-            while True:
-                session = self._session(chat_id)
-                if session is None or (device_id not in self._turns and not session.audio_playing):
-                    break
-                if time.monotonic() >= deadline:
-                    logger.warning("[%s] %s stayed busy for %d s; a message was shown but not spoken",
-                                   self.name, device_id, int(SPEECH_QUEUE_WAIT_S))
-                    return SendResult(success=False, error="the device stayed busy")
-                await asyncio.sleep(0.2)
-            return await self._speak(chat_id, text, wait=True)
+        deadline = time.monotonic() + SPEECH_QUEUE_WAIT_S
+        try:
+            await asyncio.wait_for(lock.acquire(), max(0.0, deadline - time.monotonic()))
+        except asyncio.TimeoutError:
+            return self._not_spoken(device_id)
+        try:
+            if not await self._device_idle(chat_id, deadline):
+                return self._not_spoken(device_id)
+            if not self._should_auto_tts_for_chat(chat_id):  # voice was turned off while it waited
+                return SendResult(success=False, error="voice is off")
+            return await self._speak(chat_id, text, wait=True, idle_by=deadline)
+        finally:
+            lock.release()
+
+    async def _device_idle(self, chat_id: str, deadline: float) -> bool:
+        """Wait until the device is in no turn and plays nothing; False once ``deadline`` passes.
+        Returns without yielding when it is idle already, so the caller can start audio at once."""
+        device_id = self._device_id(chat_id)
+        while True:
+            session = self._session(chat_id)
+            if session is None or (device_id not in self._turns and not session.audio_playing):
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(0.2)
+
+    def _not_spoken(self, device_id: str) -> SendResult:
+        logger.warning("[%s] %s stayed busy for %d s; a message was shown but not spoken",
+                       self.name, device_id, int(SPEECH_QUEUE_WAIT_S))
+        return SendResult(success=False, error="the device stayed busy")
 
     def supports_draft_streaming(self, chat_type=None, metadata=None, chat_id=None) -> bool:
         return True
@@ -1566,11 +1584,13 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             session.spawn(self._speak(chat_id, spoken_question(question, choices)))
         return result
 
-    async def _speak(self, chat_id: str, text: str, *, wait: bool = False) -> SendResult:
+    async def _speak(self, chat_id: str, text: str, *, wait: bool = False,
+                     idle_by: Optional[float] = None) -> SendResult:
         """Speak ``text`` on the device with Hermes's configured text-to-speech.
 
         Long text comes back as several files; each one waits for the one before it to finish, so
-        they never cut each other off. ``wait`` also waits for the last one."""
+        they never cut each other off. ``wait`` also waits for the last one. ``idle_by`` is for
+        queued speech: each file starts only once the device is idle, or not at all after that time."""
         paths: List[str] = []
         try:
             from tools.tts_tool import text_to_speech_tool
@@ -1584,7 +1604,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 return SendResult(success=False, error=error)
             played = SendResult(success=False, error="nothing to play")
             for i, path in enumerate(paths):
-                played = await self._play_file(chat_id, path, wait=wait or i < len(paths) - 1)
+                played = await self._play_file(chat_id, path, wait=wait or i < len(paths) - 1, idle_by=idle_by)
                 if not played.success:
                     break
             return played
@@ -1612,7 +1632,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             return True
         return super()._should_auto_tts_for_chat(chat_id)
 
-    async def _play_file(self, chat_id: str, path: str, *, wait: bool = False) -> SendResult:
+    async def _play_file(self, chat_id: str, path: str, *, wait: bool = False,
+                         idle_by: Optional[float] = None) -> SendResult:
         session = self._session(chat_id)
         if session is None or not session.paired:
             return SendResult(success=False, error="gadget not connected")
@@ -1623,11 +1644,19 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         except Exception as exc:  # undecodable file, missing ffmpeg, I/O error
             logger.warning("[%s] cannot play %s: %s", self.name, path, exc)
             return SendResult(success=False, error=str(exc))
+        if idle_by is not None:
+            # Synthesis and decoding took time: a turn or its reply may have started meanwhile.
+            if not await self._device_idle(chat_id, idle_by):
+                return self._not_spoken(session.device_id)
+            if not self._should_auto_tts_for_chat(chat_id):
+                return SendResult(success=False, error="voice is off")
         out = await session.play_pcm(pcm, session.speaker_rate, turn=self._turns.get(session.device_id))
         if wait:
-            await out.done.wait()
+            await out.wait_played()
             if out.aborted:
                 return SendResult(success=False, error="interrupted by newer audio")
+            if out.failed:
+                return SendResult(success=False, error="the connection dropped while playing")
         return SendResult(success=True, message_id=uuid.uuid4().hex[:12])
 
     async def play_tts(self, chat_id: str, audio_path: str, **kwargs) -> SendResult:

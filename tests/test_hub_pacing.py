@@ -194,3 +194,67 @@ def test_the_lead_follows_the_buffer_the_device_announces(speaker, lead):
     caps = {} if speaker is None else {"speaker": speaker}
     session = hubmod.DeviceSession(None, SimpleNamespace(), {"device_id": "hg-1", "caps": caps})
     assert session.playback_lead_s == pytest.approx(lead)
+
+
+def _virtual_time(monkeypatch):
+    clock = VirtualClock()
+    real_sleep = asyncio.sleep
+
+    async def fake_sleep(seconds, *args):
+        if seconds > 0:
+            clock.now += seconds
+        await real_sleep(0)
+
+    monkeypatch.setattr(hubmod.asyncio, "sleep", fake_sleep)
+    return clock
+
+
+def test_a_stream_counts_as_playing_until_the_device_has_played_its_buffer(monkeypatch):
+    """Frames go out up to the lead ahead of real time, and a device drops what it buffered when
+    the next stream starts: whoever queues audio behind this stream waits for the tail."""
+    clock = _virtual_time(monkeypatch)
+
+    async def run():
+        loop = asyncio.get_running_loop()
+        monkeypatch.setattr(loop, "time", lambda: clock.now)
+        out = hubmod.AudioOut(RecordingSession(clock), stream=7, src_rate=RATE)
+        await out.start()
+        started = clock.now
+        out.write(b"\x00" * (FRAME_BYTES * 50))  # two seconds of audio
+        out.finish()
+        await asyncio.wait_for(out.done.wait(), 5)
+        sent_at = clock.now - started
+        playing_when_sent = out.playing
+        await out.wait_played()
+        return sent_at, playing_when_sent, clock.now - started, out.playing
+
+    sent_at, playing_when_sent, played_at, playing_after = asyncio.run(run())
+    assert sent_at < 2.0 - hubmod.PLAYBACK_LEAD_S + 0.1  # all sent while the device still plays
+    assert playing_when_sent
+    assert played_at == pytest.approx(2.0, abs=0.05)
+    assert not playing_after
+
+
+def test_a_stream_the_connection_dropped_is_failed_not_played(monkeypatch):
+    clock = _virtual_time(monkeypatch)
+
+    class DroppingSession(RecordingSession):
+        async def send_binary(self, data: bytes):
+            if len(self.sent) == 3:
+                raise ConnectionError("gone")
+            await super().send_binary(data)
+
+    async def run():
+        loop = asyncio.get_running_loop()
+        monkeypatch.setattr(loop, "time", lambda: clock.now)
+        out = hubmod.AudioOut(DroppingSession(clock), stream=7, src_rate=RATE)
+        await out.start()
+        out.write(b"\x00" * (FRAME_BYTES * 50))
+        out.finish()
+        before = clock.now
+        await asyncio.wait_for(out.wait_played(), 5)
+        return out, clock.now - before
+
+    out, waited = asyncio.run(run())
+    assert out.failed and not out.aborted and not out.playing
+    assert waited < 0.5  # nothing left to wait for
