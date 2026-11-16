@@ -90,14 +90,29 @@ class EchoBrain(HubDelegate):
             await session.set_paired(True)
         return True
 
+    def interprets(self, session: DeviceSession) -> bool:
+        return session.device_id in self.interpreting
+
+    async def _stop_turn(self, session: DeviceSession) -> None:
+        """Stop the device's turn under way, an answer or a translation, and wait until it has ended."""
+        task = self._turns.get(session.device_id)
+        if task and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+            await asyncio.wait({task})
+
     async def interpret(self, session: DeviceSession, first: str, second: str) -> interpret.Session:
         state = self.interpreting[session.device_id] = interpret.start(first, second)
+        # As the Hermes adapter does: an answer under way is not for whoever holds the gadget next,
+        # a translation of the mode before is not this mode's, and a choice on screen goes unanswered.
+        await self._stop_turn(session)
+        await session.withdraw_choice(f"{session.name} now interprets, and takes no questions")
         await session.send_interpret(state.message())
         return state
 
     async def interpret_off(self, session: DeviceSession) -> bool:
         if self.interpreting.pop(session.device_id, None) is None:
             return False
+        await self._stop_turn(session)  # no more of a translation arrives after the mode is off
         await session.send_interpret(interpret.OFF)
         return True
 
@@ -166,6 +181,7 @@ class EchoBrain(HubDelegate):
 
     async def on_interpret_stop(self, session: DeviceSession) -> None:
         self.interpreting.pop(session.device_id, None)
+        await self._stop_turn(session)
         await session.refuse_interpreted("Interpreter off")
 
     async def on_text(self, session: DeviceSession, msg_id: str, text: str) -> None:

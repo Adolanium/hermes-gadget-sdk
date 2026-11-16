@@ -331,6 +331,57 @@ def test_a_script_the_screen_cannot_draw_is_said_to_be_spoken_only_where_it_is(d
     assert fake.translated == [("Where is the station?", "EN > JA")]
 
 
+def _slow_reply(sim, brain, text: str) -> None:
+    """Type ``text`` to a development server that takes its time, and wait until the reply has begun."""
+    brain.word_delay = 0.6
+    sim.type_text(text)
+    assert sim.wait_for(lambda: sim.last_received("reply.delta") is not None, timeout=10)
+
+
+def _nothing_more_of_the_reply(sim) -> None:
+    """The turn was stopped: it ended cancelled, and no reply text came after that."""
+    assert sim.wait_for(lambda: (sim.last_received("turn.end") or {}).get("outcome") == "cancelled", timeout=5)
+    sim.run_for(2.0)  # longer than the rest of the reply would have taken
+    assert sim.last_received("reply") is None
+    kinds = [m.get("type") for m in sim.received]
+    assert "reply.delta" not in kinds[len(kinds) - kinds[::-1].index("turn.end"):]
+    assert sim.last_received("turn.end")["outcome"] == "cancelled"
+
+
+@requires_sim
+def test_the_dev_server_stops_a_translation_when_the_mode_is_left(devserver, make_sim, loop_thread):
+    sim, session, brain, _fake = _interpreting_sim(devserver, make_sim, loop_thread)
+    assert sim.wait_for(lambda: sim.status().get("interpret") == "ES > EN", timeout=5)
+    # `interpret off` in the console, during a slow translation.
+    _slow_reply(sim, brain, "buenos días")
+    assert loop_thread.run(brain.interpret_off(session)) is True
+    assert sim.wait_for(lambda: "interpret" not in sim.status(), timeout=5)
+    _nothing_more_of_the_reply(sim)
+    assert sim.wait_screen("ready", timeout=5)
+
+    # CANCEL held on the device, the same.
+    sim.received.clear()
+    loop_thread.run(brain.interpret(session, "es", "en"))
+    assert sim.wait_for(lambda: sim.status().get("interpret") == "ES > EN", timeout=5)
+    _slow_reply(sim, brain, "buenos días")
+    sim.console("new-session")
+    assert sim.wait_for(lambda: "interpret" not in sim.status(), timeout=5)
+    _nothing_more_of_the_reply(sim)
+    assert brain.interpreting == {}
+
+
+@requires_sim
+def test_the_dev_server_stops_an_answer_under_way_when_the_mode_starts(devserver, make_sim, loop_thread):
+    hub, brain, url = devserver()
+    sim = make_sim(url)
+    assert sim.wait_screen("ready", timeout=10)
+    session = hub.get(sim.status()["device_id"])
+    _slow_reply(sim, brain, "what is on my calendar today")
+    loop_thread.run(brain.interpret(session, "es", "en"))
+    assert sim.wait_for(lambda: sim.status().get("interpret") == "ES > EN", timeout=5)
+    _nothing_more_of_the_reply(sim)  # the answer was the owner's: none of it reaches whoever holds the gadget now
+
+
 # -- the adapter on Hermes's classes ------------------------------------------------------------------
 
 hermes = pytest.mark.usefixtures("registered_platform")
