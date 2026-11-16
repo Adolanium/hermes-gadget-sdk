@@ -662,7 +662,7 @@ void App::send_hello() {
     caps.set("dashboard", dash);
   }
   caps.set("profiles", true);
-  caps.set("interpret", 1);
+  if (ui_) caps.set("interpret", 1);  // it draws the mode; a device without a screen has nothing to draw
   if (ui_ && profile_.faces) {
     json::Value colour = json::Value::object().set("v", 2).set("px", colour_px_);
     if (colour_bands_) colour.set("frames", true);

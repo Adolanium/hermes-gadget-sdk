@@ -308,7 +308,7 @@ Hermes asks before some actions: destructive commands such as `/new`, a costly m
 
 In interpreter mode Hermes translates what is said to the device into another language instead of answering it. The turn itself is an ordinary one: `turn.start`, `transcript` with what was said, `reply` with the translation, reply audio, `turn.end`.
 
-- `caps.interpret: 1` in `hello` means the device draws the mode. The server sends the messages below to every device; one that does not know them ignores them and shows each translation as a reply.
+- `caps.interpret: 1` in `hello` means the device draws the mode. The reference firmware announces it when it has a screen. The server sends the messages below to every device; one that does not know them ignores them and shows each translation as a reply.
 - `{"type": "interpret", "on": true, "label": "ES > EN", "flip": true}` (server → device) turns the mode on, or updates it. `label` is short ASCII text that names the languages: `ES > EN` when the next recording is taken as Spanish and translated into English, `ES <> EN` when the server detects the language. `flip` says whether the device may ask to switch who speaks next. The server sends the message again after each turn that switches the speaker, and after a reconnect.
 - `{"type": "interpret", "on": false}` (server → device) turns it off. The device also leaves the mode when the connection ends or it is unpaired.
 - `{"type": "interpret.flip"}` (device → server) asks the server to switch who speaks next. The server answers with a new `interpret` message, and ignores the request during a turn or when `flip` was false. The device shows the new label only when that message arrives.

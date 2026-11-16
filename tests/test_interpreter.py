@@ -268,7 +268,7 @@ def test_holding_cancel_leaves_the_mode_and_the_device_answers_again(devserver, 
     sim.release("cancel")
     assert sim.wait_for(lambda: "interpret" not in sim.status(), timeout=5)
     assert brain.interpreting == {}
-    assert sim.last_received("notice")["text"] == "Interpreter off"
+    assert sim.wait_for(lambda: (sim.last_received("notice") or {}).get("text") == "Interpreter off", timeout=5)
     assert sim.wait_screen("ready", timeout=5)
     sim.type_text("ping")
     assert sim.wait_for(lambda: (sim.last_received("reply") or {}).get("text") == "You said: ping", timeout=10)
