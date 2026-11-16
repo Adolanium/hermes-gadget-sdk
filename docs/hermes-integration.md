@@ -220,7 +220,9 @@ What it does not enforce: the words go to the configured STT, model and TTS prov
 - Only a translation of the device's current mode is played. Hermes's own speech, such as a message spoken outside a turn or a spoken `clarify` question, is checked again right before the audio starts: speech that was queued or still being synthesized when the mode started is dropped. Its text was shown before the mode started. Audio that is already playing when the mode starts is not stopped.
 - Holding CANCEL sends `interpret.stop`, never `session.new`, so it cannot reset the owner's conversation.
 
-One turn is let through: if the agent turned the mode on with `gadget_interpret`, the rest of that turn, its reply included, still reaches the device.
+One turn is let through: if the agent turned the mode on with `gadget_interpret` in the gadget's own chat, the rest of that turn, its reply included, still reaches the device. Another agent turn that is running on the gadget when the mode starts, for example when the mode is started from another chat or with `hermes gadget interpret`, reaches it no more: its status phrases, streamed text and streamed speech are dropped, and its finished reply is held like a pushed message.
+
+When the mode starts, the adapter also stops what the gadget is playing: a `gadget_play` playback and speech still being sent. A choice the agent asked is withdrawn when the device is unpaired, as when the mode starts.
 
 What is kept: nothing of a translation is written to a session or to memory. The recording is written to a temporary file that the same worker deletes when speech-to-text returns, also when the turn was cancelled meanwhile; a speech file whose synthesis outlives a cancelled turn is deleted when it is done. While the mode is on, what was heard and replied is left out of `status.json`, which the Desktop page mirrors.
 

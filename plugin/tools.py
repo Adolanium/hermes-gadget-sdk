@@ -527,7 +527,12 @@ def gadget_interpret(args: dict, **_kw) -> str:
         languages = args.get("languages")
         if not isinstance(languages, list) or len(languages) != 2:
             return _error("languages must name two languages, or pass stop: true")
-        state = _run(adapter, adapter.interpret_start(session, languages[0], languages[1]))
+        from gateway.session_context import get_session_env
+
+        # Asked in this gadget's own chat: the turn asking may still say on it that the mode is on.
+        asked_here = (get_session_env("HERMES_SESSION_PLATFORM") == "gadget" and adapter._device_id(
+            get_session_env("HERMES_SESSION_CHAT_ID") or "") == session.device_id)
+        state = _run(adapter, adapter.interpret_start(session, languages[0], languages[1], asked_here=asked_here))
     except ValueError as exc:
         return _error(str(exc))
     except Exception as exc:

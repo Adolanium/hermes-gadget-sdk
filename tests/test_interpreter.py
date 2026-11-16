@@ -1502,3 +1502,131 @@ def test_a_held_message_whose_send_fails_is_not_kept_for_a_gadget_revoked_meanwh
     gadget.run(adapter._interpret_release(it.session))
     it.sim.run_for(0.3)
     assert "Reminder: call the bank" not in _replies(it.sim)
+
+
+
+@requires_hermes
+@requires_sim
+@hermes
+def test_audio_playing_when_the_mode_starts_is_stopped(gadget, make_sim, monkeypatch, tmp_path):
+    from hermes_fixtures import _paired_sim
+
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+    adapter, session = gadget.adapter, gadget.adapter.hub.get(device_id)
+    adapter._llm = _Llm()
+    ended = []
+    # A gadget_play playback (a stand-in that records how it was ended), and the owner's speech
+    # still being sent: ten seconds of it.
+    session.playback = types.SimpleNamespace(end=ended.append, out=None)  # still waiting for the speaker
+    gadget.run(session.play_pcm(b"\x10\x00" * session.speaker_rate * 10, session.speaker_rate))
+    assert sim.wait_for(lambda: sim.last_received("audio.start") is not None, timeout=5)
+    assert session.audio_playing
+    gadget.run(adapter.interpret_start(session, "es", "en"))
+    assert ended == ["interrupted"] and session.playback is None
+    assert not session.audio_playing
+    assert sim.wait_for(lambda: sim.last_received("audio.abort") is not None, timeout=5)
+    kinds = [m.get("type") for m in sim.received]
+    assert kinds.index("audio.abort") < kinds.index("interpret")  # stopped before the mode is announced
+
+
+def _replies_and_deltas(sim) -> list[str]:
+    return [m["text"] for m in sim.received if m.get("type") in ("reply", "reply.delta", "status")]
+
+
+@requires_hermes
+@requires_sim
+@hermes
+def test_an_owner_turn_running_when_the_mode_starts_reaches_the_gadget_no_more(gadget, make_sim, monkeypatch,
+                                                                             tmp_path):
+    from hermes_gadget_plugin.adapter import AudioFormat
+
+    it = _interpreter(gadget, make_sim, monkeypatch, tmp_path)
+    adapter = gadget.adapter
+    gadget.run(adapter.interpret_stop(it.device_id))
+    adapter._auto_tts_disabled_chats.add(it.device_id)
+    # The owner asked something; the agent is still working on it when the mode is started from
+    # elsewhere (`hermes gadget interpret`, or another chat).
+    adapter._turns[it.device_id] = "owner-turn"
+    gadget.run(adapter.interpret_start(it.session, "es", "en"))
+    it.sim.received.clear()
+    adapter.set_status_text(it.device_id, "Checking your bank account")
+    assert not gadget.run(adapter.send_draft(it.device_id, 1, "Your balance")).success
+    assert not gadget.run(adapter.edit_message(it.device_id, "m1", "Your balance is")).success
+    assert gadget.run(adapter.send(it.device_id, "Your balance is 2,400.")).success  # kept for the owner
+    assert not adapter.supports_streaming_tts(it.device_id, AudioFormat(sample_rate=16000, channels=1,
+                                                                       sample_width=2))
+    it.sim.run_for(0.5)
+    assert _replies_and_deltas(it.sim) == []
+    # The translations go on meanwhile, and the reply waits until the mode ends.
+    _speaks(it, "Where is the station?")
+    adapter._turns.pop(it.device_id)
+    gadget.run(adapter.interpret_stop(it.device_id))
+    assert it.sim.wait_for(lambda: "Your balance is 2,400." in _replies(it.sim), timeout=5)
+
+
+@requires_hermes
+@requires_sim
+@hermes
+def test_only_the_turn_that_started_the_mode_on_this_gadget_finishes_its_reply(gadget, make_sim, monkeypatch):
+    from gateway import session_context
+    from hermes_fixtures import _paired_sim
+    from hermes_gadget_plugin import tools
+
+    sim = _paired_sim(gadget, make_sim, name="Desk")
+    device_id = sim.status()["device_id"]
+    adapter = gadget.adapter
+    adapter._llm = _Llm()
+    adapter._auto_tts_disabled_chats.add(device_id)
+    env = {}
+    monkeypatch.setattr(session_context, "get_session_env", lambda name, default="": env.get(name, default))
+    pool = concurrent.futures.ThreadPoolExecutor(1)
+
+    def call(args):
+        fut = pool.submit(tools.gadget_interpret, args)
+        assert sim.wait_for(fut.done, timeout=15)
+        return json.loads(fut.result())
+
+    # Asked on the gadget itself: that turn's own short reply still reaches it.
+    env.update(HERMES_SESSION_PLATFORM="gadget", HERMES_SESSION_CHAT_ID=device_id)
+    adapter._turns[device_id] = "asked-here"
+    assert call({"languages": ["es", "en"]})["success"]
+    assert gadget.run(adapter.send(device_id, "The interpreter is ready. Spanish speaks first.")).success
+    assert sim.wait_for(lambda: _replies(sim) == ["The interpreter is ready. Spanish speaks first."], timeout=5)
+    adapter._turns.pop(device_id)  # that turn has ended
+    adapter._turns[device_id] = "a-later-turn"  # one that runs on the gadget now is not let through
+    assert gadget.run(adapter.send(device_id, "Something else for the owner")).success
+    sim.run_for(0.4)
+    assert _replies(sim) == ["The interpreter is ready. Spanish speaks first."]
+    adapter._turns.pop(device_id)
+    call({"stop": True})
+
+    # Asked in another chat while the gadget's own turn runs: that turn is not the one let through.
+    env.update(HERMES_SESSION_PLATFORM="telegram", HERMES_SESSION_CHAT_ID="12345")
+    adapter._turns[device_id] = "owners-turn-on-the-gadget"
+    assert call({"languages": ["es", "en"], "device": device_id})["success"]
+    assert gadget.run(adapter.send(device_id, "Your balance is 2,400.")).success
+    sim.run_for(0.4)
+    assert "Your balance is 2,400." not in _replies(sim)
+    adapter._turns.pop(device_id)
+    pool.shutdown()
+
+
+@requires_hermes
+@requires_sim
+@hermes
+def test_a_choice_on_a_gadget_that_is_unpaired_is_withdrawn(gadget, make_sim):
+    from hermes_fixtures import _paired_sim
+    from hermes_gadget_plugin import hub as gadget_hub
+
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+    session = gadget.adapter.hub.get(device_id)
+    asked = asyncio.run_coroutine_threadsafe(session.ask_choice("Delete the backup?", ["Yes", "No"], timeout=60),
+                                             gadget.loop)
+    assert sim.wait_screen("choice", timeout=5)
+    gadget.authorized.discard(device_id)  # the gadget's pairing is revoked
+    assert sim.wait_for(asked.done, timeout=10)
+    with pytest.raises(gadget_hub.ActionError):
+        asked.result()
+    assert sim.wait_for(lambda: sim.last_received("choice.close") is not None, timeout=5)

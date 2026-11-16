@@ -315,6 +315,9 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._interpret_tasks: Dict[str, asyncio.Task] = {}
         self._interpret_turns: Dict[str, str] = {}  # device id -> the translation's turn id
         self._held_pushes: Dict[str, List[tuple]] = {}  # device id -> (chat id, text, metadata) kept for later
+        # device id -> the agent turn that started the mode from the gadget's own chat, whose own
+        # short reply still reaches the gadget; no other turn's output does while the mode is on.
+        self._interpret_asker: Dict[str, str] = {}
         self._llm: Any = None  # tests may stand in for Hermes's ctx.llm; None = this profile's own
         self._watch_task: Optional[asyncio.Task] = None
         self._update_task: Optional[asyncio.Task] = None
@@ -824,6 +827,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             return
         self._prompts.pop(session.device_id, None)  # unpaired while away: its questions are void
         self._held_pushes.pop(session.device_id, None)  # and so is what waited for its mode to end
+        await session.withdraw_choice(f"{session.name} is not paired")
         await self.interpret_stop(session.device_id)
         refusal = self._refusal(session)
         if refusal:  # no pairing code can let it in: say why rather than ask Hermes for one
@@ -883,6 +887,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 # Leaving the mode delivers what was held for the owner, and the device is still
                 # paired at that point: a revoked device gets none of it.
                 self._held_pushes.pop(session.device_id, None)
+                # A choice the agent asked: an answer from a device that is no longer trusted is none.
+                await session.withdraw_choice(f"{session.name} is no longer paired")
                 await self.interpret_stop(session.device_id)
                 await session.set_paired(False, refusal)
                 if refusal is None:  # a pairing code can let it in again
@@ -1388,8 +1394,11 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             return f"this Hermes lacks the speech functions interpreter mode uses ({exc}); update Hermes or the plugin"
         return None
 
-    async def interpret_start(self, session: DeviceSession, first: Any, second: Any) -> interpret.Session:
+    async def interpret_start(self, session: DeviceSession, first: Any, second: Any, *,
+                              asked_here: bool = False) -> interpret.Session:
         """Put a paired device in interpreter mode between two languages; the first speaks first.
+        ``asked_here``: the agent turn running in the device's own chat asked for it (gadget_interpret),
+        and may finish its reply on the device. Any other agent turn running there reaches it no more.
         Raises ValueError with a sentence for a bad language, an unpaired device, a Hermes without
         what the translations need, or a mode that could not be saved."""
         if not session.paired:
@@ -1412,9 +1421,17 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                              "would end it unnoticed. Check that the plugin's data folder can be written "
                              "(the gateway log has the error)")
         logger.info("[%s] %s interprets %s", self.name, session.device_id, state.label)
+        asker = self._turns.get(session.device_id) if asked_here else None
+        if asker is not None:
+            self._interpret_asker[session.device_id] = asker
+        else:
+            self._interpret_asker.pop(session.device_id, None)
         # A choice the agent asked (gadget_ask) cannot wait: its tool call fails, unanswered. First, and
         # with no await since the mode was set: no answer to it is taken in between.
         await session.withdraw_choice(f"{session.name} now interprets, and takes no questions")
+        # The owner's audio stops: a gadget_play playback, and speech still being sent.
+        session.end_playback("interrupted")
+        await session.stop_audio()
         shown = self._prompts.get(session.device_id) or []
         if shown:  # the gadget is about to change hands: its question waits (see _show_prompt)
             await session.close_prompt(shown[0].id)
@@ -1432,6 +1449,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         """Leave interpreter mode, stopping a translation under way; False when the device was not
         in it. Works for a device that is away: it is told when it connects (on_ready)."""
         was_on = self._interpreting.pop(device_id, None) is not None
+        if was_on:
+            self._interpret_asker.pop(device_id, None)
         await self._interpret_cancel(device_id)
         session = self._hub.get(device_id) if self._hub else None
         if was_on:
@@ -1473,6 +1492,14 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 return
         if queue is not None and not queue and self._held_pushes.get(device_id) is queue:
             del self._held_pushes[device_id]
+
+    def _owner_output_held(self, device_id: str) -> bool:
+        """Whether what Hermes sends the device now is kept from it: while it interprets, all of it
+        except the output of the turn that started the mode from the device's own chat."""
+        if device_id not in self._interpreting:
+            return False
+        turn = self._turns.get(device_id)
+        return turn is None or turn != self._interpret_asker.get(device_id)
 
     def _hold_push(self, chat_id: str, content: str, metadata: Optional[Dict[str, Any]]) -> SendResult:
         """Keep a message pushed to an interpreting gadget until the mode ends: whoever holds the
@@ -1737,7 +1764,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         await session.turn_start(turn)
 
     async def on_processing_complete(self, event: MessageEvent, outcome) -> None:
-        turn = self._turns.pop(self._device_id(event.source.chat_id), None) or event.message_id or ""
+        device_id = self._device_id(event.source.chat_id)
+        turn = self._turns.pop(device_id, None) or event.message_id or ""
+        if self._interpret_asker.get(device_id) == turn:
+            del self._interpret_asker[device_id]  # its reply is out: the next turn is let through no more
         session = self._session(event.source.chat_id)
         if session is None or not session.paired:
             return
@@ -1746,7 +1776,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     def set_status_text(self, chat_id: str, text: Optional[str]) -> None:
         super().set_status_text(chat_id, text)
         session = self._session(chat_id)
-        if session is None or self._loop is None:
+        if session is None or self._loop is None or self._owner_output_held(session.device_id):
             return
         coro = session.send_status(text or "")
         try:
@@ -1776,9 +1806,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 f"Not approved for the {session.profile} profile yet. On the Hermes host run:\n{match.group(1)}",
                 session.charset))
             return SendResult(success=True, message_id=uuid.uuid4().hex[:12])
-        if (session.device_id in self._interpreting
-                and (self._turns.get(session.device_id) is None or (metadata or {}).get("job_id"))):
-            # Outside a turn the owner started (send_message, cron): it waits until the mode ends.
+        if self._owner_output_held(session.device_id) or (
+                session.device_id in self._interpreting and (metadata or {}).get("job_id")):
+            # Outside the turn that started the mode here (another turn, send_message, cron): it waits
+            # until the mode ends.
             return self._hold_push(chat_id, content, metadata)
         heard = transcript_echo(content or "")
         if heard is not None:
@@ -1847,6 +1878,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         session = self._session(chat_id)
         if session is None or not session.paired:
             return SendResult(success=False, error="gadget not connected")
+        if self._owner_output_held(session.device_id):
+            return SendResult(success=False, error="the gadget is in interpreter mode")
         await session.send_delta(textfmt.for_device(content, session.charset), turn=self._turns.get(session.device_id))
         return SendResult(success=True)
 
@@ -1858,9 +1891,13 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if str(message_id).startswith(PROMPT_PREFIX):
             # Hermes edits a question card when it times out: withdraw it and say why.
             await self._withdraw_prompt(session, str(message_id)[len(PROMPT_PREFIX):])
-            if text:
+            if text and session.device_id not in self._interpreting:  # the question was never shown there
                 await session.send_notice(text, ttl_s=15)
             return SendResult(success=True, message_id=message_id)
+        if self._owner_output_held(session.device_id):
+            # A turn's streamed reply: the finished text waits like a pushed message, a draft is dropped.
+            return self._hold_push(chat_id, content, None) if finalize else SendResult(
+                success=False, error="the gadget is in interpreter mode")
         turn = self._turns.get(session.device_id)
         if finalize:
             await session.send_reply(text, turn=turn)
@@ -2110,6 +2147,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     def supports_streaming_tts(self, chat_id: str, audio_format: AudioFormat) -> bool:
         session = self._session(chat_id)
         return bool(session and session.paired and session.has_speaker
+                    and not self._owner_output_held(session.device_id)
                     and audio_format.sample_width == 2 and audio_format.channels in (1, 2))
 
     async def begin_streaming_tts(self, chat_id: str, audio_format: AudioFormat,
