@@ -200,6 +200,7 @@ const App::Route App::kRoutes[] = {
     {"transcript", &App::h_transcript},   {"prompt", &App::h_prompt},
     {"prompt.close", &App::h_prompt_close}, {"ota.offer", &App::h_ota_offer},
     {"choice", &App::h_choice},           {"choice.close", &App::h_choice_close},
+    {"interpret", &App::h_interpret},
     {"ota.begin", &App::h_ota_begin},     {"ota.end", &App::h_ota_end},
     {"ota.abort", &App::h_ota_abort},     {"dashboard", &App::h_dashboard},
     {"profile", &App::h_profile},         {"profiles", &App::h_profiles},
@@ -687,6 +688,7 @@ void App::send_hello() {
     }
   }
   caps.set("profiles", true);
+  if (ui_) caps.set("interpret", 1);  // it draws the mode; a device without a screen has nothing to draw
   if (ui_ && profile_.faces) {
     json::Value colour = json::Value::object().set("v", 2).set("px", colour_px_);
     if (colour_bands_) colour.set("frames", true);
@@ -1161,6 +1163,7 @@ void App::h_paired(const json::Value&) {
 
 void App::h_unpaired(const json::Value& m) {
   paired_ = false;
+  interpret_off();
   unpaired_reason_ = m["reason"].as_string();
   if (unpaired_reason_ == "routed") {  // no code can let it in: drop one shown before
     pairing_code_.clear();
@@ -1215,6 +1218,48 @@ void App::h_turn_end(const json::Value& m) {
     mode_ = reply_.empty() ? Mode::Idle : Mode::Responding;
     mode_since_ = now();
   }
+}
+
+void App::h_interpret(const json::Value& m) {
+  if (!m["on"].as_bool()) {
+    interpret_off();
+    return;
+  }
+  wake_display();
+  // From here on the gadget may be in other hands: a question or a choice on screen goes
+  // unanswered, as when it expires, and none is shown while the mode lasts (h_prompt, h_choice).
+  clear_prompt();
+  clear_choice();
+  if (!interpret_) {
+    // The mode starts (a new label for a mode already on comes here too, and keeps the translation):
+    // the owner's last exchange is not left under the label, where UP could also bring it back, and
+    // a card, an image or a list of the owner's that is up goes.
+    reply_.clear();
+    user_echo_.clear();
+    scroll_ = -1;
+    reply_until_ = now();
+    dismiss_overlay();
+    // And what was said to the owner in passing: a notice ("Approved") and the phrase of a turn
+    // still working for them.
+    notice_.clear();
+    notice_until_ = 0;
+    status_.clear();
+  }
+  interpret_ = true;
+  interpret_label_ = m["label"].as_string().substr(0, 24);
+}
+
+void App::interpret_off() {
+  interpret_ = false;
+  interpret_label_.clear();
+}
+
+void App::interpret_text(UiModel& m) {
+  if (m.detail.empty()) m.detail = user_echo_;
+  if (!ui_ || m.body.empty()) return;
+  // Large where the whole translation fits the screen that way; a longer one keeps the base size.
+  m.body_scale = 1;
+  if (static_cast<int>(wrap_text(m.body, ui_->body_cols(m)).size()) > ui_->body_rows(m)) m.body_scale = 0;
 }
 
 void App::h_status(const json::Value& m) {
@@ -1541,6 +1586,7 @@ void App::h_image_end(const json::Value& m) {
 }
 
 void App::h_prompt(const json::Value& m) {
+  if (interpret_) return;  // whoever holds an interpreting gadget answers nothing for its owner
   close_setup_screens();
   wake_display();
   if (settings_open()) close_settings();
@@ -1607,7 +1653,7 @@ void App::h_choice(const json::Value& m) {
     if (!given[i].is_string()) return;
     if (options.size() < kChoiceMaxOptions) options.push_back(given[i].as_string());
   }
-  if (id.empty() || options.size() < 2 || !can_choose()) return;
+  if (id.empty() || options.size() < 2 || !can_choose() || interpret_) return;
   close_setup_screens();
   wake_display();
   if (settings_open()) close_settings();
@@ -1905,6 +1951,7 @@ void App::on_button(Button button, bool pressed, bool touch) {
       } else if (mode_ == Mode::Listening) cancel_listening("cancelled");
       else if (overlay_ != Overlay::None) dismiss_overlay();
       else if (mode_ == Mode::Thinking || mode_ == Mode::Responding) cancel_turn();
+      else if (interpret_ && can_talk()) send(proto::message("interpret.flip"));  // the other one speaks next
       else if (dashboard_ready_ && paired_) {
         overlay_ = Overlay::Dashboard;
         overlay_until_ = 0;
@@ -1974,6 +2021,7 @@ void App::start_listening(bool hands_free) {
   rec_resends_ = 0;
   rec_backlog_ms_ = 0;
   rec_started_at_ = now();
+  rec_interpret_ = interpret_;
   // Buffered, a start that didn't go leaves the recording held: tick() sends it all on a new stream.
   rec_live_ = send_audio_start();
   mode_ = Mode::Listening;
@@ -2103,6 +2151,8 @@ bool App::send_audio_start() {
       .set("mode", hands_free_ ? "tap" : "hold");
   // Sent again after a lost connection: how long ago it began. Hermes may ignore it.
   if (rec_resends_) start.set("resent", rec_resends_).set("age_ms", now() - rec_started_at_);
+  // Said to be translated, whenever it arrives: Hermes never answers it (interpreter mode).
+  if (rec_interpret_) start.set("interpret", true);
   return send(start);
 }
 
@@ -2183,17 +2233,18 @@ void App::start_new_session() {
   close_camera();
   clear_prompt();
   answer_choice(-1);
-  send(proto::message("session.new"));
+  // In interpreter mode the hold asks to leave it; a new session is never asked for from the mode.
+  send(proto::message(interpret_ ? "interpret.stop" : "session.new"));
   end_expression();
   reply_.clear();
   user_echo_.clear();
-  status_ = tr(i18n::Msg::StartingNewSession);
+  status_ = tr(interpret_ ? i18n::Msg::InterpreterOff : i18n::Msg::StartingNewSession);
   scroll_ = -1;
   mode_ = Mode::Thinking;
   mode_since_ = now();
   last_turn_rx_ = now();
   turn_started_ = false;
-  set_hint_flash(tr(i18n::Msg::NewSession));
+  set_hint_flash(tr(interpret_ ? i18n::Msg::InterpreterOff : i18n::Msg::NewSession));
 }
 
 void App::cancel_turn() {
@@ -2267,6 +2318,7 @@ void App::submit_text(std::string_view text) {
   request_id_ = next_id('t');
   json::Value msg = proto::message("text");
   msg.set("id", request_id_).set("text", t);
+  if (interpret_) msg.set("interpret", true);
   send(msg);
   user_echo_ = t;
   reply_.clear();
@@ -2295,7 +2347,7 @@ void App::scroll_body(int delta) {
   const std::string& body = card ? card_body_ : reply_;
   if (body.empty() || !ui_) return;
   int& pos = card ? card_scroll_ : scroll_;
-  int total = static_cast<int>(wrap_text(body, ui_->layout().body_cols).size());
+  int total = static_cast<int>(wrap_text(body, ui_->body_cols(model_)).size());
   int max_first = std::max(0, total - ui_->body_rows(model_));
   int cur = pos < 0 ? max_first : std::min(pos, max_first);
   pos = std::max(0, std::min(max_first, cur + delta));
@@ -2338,7 +2390,7 @@ bool App::turn_page() {
   }
   if (!pos) return false;
   const int rows = ui_->body_rows(model_);
-  const int total = static_cast<int>(wrap_text(*body, ui_->layout().body_cols).size());
+  const int total = static_cast<int>(wrap_text(*body, ui_->body_cols(model_)).size());
   const int max_first = std::max(0, total - rows);
   if (*pos >= max_first) return false;
   *pos = std::min(max_first, *pos + std::max(1, rows - 1));  // keep one line of context
@@ -2724,7 +2776,7 @@ void App::tick() {
       update_model();
     } else if (held >= kNewSessionHintMs && can_talk()) {
       uint32_t left = (kNewSessionHoldMs - held + 999) / 1000;
-      std::string hint = tr(i18n::Msg::NewSessionIn, {std::to_string(left)});
+      std::string hint = tr(interpret_ ? i18n::Msg::InterpreterOffIn : i18n::Msg::NewSessionIn, {std::to_string(left)});
       if (hint != hint_flash_) {
         set_hint_flash(std::move(hint));
         hint_countdown_ = true;
@@ -2774,6 +2826,7 @@ void App::update_model() {
   m.clock_date.clear();
   m.detail.clear();
   m.body.clear();
+  m.body_scale = 0;
   m.yes.clear();
   m.no.clear();
   m.qr = nullptr;
@@ -3106,14 +3159,18 @@ void App::update_model() {
     m.hint = tr(Msg::ButtonToStop, {cancel});
   } else if (mode_ == Mode::Responding) {
     m.screen = Screen::Responding;
-    m.headline = m.speaking ? tr(Msg::Speaking) : "Hermes";
+    // In interpreter mode the label stays while the translation is spoken: it names who speaks
+    // next, and that person may answer before the speech has ended.
+    m.headline = interpret_ ? interpret_label_.c_str() : m.speaking ? tr(Msg::Speaking) : "Hermes";
     m.detail = status_;
     m.body = reply_;
     m.hint = profile_.touch_screen && touch_talk_ ? std::string(tr(Msg::HoldToReply)) : tr(Msg::ButtonToReply, {talk});
     // Spoken audio can start before the text arrives: let the mascot talk meanwhile.
     m.hero = reply_.empty();
     // While it is spoken, the face talks over the reply's latest two lines, where they fit.
-    if (m.speaking && !reply_shown_ && ui_ && ui_->talk_caption_fits()) {
+    if (interpret_) {
+      interpret_text(m);  // the translation is for the other person to read: never the caption
+    } else if (m.speaking && !reply_shown_ && ui_ && ui_->talk_caption_fits()) {
       m.hero = true;
       m.caption_lines = 2;
       const std::string& text = reply_.empty() ? status_ : reply_;
@@ -3152,6 +3209,15 @@ void App::update_model() {
                    ((sessions || timing) ? "\n" + m.detail : "");
         m.caption_lines = 2;
       }
+      if (interpret_) {  // who speaks next and into what, in place of the greeting
+        m.headline = interpret_label_;
+        m.detail = tr(Msg::Interpreter);
+        m.name_target = false;
+        m.caption_lines = 1;
+      }
+    } else if (interpret_) {
+      m.headline = interpret_label_;
+      interpret_text(m);
     }
     if (clock_showing_) clock_model(m);
   }
@@ -3227,6 +3293,7 @@ json::Value App::status_value() const {
   if (!unpaired_reason_.empty()) s.set("unpaired_reason", unpaired_reason_);
   if (!prompt_id_.empty()) s.set("prompt", prompt_id_);
   if (!choice_id_.empty()) s.set("choice", choice_id_);
+  if (interpret_) s.set("interpret", interpret_label_);
   if (timer_active()) s.set("timer", timer_value());
   if (expression_ != mascot::Expression::Neutral) s.set("expression", mascot::expression_name(expression_));
   if (on_phone_pair) s.set("phone", phone_value());

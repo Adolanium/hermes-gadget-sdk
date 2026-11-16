@@ -53,7 +53,7 @@ def _parse_target(raw: str):
 
 
 def register(ctx) -> None:
-    from . import cli, stt
+    from . import cli, runtime, stt
     from .dashboard import BOARD
     from .tools import register_tools
 
@@ -78,6 +78,8 @@ def register(ctx) -> None:
     register_tools(ctx)
     BOARD.register(ctx)  # session state for the dashboard
     stt.register(ctx)  # platforms.gadget.extra.stt_language for gadget recordings
+    # Interpreter mode translates with Hermes's completion API for plugins, which carries no tools.
+    runtime.set_llm(getattr(ctx, "profile_name", None) or "default", getattr(ctx, "llm", None))
     ctx.register_cli_command(
         name="gadget",
         help="Manage Hermes gadgets (ESP32 devices)",

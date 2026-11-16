@@ -4,8 +4,10 @@ Serves just enough of the API for Hermes to run a real gateway turn:
 
 * ``POST /v1/chat/completions`` (streaming and not): a scripted model. Messages
   that mention the screen trigger a ``gadget_display`` tool call, messages
-  that mention the LED trigger ``gadget_action``; anything else is echoed.
-* ``POST /v1/audio/transcriptions``: returns ``TRANSCRIPT``.
+  that mention the LED trigger ``gadget_action``; anything else is echoed. Told to
+  interpret (the gadget plugin's interpreter instruction), it translates from ``PHRASEBOOK``.
+* ``POST /v1/audio/transcriptions``: returns ``TRANSCRIPT``. While a test has put speakers in
+  ``SPEAKERS``, a request that fixes one of their languages gets that speaker's line instead.
 * ``POST /v1/audio/speech``: returns a short tone (raw PCM for
   ``response_format=pcm``, WAV otherwise).
 
@@ -26,6 +28,15 @@ import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TRANSCRIPT = "what is on my screen"
+# Two people for an interpreter test: what each one's "recording" says, by the language the request
+# fixes. A test copies them into SPEAKERS for the exchange and clears it afterwards. Empty, every
+# recording says TRANSCRIPT: Hermes fixes English by default (stt.language), so the language of a
+# request alone says nothing about who is speaking.
+TRANSCRIPTS = {"es": "donde esta la estacion", "en": "go straight and turn left"}
+SPEAKERS: dict = {}
+PHRASEBOOK = {"donde esta la estacion": "Where is the station?",
+              "go straight and turn left": "Siga recto y gire a la izquierda."}
+INTERPRETER_MARK = "live interpreter between"  # plugin/interpret.py, messages()
 CRLF = b"\r\n"
 MODEL = "fake-gadget-model"
 
@@ -55,9 +66,33 @@ def _last_user_text(messages: list) -> str:
     return ""
 
 
+def _text_of(message: dict) -> str:
+    content = message.get("content")
+    if isinstance(content, list):
+        return " ".join(p.get("text", "") for p in content if isinstance(p, dict))
+    return str(content or "")
+
+
+def is_interpreting(messages: list) -> bool:
+    """Whether the system prompt carries the gadget plugin's interpreter instruction."""
+    return any(INTERPRETER_MARK in _text_of(m) for m in messages if m.get("role") == "system")
+
+
+def _form_field(raw: bytes, name: str) -> str | None:
+    """A text field of a multipart form, or None when the form has none by that name."""
+    marker = b'name="' + name.encode() + b'"'
+    if marker not in raw:
+        return None
+    value = raw.split(marker, 1)[1].split(CRLF + CRLF, 1)[1]
+    return value.split(CRLF, 1)[0].decode().strip()
+
+
 def plan_reply(body: dict) -> dict:
     """Decide the assistant message: {"content": str} or {"tool_call": (name, args)}."""
     messages = body.get("messages") or []
+    if is_interpreting(messages):
+        said = _last_user_text(messages).partition("\n\n")[2].strip()  # after "Translate from X into Y:"
+        return {"content": PHRASEBOOK.get(said, f"(no translation for {said[:80]!r})")}
     tools = {t.get("function", {}).get("name") for t in body.get("tools") or []}
     if messages and messages[-1].get("role") == "tool":
         result = str(messages[-1].get("content") or "")
@@ -112,8 +147,13 @@ class Handler(BaseHTTPRequestHandler):
         summary: dict = {"path": path}
         if path.endswith("/chat/completions"):
             body = json.loads(raw or b"{}")
+            messages = body.get("messages") or []
             summary.update(model=body.get("model"), tools=sorted(t.get("function", {}).get("name", "") for t in body.get("tools") or []),
-                           user=_last_user_text(body.get("messages") or [])[-200:])
+                           user=_last_user_text(messages)[-200:], interpreter=is_interpreting(messages),
+                           # the conversation so far, to check what a chat's history holds
+                           history=" | ".join(_text_of(m) for m in messages if m.get("role") != "system")[-4000:])
+        elif path.endswith("/audio/transcriptions"):
+            summary.update(language=_form_field(raw, "language"))
         self._record(summary)
         if path.endswith("/chat/completions"):
             self._chat(body)
@@ -140,21 +180,18 @@ class Handler(BaseHTTPRequestHandler):
                 f.write(json.dumps(summary) + "\n")
 
     def _transcription(self, raw: bytes) -> None:
-        # Multipart form; only response_format matters here.
-        fmt = "json"
-        marker = b'name="response_format"'
-        if marker in raw:
-            value = raw.split(marker, 1)[1].split(CRLF + CRLF, 1)[1]
-            fmt = value.split(CRLF, 1)[0].decode().strip()
+        # Multipart form; only response_format and language matter here.
+        fmt = _form_field(raw, "response_format") or "json"
+        transcript = SPEAKERS.get(_form_field(raw, "language") or "", TRANSCRIPT)
         if fmt == "text":
-            data = TRANSCRIPT.encode()
+            data = transcript.encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
         else:
-            self._json(200, {"text": TRANSCRIPT})
+            self._json(200, {"text": transcript})
 
     def _chat(self, body: dict) -> None:
         plan = plan_reply(body)

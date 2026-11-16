@@ -10607,3 +10607,298 @@ TEST("widgets: under a question a sideways swipe does nothing, and the widgets a
   CHECK(r.app.screen() == hg::Screen::Widget);
   CHECK_EQ(int(r.app.model().widget_index), 1);  // where the question found them
 }
+
+// --------------------------------------------------------------------------
+// Interpreter mode (docs/protocol.md#interpreter-mode)
+
+TEST("interpret: hello says the device draws interpreter mode") {
+  Rig r;
+  r.bring_online(true);
+  const Value* hello = r.fake.last("hello");
+  CHECK(hello != nullptr);
+  if (hello) CHECK_EQ((*hello)["caps"]["interpret"].as_int(), int64_t(1));
+}
+
+TEST("interpret: the idle screen names the languages until Hermes turns the mode off") {
+  Rig r;
+  r.bring_online(true);
+  CHECK_EQ(r.app.model().headline, std::string("Hi, I'm Hermes"));
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.app.model().headline, std::string("ES > EN"));
+  CHECK_EQ(r.app.model().detail, std::string("Interpreter"));
+  CHECK(r.app.status_json().find("\"interpret\":\"ES > EN\"") != std::string::npos);
+  // The turn's end switches who speaks next: Hermes sends the new label.
+  r.server(R"({"type":"interpret","on":true,"label":"EN > ES"})");
+  CHECK_EQ(r.app.model().headline, std::string("EN > ES"));
+  r.server(R"({"type":"interpret","on":false})");
+  CHECK_EQ(r.app.model().headline, std::string("Hi, I'm Hermes"));
+  CHECK(r.app.status_json().find("\"interpret\"") == std::string::npos);
+}
+
+TEST("interpret: the translation is drawn large with what was said above it") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  r.server(R"({"type":"turn.start","turn":"a1"})");
+  r.server(R"({"type":"transcript","text":"buenos dias"})");
+  r.server(R"({"type":"reply","turn":"a1","text":"Good morning"})");
+  CHECK(r.app.screen() == hg::Screen::Responding);
+  CHECK_EQ(r.app.model().body, std::string("Good morning"));
+  CHECK_EQ(int(r.app.model().body_scale), 1);
+  CHECK_EQ(r.app.model().detail, std::string("buenos dias"));
+  CHECK_EQ(r.app.model().headline, std::string("ES > EN"));
+  CHECK(!r.app.model().hero);
+  r.server(R"({"type":"turn.end","turn":"a1","outcome":"success"})");
+  r.server(R"({"type":"interpret","on":true,"label":"EN > ES"})");
+  r.advance(200);
+  // Back on the idle screen the translation stays up, large, under who speaks next.
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.app.model().headline, std::string("EN > ES"));
+  CHECK_EQ(r.app.model().body, std::string("Good morning"));
+  CHECK_EQ(int(r.app.model().body_scale), 1);
+
+  // A translation too long for the screen at the large size keeps the base size, and pages.
+  std::string longer;
+  for (int i = 0; i < 40; ++i) longer += "translated words ";
+  r.server(R"({"type":"turn.start","turn":"a2"})");
+  r.server(R"({"type":"reply","turn":"a2","text":")" + longer + R"("})");
+  CHECK_EQ(int(r.app.model().body_scale), 0);
+
+  // Outside the mode a reply is drawn at the base size.
+  r.server(R"({"type":"turn.end","turn":"a2","outcome":"success"})");
+  r.server(R"({"type":"interpret","on":false})");
+  r.server(R"({"type":"turn.start","turn":"a3"})");
+  r.server(R"({"type":"reply","turn":"a3","text":"Good morning"})");
+  CHECK_EQ(int(r.app.model().body_scale), 0);
+  CHECK_EQ(r.app.model().headline, std::string("Hermes"));
+}
+
+TEST("interpret: a short CANCEL press asks Hermes to switch who speaks next") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"dashboard","v":1,"sessions":[{"label":"cli 1","state":"idle"}]})");
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Cancel, false);
+  CHECK(r.fake.last("interpret.flip") != nullptr);
+  CHECK(r.app.screen() == hg::Screen::Ready);  // not the dashboard
+  // The device waits for Hermes's word: the label is Hermes's, never guessed.
+  CHECK_EQ(r.app.model().headline, std::string("ES > EN"));
+}
+
+TEST("interpret: holding CANCEL counts down and asks to leave the mode, never for a new session") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  r.app.on_button(hg::Button::Cancel, true);
+  r.advance(1200);
+  CHECK(r.app.model().hint.find("Interpreter off in") != std::string::npos);
+  r.advance(1000);
+  CHECK(r.fake.last("interpret.stop") != nullptr);
+  CHECK(r.fake.last("session.new") == nullptr);
+  CHECK(r.fake.last("interpret.flip") == nullptr);
+  r.app.on_button(hg::Button::Cancel, false);
+  // Still in the mode until Hermes says so.
+  CHECK(r.app.status_json().find("\"interpret\"") != std::string::npos);
+  r.server(R"({"type":"interpret","on":false})");
+  r.server(R"({"type":"turn.end","turn":"","outcome":"cancelled"})");
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.app.model().headline, std::string("Hi, I'm Hermes"));
+  // Outside the mode the same hold asks for a new session.
+  r.app.on_button(hg::Button::Cancel, true);
+  r.advance(2200);
+  r.app.on_button(hg::Button::Cancel, false);
+  CHECK(r.fake.last("session.new") != nullptr);
+}
+
+TEST("interpret: what is typed or recorded in the mode says so") {
+  Rig r;
+  r.bring_online(true);
+  r.app.console("say hello");
+  const Value* text = r.fake.last("text");
+  CHECK(text != nullptr && !(*text)["interpret"].as_bool());
+  r.server(R"({"type":"turn.end","turn":"","outcome":"cancelled"})");
+  r.app.on_button(hg::Button::Talk, true);
+  const Value* start = r.fake.last("audio.start");
+  CHECK(start != nullptr && !(*start).has("interpret"));
+  r.app.on_button(hg::Button::Cancel, true);  // discard it
+  r.app.on_button(hg::Button::Cancel, false);
+  r.app.on_button(hg::Button::Talk, false);
+
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  r.app.console("say hola");
+  text = r.fake.last("text");
+  CHECK(text != nullptr && (*text)["interpret"].as_bool());
+  r.server(R"({"type":"turn.end","turn":"","outcome":"cancelled"})");
+  r.advance(2000);  // not a double press of TALK
+  r.app.on_button(hg::Button::Talk, true);
+  start = r.fake.last("audio.start");
+  CHECK(start != nullptr && (*start)["interpret"].as_bool());
+}
+
+TEST("interpret: the mode outlives a lost connection, and only Hermes ends it") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  r.app.on_transport_closed("gone");
+  CHECK(r.app.status_json().find("\"interpret\":\"ES > EN\"") != std::string::npos);
+  // Back online, what is typed is still marked: a Hermes that forgot the mode must not answer it.
+  reconnect(r);
+  r.app.console("say hola");
+  const Value* text = r.fake.last("text");
+  CHECK(text != nullptr && (*text)["interpret"].as_bool());
+  r.server(R"({"type":"interpret","on":false})");
+  CHECK(r.app.status_json().find("\"interpret\"") == std::string::npos);
+}
+
+TEST("interpret: a recording made in the mode is marked when it is sent again, even after the mode ended") {
+  Rig r(buffered_profile());
+  r.bring_online(true);
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  Speech sp;
+  r.app.on_button(hg::Button::Talk, true);
+  const Value* first = r.fake.last("audio.start");
+  CHECK(first && (*first)["interpret"].as_bool());
+  sp.talk(r, 5);
+  r.app.on_transport_closed("disconnected");  // the recording is held
+  sp.talk(r, 5);
+  r.app.on_button(hg::Button::Talk, false);
+  reconnect(r);
+  r.server(R"({"type":"interpret","on":false})");  // Hermes left the mode while the gadget was away
+  r.advance(20);
+  const Value* again = r.fake.last("audio.start");
+  CHECK(again && again != first);
+  if (!again) return;
+  CHECK_EQ((*again)["resent"].as_int(), int64_t(1));
+  CHECK((*again)["interpret"].as_bool());  // it still says where it was made: never something to answer
+  // What is recorded from now on is ordinary again.
+  r.server(R"({"type":"turn.end","turn":"","outcome":"cancelled"})");
+  r.advance(200);
+  r.app.on_button(hg::Button::Talk, true);
+  const Value* next = r.fake.last("audio.start");
+  CHECK(next && next != again && !(*next).has("interpret"));
+}
+
+TEST("interpret: the reply names who speaks next while the translation is spoken too") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  r.server(R"({"type":"turn.start","turn":"a1"})");
+  r.server(R"({"type":"reply","turn":"a1","text":"Good morning"})");
+  // The gadget changes hands when the translation is out: the label already names the other person.
+  r.server(R"({"type":"interpret","on":true,"label":"EN > ES"})");
+  r.server(R"({"type":"audio.start","stream":2,"rate":16000,"format":"pcm16"})");
+  CHECK(r.app.screen() == hg::Screen::Responding && r.app.model().speaking);
+  CHECK_EQ(r.app.model().headline, std::string("EN > ES"));
+  // Outside the mode a spoken reply says so, as before.
+  r.server(R"({"type":"audio.end","stream":2})");
+  r.server(R"({"type":"turn.end","turn":"a1","outcome":"success"})");
+  r.server(R"({"type":"interpret","on":false})");
+  r.server(R"({"type":"turn.start","turn":"a2"})");
+  r.server(R"({"type":"reply","turn":"a2","text":"Good morning"})");
+  r.server(R"({"type":"audio.start","stream":4,"rate":16000,"format":"pcm16"})");
+  CHECK(r.app.model().speaking);
+  CHECK_EQ(r.app.model().headline, std::string("Speaking"));
+}
+
+TEST("interpret: a choice or a question on screen goes when the mode starts, and none is taken in it") {
+  Rig r(scroll_profile());
+  r.bring_online(true);
+  // On screen, and old enough to be answered, when the gadget changes hands.
+  r.server(R"({"type":"choice","id":"c1","title":"Delete the backup?","options":["Yes","No"]})");
+  r.advance(700);
+  CHECK(r.app.screen() == hg::Screen::Choice);
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  r.advance(20);
+  CHECK(r.app.screen() != hg::Screen::Choice);
+  CHECK(r.app.status_json().find("\"choice\"") == std::string::npos);
+  CHECK(r.app.console("choose 1").rfind("@error", 0) == 0);
+  CHECK(r.fake.last("choice.reply") == nullptr);  // gone unanswered: nothing was sent for it
+  r.server(R"({"type":"interpret","on":false})");
+
+  r.server(R"({"type":"prompt","id":"q1","title":"Allow command?","text":"rm -rf build"})");
+  r.advance(700);
+  CHECK(r.app.screen() == hg::Screen::Prompt);
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  r.advance(20);
+  CHECK(r.app.screen() != hg::Screen::Prompt);
+  CHECK(r.app.status_json().find("\"prompt\"") == std::string::npos);
+
+  // One that arrives in the mode is not shown: TALK stays the microphone, never an answer.
+  r.server(R"({"type":"choice","id":"c2","title":"Delete the backup?","options":["Yes","No"]})");
+  r.server(R"({"type":"prompt","id":"q2","title":"Allow command?","text":"rm -rf build"})");
+  r.advance(700);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.app.model().headline, std::string("ES > EN"));
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK(r.fake.mic_on);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.last("choice.reply") == nullptr && r.fake.last("prompt.reply") == nullptr);
+}
+
+TEST("interpret: the owner's last reply and card are gone when the mode starts; a translation stays") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(R"({"type":"transcript","text":"what did the bank say"})");
+  r.server(R"({"type":"reply","turn":"t","text":"The loan was approved."})");
+  r.server(R"({"type":"turn.end","turn":"t","outcome":"success"})");
+  r.advance(200);
+  CHECK_EQ(r.app.model().body, std::string("The loan was approved."));
+  // The gadget changes hands: nothing of the owner's conversation stays on it.
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  r.advance(20);
+  CHECK(r.app.screen() == hg::Screen::Ready && r.app.model().hero);
+  CHECK_EQ(r.app.model().headline, std::string("ES > EN"));
+  CHECK_EQ(r.app.model().body, std::string(""));
+  CHECK_EQ(r.app.model().detail, std::string("Interpreter"));
+  r.app.on_button(hg::Button::Up, true);  // and UP has no last reply to bring back
+  r.app.on_button(hg::Button::Up, false);
+  CHECK(r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string(""));
+
+  // A translation is the mode's own: the label update that follows it leaves it up.
+  r.server(R"({"type":"turn.start","turn":"a1"})");
+  r.server(R"({"type":"transcript","text":"buenos dias"})");
+  r.server(R"({"type":"reply","turn":"a1","text":"Good morning"})");
+  r.server(R"({"type":"interpret","on":true,"label":"EN > ES"})");
+  r.server(R"({"type":"turn.end","turn":"a1","outcome":"success"})");
+  r.advance(200);
+  CHECK_EQ(r.app.model().body, std::string("Good morning"));
+  CHECK_EQ(r.app.model().detail, std::string("buenos dias"));
+
+  // A card of the owner's that is on the screen goes too.
+  r.server(R"({"type":"interpret","on":false})");
+  r.server(R"({"type":"display","title":"Note","body":"Door code 4471","ttl_s":0})");
+  r.advance(20);
+  CHECK(r.app.screen() == hg::Screen::Card);
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  r.advance(20);
+  CHECK(r.app.screen() != hg::Screen::Card);
+  CHECK_EQ(r.app.model().headline, std::string("ES > EN"));
+}
+
+TEST("interpret: an owner's notice and working-state phrase are gone when the mode starts") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"notice","text":"Approved","ttl_s":30})");
+  r.advance(20);
+  CHECK_EQ(r.app.model().detail, std::string("Approved"));
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  r.advance(20);
+  CHECK_EQ(r.app.model().detail, std::string("Interpreter"));
+  r.advance(1000);
+  CHECK_EQ(r.app.model().detail, std::string("Interpreter"));
+  r.server(R"({"type":"interpret","on":false})");
+
+  // An owner's turn is still working when the gadget changes hands: its phrase is not left up.
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(R"({"type":"status","text":"Checking your bank account"})");
+  r.advance(20);
+  CHECK_EQ(r.app.model().detail, std::string("Checking your bank account"));
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  r.advance(20);
+  CHECK(r.app.model().detail.find("bank") == std::string::npos);
+  CHECK(r.app.model().body.find("bank") == std::string::npos);
+}

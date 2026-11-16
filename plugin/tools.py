@@ -1,5 +1,5 @@
 """Agent tools for gadgets: inspect devices, show content on a screen, ask the
-user to pick an answer there, invoke device-declared actions.
+user to pick an answer there, invoke device-declared actions, turn a gadget into an interpreter.
 
 Schemas are static (prompt caching); what a device can do is discovered at run
 time through ``gadget_devices`` and the per-device context Hermes receives with
@@ -160,6 +160,30 @@ WIDGET_SCHEMA = {
 }
 
 
+INTERPRET_SCHEMA = {
+    "name": "gadget_interpret",
+    "description": "Turn a gadget into an interpreter between two languages, or back. While it is on, everything "
+                   "said to that gadget is translated into the other language, spoken and shown. You are not "
+                   "involved: this conversation gets none of it, and a spoken request to stop would be translated "
+                   "too. The two people take turns, the first language first. The user stops it by holding the "
+                   "gadget's cancel control, or you stop it from another chat. After turning it on, say briefly "
+                   "that the interpreter is ready and who speaks first.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "languages": {
+                "type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2,
+                "description": "The two languages as codes (es, en, pt-BR) or English names; the one that "
+                               "speaks first comes first. Omit when stopping.",
+            },
+            "stop": {"type": "boolean", "description": "true leaves interpreter mode."},
+            "device": _DEVICE_PARAM,
+        },
+        "required": [],
+    },
+}
+
+
 def _error(message: str) -> str:
     return json.dumps({"success": False, "error": message})
 
@@ -301,6 +325,10 @@ def gadget_ask(args: dict, **_kw) -> str:
         return _error(err)
     if (err := _usable(session)):
         return _error(err)
+    # In interpreter mode whoever holds the gadget may not be its owner: their tap is not an answer.
+    if getattr(adapter, "interpreting", lambda _device_id: None)(session.device_id) is not None:
+        return _error(f"{session.name} is in interpreter mode and takes no questions; ask in another chat, "
+                      "or after the mode has ended")
     given = args.get("options")
     if not isinstance(given, list) or not 2 <= len(given) <= MAX_CHOICE_OPTIONS:
         return _error(f"options must be a list of 2 to {MAX_CHOICE_OPTIONS} short answers")
@@ -483,6 +511,37 @@ def gadget_widget(args: dict, **_kw) -> str:
                        "connected_gadgets_showing_it": drawing})
 
 
+def gadget_interpret(args: dict, **_kw) -> str:
+    adapter = _adapter()
+    if adapter is None:
+        return _error("gadget hub is not running in this process")
+    session, err = _resolve(adapter, args.get("device"))
+    if err:
+        return _error(err)
+    if (err := _usable(session)):
+        return _error(err)
+    try:
+        if args.get("stop"):
+            was_on = _run(adapter, adapter.interpret_stop(session.device_id))
+            return json.dumps({"success": True, "device": session.name, "interpreting": False, "was_on": was_on})
+        languages = args.get("languages")
+        if not isinstance(languages, list) or len(languages) != 2:
+            return _error("languages must name two languages, or pass stop: true")
+        from gateway.session_context import get_session_env
+
+        # Asked in this gadget's own chat: the turn asking may still say on it that the mode is on.
+        asked_here = (get_session_env("HERMES_SESSION_PLATFORM") == "gadget" and adapter._device_id(
+            get_session_env("HERMES_SESSION_CHAT_ID") or "") == session.device_id)
+        state = _run(adapter, adapter.interpret_start(session, languages[0], languages[1], asked_here=asked_here))
+    except ValueError as exc:
+        return _error(str(exc))
+    except Exception as exc:
+        return _error(f"could not reach {session.name}: {exc}")
+    return json.dumps({"success": True, "device": session.name, "interpreting": True, **state.describe(),
+                       "leave": "the user holds the gadget's cancel control, or call this tool with stop: true "
+                                "from another chat"})
+
+
 def available() -> bool:
     """Reachability: tools work only in the process hosting the gadget hub."""
     return runtime.any_active()
@@ -496,6 +555,7 @@ def register_tools(ctx) -> None:
         (ACTION_SCHEMA, gadget_action, "🎛️"),
         (PLAY_SCHEMA, gadget_play, "🔊"),
         (WIDGET_SCHEMA, gadget_widget, "🧩"),
+        (INTERPRET_SCHEMA, gadget_interpret, "🗣️"),
     ):
         ctx.register_tool(
             name=schema["name"], toolset=TOOLSET, schema=schema, handler=handler,

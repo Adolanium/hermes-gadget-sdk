@@ -95,6 +95,29 @@ class HubDelegate:
     async def on_cancel(self, session: "DeviceSession") -> None:
         pass
 
+    def interprets(self, session: "DeviceSession") -> bool:
+        """Whether ``session``'s device is in interpreter mode. Whoever holds it then may not be its
+        owner, so the hub shows it no choice and takes no answer from it. The delegate that runs the
+        mode is the one that knows."""
+        return False
+
+    async def on_interpret_flip(self, session: "DeviceSession") -> None:
+        """The device's user switched which language is spoken next (interpreter mode)."""
+
+    # What a device types or records while it believes it interprets arrives here, never in on_text
+    # or on_utterance: it may be a stranger's words, so it is translated or dropped, not answered.
+    # A delegate that does not interpret tells the device that the mode is off.
+
+    async def on_interpret_text(self, session: "DeviceSession", msg_id: str, text: str) -> None:
+        await session.refuse_interpreted()
+
+    async def on_interpret_utterance(self, session: "DeviceSession", msg_id: str, wav: bytes, seconds: float) -> None:
+        await session.refuse_interpreted()
+
+    async def on_interpret_stop(self, session: "DeviceSession") -> None:
+        """The device's user asked to leave interpreter mode (CANCEL held)."""
+        await session.refuse_interpreted("Interpreter off")
+
     async def on_new_session(self, session: "DeviceSession") -> None:
         pass
 
@@ -148,6 +171,7 @@ class _Upload:
     next_seq: int = 0
     gaps: int = 0
     truncated: bool = False
+    interpret: bool = False  # recorded in interpreter mode: never an utterance to answer
 
 
 @dataclass
@@ -347,6 +371,8 @@ class DeviceSession:
         # What the device's screen is showing, for the Desktop page's live mirror (status.json):
         # ready, listening, thinking or speaking, with what Hermes heard and the reply so far.
         self.activity: dict = {"state": "ready", "heard": "", "reply": "", "status": "", "at": time.time()}
+        # In interpreter mode what is heard and replied may be a stranger's words: the mirror gets none.
+        self.private = False
         self.closed = False
         self._send_lock = asyncio.Lock()
         self._upload: _Upload | None = None
@@ -508,6 +534,8 @@ class DeviceSession:
     def note(self, **changes) -> None:
         """Record a change to what the device shows. Text is cut short: this is a mirror, not a log."""
         for key, value in changes.items():
+            if self.private and key in ("heard", "reply"):
+                value = ""
             self.activity[key] = value[:280] if isinstance(value, str) else value
         self.activity["at"] = time.time()
 
@@ -546,6 +574,23 @@ class DeviceSession:
         self.note(status=text)
         await self.send_json(protocol.message("status", text=text))
         return True
+
+    async def send_interpret(self, message: dict) -> None:
+        """Tell the device its interpreter mode (an ``interpret`` message from plugin/interpret.py).
+        Firmware that doesn't draw the mode ignores it; the translations reach it as replies all the same."""
+        self.private = message.get("on") is True
+        if self.private:
+            self.activity.update(heard="", reply="")
+        await self.send_json(message)
+
+    async def refuse_interpreted(self, notice: str = "Interpreter is off. Say it again.") -> None:
+        """Answer something sent from interpreter mode while the mode is off here: the device is told
+        so, whatever it was waiting for ends, and nothing is done with what it sent."""
+        from . import interpret
+
+        await self.send_interpret(interpret.OFF)
+        await self.turn_end("", "cancelled")
+        await self.send_notice(notice)
 
     async def send_notice(self, text: str, ttl_s: float = 8) -> None:
         await self.send_json(protocol.message("notice", text=text, ttl_s=ttl_s))
@@ -598,6 +643,11 @@ class DeviceSession:
         limit = self.choice_options
         if not limit:
             raise ActionError(f"{self.name} cannot take a choice on its screen")
+        # Checked here, on the hub's loop, with no await before the choice exists: a mode that starts
+        # later finds the choice and withdraws it (withdraw_choice), one that started earlier refuses it.
+        if self.hub.delegate.interprets(self):
+            raise ActionError(f"{self.name} is in interpreter mode and takes no questions; ask in another chat, "
+                              "or after the mode has ended")
         if not 2 <= len(options) <= limit:
             raise ActionError(f"{self.name} takes 2 to {limit} options")
         if self._choice is not None:
@@ -618,6 +668,20 @@ class DeviceSession:
                     await self.send_json(protocol.message("choice.close", id=choice_id))
                 except Exception:
                     pass
+
+    async def withdraw_choice(self, why: str) -> None:
+        """Take the choice off the screen unanswered; the tool that asked it fails with ``why``. For
+        a device that is about to be in other hands (interpreter mode): a tap there must not come
+        back as the user's answer."""
+        if self._choice is None:
+            return
+        choice_id, _count, fut = self._choice
+        if not fut.done():
+            fut.set_exception(ActionError(why))
+        try:
+            await self.send_json(protocol.message("choice.close", id=choice_id))
+        except Exception:
+            pass
 
     async def send_profiles(self, roster: list[dict], offered: "set[str] | None" = None) -> None:
         """The offered profiles changed since the welcome: send the new list (docs/protocol.md#profiles),
@@ -1330,7 +1394,10 @@ class DeviceHub:
 
     async def _h_text(self, session: DeviceSession, msg: dict) -> None:
         text = str(msg.get("text") or "").strip()
-        if text:
+        if text and msg.get("interpret") is True:  # typed in interpreter mode
+            _note(session, state="thinking", heard="", reply="", status="")
+            session.spawn(self.delegate.on_interpret_text(session, str(msg.get("id") or ""), text[:4000]))
+        elif text:
             _note(session, state="thinking", heard=text[:4000], reply="", status="")
             session.spawn(self.delegate.on_text(session, str(msg.get("id") or ""), text[:4000]))
 
@@ -1348,7 +1415,8 @@ class DeviceHub:
             await session.send_notice(f"Unsupported sample rate {rate}")
             return
         session._upload = _Upload(
-            id=str(msg.get("id") or ""), stream=int(msg.get("stream") or 0), rate=rate, started=time.monotonic())
+            id=str(msg.get("id") or ""), stream=int(msg.get("stream") or 0), rate=rate, started=time.monotonic(),
+            interpret=msg.get("interpret") is True)
         _note(session, state="listening", heard="", reply="", status="")
         resent = msg.get("resent")
         if isinstance(resent, int) and resent > 0:
@@ -1386,7 +1454,8 @@ class DeviceHub:
             return
         wav = audio.wav_bytes(bytes(up.pcm), up.rate)
         _note(session, state="thinking")
-        session.spawn(self.delegate.on_utterance(session, up.id, wav, seconds))
+        handler = self.delegate.on_interpret_utterance if up.interpret else self.delegate.on_utterance
+        session.spawn(handler(session, up.id, wav, seconds))
 
     async def _h_audio_cancel(self, session: DeviceSession, msg: dict) -> None:
         session._upload = None
@@ -1402,15 +1471,26 @@ class DeviceHub:
         await session.stop_audio()
         session.spawn(self.delegate.on_new_session(session))
 
+    async def _h_interpret_flip(self, session: DeviceSession, msg: dict) -> None:
+        session.spawn(self.delegate.on_interpret_flip(session))
+
+    async def _h_interpret_stop(self, session: DeviceSession, msg: dict) -> None:
+        await session.stop_audio()
+        session.spawn(self.delegate.on_interpret_stop(session))
+
     async def _h_prompt_reply(self, session: DeviceSession, msg: dict) -> None:
         prompt_id = str(msg.get("id") or "")[:64]
         answer = msg.get("answer")
+        if self.delegate.interprets(session):
+            return  # whoever holds a gadget that interprets answers nothing
         if prompt_id and answer in ("yes", "no"):
             session.spawn(self.delegate.on_prompt_reply(session, prompt_id, answer == "yes"))
 
     async def _h_choice_reply(self, session: DeviceSession, msg: dict) -> None:
         if session._choice is None:
             return
+        if self.delegate.interprets(session):
+            return  # a tap in interpreter mode is not the user's answer: the choice stays unanswered
         choice_id, count, fut = session._choice
         if fut.done() or str(msg.get("id") or "") != choice_id:
             return
@@ -1479,6 +1559,8 @@ class DeviceHub:
         "audio.cancel": _h_audio_cancel,
         "cancel": _h_cancel,
         "session.new": _h_session_new,
+        "interpret.flip": _h_interpret_flip,
+        "interpret.stop": _h_interpret_stop,
         "prompt.reply": _h_prompt_reply,
         "choice.reply": _h_choice_reply,
         "action.result": _h_action_result,

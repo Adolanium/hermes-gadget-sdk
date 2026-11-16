@@ -219,6 +219,9 @@ namespace hg::i18n {
   X(NewSessionIn,           "New session in {0}s") \
   X(NewSession,             "New session") \
   X(StartingNewSession,     "Starting a new session") \
+  X(Interpreter,            "Interpreter") \
+  X(InterpreterOffIn,       "Interpreter off in {0}s") \
+  X(InterpreterOff,         "Interpreter off") \
   X(Thinking,               "Thinking") \
   X(ButtonToStop,           "{0} to stop") \
   X(Speaking,               "Speaking") \

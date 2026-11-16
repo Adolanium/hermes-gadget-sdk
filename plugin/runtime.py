@@ -23,6 +23,7 @@ _fresh.lock = threading.Lock()
 _fresh.adapters = {}
 _fresh.boards = {}  # each profile's dashboard.SessionBoard, from that profile's copy of the plugin
 _fresh.stt_clips = OrderedDict()  # recorded clip's file stem -> the STT language to use for it
+_fresh.llms = {}  # each profile's ctx.llm, Hermes's completion API for plugins (interpreter mode)
 _registry = sys.modules.setdefault(_SHARED, _fresh)  # atomic: two copies importing at once share one
 _lock: threading.Lock = _registry.lock
 _adapters: dict[str, Any] = _registry.adapters
@@ -30,6 +31,9 @@ _boards: dict[str, Any] = _registry.boards
 with _lock:  # a registry made by an older copy of the plugin has no clip table yet
     if not hasattr(_registry, "stt_clips"):
         _registry.stt_clips = OrderedDict()
+    if not hasattr(_registry, "llms"):
+        _registry.llms = {}
+_llms: dict[str, Any] = _registry.llms
 _stt_clips: "OrderedDict[str, str]" = _registry.stt_clips
 MAX_STT_CLIPS = 256  # recent recordings remembered; older ones are long transcribed
 
@@ -69,6 +73,20 @@ def boards(profiles: Iterable[str]) -> list[Any]:
     """The session boards of those ``profiles`` whose plugin copy has loaded."""
     with _lock:
         return [_boards[p] for p in profiles if p in _boards]
+
+
+def set_llm(profile: str, llm: Any) -> None:
+    """Keep ``profile``'s ``ctx.llm`` for the adapter, which Hermes creates without a plugin context."""
+    if llm is not None:
+        with _lock:
+            _llms[profile] = llm
+
+
+def llm(profile: str | None = None) -> Any | None:
+    """Hermes's plugin completion API as ``profile``'s copy of the plugin got it, else the default
+    profile's, else None on a Hermes that has none."""
+    with _lock:
+        return _llms.get(profile or "default") or _llms.get("default")
 
 
 def _stem(path: str) -> str:

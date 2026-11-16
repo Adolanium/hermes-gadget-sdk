@@ -8,6 +8,7 @@ runs — with a delegate that:
 * answers voice with a short report and plays the recording back
   (a microphone -> server -> speaker loopback test);
 * simulates pairing codes, approved from this server's console;
+* runs interpreter mode with a stand-in for the translation (``interpret es en``);
 * lets you push cards, notices, questions, images and action calls to a
   device from the console (type ``help``).
 """
@@ -25,7 +26,7 @@ import threading
 from pathlib import Path
 
 from hermes_gadget_plugin import audio as pcm_tools
-from hermes_gadget_plugin import textfmt
+from hermes_gadget_plugin import interpret, textfmt
 from hermes_gadget_plugin.hub import DeviceHub, DeviceSession, HubDelegate
 from hermes_gadget_plugin.store import DeviceStore
 
@@ -55,6 +56,12 @@ class EchoBrain(HubDelegate):
         self.codes: dict[str, str] = {}  # code -> device_id
         self._turns: dict[str, asyncio.Task] = {}
         self.hub: DeviceHub | None = None
+        # Interpreter mode, as the Hermes adapter runs it (plugin/interpret.py), with stand-ins for what
+        # Hermes does: `transcribe(seconds, language)` for speech-to-text and `translate(text, session)`
+        # for the model. The defaults only label the text, so the screens can be developed without a model.
+        self.interpreting: dict[str, interpret.Session] = {}
+        self.transcribe = lambda seconds, language: f"{seconds:.1f} s of {language} speech"
+        self.translate = lambda text, session: f"[{session.label}] {text}"
 
     async def is_paired(self, session: DeviceSession) -> bool:
         return not self.require_pairing or session.device_id in self.approved
@@ -83,9 +90,46 @@ class EchoBrain(HubDelegate):
             await session.set_paired(True)
         return True
 
-    async def _turn(self, session: DeviceSession, turn: str, reply: str, audio: bytes | None) -> None:
+    def interprets(self, session: DeviceSession) -> bool:
+        return session.device_id in self.interpreting
+
+    async def _stop_turn(self, session: DeviceSession) -> None:
+        """Stop the device's turn under way, an answer or a translation, and wait until it has ended."""
+        task = self._turns.get(session.device_id)
+        if task and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+            await asyncio.wait({task})
+
+    async def interpret(self, session: DeviceSession, first: str, second: str) -> interpret.Session:
+        state = self.interpreting[session.device_id] = interpret.start(first, second)
+        # As the Hermes adapter does: an answer under way is not for whoever holds the gadget next,
+        # a translation of the mode before is not this mode's, and a choice on screen goes unanswered.
+        await self._stop_turn(session)
+        await session.withdraw_choice(f"{session.name} now interprets, and takes no questions")
+        await session.send_interpret(state.message())
+        return state
+
+    async def interpret_off(self, session: DeviceSession) -> bool:
+        if self.interpreting.pop(session.device_id, None) is None:
+            return False
+        await self._stop_turn(session)  # no more of a translation arrives after the mode is off
+        await session.send_interpret(interpret.OFF)
+        return True
+
+    async def on_interpret_flip(self, session: DeviceSession) -> None:
+        state = self.interpreting.get(session.device_id)
+        task = self._turns.get(session.device_id)
+        if state is None or (task and not task.done()):
+            return
+        state.flip()
+        await session.send_interpret(state.message())
+
+    async def _turn(self, session: DeviceSession, turn: str, reply: str, audio: bytes | None,
+                    heard: str | None = None, interpreting: interpret.Session | None = None) -> None:
         await session.turn_start(turn)
         try:
+            if heard is not None:
+                await session.send_transcript(textfmt.for_device(heard, session.charset))
             await session.send_status("Thinking")
             await asyncio.sleep(0.4)
             if audio and session.has_speaker:
@@ -95,6 +139,9 @@ class EchoBrain(HubDelegate):
                 await session.send_delta(" ".join(words[:i]), turn=turn)
                 await asyncio.sleep(self.word_delay)
             await session.send_reply(reply, turn=turn)
+            if interpreting is not None and self.interpreting.get(session.device_id) is interpreting:
+                interpreting.flip()  # the gadget changes hands
+                await session.send_interpret(interpreting.message())
             await session.turn_end(turn, "success")
         except asyncio.CancelledError:
             if not session.closed:  # a stopping server has nobody left to tell
@@ -102,19 +149,54 @@ class EchoBrain(HubDelegate):
                 await session.turn_end(turn, "cancelled")
             raise
 
-    def _start_turn(self, session: DeviceSession, msg_id: str, reply: str, audio: bytes | None) -> None:
+    def _start_turn(self, session: DeviceSession, msg_id: str, reply: str, audio: bytes | None, **kw) -> None:
         previous = self._turns.get(session.device_id)
         if previous and not previous.done():
             previous.cancel()
         turn = f"{session.session_id}:{msg_id}"
-        self._turns[session.device_id] = session.spawn(self._turn(session, turn, reply, audio))
+        self._turns[session.device_id] = session.spawn(self._turn(session, turn, reply, audio, **kw))
+
+    def _interpret_turn(self, session: DeviceSession, msg_id: str, state: interpret.Session, said: str,
+                        heard: str | None) -> None:
+        """A translation in place of an answer: the stand-in's text, as the device can show it, and a tone."""
+        reply = interpret.shown(self.translate(said, state), session.charset, state.target,
+                                spoken=session.has_speaker)
+        audio = tone(session.speaker_rate, 0.25) if session.has_speaker else None  # stands in for the speech
+        self._start_turn(session, msg_id, reply, audio, heard=heard, interpreting=state)
+
+    # A device marks what is typed or recorded in the mode; that is translated or refused, never echoed.
+
+    async def on_interpret_text(self, session: DeviceSession, msg_id: str, text: str) -> None:
+        if (state := self.interpreting.get(session.device_id)) is None:
+            await session.refuse_interpreted()
+            return
+        self._interpret_turn(session, msg_id, state, text, None)
+
+    async def on_interpret_utterance(self, session: DeviceSession, msg_id: str, wav: bytes, seconds: float) -> None:
+        if (state := self.interpreting.get(session.device_id)) is None:
+            await session.refuse_interpreted()
+            return
+        heard = self.transcribe(seconds, state.speaker)
+        self._interpret_turn(session, msg_id, state, heard, heard)
+
+    async def on_interpret_stop(self, session: DeviceSession) -> None:
+        self.interpreting.pop(session.device_id, None)
+        await self._stop_turn(session)
+        await session.refuse_interpreted("Interpreter off")
 
     async def on_text(self, session: DeviceSession, msg_id: str, text: str) -> None:
+        if (state := self.interpreting.get(session.device_id)) is not None:
+            self._interpret_turn(session, msg_id, state, text, None)
+            return
         reply = textfmt.for_device(f"You said: {text}", session.charset)
         audio = tone(session.speaker_rate, 0.25) if session.has_speaker else None
         self._start_turn(session, msg_id, reply, audio)
 
     async def on_utterance(self, session: DeviceSession, msg_id: str, wav: bytes, seconds: float) -> None:
+        if (state := self.interpreting.get(session.device_id)) is not None:
+            heard = self.transcribe(seconds, state.speaker)
+            self._interpret_turn(session, msg_id, state, heard, heard)
+            return
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             f.write(wav)
             path = f.name
@@ -127,6 +209,10 @@ class EchoBrain(HubDelegate):
         self._start_turn(session, msg_id, reply.strip(), pcm if self.loopback else None)
 
     async def on_new_session(self, session: DeviceSession) -> None:
+        if await self.interpret_off(session):  # holding CANCEL leaves interpreter mode
+            await session.turn_end("", "cancelled")
+            await session.send_notice("Interpreter off")
+            return
         self._start_turn(session, "new", "Started a new conversation.", None)
 
     async def on_prompt_reply(self, session: DeviceSession, prompt_id: str, yes: bool) -> None:
@@ -162,6 +248,9 @@ HELP = """commands:
                                CANCEL on the idle screen opens the list, DOWN or a swipe
                                from left to right the widgets
   play <path> | stop           play a sound file on every speaker (WAV; other formats need ffmpeg)
+  interpret <a> <b>            interpreter mode between two languages, e.g. interpret es en;
+                               the translation is a stand-in that labels the text
+  interpret off                leave interpreter mode
   update <path>                install a firmware image (firmware.bin) over the air
   quit"""
 
@@ -291,6 +380,16 @@ async def _console(hub: DeviceHub, brain: EchoBrain, stop: asyncio.Event) -> Non
                         source = await asyncio.to_thread(lambda p=path, r=s.speaker_rate: playback.open_source(
                             str(p), r, roots=[p.resolve().parent]))
                         await playback.play(s, source, title=path.name, max_s=playback.max_seconds({}))
+            elif cmd == "interpret":
+                words = rest.split()
+                for s in sessions:
+                    if words == ["off"]:
+                        await brain.interpret_off(s)
+                    elif len(words) == 2:
+                        state = await brain.interpret(s, words[0], words[1])
+                        print(f"  {s.name}: {state.label}")
+                    else:
+                        print("  usage: interpret <a> <b> | interpret off")
             elif cmd == "update":
                 for s in sessions:
                     s.spawn(_update(s, rest.strip()))

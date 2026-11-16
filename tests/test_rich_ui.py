@@ -576,3 +576,86 @@ def test_a_codes_text_keeps_its_spaces(tool):
     assert json.loads(tools.gadget_display({"title": "Wi-Fi", "qr": " pass word "}))["success"] is True
     assert device.frames()[0]["qr"] == " pass word "
     assert json.loads(tools.gadget_display({"qr": "   "}))["success"] is False  # nothing to show
+
+
+def test_a_gadget_that_interprets_is_asked_nothing_and_a_choice_on_its_screen_is_withdrawn(tool, loop_thread,
+                                                                                           monkeypatch):
+    # In interpreter mode the gadget may be in a stranger's hands: their tap must never come back
+    # to the agent as the user's answer.
+    from types import SimpleNamespace
+
+    device, session = tool(caps={"choice": CHOICE})
+    interpreting = set()
+    monkeypatch.setattr(tools, "_adapter", lambda: SimpleNamespace(
+        interpreting=lambda device_id: "es > en" if device_id in interpreting else None))
+    ask = {"question": "Delete the backup?", "options": ["Yes", "No"], "seconds": 30}
+
+    # A choice already on the screen when the mode starts goes away unanswered.
+    answer = {}
+    asked = threading.Thread(target=lambda: answer.update(json.loads(tools.gadget_ask(ask))))
+    asked.start()
+    choice = device.next("choice")
+    loop_thread.run(session.withdraw_choice("watch now interprets"))
+    asked.join(5)
+    assert answer["success"] is False and "interprets" in answer["error"]
+    assert device.next("choice.close")["id"] == choice["id"]
+    device.send("choice.reply", id=choice["id"], index=0)  # a tap that was already on its way
+    assert session._choice is None
+
+    # And none is sent while the mode is on.
+    interpreting.add(session.device_id)
+    refused = json.loads(tools.gadget_ask(ask))
+    assert refused["success"] is False and "interpret" in refused["error"]
+    assert [m["type"] for m in device.frames() if m["type"] == "choice"] == []
+
+
+def test_the_hub_makes_no_choice_and_takes_no_answer_while_the_device_interprets(online, loop_thread):
+    # The check lives where the choice is made and where its answer arrives, on the hub's loop: a
+    # caller that looked before the mode started cannot get a stranger's tap back as an answer.
+    from hermes_gadget_plugin import interpret
+
+    hub, connect = online
+    device, session = connect(caps={"choice": CHOICE})
+    brain, answers = hub.delegate, []
+
+    async def on_prompt_reply(_session, prompt_id, yes):
+        answers.append((prompt_id, yes))
+
+    brain.on_prompt_reply = on_prompt_reply
+    # A choice and a question are on the screen; the mode starts, and they are not withdrawn yet.
+    asked = _ask(loop_thread, session, "Delete the backup?", ["Yes", "No"], timeout=30)
+    choice = device.next("choice")
+    loop_thread.run(session.ask("q1", "Allow command?", "rm -rf build"))
+    brain.interpreting[session.device_id] = interpret.start("es", "en")
+    device.send("choice.reply", id=choice["id"], index=0)
+    device.send("prompt.reply", id="q1", answer="yes")
+    time.sleep(0.3)
+    assert not asked.done() and answers == []
+    loop_thread.run(session.withdraw_choice("watch now interprets"))
+    with pytest.raises(gadget_hub.ActionError, match="interprets"):
+        asked.result(5)
+    device.frames()
+
+    with pytest.raises(gadget_hub.ActionError, match="interpreter mode"):
+        loop_thread.run(session.ask_choice("Delete the backup?", ["Yes", "No"]))
+    assert device.frames() == []  # nothing was sent, so there is nothing to tap
+    # Out of the mode both work as before.
+    brain.interpreting.clear()
+    again = _ask(loop_thread, session, "Delete the backup?", ["Yes", "No"], timeout=30)
+    device.send("choice.reply", id=device.next("choice")["id"], index=1)
+    assert again.result(5) == 1
+    device.send("prompt.reply", id="q1", answer="no")
+    assert _wait(lambda: answers == [("q1", False)])
+
+
+def test_gadget_ask_is_refused_when_the_mode_starts_after_the_tool_looked(tool, online):
+    from hermes_gadget_plugin import interpret
+
+    hub, _connect = online
+    device, session = tool(caps={"choice": CHOICE})
+    # The tool's own look, on its worker thread, still says "not interpreting" (the adapter stand-in
+    # of this fixture knows no mode); by the time the choice is made on the hub's loop, the mode is on.
+    hub.delegate.interpreting[session.device_id] = interpret.start("es", "en")
+    refused = json.loads(tools.gadget_ask({"question": "Delete the backup?", "options": ["Yes", "No"], "seconds": 5}))
+    assert refused["success"] is False and "interpreter mode" in refused["error"]
+    assert [m["type"] for m in device.frames()] == []

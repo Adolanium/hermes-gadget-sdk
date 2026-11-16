@@ -9,6 +9,7 @@ Wait for the device to show Ready. On the LCD board, BOOT is TALK and PLUS is CA
 | Read a spoken reply in full before it ends | Tap the screen, or press Up or Down |
 | Discard a recording, close a card, or stop a turn | Tap CANCEL |
 | Start a fresh conversation | Hold CANCEL for two seconds |
+| Translate between two people | See [Interpreter mode](#interpreter-mode) |
 | Open or close the [dashboard](#watch-hermes-sessions-on-the-dashboard) | Tap CANCEL on the idle screen |
 | Page through the [widgets](#glance-at-widgets) | Press Down on the idle screen, or swipe from left to right |
 | Answer a confirmation question | TALK means yes; CANCEL means no |
@@ -152,6 +153,50 @@ On a round display, a thin ring just inside the glass edge shows what the device
 - **Starting up and connecting:** an amber comet, one lap every 2.4 seconds.
 
 Anything else shows no ring. A recording, an update or a battery screen takes the ring from a running timer while it lasts, and the timer's arc comes back after it. Screens not in the list, such as settings, cards and the dashboard, still show the timer's arc while a timer runs.
+
+## Interpreter mode
+
+Two people who speak different languages can pass the gadget back and forth. While the mode is on, the gadget does not answer what it hears. It says each thing in the other language and shows the translation in large text, with what was said in small text above it.
+
+Turn it on in one of two ways:
+
+- Ask Hermes, for example "interpret between Spanish and English". The agent uses its `gadget_interpret` tool. The language you name first speaks first.
+- Run a command on the Hermes computer, with the gadget's name or id:
+
+  ```bash
+  hermes gadget interpret kitchen es en
+  ```
+
+A language is a code such as `es`, `en` or `pt-BR`, or an English name such as `Spanish`. The mode knows 54 languages and refuses anything else.
+
+The screen then shows who speaks next and into which language, for example `ES > EN`: the next recording is taken as Spanish and translated into English.
+
+| What you want to do | Control |
+|---|---|
+| Say something to the other person | Hold TALK, speak, and release |
+| Let the same person speak again | Tap CANCEL on the idle screen; the label switches back |
+| Stop a translation | Tap CANCEL while Hermes works on it or speaks it |
+| Leave interpreter mode | Hold CANCEL for two seconds, or run `hermes gadget interpret kitchen off` |
+
+The two people take turns. The label switches as soon as a translation appears, because the gadget changes hands. Each recording is transcribed in the language on the left of the label, so check the label before you speak. A recording transcribed in the wrong language gives a wrong translation: tap CANCEL to switch, and say it again. The mode does not detect who is speaking; [the Hermes side](hermes-integration.md#interpreter-mode) says why.
+
+Text typed in the simulator is translated the same way.
+
+What to expect:
+
+- **The other person cannot make Hermes do anything.** What is said in this mode never reaches the Hermes agent. The plugin sends the words to speech-to-text and then to the model as a request for a translation, with no tools. The model's answer can only be shown and spoken: it cannot run a command, use a tool, or read your conversation or memory.
+- **While the mode is on, the gadget is closed to Hermes in the other direction too.** It shows no approval or confirmation question and takes no answer to one: a question waits until the mode ends, or you answer it on the host or in another chat. A message sent to the gadget, such as a reminder or a cron result, waits until the mode ends; audio and pictures sent to it are refused. A reminder that was shown just before the mode started is not read aloud after it. Device events start no Hermes turn. If you turn the mode on by asking Hermes, the reply to that request, usually "the interpreter is ready", is still shown and spoken.
+- **The mode does not end by accident.** Hermes keeps it on disk, so a gateway restart does not end it, and the gadget keeps it through a lost connection. If Hermes cannot save it, the mode does not start and you are told why. What is typed or recorded in the mode is marked as such by the gadget: if the mode has ended on the Hermes side meanwhile, that is dropped with "Interpreter is off. Say it again." and never answered by Hermes.
+- **What is kept.** A translation is not part of any Hermes session and is not saved to memory. The recording is deleted as soon as it is transcribed, and what was said and its translation are not copied to the live view of the gadget in Hermes Desktop. The words do pass through the speech-to-text, model and text-to-speech providers that your Hermes is configured to use, as everything you say to Hermes does; if a request fails, Hermes may try it again on a fallback provider you configured. The gateway log has one line per translation, without its text. Each sentence is translated by itself: the model does not see the sentences before it.
+- **Your conversation is not touched.** When you leave the mode, the gadget's conversation with Hermes is as you left it.
+- **A spoken request to stop is translated too.** Leave with CANCEL or the command. The command also works while the gadget is switched off or out of reach; the gadget leaves the mode when it next connects. Holding CANCEL needs a connection to Hermes.
+- **The mode ends by itself** after 30 minutes without a translation. The gadget is told and shows "Interpreter off".
+- **CANCEL on the idle screen switches the speaker** instead of opening the [dashboard](#watch-hermes-sessions-on-the-dashboard).
+- **A script the screen can't draw.** The screen draws Latin letters and Russian Cyrillic, and on a [CJK build](cjk.md) also Chinese, Japanese kana and Korean hangul. A translation in any other script, such as Arabic, Hebrew, Greek, Thai or Hindi, or in Chinese, Japanese or Korean on a standard build, is still spoken, and the screen shows a line such as "(Arabic: spoken only. This screen can't show its script.)". When only some characters are missing, such as the Ukrainian letters the font lacks or Japanese words between Latin ones, the screen shows the rest with "(Some characters can't be shown on this screen.)" under it. On a gadget that does not speak, because it has no speaker or voice is off, such a translation is lost: the screen says that it can't show the script, and the command warns about it when you start the mode.
+- **Long answers are cut.** A translation is limited to about 800 characters, and one that takes more than 45 seconds fails with "Translation failed".
+- **The speech uses Hermes's one text-to-speech voice.** Choose a provider and voice that speak both languages; a voice made for one language reads the other badly.
+- **Which settings translate.** The model, speech-to-text and text-to-speech settings are those of the Hermes profile that runs the gadget platform, usually `default`, whichever profile the gadget was talking to. This was tested on a gateway that serves one profile only.
+- **Older firmware.** Firmware from before this feature still interprets, and shows each translation as an ordinary reply, without the label or the large text. It does not mark what it sends, so the protection against a mode that ended meanwhile rests on the Hermes side alone. Update the gadget before you hand it to someone.
 
 ## Timers
 
