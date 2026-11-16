@@ -12,7 +12,7 @@ Hermes's gateway runs "platform adapters": Telegram, Slack and about twenty othe
 | `__init__.py` | `register(ctx)`: platform entry, agent tools, `hermes gadget` CLI |
 | `adapter.py` | `GadgetAdapter(BasePlatformAdapter)`: the Hermes-facing side |
 | `hub.py` | WebSocket server, auth, audio, images, actions (no Hermes imports) |
-| `tools.py` | `gadget_devices`, `gadget_display`, `gadget_ask`, `gadget_action`, `gadget_play` |
+| `tools.py` | `gadget_devices`, `gadget_display`, `gadget_ask`, `gadget_action`, `gadget_play`, `gadget_widget` |
 | `playback.py` | What `gadget_play` may open, decoding a chunk at a time, and the playback task (see [Playing audio](#playing-audio)) |
 | `store.py`, `status.py`, `protocol.py`, `audio.py`, `textfmt.py`, `imaging.py` | Support modules (no Hermes imports) |
 | `dashboard/` | The **Gadgets** tab of the Hermes web dashboard: `manifest.json`, the backend routes in `plugin_api.py`, and the tab's bundle in `dist/`, built from `src/` (see [The Gadgets tab](#the-gadgets-tab-in-the-hermes-dashboard)) |
@@ -215,7 +215,7 @@ Hermes asks before destructive commands (`/new`, `/undo`), costly model switches
 
 Hermes keeps the core tool schema narrow. Plugin tools are therefore deferred behind its tool-search bridge (`tool_search` / `tool_describe` / `tool_call`), and their names and descriptions appear in the bridge's manifest. A model invokes `gadget_action` through `tool_call`, and the end-to-end test exercises exactly that. The per-device context names the available actions so the model knows they exist.
 
-The five tools:
+The six tools:
 
 | Tool | What it does |
 |---|---|
@@ -224,6 +224,7 @@ The five tools:
 | `gadget_ask` | Shows `question` with 2 to 6 `options`, waits up to `seconds` (60 by default, 300 at most) and returns the option the user picked, as the agent wrote it, with its `index`; `cancelled: true` when the user cancelled; an error when nobody answered |
 | `gadget_action` | Runs an action the device declared |
 | `gadget_play` | Plays a sound file or an audio stream on the device's speaker, and stops it (see [Playing audio](#playing-audio)) |
+| `gadget_widget` | Sets, lists and clears home-screen widgets (see [Widgets from the agent](#widgets-from-the-agent)) |
 
 `gadget_display` and `gadget_ask` shape their text for the device: Markdown is stripped, characters are folded to its `charset`, and each list row or answer is one line of at most `text_cols` less 2 characters, the room left after its bullet. A QR code's text is sent unchanged.
 
@@ -260,6 +261,26 @@ What it may open:
 - **Playlists are not followed.** For an `.m3u` or `.pls` URL the tool returns up to three of the stream URLs the playlist lists, and the agent picks one. That text comes from the remote server: only plain `http(s)` URLs of at most 200 characters are passed on. HLS streams (`.m3u8`) are not supported.
 - **Errors say little.** What `ffmpeg` prints about data it could not decode, and the details of a failed download, go to the gateway log, not to the agent.
 - **Only a tool call fetches.** Nothing a device sends, and no message text, makes the plugin open a file or a URL.
+
+### Widgets from the agent
+
+`gadget_widget` sets, lists and clears [home-screen widgets](using-gadget.md#glance-at-widgets). It writes the same file as `hermes gadget widget` (`dashboard.json` in the plugin's data folder), so a widget the agent sets and one a cron job sets are the same thing, and either can replace or clear the other's.
+
+| Argument | Meaning |
+|---|---|
+| `action` | `set` (the default), `clear` or `list` |
+| `name` | The widget's name. Setting it again replaces the widget. `clear` without a name removes every widget of that scope |
+| `kind` | `value`, `progress`, `list` or `headline` |
+| `label`, `value`, `unit`, `percent`, `items`, `title`, `text`, `state` | The widget's fields, as in the [protocol](protocol.md#widgets) |
+| `ttl_s` | Seconds until the widget disappears unless it is set again |
+| `device` | A gadget's name or id, connected or not. Without it the widget is for every gadget |
+
+- The tool does not take the screen and does not wait for a device: the gateway sends the changed dashboard to connected gadgets at once, and to the others when they connect or their screens light up.
+- The limits are the CLI's: eight widgets for a gadget, counting the shared ones with its own, four list items, and text cut to the device's line. A widget for every gadget is refused when it would give any gadget a ninth, and the error names that gadget, so a shared widget never displaces a gadget's own. `ttl_s` is a positive number of seconds.
+- The tool answers with an error, and stores nothing, for a widget no device could draw: a missing value, a percent that is not a number, more than four items. It also answers with an error when the file cannot be read or written.
+- Every change is one locked read-modify-write of `dashboard.json`: the CLI, a cron job, the tool and the gateway can change tiles and widgets at the same time without losing each other's changes. A change waits up to 10 seconds for another to finish. The lock is the operating system's lock on `dashboard.json.lock`, so it ends with the process that holds it: a process that died blocks nobody, and a lock is never taken over because its file is old.
+- The gateway picks each device's layout from its `caps.dashboard.v`. Older firmware, and boards that cannot page, get each widget as a tile on the sessions list.
+- With `dashboard: false` the tool reports that the dashboard is off.
 
 ## Making replies fast
 

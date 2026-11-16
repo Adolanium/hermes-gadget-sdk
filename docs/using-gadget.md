@@ -10,6 +10,7 @@ Wait for the device to show Ready. On the LCD board, BOOT is TALK and PLUS is CA
 | Discard a recording, close a card, or stop a turn | Tap CANCEL |
 | Start a fresh conversation | Hold CANCEL for two seconds |
 | Open or close the [dashboard](#watch-hermes-sessions-on-the-dashboard) | Tap CANCEL on the idle screen |
+| Page through the [widgets](#glance-at-widgets) | Press Down on the idle screen, or swipe from left to right |
 | Answer a confirmation question | TALK means yes; CANCEL means no |
 | Go back to Ready with the default Hermes profile | Press the TALK key (BOOT on most boards) twice, quickly |
 | Type in the simulator | Enter a message in the text box and press Enter |
@@ -78,6 +79,64 @@ if ping -c1 -W2 nas.lan >/dev/null; then hermes gadget tile set nas up --state o
 ```
 
 The device gets a new dashboard only when something on it changes. While the screen is dark, it gets the latest one when the screen lights up. To turn the dashboard off, set `dashboard: false` under `platforms.gadget.extra` ([configuration](hermes-integration.md#configuration)). Boards without a CANCEL button or a touchscreen don't show it.
+
+## Glance at widgets
+
+Widgets are full-screen pages of data that you, a script or the agent set on the Hermes computer: a room's temperature, a backup's progress, the next calendar events, what is playing. The gadget only draws them. It fetches nothing itself.
+
+| Kind | Shows | Set it with |
+|---|---|---|
+| Value | A big value with its unit | `--value 21.5 --unit C` |
+| Progress | A percentage over a bar | `--percent 62` |
+| List | Up to four short lines | `--item "09:00 Standup" --item "11:30 Dentist"` |
+| Headline | A title and a second line | `--title "Blue in Green" --text "Miles Davis"` |
+
+```bash
+hermes gadget widget set office --value 21.5 --unit C --label Office --state ok
+```
+
+```bash
+hermes gadget widget set backup --percent 62 --label Backup --ttl 900
+```
+
+```bash
+hermes gadget widget set today --item "09:00 Standup" --item "11:30 Dentist" --label Today
+```
+
+```bash
+hermes gadget widget set playing --title "Blue in Green" --text "Miles Davis" --label "Now playing" --device kitchen
+```
+
+- The option you give picks the kind. Setting a name again replaces that widget.
+- `--label` is the small heading; without it the name is shown.
+- `--state` colours the value, the bar or the title green (`ok`), yellow (`warn`) or red (`bad`).
+- `--ttl 900` removes the widget after 15 minutes unless it is set again. It is a positive number of seconds.
+- `--device kitchen` sets the widget for one gadget, by name or id. Without it every gadget gets the widget. A gadget's own widget replaces the shared widget of the same name.
+- `hermes gadget widget list` shows the widgets. `hermes gadget widget clear office` removes one, and `hermes gadget widget clear --all` removes all of them; add `--device` for the widgets set for one gadget.
+- A gadget shows up to eight widgets, the shared ones counted with its own. A widget that would give any gadget a ninth is refused, and the message names that gadget; nothing already on a screen is pushed off it. Clear one first.
+- Connected gadgets get a change within a few seconds.
+- `hermes gadget forget` also removes the widgets set for that gadget.
+
+To page through the widgets on the gadget:
+
+| Board | Open and go forward | Go back | Close |
+|---|---|---|---|
+| Touchscreen | Swipe from left to right on the idle screen, and again on each widget | Swipe from right to left | Swipe down |
+| Up and Down buttons, or a knob | Press Down on the idle screen, and again on each widget | Press Up | Tap CANCEL |
+
+Past the last widget the idle screen returns, and so it does when you go back from the first. The dots at the bottom show which widget you are on. Holding or tapping the screen, or TALK, still talks from a widget. A question, a card or an image takes the screen over, and so does a reply from Hermes: a turn that starts by itself, such as a scheduled message, closes the widgets and shows its text. While a question is on screen, a sideways swipe does nothing, and the widget comes back when the question is answered. The other gestures are unchanged: a swipe down on the idle screen opens the sessions list, a swipe from right to left opens the profile grid, and Up brings the last reply back.
+
+A widget left open follows the screen timeout like the sessions list: the screen dims, goes dark and wakes to the idle screen. With the [resting clock](#resting-clock) on, a widget left open rests too: each minute the screen shows the clock face or the next widget in turn, at the clock's lower brightness. Like the clock face, each of them is drawn a few pixels away from where it was the turn before, through nine places, to spare OLED panels. A touch brings back the widget you left. Up or Down pages from the widget on screen; on the clock face's turn they bring back the widget you left. The idle screen's own rest is the clock alone, as before.
+
+Boards with only TALK and CANCEL cannot page, and so do gadgets on firmware older than this feature. They show each widget as a line on the [sessions list](#watch-hermes-sessions-on-the-dashboard), after the tiles and while fewer than eight lines are in use.
+
+A cron job can keep widgets current. [`examples/widgets/system_widgets.py`](../examples/widgets/system_widgets.py) needs only Python: it sets a disk's fill level, the load average and a headline with the host name, each with a `--ttl` so that a job that stops leaves nothing stale. Run it with `--dry-run` to see the commands.
+
+```
+*/5 * * * * python3 /path/to/examples/widgets/system_widgets.py
+```
+
+The agent sets widgets with the `gadget_widget` tool, so "put tomorrow's weather on the kitchen gadget" or a Hermes cron job works too ([agent tools](hermes-integration.md#agent-tools-and-hermes-tool-search)). `dashboard: false` under `platforms.gadget.extra` turns widgets off with the rest of the dashboard.
 
 ## Round screens
 

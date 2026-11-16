@@ -48,12 +48,12 @@ A first session, start to finish:
 | Input | Action |
 |---|---|
 | Hold **Space** / TALK button | Push-to-talk |
-| **Esc** / CANCEL | Discard a recording, close a card, stop a turn; on the idle screen, open or close the [dashboard](using-gadget.md#watch-hermes-sessions-on-the-dashboard). With `hermes-gadget devserver`, type `dashboard` there to send sample sessions and tiles |
+| **Esc** / CANCEL | Discard a recording, close a card, stop a turn; on the idle screen, open or close the [dashboard](using-gadget.md#watch-hermes-sessions-on-the-dashboard). With `hermes-gadget devserver`, type `dashboard` there to send sample sessions, tiles and one [widget](using-gadget.md#glance-at-widgets) of each kind |
 | Hold **Esc** / CANCEL for 2 s | Start a new Hermes session (`/new`); a countdown shows in the hint bar |
 | Hold **Space + Esc** for 1 s | Open or close the device's settings and local hardware checks |
 | **Space** / **Esc** on a question | Answer yes / no |
 | A [choice](using-gadget.md#pick-an-answer) | Click an answer on a touch board; otherwise **Up / Down** then **Space**, and **Esc** cancels. On a board with neither, **Esc** moves to the next answer. `choose 2` or `choose cancel` in the device console answers it too |
-| **Up / Down** | Scroll a long reply (long replies also page by themselves) |
+| **Up / Down** | Scroll a long reply (long replies also page by themselves). On the idle screen, **Down** opens the widgets and pages them, and **Up** goes back. On a touch board, drag from left to right instead |
 | **Ctrl+S** | Save a PNG screenshot into the state directory |
 | Text box | Send a typed message, as from a keyboard device |
 | **Speak WAV...** | Hold TALK while a WAV file plays into the microphone |
@@ -134,7 +134,7 @@ Script commands, one per line:
 | `time <YYYY-MM-DDTHH:MM>` \| `time now` | Pin the simulated clock's time at that moment, or follow the computer's clock again |
 | `expect <text>` | Fail unless the last reply contains `<text>` |
 
-Screens are `boot`, `offline`, `connecting`, `pairing`, `ready`, `listening`, `thinking`, `responding`, `card`, `image`, `prompt`, `updating`, `settings`, `setup`, `dashboard`, `profiles`, `alarm`, `clock`, `low_battery`, `charging`, `charged` and `error`. The `setup` screen belongs to the ESP32 phone-setup flow; the simulator does not start a Wi-Fi access point.
+Screens are `boot`, `offline`, `connecting`, `pairing`, `ready`, `listening`, `thinking`, `responding`, `card`, `image`, `prompt`, `updating`, `settings`, `setup`, `dashboard`, `widget`, `profiles`, `alarm`, `clock`, `low_battery`, `charging`, `charged` and `error`. The `setup` screen belongs to the ESP32 phone-setup flow; the simulator does not start a Wi-Fi access point.
 
 For example, after `wait ready 20`:
 

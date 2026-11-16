@@ -67,7 +67,7 @@ The screenshots come from the desktop simulator, which runs the same device core
 - **Touch wakes screen.** Turn it off so a dark screen ignores touches and only a button lights it, for a gadget in a pocket. [Device settings](using-gadget.md#device-settings-and-hardware-checks)
 - **Talk from a dark screen.** One press of TALK lights the screen and starts recording. Off by default. [Device settings](using-gadget.md#device-settings-and-hardware-checks)
 - **Double press home.** Two quick presses of TALK go back to Ready and the default Hermes profile. [Device settings](using-gadget.md#device-settings-and-hardware-checks)
-- **Swipe gestures.** A swipe down cancels, closes a card or list, and opens the sessions dashboard. A swipe from right to left on the idle screen opens the profile grid, and a sideways swipe there turns its page. [Talk, type, and interrupt](using-gadget.md)
+- **Swipe gestures.** A swipe down cancels, closes a card or list, and opens the sessions dashboard. A swipe from right to left on the idle screen opens the profile grid, and a sideways swipe there turns its page. A swipe from left to right opens the widgets. [Talk, type, and interrupt](using-gadget.md)
 - **Knob and scroll buttons.** On boards with Up and Down buttons or a knob, they scroll long replies, lists and the settings menu. [Device settings](using-gadget.md#device-settings-and-hardware-checks)
 
 ## Connection and reliability
@@ -108,6 +108,7 @@ The screenshots come from the desktop simulator, which runs the same device core
 - **Pairing.** Run `hermes gadget pair` on the Hermes computer to approve the code a new device shows. [Connect Hermes](connect-hermes.md)
 - **Sessions on the device.** CANCEL or a swipe down opens a list of Hermes sessions, with busy ones in blue and those waiting for approval in amber. [The dashboard](using-gadget.md#watch-hermes-sessions-on-the-dashboard)
 - **Status tiles.** Put up to eight lines, such as a NAS's state, on that list from a script on the host. [The dashboard](using-gadget.md#watch-hermes-sessions-on-the-dashboard)
+- **Home-screen widgets.** Page through up to eight full-screen widgets from the idle screen: a big value, a progress bar, a short list or a two-line headline. A script, a cron job or the agent sets them on the Hermes computer, for every gadget or for one. [Widgets](using-gadget.md#glance-at-widgets)
 - **Gadgets tab.** The Hermes web dashboard lists your devices with board, firmware, last seen, online state and battery. [The Gadgets tab](hermes-integration.md#the-gadgets-tab-in-the-hermes-dashboard)
 - **Gadgets page in Hermes Desktop.** A gadget that runs in the desktop app's window, pairing with one click, a live copy of each device's screen, and buttons to send a card or run an action. [The Gadgets page](hermes-integration.md#the-gadgets-page-in-hermes-desktop)
 - **Device commands.** `hermes gadget devices`, `info`, `pair`, `update`, `bot-chat` and `forget` manage devices from the host. [Hermes integration](hermes-integration.md#hermes-surfaces-the-sdk-uses)

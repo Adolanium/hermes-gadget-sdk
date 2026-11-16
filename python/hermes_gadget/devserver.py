@@ -158,19 +158,26 @@ HELP = """commands:
   ask <title> | <question>     ask a yes/no question (TALK = yes, CANCEL = no)
   action <name> [json-args]    invoke a device action, e.g. action led.set {"color":"red"}
   image <path>                 send an image (needs Pillow)
-  dashboard [json]             send a dashboard (sample sessions and tiles without json);
-                               CANCEL on the idle screen opens it
+  dashboard [json]             send a dashboard (sample sessions, tiles and widgets without json);
+                               CANCEL on the idle screen opens the list, DOWN or a swipe
+                               from left to right the widgets
   play <path> | stop           play a sound file on every speaker (WAV; other formats need ffmpeg)
   update <path>                install a firmware image (firmware.bin) over the air
   quit"""
 
 
-# What `dashboard` sends without arguments: a few sessions in each state and two tiles.
+# What `dashboard` sends without arguments: a few sessions in each state, two tiles and one widget of each kind.
 SAMPLE_DASHBOARD = {
     "sessions": [{"label": "telegram 3f2a", "state": "waiting"}, {"label": "gadget 91c0", "state": "busy"},
                  {"label": "cli 77de", "state": "idle"}],
     "tiles": [{"label": "NAS", "value": "up", "state": "ok"},
               {"label": "Backups", "value": "2 days", "state": "warn"}],
+    "widgets": [{"id": "office", "kind": "value", "label": "Office", "value": "21.5", "unit": "C", "state": "ok"},
+                {"id": "backup", "kind": "progress", "label": "Backup", "percent": 62},
+                {"id": "today", "kind": "list", "label": "Today",
+                 "items": ["09:00 Standup", "11:30 Dentist", "14:00 Review", "18:00 Gym"]},
+                {"id": "playing", "kind": "headline", "label": "Now playing", "title": "Blue in Green",
+                 "text": "Miles Davis"}],
 }
 
 
@@ -270,8 +277,8 @@ async def _console(hub: DeviceHub, brain: EchoBrain, stop: asyncio.Event) -> Non
                 for s in sessions:
                     if s.dashboard_version:
                         await s.send_dashboard(dashboard.message(
-                            given.get("sessions") or [], given.get("tiles") or [], charset=s.charset,
-                            cols=s.display.get("text_cols")))
+                            given.get("sessions") or [], given.get("tiles") or [], given.get("widgets") or [],
+                            charset=s.charset, cols=s.display.get("text_cols"), version=s.dashboard_version))
             elif cmd in ("play", "stop"):
                 from hermes_gadget_plugin import playback
 

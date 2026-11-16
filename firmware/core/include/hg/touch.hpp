@@ -6,7 +6,9 @@
 //   quick tap          a TALK press and release (answers "yes" to a question); on the
 //                      name under the mascot it opens the profile grid instead; on the
 //                      resting clock it does nothing (the touch-down brought Ready back)
-//   swipe sideways     on the Ready screen, opens the profile grid; on the grid, turns its page
+//   swipe sideways     on the Ready screen, from right to left opens the profile grid and from
+//                      left to right the widgets; on the grid, turns its page; on a widget,
+//                      left to right shows the next and right to left the one before
 //   tap a grid cell    asks Hermes for that profile
 //   on a choice        a tap on an answer picks it, a swipe up shows more answers, a swipe
 //                      down cancels; holds do nothing

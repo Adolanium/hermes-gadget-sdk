@@ -896,7 +896,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if self._hub is None or self._tiles is None:
             return
         live = [s for s in self._hub.sessions.values()
-                if s.paired and not s.closed and s.dashboard_version >= dashboard.VERSION]
+                if s.paired and not s.closed and s.dashboard_version]  # each gets the layout it draws
         targets = live if only is None else [s for s in live if s is only]
         if not any(self._switches(s) for s in live):  # no device reads other profiles' boards any more
             self._keep_boards([])
@@ -914,7 +914,6 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         mine = dashboard.BOARD.sessions()  # after any roster wait, so a change made during it goes out
         if theirs is None:
             theirs = mine
-        tiles = self._tiles.tiles()
         for session, switches in zip(targets, switching):
             if not session.paired or (switches and not self._still_trusted(session)):
                 continue  # revoked or replaced while the roster was read
@@ -922,8 +921,12 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 continue  # a newer push has a newer roster for this device and sends it
             # No await from the check to here: send_dashboard queues on the device's send lock (FIFO)
             # before any newer push can, so an older dashboard never lands after a newer one.
-            await session.send_dashboard(dashboard.message(
-                theirs if switches else mine, tiles, charset=session.charset, cols=session.display.get("text_cols")))
+            try:
+                msg = dashboard.message_for(session, theirs if switches else mine, self._tiles)
+            except OSError as exc:  # the file is busy past its retries: the next look sends it
+                logger.debug("[%s] dashboard file unreadable: %s", self.name, exc)
+                return
+            await session.send_dashboard(msg)
 
     async def _offered_boards(self) -> List[dashboard.SessionBoard]:
         """The session boards of the other profiles a switching device may pick, as each profile's

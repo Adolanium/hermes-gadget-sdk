@@ -19,7 +19,7 @@ from hermes_gadget_plugin import protocol
 class Device:
     """A bare protocol client: says what the firmware says, records what it receives."""
 
-    def __init__(self, url: str, *, key: bytes | None = None, sleeping: bool | None = None, dashboard: bool = False):
+    def __init__(self, url: str, *, key: bytes | None = None, sleeping: bool | None = None, dashboard: bool | int = False):
         from websockets.sync.client import connect
 
         self.key = key or secrets.token_bytes(32)
@@ -32,7 +32,7 @@ class Device:
         if sleeping is not None:
             hello["display_sleeping"] = sleeping
         if dashboard:
-            hello["caps"]["dashboard"] = {"v": 1}
+            hello["caps"]["dashboard"] = {"v": int(dashboard)}  # True: layout 1; a number: that layout
         self.ws.send(json.dumps(hello))
         challenge = json.loads(self.ws.recv(timeout=5))
         if challenge["enrolled"]:
@@ -268,3 +268,32 @@ def test_the_simulated_firmware_rests_on_a_clock(devserver, make_sim):
     sim.run_for(0.5)
     assert sim.status()["screen"] == "ready", "the tap only brought Ready back"
     assert sim.peripherals.backlight == 100
+
+
+def test_a_held_layout_2_dashboard_reaches_the_device_with_its_widgets_when_the_screen_lights_up(
+        devserver, loop_thread):
+    from hermes_gadget_plugin import dashboard
+
+    hub, _brain, url = devserver()
+    device = Device(url, dashboard=2)
+    try:
+        assert _wait(lambda: device.device_id in hub.sessions)
+        session = hub.sessions[device.device_id]
+        device.frames()
+        device.screen(True)
+        assert _wait(lambda: session.display_sleeping)
+        older = dashboard.message([], [], [{"id": "t", "kind": "value", "label": "Office", "value": "21"}])
+        held = dashboard.message([], [], [{"id": "t", "kind": "value", "label": "Office", "value": "22"},
+                                          {"id": "b", "kind": "progress", "label": "Backup", "percent": 62}])
+        assert loop_thread.run(session.send_dashboard(older)) is False
+        assert loop_thread.run(session.send_dashboard(held)) is False  # only the latest is kept
+        assert [f for f in device.frames() if f.get("type") == "dashboard"] == []
+        device.screen(False)
+        woke = [f for f in device.frames() if f.get("type") == "dashboard"]
+        assert woke == [held] and woke[0]["v"] == 2 and len(woke[0]["widgets"]) == 2
+        # Lit again: an unchanged one is not repeated, and one whose widgets are gone goes at once.
+        assert loop_thread.run(session.send_dashboard(dict(held))) is False
+        assert loop_thread.run(session.send_dashboard(dashboard.message([], []))) is True
+        assert [f["widgets"] for f in device.frames() if f.get("type") == "dashboard"] == [[]]
+    finally:
+        device.close()
