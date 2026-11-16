@@ -95,6 +95,12 @@ class HubDelegate:
     async def on_cancel(self, session: "DeviceSession") -> None:
         pass
 
+    def interprets(self, session: "DeviceSession") -> bool:
+        """Whether ``session``'s device is in interpreter mode. Whoever holds it then may not be its
+        owner, so the hub shows it no choice and takes no answer from it. The delegate that runs the
+        mode is the one that knows."""
+        return False
+
     async def on_interpret_flip(self, session: "DeviceSession") -> None:
         """The device's user switched which language is spoken next (interpreter mode)."""
 
@@ -637,6 +643,11 @@ class DeviceSession:
         limit = self.choice_options
         if not limit:
             raise ActionError(f"{self.name} cannot take a choice on its screen")
+        # Checked here, on the hub's loop, with no await before the choice exists: a mode that starts
+        # later finds the choice and withdraws it (withdraw_choice), one that started earlier refuses it.
+        if self.hub.delegate.interprets(self):
+            raise ActionError(f"{self.name} is in interpreter mode and takes no questions; ask in another chat, "
+                              "or after the mode has ended")
         if not 2 <= len(options) <= limit:
             raise ActionError(f"{self.name} takes 2 to {limit} options")
         if self._choice is not None:
@@ -1470,12 +1481,16 @@ class DeviceHub:
     async def _h_prompt_reply(self, session: DeviceSession, msg: dict) -> None:
         prompt_id = str(msg.get("id") or "")[:64]
         answer = msg.get("answer")
+        if self.delegate.interprets(session):
+            return  # whoever holds a gadget that interprets answers nothing
         if prompt_id and answer in ("yes", "no"):
             session.spawn(self.delegate.on_prompt_reply(session, prompt_id, answer == "yes"))
 
     async def _h_choice_reply(self, session: DeviceSession, msg: dict) -> None:
         if session._choice is None:
             return
+        if self.delegate.interprets(session):
+            return  # a tap in interpreter mode is not the user's answer: the choice stays unanswered
         choice_id, count, fut = session._choice
         if fut.done() or str(msg.get("id") or "") != choice_id:
             return
