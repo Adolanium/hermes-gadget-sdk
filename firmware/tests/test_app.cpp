@@ -10836,3 +10836,45 @@ TEST("interpret: a choice or a question on screen goes when the mode starts, and
   r.app.on_button(hg::Button::Talk, false);
   CHECK(r.fake.last("choice.reply") == nullptr && r.fake.last("prompt.reply") == nullptr);
 }
+
+TEST("interpret: the owner's last reply and card are gone when the mode starts; a translation stays") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"turn.start","turn":"t"})");
+  r.server(R"({"type":"transcript","text":"what did the bank say"})");
+  r.server(R"({"type":"reply","turn":"t","text":"The loan was approved."})");
+  r.server(R"({"type":"turn.end","turn":"t","outcome":"success"})");
+  r.advance(200);
+  CHECK_EQ(r.app.model().body, std::string("The loan was approved."));
+  // The gadget changes hands: nothing of the owner's conversation stays on it.
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  r.advance(20);
+  CHECK(r.app.screen() == hg::Screen::Ready && r.app.model().hero);
+  CHECK_EQ(r.app.model().headline, std::string("ES > EN"));
+  CHECK_EQ(r.app.model().body, std::string(""));
+  CHECK_EQ(r.app.model().detail, std::string("Interpreter"));
+  r.app.on_button(hg::Button::Up, true);  // and UP has no last reply to bring back
+  r.app.on_button(hg::Button::Up, false);
+  CHECK(r.app.model().hero);
+  CHECK_EQ(r.app.model().body, std::string(""));
+
+  // A translation is the mode's own: the label update that follows it leaves it up.
+  r.server(R"({"type":"turn.start","turn":"a1"})");
+  r.server(R"({"type":"transcript","text":"buenos dias"})");
+  r.server(R"({"type":"reply","turn":"a1","text":"Good morning"})");
+  r.server(R"({"type":"interpret","on":true,"label":"EN > ES"})");
+  r.server(R"({"type":"turn.end","turn":"a1","outcome":"success"})");
+  r.advance(200);
+  CHECK_EQ(r.app.model().body, std::string("Good morning"));
+  CHECK_EQ(r.app.model().detail, std::string("buenos dias"));
+
+  // A card of the owner's that is on the screen goes too.
+  r.server(R"({"type":"interpret","on":false})");
+  r.server(R"({"type":"display","title":"Note","body":"Door code 4471","ttl_s":0})");
+  r.advance(20);
+  CHECK(r.app.screen() == hg::Screen::Card);
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  r.advance(20);
+  CHECK(r.app.screen() != hg::Screen::Card);
+  CHECK_EQ(r.app.model().headline, std::string("ES > EN"));
+}

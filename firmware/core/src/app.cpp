@@ -1230,6 +1230,16 @@ void App::h_interpret(const json::Value& m) {
   // unanswered, as when it expires, and none is shown while the mode lasts (h_prompt, h_choice).
   clear_prompt();
   clear_choice();
+  if (!interpret_) {
+    // The mode starts (a new label for a mode already on comes here too, and keeps the translation):
+    // the owner's last exchange is not left under the label, where UP could also bring it back, and
+    // a card, an image or a list of the owner's that is up goes.
+    reply_.clear();
+    user_echo_.clear();
+    scroll_ = -1;
+    reply_until_ = now();
+    dismiss_overlay();
+  }
   interpret_ = true;
   interpret_label_ = m["label"].as_string().substr(0, 24);
 }
