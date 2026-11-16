@@ -131,6 +131,7 @@ The table shows what each board profile drives. In the battery column, "Voltage"
 | Waveshare ESP32-S3-LCD-1.54 | Touch SKUs | Yes | Yes | Voltage | Light sleep | Partial report |
 | Waveshare ESP32-S3-Touch-LCD-1.83 | Yes | Yes | Yes | Gauge | | Not run on a board |
 | Waveshare ESP32-S3-Touch-LCD-1.46 | Yes | Yes | Yes | No | | Not run on a board |
+| Waveshare ESP32-S3-Touch-LCD-1.47 | Yes | No | No | No | | Picture, Wi-Fi, one card and swipe-down cancel checked; colour, a tap, a prompt and a silent timer not checked |
 | Waveshare ESP32-S3-Touch-AMOLED-1.32 | Yes | Yes | Yes | No | | Not run on a board |
 | Waveshare ESP32-S3-Touch-AMOLED-1.43C | Yes | Yes | Yes | Voltage | | Not run on a board |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | Yes | Yes | Output, needs a speaker | Gauge | Face-down sleep, clock chip | Some features checked |
@@ -150,6 +151,7 @@ The table shows what each board profile drives. In the battery column, "Voltage"
 | Espressif ESP32-S3-BOX-3 | Yes | Yes | Yes | No | | No report yet |
 | M5Stack CoreS3 | Yes | Yes | Yes | Gauge | | No report yet |
 | M5Stack StickS3 | No | Yes | Yes | Voltage | Face-down sleep | Smoke test |
+| M5Stack StopWatch | Yes | Yes | Yes | Voltage (measured curves) | Face-down sleep, clock chip | Partial report |
 | LilyGO T-Display-S3 | No | No | No | Voltage | Text through the USB console | Smoke test |
 | Elecrow CrowPanel 2.1-inch HMI | Yes | No | No | No | Knob; text through the USB console | Smoke test |
 | Elecrow CrowPanel 5.0-inch HMI | Yes | No | No | No | Text through the USB console | Boot check |

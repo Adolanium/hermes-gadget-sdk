@@ -82,6 +82,7 @@ hgp::AxpPower g_power;
 hgp::LatchPower g_latch_power;
 hgp::CoreS3Board g_cores3;
 hgp::StickS3Board g_sticks3;
+hgp::StopWatchBoard g_stopwatch;
 hgp::PhoneLink g_phone;
 hgp::TailnetLink g_tailnet;
 #endif
@@ -449,6 +450,7 @@ extern "C" void app_main(void) {
   i2c_master_bus_handle_t i2c_bus = io_rail_ready ? hgp::i2c::bus(board.i2c) : nullptr;
   const bool peripherals_ready = io_rail_ready && (!board.cores3 || g_cores3.begin(i2c_bus)) &&
       (!board.sticks3 || g_sticks3.begin(i2c_bus)) &&
+      (!board.stopwatch || g_stopwatch.begin(i2c_bus)) &&
       (!board.expander_reset.mask || hgp::tca9554_reset(i2c_bus, board.expander_reset)) &&
       (!board.expander_levels.enabled || hgp::tca9554_levels_begin(i2c_bus, board.expander_levels));
   if (board.cores3 && peripherals_ready)
@@ -501,9 +503,15 @@ extern "C" void app_main(void) {
     hal.power = &g_sticks3;
     g_wifi.on_battery = [] { return g_sticks3.external_power() == std::optional<bool>(false); };
   }
+  if (board.stopwatch && peripherals_ready) {  // peripherals_ready includes g_stopwatch.begin()
+    hal.power = &g_stopwatch;
+    g_stopwatch.use_curves(board.battery_curve, board.battery_charge_curve);
+    g_wifi.on_battery = [] { return g_stopwatch.external_power() == std::optional<bool>(false); };
+  }
   const bool audio_power = peripherals_ready && (!board.axp_audio_supply || g_power.enable_audio_supply());
   if (!audio_power) ESP_LOGE(TAG, "audio supply unavailable");
   if (board.sticks3) g_codec_speaker.board_pa = [](bool on) { g_sticks3.set_amplifier(on); };
+  if (board.stopwatch) g_codec_speaker.board_pa = [](bool on) { g_stopwatch.set_amplifier(on); };
   if (board.codec.enabled && audio_power && g_codec.begin(board.codec, i2c_bus)) {
     if (g_codec_mic.begin(g_codec.in(), board.codec.rmnm_mics, g_codec.mic_link())) hal.mic = &g_codec_mic;
     g_codec_speaker.es8311_fade_ramp = board.codec.dac_fade_ramp && board.codec.speaker == hgp::SpeakerCodec::Es8311;
@@ -543,9 +551,10 @@ extern "C" void app_main(void) {
       hal.speaker == &g_speaker ? "i2s" : "none";
   parts.touch = touch && g_touch.has_touch();
   parts.key = touch && g_touch.has_key();
+  parts.touch_input = touch ? &g_touch : nullptr;
   parts.i2c = i2c_bus;
   parts.imu = imu ? g_motion.chip_name() : "none";
-  parts.rtc = g_time.rtc_ready() ? "pcf85063" : "none";
+  parts.rtc = g_time.rtc_name();
   parts.motion = imu ? &g_motion : nullptr;
   parts.time = &g_time;
 #endif
@@ -672,6 +681,17 @@ extern "C" void app_main(void) {
 #endif
   };
   app.recent_log = &hgp::diag::recent_log;
+  app.on_log_level = [](const std::string& tag, const std::string& level) {
+    static const esp_log_level_t kLevels[] = {ESP_LOG_NONE, ESP_LOG_ERROR, ESP_LOG_WARN, ESP_LOG_INFO, ESP_LOG_DEBUG};
+    static_assert(std::size(kLevels) == std::size(hg::App::kLogLevels));
+    for (size_t i = 0; i < std::size(kLevels); ++i) {
+      if (level != hg::App::kLogLevels[i]) continue;
+      esp_log_level_set(tag.c_str(), kLevels[i]);
+      ESP_LOGI(TAG, "log level of %s: %s", tag.c_str(), level.c_str());
+      return true;
+    }
+    return false;
+  };
   if (board.light_sleep) keep_pins_through_sleep(board);
 #if !CONFIG_HG_BOARD_ESP32_CYD
   g_system.on_doze_start = [] { g_codec_speaker.power_down(); };

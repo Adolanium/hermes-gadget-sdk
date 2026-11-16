@@ -191,6 +191,14 @@ Copyright 2022-2026 Espressif Systems (Shanghai) CO LTD, Apache License 2.0.
 The adapter changes sleep-out and display-on to zero data bytes and explicit
 delays, and omits the legacy table terminator.
 
+The CoreS3 LCD register probe and software-SPI timing in
+firmware/drivers/cores3_panel.hpp are adapted from M5Stack M5GFX,
+https://github.com/m5stack/M5GFX/tree/28d47949bdc84f30881623476f555398e2194313,
+src/board_detect/m5/board_registry.inl and src/board_detect/probe_hardware.inl,
+Copyright (c) 2021 M5Stack, MIT License (LICENSES/M5GFX-MIT.txt).
+The adapter retains known touch-firmware hints, uses a bounded CoreS3-only GPIO
+interface and rejects unrecognized LCD signatures instead of assuming C.
+
 The CoreS3 ILI9342E initialization table in firmware/esp32/main/panel_cores3.hpp
 is adapted from Espressif's m5stack_core_s3 BSP,
 https://github.com/espressif/esp-bsp/tree/master/bsp/m5stack_core_s3,
@@ -295,6 +303,31 @@ battery voltage, I2C idle-sleep, watchdog and shutdown registers) come from
 M5Stack's M5Unified at commit 368ad60807161625aa65baad37a4a3af2a7eccea and
 M5GFX at commit 65c816a38386062d2c3dc47d41237a9083acbc75 (both MIT,
 Copyright (c) M5Stack). Hardware facts only; no M5Stack code is included.
+
+The M5Stack StopWatch facts in firmware/drivers/stopwatch.cpp and
+firmware/esp32/main/board.cpp come from M5Stack: the pin map and the M5PM1 and
+M5IOE1 pin functions from its StopWatch documentation,
+https://docs.m5stack.com/en/products/sku/C152, and schematic
+C152-SCH_Stopwatch_PRJ_Main_VA_20251201 (SHA-256
+8d4755c341f966a6191f9f16a7a45c558a99749a5e39a30d0513f86a5e10ef80); the M5PM1
+registers (I2C idle sleep, watchdog, system command, GPIO input, battery and
+VIN voltage, interrupt masks, button status and configuration) from the M5PM1
+library at commit 315d2899c863ae34b59197392b9f4c59490751ef; the M5IOE1 registers
+(GPIO mode, output and drive, PWM1 duty, I2C configuration) from the M5IOE1
+library at commit 8401119bf171cb8f906fbe22e7490989077bbee8 (both MIT, Copyright
+(c) 2026 M5Stack Technology CO LTD). Hardware facts only; no M5Stack code is
+included. The power sequence (supplies, 20 ms, resets low for 10 ms, 120 ms),
+the CST820 stay-awake write and the key settings follow the StopWatch port in
+allinnb/hermes-gadget-sdk at commits deb5707 and df58bd1 (MIT), by allinnb and
+heyia, rewritten here.
+
+The RX8130CE register facts in firmware/drivers/rx8130.cpp (the BCD time
+registers from 0x10, the one-bit-per-day weekday, the VLF flag and its
+clear-on-zero flag register, STOP and TEST) come from Epson's RX8130CE
+application manual ETM50E-10,
+https://download.epsondevice.com/td/pdf/app/RX8130CE_en.pdf (SHA-256
+db027a5fa2dd17b333da81e95063764eb5536d2878c63b64949348d2ec4b8a22). Hardware
+facts only; no Epson code is included.
 
 The PCF85063 register facts in firmware/drivers/pcf85063.cpp (the BCD time
 registers 0x04-0x0A, the oscillator-stop flag on the seconds register and the

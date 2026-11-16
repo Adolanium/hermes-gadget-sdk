@@ -42,6 +42,8 @@ namespace {
 #define HG_BOARD_NAME "m5stack-cores3"
 #elif CONFIG_HG_BOARD_STICKS3
 #define HG_BOARD_NAME "m5stack-sticks3"
+#elif CONFIG_HG_BOARD_STOPWATCH
+#define HG_BOARD_NAME "m5stack-stopwatch"
 #elif CONFIG_HG_BOARD_CARDPUTER_ADV
 #define HG_BOARD_NAME "cardputer-adv"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_185C_V2
@@ -66,6 +68,8 @@ namespace {
 #define HG_BOARD_NAME "waveshare-esp32-p4-wifi6-touch-lcd-7b"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154
 #define HG_BOARD_NAME "waveshare-esp32s3-lcd-154"
+#elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_147
+#define HG_BOARD_NAME "esp32-s3-touch-lcd-147"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_183
 #define HG_BOARD_NAME "waveshare-esp32-s3-touch-lcd-1.83"
 #elif CONFIG_HG_BOARD_ESP32_CYD
@@ -552,6 +556,54 @@ BoardConfig make() {
   b.cancel_label = "Swipe down";
   return b;
 }
+#elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_147
+// Waveshare ESP32-S3-Touch-LCD-1.47: native 172x320 JD9853, used landscape
+// (320x172) on the ST7789 SPI path. The column offset 34 follows the axis
+// swap onto the short side. AXS5106L touch. No microphone, speaker or codec,
+// so replies stay on the glass and typed messages go out the USB console.
+// Battery ADC and the microSD slot stay off.
+// Pins: docs/hardware.md#waveshare-esp32-s3-touch-lcd-147
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.lcd.enabled = true;
+  b.lcd.width = 320;
+  b.lcd.height = 172;
+  b.lcd.swap_xy = true;
+  // Portrait needed mirror_x so text read left to right. After the axis swap
+  // that same bit mirrors the landscape picture, so it stays off.
+  b.lcd.mirror_x = false;
+  b.lcd.mirror_y = false;
+  b.lcd.invert = false;  // Waveshare's Arduino demo constructs this glass with IPS off
+  // After the axis swap the 34-column window is the logical Y offset.
+  b.lcd.gap_x = 0;
+  b.lcd.gap_y = 34;
+  // 320x172 still picks scale 1 on its own (the short side). Double it. The
+  // hero was the 144 px bitmap; 64 is the stock size under half of that.
+  b.lcd.font_scale = 2;
+  b.lcd.mascot_px = 64;
+  b.lcd.mosi = 39;
+  b.lcd.sclk = 38;
+  b.lcd.cs = 21;
+  b.lcd.dc = 45;
+  b.lcd.rst = 40;
+  b.lcd.backlight = 46;
+  b.i2c = {42, 41, 400000};
+  b.touch.enabled = true;
+  b.touch.ppi = 247;  // sqrt(172^2 + 320^2) / 1.47
+  b.touch.controller = TouchController::Axs5106;
+  b.touch.addr = 0x63;
+  b.touch.rst = 47;
+  b.touch.int_gpio = 48;
+  b.touch.width = 320;
+  b.touch.height = 172;
+  b.touch.swap_xy = true;  // the report is still native 172x320; exchange into landscape
+  b.touch.mirror_x = false;  // same axis as the panel, so a tap lands on the drawn pixel
+  b.buttons = {0, -1, -1, -1};
+  b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
+  return b;
+}
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154
 // Waveshare ESP32-S3-LCD-1.54 (SKUs 33866/33867, the non-touch version): 1.54"
 // 240x240 ST7789 over SPI, ES8311 speaker DAC + ES7210 microphone ADC on one
@@ -854,6 +906,7 @@ BoardConfig make() {
   b.lcd.mirror_x = false;
   b.lcd.mirror_y = false;
   b.lcd.invert = true;
+  b.lcd.bgr = true;  // CoreS3 BSP display.h: LCD_RGB_ELEMENT_ORDER_BGR
   b.lcd.mosi = 37;
   b.lcd.sclk = 36;
   b.lcd.cs = 3;
@@ -912,6 +965,70 @@ BoardConfig make() {
   b.buttons = {11, 12, -1, -1};
   b.talk_label = "KEY1";
   b.cancel_label = "KEY2";
+  return b;
+}
+#elif CONFIG_HG_BOARD_STOPWATCH
+// M5Stack StopWatch (SKU C152): ESP32-S3R8, 16 MB flash, 8 MB octal PSRAM, a round
+// 1.75" 466x466 CO5300 over QSPI, CST820 touch, one ES8311 for the speaker and the
+// microphone, a blue and a yellow key. The panel, the touch controller, the codec
+// and the AW8737A amplifier have no ESP32 pin for power or reset: the M5IOE1
+// expander switches and resets them and the M5PM1 measures the cell and reads the
+// red key (StopWatchBoard). A BMI270 at 0x68 gives face-down sleep and an RX8130CE
+// at 0x32 keeps the time. The touch interrupt (GPIO 13), the panel's tearing line
+// (GPIO 38) and the vibration motor are unused.
+// Pins: docs/hardware.md#m5stack-stopwatch
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.stopwatch = true;
+  b.i2c = {47, 48, 400000};
+  b.imu.enabled = true;
+  b.imu.chip = ImuChip::Bmi270;
+  b.imu.addr = 0x68;
+  // Measured on the watch: flat face up reads sensor z +1 g, standing on its left edge
+  // sensor y +1 g, standing on its top edge sensor x +1 g.
+  b.imu.x_from = 1; b.imu.y_from = 0; b.imu.z_from = 2;
+  b.imu.x_sign = 1; b.imu.y_sign = -1; b.imu.z_sign = 1;
+  b.rtc.enabled = true;  // RX8130CE: keeps UTC while the cell has charge, also switched off
+  b.rtc.chip = RtcChip::Rx8130;
+  b.rtc.addr = 0x32;
+  b.battery_curve = hg::kStopWatchCurve;
+  b.battery_charge_curve = hg::kStopWatchChargeCurve;
+  b.amoled.enabled = true;
+  b.amoled.width = 466;
+  b.amoled.height = 466;
+  b.amoled.cs = 39;
+  b.amoled.sclk = 40;
+  b.amoled.d0 = 41;
+  b.amoled.d1 = 42;
+  b.amoled.d2 = 46;
+  b.amoled.d3 = 45;
+  b.amoled.gap_x = 6;  // the controller's RAM is 480 wide; the glass starts at column 6
+  b.amoled.qspi_mhz = 40;
+  b.amoled.round = true;
+  b.amoled.panel = AmoledPanel::Co5300_466;
+  b.codec.enabled = true;
+  b.codec.mclk = 18;
+  b.codec.bclk = 17;
+  b.codec.ws = 15;
+  b.codec.dout = 21;
+  b.codec.din = 16;
+  b.codec.mic = MicCodec::Es8311;
+  // The AW8737A runs from the cell, or USB less a diode: 3.3 to 4.8 V. The lowest is assumed.
+  b.codec.amp_supply_v = 3.3f;
+  // Speech through this microphone measures 300-800 RMS per block at the usual 24 dB and
+  // room noise 25-100, both below 3.4 kHz: under tap mode's default floor of 500 most
+  // speech counted as silence and a recording ended after 900 ms mid-sentence.
+  b.codec.vad_min_rms = 180.0f;
+  b.touch.enabled = true;
+  b.touch.controller = TouchController::Cst816;  // the CST820 sends the same report
+  b.touch.addr = 0x15;
+  b.touch.width = 466;
+  b.touch.height = 466;
+  b.touch.ppi = 266;  // estimate (see TouchConfig::ppi): 466 px across the 1.75" diameter
+  b.buttons = {1, 2, -1, -1};  // blue (KEYB) talks, yellow (KEYA) cancels
+  b.talk_label = "Blue";
+  b.cancel_label = "Yellow";
   return b;
 }
 #elif CONFIG_HG_BOARD_T_DISPLAY_S3

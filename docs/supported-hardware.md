@@ -12,6 +12,7 @@ Hardware ports remain experimental until the [verification table](hardware-valid
 | [Waveshare ESP32-S3-LCD-1.54](hardware.md#waveshare-esp32-s3-lcd-154) | Hold BOOT to talk | Onboard microphones and speaker |
 | [Waveshare ESP32-S3-Touch-LCD-1.83](hardware.md#waveshare-esp32-s3-touch-lcd-183) | Hold the screen or BOOT to talk; PWR turns the screen off and on | Onboard microphones and speaker. Experimental |
 | [Waveshare ESP32-S3-Touch-LCD-1.46](hardware.md#waveshare-esp32-s3-touch-lcd-146) | Hold the screen or BOOT to talk | Onboard microphone and speaker. Experimental |
+| [Waveshare ESP32-S3-Touch-LCD-1.47](hardware.md#waveshare-esp32-s3-touch-lcd-147) | Hold the screen or BOOT to talk (no microphone, so it reports that); swipe down cancels; USB console for text | No onboard microphone or speaker. Experimental |
 | [Waveshare ESP32-S3-Touch-AMOLED-1.32](hardware.md#waveshare-esp32-s3-touch-amoled-132) | Hold the screen or BOOT to talk; PWR turns the screen off and on, and a hold powers off on battery | Onboard microphone and speaker. Experimental |
 | [Waveshare ESP32-S3-Touch-AMOLED-1.43C](hardware.md#waveshare-esp32-s3-touch-amoled-143c) | Hold the screen or BOOT to talk | Onboard microphones and speaker. Experimental |
 | [Waveshare ESP32-S3-Touch-AMOLED-1.75](hardware.md#esp32-s3-touch-amoled-175) | Hold the screen to talk; lay it face down to sleep (off by default) | Onboard microphones; speaker output |
@@ -31,6 +32,7 @@ Hardware ports remain experimental until the [verification table](hardware-valid
 | [Espressif ESP32-S3-BOX-3](hardware.md#esp32-s3-box-3) | Hold the screen or BOOT to talk | Onboard microphones and speaker |
 | [M5Stack CoreS3](hardware.md#m5stack-cores3) | Hold the screen to talk | Onboard microphones and speaker; battery management |
 | [M5Stack StickS3](hardware.md#m5stack-sticks3) | Hold KEY1 to talk; KEY2 cancels; face-down sleep | Onboard microphone and speaker; battery. Experimental |
+| [M5Stack StopWatch](hardware.md#m5stack-stopwatch) | Hold the blue key or the screen to talk; yellow cancels; red turns the screen off and on | Onboard microphone and speaker; battery. Experimental |
 | [LilyGO T-Display-S3](hardware.md#lilygo-t-display-s3) | BOOT and Button2; send text through the USB console | No onboard microphone or speaker |
 | [Elecrow CrowPanel 2.1-inch HMI](hardware.md#elecrow-crowpanel-21-inch-hmi) | Touch screen and rotary knob; send text through the USB console | No onboard microphone or speaker |
 | [Elecrow CrowPanel 5.0-inch HMI](hardware.md#elecrow-crowpanel-50-inch-hmi) | Touch screen; send text through the USB console | No onboard microphone or speaker |

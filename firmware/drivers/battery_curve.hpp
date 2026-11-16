@@ -80,6 +80,32 @@ inline constexpr CurvePoint kAmoled206Points[] = {
 };
 inline constexpr Curve kAmoled206Curve{kAmoled206Points, sizeof(kAmoled206Points) / sizeof(kAmoled206Points[0])};
 
+// The M5Stack StopWatch's 450 mAh cell: one full discharge, 6 h 25 min from
+// unplugging at full to the device switching off at 3000 mV, on Wi-Fi with light
+// use. Percent = share of the time left until shutdown; voltage = median of the
+// 11 readings (30 s apart) around that time, read by the M5PM1; 100 is the first
+// reading after unplugging and 0 the last minute before shutdown.
+inline constexpr CurvePoint kStopWatchPoints[] = {
+    {4138, 100}, {4076, 95}, {4018, 90}, {3910, 80}, {3814, 70}, {3724, 60}, {3652, 50}, {3610, 40},
+    {3574, 30},  {3518, 20}, {3476, 15}, {3436, 10}, {3366, 5},  {3208, 2},  {3072, 0},
+};
+inline constexpr Curve kStopWatchCurve{kStopWatchPoints, sizeof(kStopWatchPoints) / sizeof(kStopWatchPoints[0])};
+
+// The same cell charging from empty on USB: 2 h 37 min from plugging in at
+// 3146 mV to the charger first resting. Percent = share of that time; voltage =
+// median of the readings (10 s apart) within a minute of it, under charge
+// current. The voltage was still rising when the charger stopped, so there was
+// no long taper and charge grew about with time; the current was not measured.
+// Tops out at 99 until the charger rests.
+inline constexpr CurvePoint kStopWatchChargePoints[] = {
+    {4162, 99}, {4148, 98}, {4100, 94}, {4057, 90}, {4020, 86}, {3978, 82}, {3942, 78}, {3902, 74}, {3868, 70},
+    {3836, 66}, {3806, 62}, {3774, 58}, {3748, 54}, {3728, 50}, {3712, 46}, {3698, 42}, {3686, 38}, {3672, 34},
+    {3658, 30}, {3641, 26}, {3620, 22}, {3589, 18}, {3554, 14}, {3528, 10}, {3493, 6},  {3432, 4},  {3328, 2},
+    {3146, 0},
+};
+inline constexpr Curve kStopWatchChargeCurve{kStopWatchChargePoints,
+                                             sizeof(kStopWatchChargePoints) / sizeof(kStopWatchChargePoints[0])};
+
 // What the device shows, from readings every few seconds, with the median of the
 // last kWindow voltages (about a minute) on the curve for the direction of flow:
 // - on battery, the discharge curve, never rising: a lighter load lifts the

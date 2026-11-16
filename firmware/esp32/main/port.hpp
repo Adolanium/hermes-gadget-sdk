@@ -24,9 +24,11 @@
 #include "bmi270.hpp"
 #include "cores3.hpp"
 #include "pcf85063.hpp"
+#include "rx8130.hpp"
 #include "qmi8658.hpp"
 #include "shared_reply.hpp"
 #include "sticks3.hpp"
+#include "stopwatch.hpp"
 #include "speaker_pa.hpp"
 #include "speaker_underruns.hpp"
 #include "tag_scanner.hpp"
@@ -127,6 +129,8 @@ bool post(EventType type, const void* data = nullptr, size_t len = 0, uint32_t g
           ConsoleRequest* console = nullptr);
 bool receive(Event& out, TickType_t wait);
 void release(Event& ev);
+// {waiting, peak, depth, dropped} for `diag`: a full queue drops touches, keys and audio.
+hg::json::Value stats();
 }  // namespace events
 
 // ---------------------------------------------------------------------------
@@ -575,6 +579,10 @@ class TouchInput {
   void nudge();  // ends the task's wait now, e.g. so a doze's end re-arms the INT edge at once
   // The touch_wake setting: off, a doze leaves INT quiet instead of arming it as a wake source.
   void set_wakes(bool on) { wakes_ = on; nudge(); }
+  // Counters for `diag`, safe to read from any task: whether the task still runs, how its
+  // reads go, and whether its events reach the app. A touch that stops answering, a task
+  // that stopped running and a full event queue each show as a different number here.
+  hg::json::Value stats() const;
 
  private:
   static void task(void* arg);
@@ -613,6 +621,9 @@ class TouchInput {
   volatile int8_t encoder_first_ = 0;        // leading channel of the current detent (0 = idle)
   volatile int64_t encoder_pair_deadline_us_ = 0;  // solo-pulse timeout (task checks it)
   volatile int64_t last_edge_us_ = INT64_MIN;  // per-edge debounce (ISR-written)
+  // For stats(). Written by the task, and int_edges_ by the INT handler.
+  std::atomic<uint32_t> reads_{0}, read_errors_{0}, error_streak_{0}, int_edges_{0}, posted_{0}, post_drops_{0};
+  std::atomic<int64_t> last_read_us_{0}, last_loop_us_{0};
 };
 
 // Reads the QMI8658 at 10 Hz from its own task, on its own device handle on
@@ -662,14 +673,18 @@ class TimePort {
   void set_wanted(bool on);
   // A sync arrived: records it and writes the RTC from the system clock.
   void on_synced();
-  bool rtc_ready() const { return chip_ != nullptr; }
+  bool rtc_ready() const { return chip_ != nullptr || rx8130_ != nullptr; }
+  const char* rtc_name() const { return rx8130_ ? "rx8130" : chip_ ? "pcf85063" : "none"; }
   hg::json::Value diag() const;  // {valid, synced, utc} for the diag report
 
  private:
   static void on_sntp(struct timeval* tv);  // SNTP context: posts TimeSynced
   void sync_sntp();  // starts or stops SNTP after set_network/set_wanted
   i2c_master_dev_handle_t dev_ = nullptr;
-  std::unique_ptr<hg::Pcf85063> chip_;
+  std::unique_ptr<hg::Pcf85063> chip_;  // one of the two, by RtcConfig::chip
+  std::unique_ptr<hg::Rx8130> rx8130_;
+  bool read_rtc(hg::WallTime& utc) { return rx8130_ ? rx8130_->read(utc) : chip_->read(utc); }
+  bool write_rtc(const hg::WallTime& utc) { return rx8130_ ? rx8130_->write(utc) : chip_->write(utc); }
   bool network_up_ = false, wanted_ = false;
   bool sntp_started_ = false;
   bool synced_ = false;  // set and read on the app task
@@ -751,6 +766,26 @@ class StickS3Board final : public hg::Power {
  private:
   i2c_master_dev_handle_t pm1_ = nullptr;
   std::unique_ptr<hg::StickS3Control> control_;
+};
+
+// The StopWatch's M5IOE1 (supplies, resets, amplifier) and M5PM1 (battery, red key,
+// shutdown). Hal::power once begin() succeeded.
+class StopWatchBoard final : public hg::Power {
+ public:
+  bool begin(i2c_master_bus_handle_t bus);
+  void set_amplifier(bool on);
+  void use_curves(hg::Curve discharge, hg::Curve charge) {
+    if (control_ && discharge) control_->use_curves(discharge, charge);
+  }
+  std::optional<hg::PowerStatus> read() override { return control_->read(); }
+  bool power_off() override { return control_->power_off(); }
+  bool take_key_press() override { return control_->take_key_press(); }
+  std::optional<bool> external_power() override { return control_->external_power(); }
+
+ private:
+  i2c_master_dev_handle_t pm1_ = nullptr;
+  i2c_master_dev_handle_t ioe_ = nullptr;
+  std::unique_ptr<hg::StopWatchControl> control_;
 };
 
 // Opus reply audio (port_opus.cpp). It decodes on the app task, whose stack
@@ -967,6 +1002,7 @@ struct Parts {
   i2c_master_bus_handle_t i2c = nullptr;  // scanned by `diag`
   MotionInput* motion = nullptr;          // latest sample for the report
   TimePort* time = nullptr;       // time state for the report
+  const TouchInput* touch_input = nullptr;  // its counters for the report
 };
 
 // Starts keeping a RAM copy of recent log lines. Call first in app_main.
@@ -976,7 +1012,11 @@ void set_parts(const Parts& parts);
 void log_boot_summary();
 // The port's half of the console's `diag` report (hg::App::on_diag).
 void report(hg::json::Value& r);
-// The log copy, oldest line first (hg::App::recent_log).
+// A whole `@diag` reply from the port alone, for when the app task doesn't answer:
+// memory, tasks, events, touch and the last crash. Safe from any task.
+std::string report_without_app();
+// The log copy, oldest line first (hg::App::recent_log). After a restart that kept
+// RAM, it opens with the previous boot's lines between `@log` marker lines.
 std::string recent_log();
 }  // namespace diag
 

@@ -50,6 +50,7 @@ idf_component_register(
         "port_codec.cpp"
         "port_cores3.cpp"
         "port_sticks3.cpp"
+        "port_stopwatch.cpp"
         "port_tca9554.cpp"
         "port_console.cpp"
         "port_dac.cpp"
@@ -67,8 +68,10 @@ idf_component_register(
         "../../drivers/axp2101.cpp"
         "../../drivers/cores3.cpp"
         "../../drivers/sticks3.cpp"
+        "../../drivers/stopwatch.cpp"
         "../../drivers/bmi270.cpp"
         "../../drivers/pcf85063.cpp"
+        "../../drivers/rx8130.cpp"
         "../../drivers/qmi8658.cpp"
         "port_storage.cpp"
         "port_tailnet.cpp"
@@ -93,6 +96,8 @@ idf_component_register(
         esp_app_format
         esp_adc
         esp_event
+        esp_partition
+        espcoredump
         esp_lcd
         ${HG_RGB_REQUIRES}
         ${HG_P4_REQUIRES}
@@ -111,3 +116,8 @@ idf_component_register(
         # Empty unless CONFIG_HG_TAILNET (components/tailtiny).
         tailtiny
 )
+
+# The firmware's own debug lines stay in the build, so the console's `log <tag> debug`
+# can turn them on without a rebuild. A line below its tag's level is skipped at run
+# time. Only this component: ESP-IDF's and the managed components' debug lines stay out.
+target_compile_definitions(${COMPONENT_LIB} PRIVATE LOG_LOCAL_LEVEL=ESP_LOG_DEBUG)

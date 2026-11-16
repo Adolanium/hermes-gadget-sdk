@@ -108,6 +108,7 @@ struct LcdConfig {
   int d1 = -1, d2 = -1, d3 = -1;  // QSPI data0 uses mosi
   bool round = false;
   uint8_t font_scale = 1;  // UI text scale multiplier, clamped so the scale stays 1..4 (hg::DisplayInfo)
+  uint16_t mascot_px = 0;   // largest mascot bitmap; 0 keeps the largest that fits
   // SPI data-in (the CYD wires its panel's SDO to GPIO 12); -1 when unused.
   // Last, so positional initializers written before it existed keep their meaning.
   int miso = -1;
@@ -191,7 +192,7 @@ struct CodecAudioConfig {
 };
 
 // Capacitive touch on the I2C bus: hold to talk, tap, swipe down to cancel.
-enum class TouchController { Cst9217, Box3, Ft5x06, Cst816, Gt911, Spd2010 };
+enum class TouchController { Cst9217, Box3, Ft5x06, Cst816, Gt911, Spd2010, Axs5106 };
 
 struct TouchConfig {
   bool enabled = false;
@@ -228,10 +229,13 @@ struct ImuConfig {
   ImuChip chip = ImuChip::Qmi8658;
 };
 
-// PCF85063 RTC on the I2C bus, keeping UTC across power loss.
+// An RTC on the I2C bus, keeping UTC across power loss.
+enum class RtcChip { Pcf85063, Rx8130 };
+
 struct RtcConfig {
   bool enabled = false;
   uint8_t addr = 0x51;
+  RtcChip chip = RtcChip::Pcf85063;
 };
 
 // A key whose level is read from a TCA9554 or PCF8574 I/O expander input (e.g.
@@ -343,6 +347,7 @@ struct BoardConfig {
   hg::Curve battery_curve, battery_charge_curve;
   bool cores3 = false;
   bool sticks3 = false;  // the M5PM1 switches the LCD rail and the speaker amplifier
+  bool stopwatch = false;  // M5IOE1 supplies/resets/amplifier and the M5PM1 (StopWatchBoard)
   // A phone companion app over Bluetooth LE (port_ble.cpp). Experimental: needs
   // the Bluetooth lines in the board's sdkconfig.defaults and stays off until the
   // board passes the checks in docs/hardware-validation.md#bluetooth.

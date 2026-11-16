@@ -104,6 +104,8 @@ menu "Hermes Gadget"
             bool "M5Stack CoreS3 (LCD, touch, AW88298 + ES7210)"
         config HG_BOARD_STICKS3
             bool "M5Stack StickS3 (experimental, ST7789 240x135, ES8311, M5PM1)"
+        config HG_BOARD_STOPWATCH
+            bool "M5Stack StopWatch (experimental, round 466x466 AMOLED, CST820 touch, ES8311, M5PM1)"
         config HG_BOARD_CARDPUTER_ADV
             bool "M5Stack Cardputer ADV (Stamp-S3A, ST7789 240x135, ES8311, TCA8418)"
             depends on IDF_TARGET_ESP32S3
@@ -115,6 +117,8 @@ menu "Hermes Gadget"
             bool "Waveshare ESP32-S3-Touch-LCD-1.85C V2 (experimental, ST77916, CST816, codecs)"
         config HG_BOARD_WS_ESP32S3_TOUCH_LCD_146
             bool "Waveshare ESP32-S3-Touch-LCD-1.46 (experimental, SPD2010 412x412, I2S mic, PCM5101)"
+        config HG_BOARD_WS_ESP32S3_TOUCH_LCD_147
+            bool "Waveshare ESP32-S3-Touch-LCD-1.47 (experimental, ST7789 320x172 landscape, AXS5106L, text only)"
         config HG_BOARD_WS_KNOB_LCD_18
             bool "Waveshare ESP32-S3-Knob-Touch-LCD-1.8 (SH8601 360x360 round, encoder, text-only audio)"
         config HG_BOARD_ESP_VOCAT
