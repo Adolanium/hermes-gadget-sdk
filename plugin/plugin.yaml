@@ -18,6 +18,7 @@ provides_tools:
   - gadget_devices
   - gadget_display
   - gadget_action
+  - gadget_interpret
 provides_hooks:  # session state for the device's dashboard (dashboard.SessionBoard.HOOKS)
   - on_session_start
   - pre_llm_call

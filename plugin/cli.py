@@ -14,6 +14,7 @@ from urllib.parse import quote
 INSTALLER_URL = "https://adolanium.github.io/hermes-gadget-sdk/"
 PAIR_TIMEOUT_S = 300
 DIAG_TIMEOUT_S = 20.0  # the gateway's poll, then up to 8 s for the device
+INTERPRET_TIMEOUT_S = 10.0
 
 
 def _store():
@@ -295,6 +296,44 @@ def _cmd_diag(args) -> None:
     print(f"Saved the report to {path}. Attach it when you open an issue.")
 
 
+def _cmd_interpret(args) -> None:
+    """Turn a connected gadget into an interpreter between two languages, or back."""
+    from .desk import Desk
+
+    store = _store()
+    device_id = _match(store, args.device)
+    if device_id is None:
+        sys.exit(1)
+    name = store.devices()[device_id].get("name") or device_id
+    langs = list(args.languages)
+    off = [word.lower() for word in langs] == ["off"]
+    if not off and len(langs) != 2:
+        sys.exit("Give two languages, e.g. hermes gadget interpret kitchen es en, or 'off' to stop.")
+    desk = Desk(store.path.parent)
+    try:
+        req = (desk.post(device_id, "interpret", off=True) if off
+               else desk.post(device_id, "interpret", a=langs[0], b=langs[1], auto=args.auto))
+    except ValueError as exc:
+        sys.exit(f"Can't start the interpreter: {exc}")
+    outcome = desk.wait(req, INTERPRET_TIMEOUT_S)
+    if not outcome.get("ok"):
+        sys.exit(str(outcome.get("error") or "The gateway refused."))
+    if off:
+        print(f"{name} is no longer interpreting." if outcome.get("was_on") else f"{name} was not interpreting.")
+        return
+    print(f"{name} is interpreting: {outcome.get('label')}. Hold its talk control and speak; it says and shows "
+          "the translation.")
+    if args.auto:
+        print("The speech-to-text provider detects the language of each recording.")
+    else:
+        print("The speakers take turns, the first language first. A short press of CANCEL on the gadget "
+              "switches who speaks next.")
+    if not outcome.get("draws"):
+        print("This gadget's firmware doesn't draw the interpreter screen: translations appear as replies, "
+              "and only this command switches who speaks next.")
+    print(f"Stop with: hermes gadget interpret {args.device} off   (or hold CANCEL on the gadget)")
+
+
 def _cmd_info(args) -> None:
     extra = _gadget_extra()
     url = device_url(extra)
@@ -436,6 +475,15 @@ def setup_argparse(parser) -> None:
     diag = subs.add_parser("diag", help="Save a connected gadget's diagnostics report, without a USB cable")
     diag.add_argument("device", help="Device id or name")
     diag.add_argument("--out", help="Where to save it (default: hermes-gadget-diag-<device>-<time>.txt here)")
+    interp = subs.add_parser("interpret", help="Make a gadget interpret between two languages: it says and shows "
+                                               "each thing said to it in the other one")
+    interp.add_argument("device", help="Device id or name")
+    interp.add_argument("languages", nargs="+", metavar="language",
+                        help="Two languages, the one spoken first first (codes such as es en, or English names); "
+                             "or 'off' to stop")
+    interp.add_argument("--auto", action="store_true",
+                        help="Let the speech-to-text provider detect each recording's language instead of "
+                             "taking turns")
     tile = subs.add_parser("tile", help="Set the status tiles the gadget dashboard shows")
     tile_subs = tile.add_subparsers(dest="tile_command")
     tile_set = tile_subs.add_parser("set", help="Add a tile or change its value")
@@ -452,7 +500,7 @@ def setup_argparse(parser) -> None:
 
 
 _COMMANDS = {"devices": _cmd_devices, "ls": _cmd_devices, "forget": _cmd_forget, "info": _cmd_info,
-             "pair": _cmd_pair, "update": _cmd_update, "diag": _cmd_diag, "tile": _cmd_tile, "bot-chat": _cmd_bot_chat}
+             "pair": _cmd_pair, "update": _cmd_update, "diag": _cmd_diag, "tile": _cmd_tile, "interpret": _cmd_interpret, "bot-chat": _cmd_bot_chat}
 
 
 def handle(args) -> None:

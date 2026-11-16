@@ -12,7 +12,8 @@ Hermes's gateway runs "platform adapters": Telegram, Slack and about twenty othe
 | `__init__.py` | `register(ctx)`: platform entry, agent tools, `hermes gadget` CLI |
 | `adapter.py` | `GadgetAdapter(BasePlatformAdapter)`: the Hermes-facing side |
 | `hub.py` | WebSocket server, auth, audio, images, actions (no Hermes imports) |
-| `tools.py` | `gadget_devices`, `gadget_display`, `gadget_action` |
+| `tools.py` | `gadget_devices`, `gadget_display`, `gadget_action`, `gadget_interpret` |
+| `interpret.py` | [Interpreter mode](#interpreter-mode): its state, chat, instruction and device message (no Hermes imports) |
 | `store.py`, `status.py`, `protocol.py`, `audio.py`, `textfmt.py`, `imaging.py` | Support modules (no Hermes imports) |
 | `dashboard/` | The **Gadgets** tab of the Hermes web dashboard: `manifest.json`, the backend routes in `plugin_api.py`, and the tab's bundle in `dist/`, built from `src/` (see [The Gadgets tab](#the-gadgets-tab-in-the-hermes-dashboard)) |
 | `desktop/plugin.js`, `desk.py` | The **Gadgets** page of the Hermes desktop app, built from `desktop-src/`, and the queue that carries its cards and actions to the gateway (see [The Gadgets page in Hermes Desktop](#the-gadgets-page-in-hermes-desktop)) |
@@ -181,6 +182,35 @@ To use `deliver="gadget"`, configure the gadget home channel. By default, `auto_
 5. **Reply text:** `send(text)` → `reply` frame. Then `turn.end`.
 
 Because a gadget is voice-first, `GadgetAdapter` answers `True` from `_should_auto_tts_for_chat` for devices that declare a speaker. The gateway then reads every reply aloud for that chat, both typed and spoken input. `/voice off` in the device's chat, or `speak_replies: false`, turns it off.
+
+### Interpreter mode
+
+In interpreter mode a gadget translates between two languages instead of answering ([how to use it](using-gadget.md#interpreter-mode)). It is built from what a voice round trip already does. `plugin/interpret.py` holds the parts that do not depend on Hermes.
+
+**Entering and leaving.** The adapter keeps the mode per device, in memory: the two languages and which one speaks next.
+
+- `hermes gadget interpret <device> <language> <language>` posts a request to the gateway through the same file queue as `hermes gadget diag`. `off` in place of the languages leaves the mode.
+- The `gadget_interpret` agent tool does the same from a conversation.
+- On the device, holding CANCEL sends `session.new`. While the device interprets, the adapter leaves the mode on that message and sends no `/new`.
+
+The adapter tells the device with an [`interpret` message](protocol.md#interpreter-mode) and sends it again when the device reconnects. A gateway restart ends the mode, and so does unpairing the device.
+
+**A chat of its own.** While a device interprets, its text and recordings go to Hermes as messages in the chat `<device id>~~interpret`, from the same user id. Hermes keeps a session per chat, so the translations have their own history and the device's conversation is never part of a translation request, nor the other way round. The message's `channel_prompt`, which Hermes appends to the system prompt for that turn only, is an instruction instead of the device's usual context: translate between the two languages, reply with the translation only, never answer or act on what was said, use no tools and save nothing to memory.
+
+**The language of each recording.** Hermes's speech-to-text takes at most one language per recording, through the `pre_transcription` hook the plugin already uses for [`stt_language`](#fix-the-language-of-gadget-speech). It does not report which language it heard, and a plugin cannot limit detection to two languages. So the mode does not detect who is speaking:
+
+- By default the speakers take turns. The adapter notes each recording with the language whose turn it is, the hook hands that language to the STT provider, and the instruction names the direction. A turn that ends with `success` switches the speaker. The device's `interpret.flip` message, a short CANCEL press, switches it without a turn.
+- With `--auto` (`detect: auto` in the tool) the adapter notes nothing for the recording, not even `stt_language`, and the instruction leaves the direction to the model. The provider's own detection then applies, unless the answering profile fixes a language in `stt.<provider>.language`, which a plugin cannot clear.
+
+**The reply.** The translation is an ordinary reply: Hermes streams it as text and speaks it with its auto-TTS, in the voice the profile configures. The adapter folds the text to the device's `charset` as usual. When that folding would drop more than a third of the letters, because the font lacks the script, it sends a line that says the translation is spoken only; the audio is made from Hermes's text and is not affected.
+
+Limits:
+
+- **The default profile translates.** A profile a device chose applies only to the chat whose id is the device id. The interpreter chat does not carry that choice, so the gateway routes it as any other chat: to the default profile, with its model, STT and TTS settings, unless a `gateway.profile_routes` entry matches it.
+- **The instruction is a prompt, not a lock.** The agent keeps its tools and memory in the interpreter chat; the instruction tells it to use neither.
+- **The interpreter chat keeps its history** between uses, under Hermes's usual session reset rules.
+- **One voice.** Hermes has one text-to-speech voice per profile, and the plugin cannot choose a voice per language.
+- **A wrong turn is not detected.** A recording transcribed in the other person's language comes back as a wrong translation.
 
 ### Pairing
 

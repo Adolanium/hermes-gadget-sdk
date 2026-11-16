@@ -9453,3 +9453,115 @@ TEST("camera: a card Hermes sends waits until the mode leaves, and what asks to 
   CHECK(!r.app.camera_open());  // a question takes the screen, as it takes it from settings
   CHECK(r.app.screen() == hg::Screen::Prompt);
 }
+
+// --------------------------------------------------------------------------
+// Interpreter mode (docs/protocol.md#interpreter-mode)
+
+TEST("interpret: hello says the device draws interpreter mode") {
+  Rig r;
+  r.bring_online(true);
+  const Value* hello = r.fake.last("hello");
+  CHECK(hello != nullptr);
+  if (hello) CHECK_EQ((*hello)["caps"]["interpret"].as_int(), int64_t(1));
+}
+
+TEST("interpret: the idle screen names the languages until Hermes turns the mode off") {
+  Rig r;
+  r.bring_online(true);
+  CHECK_EQ(r.app.model().headline, std::string("Hi, I'm Hermes"));
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN","flip":true})");
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.app.model().headline, std::string("ES > EN"));
+  CHECK_EQ(r.app.model().detail, std::string("Interpreter"));
+  CHECK(r.app.status_json().find("\"interpret\":\"ES > EN\"") != std::string::npos);
+  // The turn's end switches who speaks next: Hermes sends the new label.
+  r.server(R"({"type":"interpret","on":true,"label":"EN > ES","flip":true})");
+  CHECK_EQ(r.app.model().headline, std::string("EN > ES"));
+  r.server(R"({"type":"interpret","on":false})");
+  CHECK_EQ(r.app.model().headline, std::string("Hi, I'm Hermes"));
+  CHECK(r.app.status_json().find("\"interpret\"") == std::string::npos);
+}
+
+TEST("interpret: the translation is drawn large with what was said above it") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN","flip":true})");
+  r.server(R"({"type":"turn.start","turn":"a1"})");
+  r.server(R"({"type":"transcript","text":"buenos dias"})");
+  r.server(R"({"type":"reply","turn":"a1","text":"Good morning"})");
+  CHECK(r.app.screen() == hg::Screen::Responding);
+  CHECK_EQ(r.app.model().body, std::string("Good morning"));
+  CHECK_EQ(int(r.app.model().body_scale), 1);
+  CHECK_EQ(r.app.model().detail, std::string("buenos dias"));
+  CHECK_EQ(r.app.model().headline, std::string("ES > EN"));
+  CHECK(!r.app.model().hero);
+  r.server(R"({"type":"turn.end","turn":"a1","outcome":"success"})");
+  r.server(R"({"type":"interpret","on":true,"label":"EN > ES","flip":true})");
+  r.advance(200);
+  // Back on the idle screen the translation stays up, large, under who speaks next.
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.app.model().headline, std::string("EN > ES"));
+  CHECK_EQ(r.app.model().body, std::string("Good morning"));
+  CHECK_EQ(int(r.app.model().body_scale), 1);
+
+  // A translation too long for the screen at the large size keeps the base size, and pages.
+  std::string longer;
+  for (int i = 0; i < 40; ++i) longer += "translated words ";
+  r.server(R"({"type":"turn.start","turn":"a2"})");
+  r.server(R"({"type":"reply","turn":"a2","text":")" + longer + R"("})");
+  CHECK_EQ(int(r.app.model().body_scale), 0);
+
+  // Outside the mode a reply is drawn at the base size.
+  r.server(R"({"type":"turn.end","turn":"a2","outcome":"success"})");
+  r.server(R"({"type":"interpret","on":false})");
+  r.server(R"({"type":"turn.start","turn":"a3"})");
+  r.server(R"({"type":"reply","turn":"a3","text":"Good morning"})");
+  CHECK_EQ(int(r.app.model().body_scale), 0);
+  CHECK_EQ(r.app.model().headline, std::string("Hermes"));
+}
+
+TEST("interpret: a short CANCEL press asks Hermes to switch who speaks next") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"dashboard","v":1,"sessions":[{"label":"cli 1","state":"idle"}]})");
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN","flip":true})");
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Cancel, false);
+  CHECK(r.fake.last("interpret.flip") != nullptr);
+  CHECK(r.app.screen() == hg::Screen::Ready);  // not the dashboard
+  // The device waits for Hermes's word: the label is Hermes's, never guessed.
+  CHECK_EQ(r.app.model().headline, std::string("ES > EN"));
+}
+
+TEST("interpret: with detected languages CANCEL keeps opening the dashboard") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"dashboard","v":1,"sessions":[{"label":"cli 1","state":"idle"}]})");
+  r.server(R"({"type":"interpret","on":true,"label":"ES <> EN","flip":false})");
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Cancel, false);
+  CHECK(r.fake.last("interpret.flip") == nullptr);
+  CHECK(r.app.screen() == hg::Screen::Dashboard);
+}
+
+TEST("interpret: holding CANCEL counts down to leaving the mode, and a lost connection ends it") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN","flip":true})");
+  r.app.on_button(hg::Button::Cancel, true);
+  r.advance(1200);
+  CHECK(r.app.model().hint.find("Interpreter off in") != std::string::npos);
+  r.advance(1000);
+  CHECK(r.fake.last("session.new") != nullptr);  // Hermes leaves the mode on this message
+  CHECK(r.fake.last("interpret.flip") == nullptr);
+  r.app.on_button(hg::Button::Cancel, false);
+  r.server(R"({"type":"interpret","on":false})");
+  r.server(R"({"type":"turn.end","turn":"","outcome":"cancelled"})");
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.app.model().headline, std::string("Hi, I'm Hermes"));
+
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN","flip":true})");
+  CHECK(r.app.status_json().find("\"interpret\"") != std::string::npos);
+  r.app.on_transport_closed("gone");
+  CHECK(r.app.status_json().find("\"interpret\"") == std::string::npos);
+}

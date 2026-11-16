@@ -190,6 +190,7 @@ const App::Route App::kRoutes[] = {
     {"notice", &App::h_notice},           {"error", &App::h_error},
     {"transcript", &App::h_transcript},   {"prompt", &App::h_prompt},
     {"prompt.close", &App::h_prompt_close}, {"ota.offer", &App::h_ota_offer},
+    {"interpret", &App::h_interpret},
     {"ota.begin", &App::h_ota_begin},     {"ota.end", &App::h_ota_end},
     {"ota.abort", &App::h_ota_abort},     {"dashboard", &App::h_dashboard},
     {"profile", &App::h_profile},         {"profiles", &App::h_profiles},
@@ -528,6 +529,7 @@ const char* App::activity() const {
 
 void App::drop_session(std::string_view reason) {
   last_close_ = std::string(reason);
+  interpret_off();  // Hermes says it again on the next connection if it still holds
   // Every end of a session, whoever noticed it: the transport, a timeout or the network.
   ++closes_total_;
   if (closes_.size() >= kCloseHistory) closes_.erase(closes_.begin());
@@ -660,6 +662,7 @@ void App::send_hello() {
     caps.set("dashboard", dash);
   }
   caps.set("profiles", true);
+  caps.set("interpret", 1);
   if (ui_ && profile_.faces) {
     json::Value colour = json::Value::object().set("v", 2).set("px", colour_px_);
     if (colour_bands_) colour.set("frames", true);
@@ -1112,6 +1115,7 @@ void App::h_paired(const json::Value&) {
 
 void App::h_unpaired(const json::Value& m) {
   paired_ = false;
+  interpret_off();
   unpaired_reason_ = m["reason"].as_string();
   if (unpaired_reason_ == "routed") {  // no code can let it in: drop one shown before
     pairing_code_.clear();
@@ -1161,6 +1165,30 @@ void App::h_turn_end(const json::Value& m) {
     mode_ = reply_.empty() ? Mode::Idle : Mode::Responding;
     mode_since_ = now();
   }
+}
+
+void App::h_interpret(const json::Value& m) {
+  if (!m["on"].as_bool()) {
+    interpret_off();
+    return;
+  }
+  wake_display();
+  interpret_ = true;
+  interpret_flip_ = m["flip"].as_bool();
+  interpret_label_ = m["label"].as_string().substr(0, 24);
+}
+
+void App::interpret_off() {
+  interpret_ = interpret_flip_ = false;
+  interpret_label_.clear();
+}
+
+void App::interpret_text(UiModel& m) {
+  if (m.detail.empty()) m.detail = user_echo_;
+  if (!ui_ || m.body.empty()) return;
+  // Large where the whole translation fits the screen that way; a longer one keeps the base size.
+  m.body_scale = 1;
+  if (static_cast<int>(wrap_text(m.body, ui_->body_cols(m)).size()) > ui_->body_rows(m)) m.body_scale = 0;
 }
 
 void App::h_status(const json::Value& m) {
@@ -1670,6 +1698,7 @@ void App::on_button(Button button, bool pressed, bool touch) {
       } else if (mode_ == Mode::Listening) cancel_listening("cancelled");
       else if (overlay_ != Overlay::None) dismiss_overlay();
       else if (mode_ == Mode::Thinking || mode_ == Mode::Responding) cancel_turn();
+      else if (interpret_flip_ && can_talk()) send(proto::message("interpret.flip"));  // the other one speaks next
       else if (dashboard_ready_ && paired_) {
         overlay_ = Overlay::Dashboard;
         overlay_until_ = 0;
@@ -1923,13 +1952,14 @@ void App::start_new_session() {
   send(proto::message("session.new"));
   reply_.clear();
   user_echo_.clear();
-  status_ = tr(i18n::Msg::StartingNewSession);
+  // In interpreter mode the hold leaves it instead: Hermes takes the same message that way.
+  status_ = tr(interpret_ ? i18n::Msg::InterpreterOff : i18n::Msg::StartingNewSession);
   scroll_ = -1;
   mode_ = Mode::Thinking;
   mode_since_ = now();
   last_turn_rx_ = now();
   turn_started_ = false;
-  set_hint_flash(tr(i18n::Msg::NewSession));
+  set_hint_flash(tr(interpret_ ? i18n::Msg::InterpreterOff : i18n::Msg::NewSession));
 }
 
 void App::cancel_turn() {
@@ -2022,7 +2052,7 @@ void App::scroll_body(int delta) {
   const std::string& body = card ? card_body_ : reply_;
   if (body.empty() || !ui_) return;
   int& pos = card ? card_scroll_ : scroll_;
-  int total = static_cast<int>(wrap_text(body, ui_->layout().body_cols).size());
+  int total = static_cast<int>(wrap_text(body, ui_->body_cols(model_)).size());
   int max_first = std::max(0, total - ui_->body_rows(model_));
   int cur = pos < 0 ? max_first : std::min(pos, max_first);
   pos = std::max(0, std::min(max_first, cur + delta));
@@ -2054,7 +2084,7 @@ bool App::turn_page() {
   }
   if (!pos) return false;
   const int rows = ui_->body_rows(model_);
-  const int total = static_cast<int>(wrap_text(*body, ui_->layout().body_cols).size());
+  const int total = static_cast<int>(wrap_text(*body, ui_->body_cols(model_)).size());
   const int max_first = std::max(0, total - rows);
   if (*pos >= max_first) return false;
   *pos = std::min(max_first, *pos + std::max(1, rows - 1));  // keep one line of context
@@ -2435,7 +2465,7 @@ void App::tick() {
       update_model();
     } else if (held >= kNewSessionHintMs && can_talk()) {
       uint32_t left = (kNewSessionHoldMs - held + 999) / 1000;
-      std::string hint = tr(i18n::Msg::NewSessionIn, {std::to_string(left)});
+      std::string hint = tr(interpret_ ? i18n::Msg::InterpreterOffIn : i18n::Msg::NewSessionIn, {std::to_string(left)});
       if (hint != hint_flash_) {
         set_hint_flash(std::move(hint));
         hint_countdown_ = true;
@@ -2482,6 +2512,7 @@ void App::update_model() {
   m.clock_date.clear();
   m.detail.clear();
   m.body.clear();
+  m.body_scale = 0;
   m.yes.clear();
   m.no.clear();
   m.qr = nullptr;
@@ -2771,14 +2802,16 @@ void App::update_model() {
     m.hint = tr(Msg::ButtonToStop, {cancel});
   } else if (mode_ == Mode::Responding) {
     m.screen = Screen::Responding;
-    m.headline = m.speaking ? tr(Msg::Speaking) : "Hermes";
+    m.headline = m.speaking ? tr(Msg::Speaking) : interpret_ ? interpret_label_.c_str() : "Hermes";
     m.detail = status_;
     m.body = reply_;
     m.hint = profile_.touch_screen && touch_talk_ ? std::string(tr(Msg::HoldToReply)) : tr(Msg::ButtonToReply, {talk});
     // Spoken audio can start before the text arrives: let the mascot talk meanwhile.
     m.hero = reply_.empty();
     // While it is spoken, the face talks over the reply's latest two lines, where they fit.
-    if (m.speaking && !reply_shown_ && ui_ && ui_->talk_caption_fits()) {
+    if (interpret_) {
+      interpret_text(m);  // the translation is for the other person to read: never the caption
+    } else if (m.speaking && !reply_shown_ && ui_ && ui_->talk_caption_fits()) {
       m.hero = true;
       m.caption_lines = 2;
       const std::string& text = reply_.empty() ? status_ : reply_;
@@ -2817,6 +2850,15 @@ void App::update_model() {
                    ((sessions || timing) ? "\n" + m.detail : "");
         m.caption_lines = 2;
       }
+      if (interpret_) {  // who speaks next and into what, in place of the greeting
+        m.headline = interpret_label_;
+        m.detail = tr(Msg::Interpreter);
+        m.name_target = false;
+        m.caption_lines = 1;
+      }
+    } else if (interpret_) {
+      m.headline = interpret_label_;
+      interpret_text(m);
     }
     if (clock_showing_) {
       // The resting clock owns the whole panel: the time, the date and the mascot.
@@ -2884,6 +2926,7 @@ json::Value App::status_value() const {
   if (!pairing_code_.empty()) s.set("pairing_code", pairing_code_);
   if (!unpaired_reason_.empty()) s.set("unpaired_reason", unpaired_reason_);
   if (!prompt_id_.empty()) s.set("prompt", prompt_id_);
+  if (interpret_) s.set("interpret", interpret_label_);
   if (timer_active()) s.set("timer", timer_value());
   if (on_phone_pair) s.set("phone", phone_value());
   if (!fatal_.empty()) s.set("error", fatal_);

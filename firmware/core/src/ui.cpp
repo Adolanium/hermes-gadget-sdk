@@ -597,7 +597,7 @@ void Ui::draw_frame(const UiModel& m) {
                   .val(m.speaking)
                   .get();
   Hash content;
-  content.val(m.screen).add(m.detail).add(m.body).add(m.code).val(m.scroll).val(m.color_test)
+  content.val(m.screen).add(m.detail).add(m.body).val(m.body_scale).add(m.code).val(m.scroll).val(m.color_test)
       .val(m.qr ? m.qr->size : 0);
   for (const DashRow& row : m.dash) content.add(row.label).add(row.value).val(row.tone).val(row.heading);
   if (m.screen == Screen::Settings) {
@@ -903,12 +903,24 @@ void Ui::draw_header(Canvas& c, const UiModel& m) {
   c.fill_rect(4 * s, y0 + hh - 1, info_.width - 8 * s, 1, kFaint);
 }
 
-int Ui::body_rows(const UiModel& m) const {
-  int rows = layout_.body_rows;
-  if (m.detail.empty()) return rows;
+int Ui::detail_rows(const UiModel& m) const {
+  if (m.detail.empty()) return 0;
+  const int rows = layout_.body_rows;
   int detail = static_cast<int>(wrap_text(m.detail, layout_.body_cols).size());
   int max_detail = m.body.empty() ? rows : std::min(2, rows - 1);
-  return rows - std::max(0, std::min(detail, max_detail));
+  return std::max(0, std::min(detail, max_detail));
+}
+
+int Ui::body_rows(const UiModel& m) const {
+  const int rows = layout_.body_rows - detail_rows(m);
+  if (!m.body_scale) return rows;
+  // Larger lines share the height the base-size rows had.
+  return rows * Canvas::line_height(layout_.scale) / Canvas::line_height(layout_.scale + m.body_scale);
+}
+
+int Ui::body_cols(const UiModel& m) const {
+  if (!m.body_scale) return layout_.body_cols;
+  return cols_for(info_.width - 8 * layout_.scale, layout_.scale + m.body_scale);
 }
 
 void Ui::draw_content(Canvas& c, const UiModel& m) {
@@ -960,7 +972,7 @@ void Ui::draw_content(Canvas& c, const UiModel& m) {
     uint16_t dcol = m.screen == Screen::Error || m.screen == Screen::Offline ? kRed : kDim;
     if (m.screen == Screen::Thinking) dcol = kBlue;
     auto detail_lines = wrap_text(m.detail, layout_.body_cols);
-    int shown = layout_.body_rows - rows;
+    int shown = detail_rows(m);
     for (int i = 0; i < shown; ++i) {
       c.text(margin, y, detail_lines[static_cast<size_t>(i)], s, dcol);
       y += lh;
@@ -968,17 +980,19 @@ void Ui::draw_content(Canvas& c, const UiModel& m) {
   }
   if (m.body.empty() || rows <= 0) return;
 
-  auto lines = wrap_text(m.body, layout_.body_cols);
+  const int bs = s + m.body_scale;  // a large body (a translation) keeps the base margins
+  const int blh = Canvas::line_height(bs);
+  auto lines = wrap_text(m.body, body_cols(m));
   int total = static_cast<int>(lines.size());
   int max_first = std::max(0, total - rows);
   int first = m.scroll < 0 ? max_first : std::min(m.scroll, max_first);
-  uint16_t col = m.screen == Screen::Ready ? kDim : kText;
+  uint16_t col = m.screen == Screen::Ready && !m.body_scale ? kDim : kText;
   for (int i = 0; i < rows && first + i < total; ++i) {
-    c.text(margin, y + i * lh, lines[static_cast<size_t>(first + i)], s, col);
+    c.text(margin, y + i * blh, lines[static_cast<size_t>(first + i)], bs, col);
   }
   if (total > rows) {
     // Scroll indicator along the right edge.
-    int track_y = y, track_h = rows * lh;
+    int track_y = y, track_h = rows * blh;
     int thumb_h = std::max(2 * s, track_h * rows / total);
     int thumb_y = track_y + (track_h - thumb_h) * first / std::max(1, max_first);
     c.fill_rect(w - 2 * s, track_y, s, track_h, kFaint);

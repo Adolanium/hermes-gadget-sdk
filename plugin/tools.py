@@ -1,5 +1,5 @@
 """Agent tools for gadgets: inspect devices, show content on a screen, invoke
-device-declared actions.
+device-declared actions, turn a gadget into an interpreter.
 
 Schemas are static (prompt caching); what a device can do is discovered at run
 time through ``gadget_devices`` and the per-device context Hermes receives with
@@ -63,6 +63,34 @@ ACTION_SCHEMA = {
             "device": _DEVICE_PARAM,
         },
         "required": ["action"],
+    },
+}
+
+INTERPRET_SCHEMA = {
+    "name": "gadget_interpret",
+    "description": "Turn a gadget into an interpreter between two languages, or back. While it is on, everything "
+                   "said to that gadget is translated into the other language, spoken and shown, in a chat of its "
+                   "own: this conversation gets none of it, and a spoken request to stop would be translated too. "
+                   "The user stops it by holding the gadget's cancel control, or you stop it from another chat. "
+                   "After turning it on, say briefly that the interpreter is ready and who speaks first.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "languages": {
+                "type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2,
+                "description": "The two languages as codes (es, en, pt-BR) or English names; the one that "
+                               "speaks first comes first. Omit when stopping.",
+            },
+            "stop": {"type": "boolean", "description": "true leaves interpreter mode."},
+            "detect": {
+                "type": "string", "enum": ["turns", "auto"],
+                "description": "turns (default): the speakers alternate and each recording is transcribed in "
+                               "the language whose turn it is. auto: the speech-to-text provider detects the "
+                               "language; use it only when asked.",
+            },
+            "device": _DEVICE_PARAM,
+        },
+        "required": [],
     },
 }
 
@@ -191,6 +219,33 @@ def gadget_action(args: dict, **_kw) -> str:
     return json.dumps({"success": True, "device": session.name, "action": action, "result": result})
 
 
+def gadget_interpret(args: dict, **_kw) -> str:
+    adapter = _adapter()
+    if adapter is None:
+        return _error("gadget hub is not running in this process")
+    session, err = _resolve(adapter, args.get("device"))
+    if err:
+        return _error(err)
+    if (err := _usable(session)):
+        return _error(err)
+    try:
+        if args.get("stop"):
+            was_on = _run(adapter, adapter.interpret_stop(session))
+            return json.dumps({"success": True, "device": session.name, "interpreting": False, "was_on": was_on})
+        languages = args.get("languages")
+        if not isinstance(languages, list) or len(languages) != 2:
+            return _error("languages must name two languages, or pass stop: true")
+        state = _run(adapter, adapter.interpret_start(session, languages[0], languages[1],
+                                                      str(args.get("detect") or "") == "auto"))
+    except ValueError as exc:
+        return _error(str(exc))
+    except Exception as exc:
+        return _error(f"could not reach {session.name}: {exc}")
+    return json.dumps({"success": True, "device": session.name, "interpreting": True, **state.describe(),
+                       "leave": "the user holds the gadget's cancel control, or call this tool with stop: true "
+                                "from another chat"})
+
+
 def available() -> bool:
     """Reachability: tools work only in the process hosting the gadget hub."""
     return runtime.any_active()
@@ -201,6 +256,7 @@ def register_tools(ctx) -> None:
         (DEVICES_SCHEMA, gadget_devices, "📟"),
         (DISPLAY_SCHEMA, gadget_display, "🖥️"),
         (ACTION_SCHEMA, gadget_action, "🎛️"),
+        (INTERPRET_SCHEMA, gadget_interpret, "🗣️"),
     ):
         ctx.register_tool(
             name=schema["name"], toolset=TOOLSET, schema=schema, handler=handler,

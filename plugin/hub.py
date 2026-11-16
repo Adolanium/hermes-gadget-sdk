@@ -92,6 +92,9 @@ class HubDelegate:
     async def on_cancel(self, session: "DeviceSession") -> None:
         pass
 
+    async def on_interpret_flip(self, session: "DeviceSession") -> None:
+        """The device's user switched which language is spoken next (interpreter mode)."""
+
     async def on_new_session(self, session: "DeviceSession") -> None:
         pass
 
@@ -481,6 +484,11 @@ class DeviceSession:
         self.note(status=text)
         await self.send_json(protocol.message("status", text=text))
         return True
+
+    async def send_interpret(self, message: dict) -> None:
+        """Tell the device its interpreter mode (an ``interpret`` message from plugin/interpret.py).
+        Firmware that doesn't draw the mode ignores it; the translations reach it as replies all the same."""
+        await self.send_json(message)
 
     async def send_notice(self, text: str, ttl_s: float = 8) -> None:
         await self.send_json(protocol.message("notice", text=text, ttl_s=ttl_s))
@@ -1254,6 +1262,9 @@ class DeviceHub:
         await session.stop_audio()
         session.spawn(self.delegate.on_new_session(session))
 
+    async def _h_interpret_flip(self, session: DeviceSession, msg: dict) -> None:
+        session.spawn(self.delegate.on_interpret_flip(session))
+
     async def _h_prompt_reply(self, session: DeviceSession, msg: dict) -> None:
         prompt_id = str(msg.get("id") or "")[:64]
         answer = msg.get("answer")
@@ -1319,6 +1330,7 @@ class DeviceHub:
         "audio.cancel": _h_audio_cancel,
         "cancel": _h_cancel,
         "session.new": _h_session_new,
+        "interpret.flip": _h_interpret_flip,
         "prompt.reply": _h_prompt_reply,
         "action.result": _h_action_result,
         "diag": _h_diag,

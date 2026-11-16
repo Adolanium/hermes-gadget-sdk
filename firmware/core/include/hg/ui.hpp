@@ -84,6 +84,7 @@ struct UiModel {
   std::string headline;  // header band, next to the indicator
   std::string detail;    // secondary line (status phrase, URL, error)
   std::string body;      // main text (reply, card body)
+  uint8_t body_scale = 0;  // text scale steps the body is drawn above the base (a translation, large)
   std::string code;      // pairing code
   int scroll = -1;       // first visible body line; -1 pins to the end
   uint8_t level = 0;     // microphone level 0..100
@@ -204,8 +205,10 @@ class Ui {
   // A canvas over that area, and a flush of its rows [y0, y1).
   Canvas canvas();
   void flush(int y0, int y1);
-  // Body text rows visible on a text screen for this model (after detail lines).
+  // Body text rows visible on a text screen for this model (after detail lines), and the
+  // characters a body line holds, both at the model's body_scale.
   int body_rows(const UiModel& m) const;
+  int body_cols(const UiModel& m) const;
   // Dashboard rows that fit the content band.
   int dash_rows() const;
   // The largest size the Ready screen draws the face at (one caption line, no name panel): a colour face
@@ -265,6 +268,7 @@ class Ui {
   void draw_top(Canvas& c, const UiModel& m);
   void draw_header(Canvas& c, const UiModel& m);
   void draw_content(Canvas& c, const UiModel& m);
+  int detail_rows(const UiModel& m) const;  // detail lines drawn above the body
   bool draw_qr(Canvas& c, const UiModel& m, int y0, int y1);
   void draw_dashboard(Canvas& c, const UiModel& m, int y0, int y1);
   void draw_profiles(Canvas& c, const UiModel& m);

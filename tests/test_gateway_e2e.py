@@ -170,6 +170,68 @@ def test_device_pairs_talks_and_is_driven_by_the_agent(gateway, make_sim):
     assert any(p.endswith("/audio/speech") for p in paths)
 
 
+def test_a_gadget_interprets_between_two_languages_in_a_chat_of_its_own(gateway, make_sim):
+    sim = make_sim(gateway["url"], name="Interpreter")
+    assert sim.wait_for(lambda: sim.status().get("pairing_code"), timeout=60)
+    approved = _hermes(gateway["home"], "pairing", "approve", "gadget", sim.status()["pairing_code"])
+    assert approved.returncode == 0, approved.stdout + approved.stderr
+    assert sim.wait_screen("ready", timeout=30)
+    device_id = sim.status()["device_id"]
+    api = gateway["api"]
+
+    def chats():
+        return [r for r in api if r["path"].endswith("/chat/completions")]
+
+    # Something in the device's own conversation, to look for later.
+    sim.type_text("remember the word pineapple")
+    assert sim.wait_for(lambda: "pineapple" in (sim.last_received("reply") or {}).get("text", ""), timeout=90)
+    assert sim.wait_for(lambda: sim.last_received("turn.end") is not None, timeout=30)
+    assert sim.wait_screen("ready", timeout=60)
+
+    started = _hermes(gateway["home"], "gadget", "interpret", device_id, "es", "en")
+    assert started.returncode == 0 and "ES > EN" in started.stdout, started.stdout + started.stderr
+    assert sim.wait_for(lambda: sim.status().get("interpret") == "ES > EN", timeout=10)
+
+    # The Spanish speaker: transcribed in Spanish, answered with the English translation, spoken.
+    del api[:]
+    pcm = b"".join(struct.pack("<h", int(7000 * math.sin(2 * math.pi * 300 * i / 16000))) for i in range(16000))
+    sim.received.clear()
+    sim.speak_pcm(pcm)
+    assert sim.wait_for(lambda: (sim.last_received("reply") or {}).get("text") == "Where is the station?",
+                        timeout=90), sim.received
+    assert sim.last_received("transcript")["text"] == "donde esta la estacion"
+    assert sim.wait_for(lambda: sim.last_received("audio.start") is not None, timeout=30)
+    assert sim.wait_for(lambda: sim.status().get("interpret") == "EN > ES", timeout=30)
+    assert sim.wait_screen("ready", timeout=60)
+
+    # The gadget changed hands: the same sound is now the English speaker's.
+    sim.received.clear()
+    sim.speak_pcm(pcm)
+    assert sim.wait_for(lambda: (sim.last_received("reply") or {}).get("text")
+                        == "Siga recto y gire a la izquierda.", timeout=90), sim.received
+    assert sim.last_received("transcript")["text"] == "go straight and turn left"
+    assert sim.wait_for(lambda: sim.status().get("interpret") == "ES > EN", timeout=30)
+    assert [r["language"] for r in api if r["path"].endswith("/audio/transcriptions")] == ["es", "en"]
+    # Every model call of the exchange carried the instruction, and none carried the device's conversation.
+    assert chats() and all(r["interpreter"] for r in chats())
+    assert not any("pineapple" in r["history"] for r in chats())
+
+    # Holding CANCEL leaves the mode; the device's conversation is as it was, without the translations.
+    assert sim.wait_screen("ready", timeout=60)
+    sim.console("new-session")
+    assert sim.wait_for(lambda: "interpret" not in sim.status(), timeout=30)
+    assert sim.wait_screen("ready", timeout=30)
+    del api[:]
+    sim.received.clear()
+    sim.type_text("hello again")
+    assert sim.wait_for(lambda: "You said: hello again" in (sim.last_received("reply") or {}).get("text", ""),
+                        timeout=90)
+    assert not chats()[-1]["interpreter"]
+    assert "pineapple" in chats()[-1]["history"] and "estacion" not in chats()[-1]["history"]
+    stopped = _hermes(gateway["home"], "gadget", "interpret", device_id, "off")
+    assert stopped.returncode == 0 and "was not interpreting" in stopped.stdout, stopped.stdout + stopped.stderr
+
+
 # A second profile beside the default one: its own model name, its gadget listener off
 # and the plugin on, as docs/hermes-integration.md asks of every profile a gadget may use.
 OPS_CONFIG = """\

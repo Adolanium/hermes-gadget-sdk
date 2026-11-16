@@ -369,6 +369,7 @@ class App {
   void h_error(const json::Value& m);
   void h_prompt(const json::Value& m);
   void h_prompt_close(const json::Value& m);
+  void h_interpret(const json::Value& m);
   void h_dashboard(const json::Value& m);
   void h_ota_offer(const json::Value& m);
   void h_ota_begin(const json::Value& m);
@@ -793,6 +794,14 @@ class App {
   uint32_t cancel_down_at_ = 0;
   std::string status_;
   std::string user_echo_;
+  // Interpreter mode (docs/protocol.md#interpreter-mode): Hermes translates what is said instead of
+  // answering. The label names the languages ("ES > EN"); with flip, a short CANCEL press on the
+  // idle screen asks Hermes to switch who speaks next.
+  bool interpret_ = false;
+  bool interpret_flip_ = false;
+  std::string interpret_label_;
+  void interpret_off();
+  void interpret_text(UiModel& m);  // the translation large, what was said small above it
   int scroll_ = -1;
   uint32_t page_at_ = 0;  // when long text turns its next page
   uint8_t level_ = 0;

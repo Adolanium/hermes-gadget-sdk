@@ -72,6 +72,7 @@ Because the id is derived from the key, nobody can claim another device's id wit
 - `caps.ota` (`{"max_size": 2031616}`) means the device installs firmware updates over this connection, up to `max_size` bytes.
 - `caps.dashboard` (`{"v": 1, "rows": 6}`) means the device draws the [dashboard](#dashboard). `v` is the newest layout it draws, and `rows` is how many lines fit on its screen at once.
 - `actions` is the device's tool manifest. Each action has a JSON-Schema `params` object and a `description` written for the model.
+- `caps.interpret: 1` means the device draws [interpreter mode](#interpreter-mode).
 - `caps.profiles: true` means the device can switch Hermes profiles (see [Profiles](#profiles)). `profile` is the profile it used last; it is omitted for `default`.
 - `caps.faces: 1` means the device draws a face that the server sends for the profile answering it (see [Faces](#faces)). `caps.faces: {"v": 2, "px": 192}` means it also draws colour faces, at `px` pixels square (at most 256): the largest size its Ready screen draws the face at. Where Ready has less room, for example with a second caption line while the device offers profiles, the device scales the face down. `"frames": true` in that object means its colour faces also blink and talk. `"thumbs": 96` in that object means the device's profile grid also takes a thumbnail of each offered profile, 96 pixels square (16 to 128); see [Profile thumbnails](#profile-thumbnails). `face` is the `hash` of the face it holds from an earlier connection; it is omitted when it shows the mascot. `thumbs` (`{"ops": "9c1d0e2f3a4b5c6d"}`) names the thumbnails it holds from an earlier connection, profile id to `hash`; it is `{}` when it holds none, and omitted by a device without `caps.faces.thumbs`.
 - `token` is required only when the host sets `GADGET_ACCESS_TOKEN`. A mismatch is rejected with error code `bad_token`.
@@ -209,6 +210,7 @@ The Hermes plugin makes a profile's thumbnail from its `gadget-face.bin` (the id
 | `{"type": "audio.cancel", "id": "a4", "stream": 4, "reason": "too short"}` | Discard the utterance |
 | `{"type": "cancel"}` | Stop the current turn (Hermes `/stop`). With no turn running it only stops the reply audio the server is still sending, and no `/stop` is sent |
 | `{"type": "session.new"}` | Start a fresh conversation (Hermes `/new`). The reference firmware sends it when CANCEL is held for 2 s |
+| `{"type": "interpret.flip"}` | Switch who speaks next; see [Interpreter mode](#interpreter-mode) |
 | `{"type": "prompt.reply", "id": "q1", "answer": "yes"}` | The answer (`yes` or `no`) to a `prompt` |
 
 - Utterances shorter than 0.25 s are dropped with a `notice`, and the server then sends a `turn.end` with an empty `turn` and outcome `cancelled`, so the device stops waiting.
@@ -228,6 +230,7 @@ The Hermes plugin makes a profile's thumbnail from its `gadget-face.bin` (the id
 | `{"type": "notice", "text": "...", "ttl_s": 8}` | Transient one-line message |
 | `{"type": "prompt", "id": "q1", "title": "Confirm /new", "text": "...", "ttl_s": 300}` | A yes/no question; see [Questions](#questions) |
 | `{"type": "prompt.close", "id": "q1"}` | The question was withdrawn (timed out or answered elsewhere) |
+| `{"type": "interpret", "on": true, "label": "ES > EN", "flip": true}` | The device interprets between two languages; see [Interpreter mode](#interpreter-mode) |
 | `{"type": "error", "code": "...", "message": "..."}` | Protocol or auth error; the server usually closes the connection next |
 
 Reply text is already shaped for the device: Markdown is stripped and the text is folded to what its `charset` draws. `"ascii"` gets printable ASCII only. `"latin1"` gets ASCII and Latin-1 (U+00A1 to U+00FF, so accented letters, ¿ ¡ and the like), with no-break spaces as plain spaces; anything else is folded to the nearest letter or dropped. Text is UTF-8 either way, and devices render it as-is. The reference firmware reports `"latin1-cyrillic"`: its font also has the Russian alphabet (U+0410 to U+044F, Ё and ё), which that charset keeps on top of `"latin1"`; other Cyrillic letters are folded or dropped as other scripts are. Firmware from before that reports `"latin1"`, and older firmware still `"ascii"`. A plugin older than `latin1-cyrillic` does not know it and leaves the text unfolded: Russian then shows, but typographic quotes, dashes and emoji that it would have folded draw as `?`. Update the plugin before the firmware. Firmware built with the Chinese font (`HG_CJK_FONT`, [cjk.md](cjk.md)) reports `"cjk"`: Latin-1 plus Chinese, Japanese kana, Korean and fullwidth characters are kept, and the rest folds as for `"latin1"`.
@@ -300,6 +303,20 @@ Hermes asks before some actions: destructive commands such as `/new`, a costly m
 - The device answers with `prompt.reply` exactly once, or not at all if the question expires (`ttl_s`, when present) or is withdrawn with `prompt.close`. A command approval carries Hermes's approval timeout (`approvals.timeout`, 300 s by default) as its `ttl_s`.
 - The server sends one question at a time. A question asked while a device was offline is sent again when it reconnects.
 - Text is shaped like replies: short, plain and already folded to the device's charset. A dangerous-command approval is the exception: its text is the command as it will run, unchanged, or a notice to approve on the host when the command doesn't fit one line of `text_cols`, less two columns, as-is. The server ignores a yes to that notice.
+
+### Interpreter mode
+
+In interpreter mode Hermes translates what is said to the device into another language instead of answering it. The turn itself is an ordinary one: `turn.start`, `transcript` with what was said, `reply` with the translation, reply audio, `turn.end`.
+
+- `caps.interpret: 1` in `hello` means the device draws the mode. The server sends the messages below to every device; one that does not know them ignores them and shows each translation as a reply.
+- `{"type": "interpret", "on": true, "label": "ES > EN", "flip": true}` (server → device) turns the mode on, or updates it. `label` is short ASCII text that names the languages: `ES > EN` when the next recording is taken as Spanish and translated into English, `ES <> EN` when the server detects the language. `flip` says whether the device may ask to switch who speaks next. The server sends the message again after each turn that switches the speaker, and after a reconnect.
+- `{"type": "interpret", "on": false}` (server → device) turns it off. The device also leaves the mode when the connection ends or it is unpaired.
+- `{"type": "interpret.flip"}` (device → server) asks the server to switch who speaks next. The server answers with a new `interpret` message, and ignores the request during a turn or when `flip` was false. The device shows the new label only when that message arrives.
+- `session.new` from a device in the mode leaves it instead of starting a new conversation: the server sends `interpret` with `on: false`, a `turn.end` with an empty `turn` and outcome `cancelled`, and a `notice`.
+
+The reference firmware shows `label` as the headline of the idle screen and of the reply. It draws the translation one text size larger when the whole text fits the screen that way, with the `transcript` above it at the usual size. A short CANCEL press on the idle screen sends `interpret.flip` when `flip` is true, in place of opening the dashboard. Holding CANCEL counts down to leaving the mode.
+
+Translations are shaped like replies. For a translation in a script the device's `charset` does not cover, the server sends a line saying that it is spoken only, in place of the text.
 
 ### Device actions
 

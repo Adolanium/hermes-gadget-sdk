@@ -16,6 +16,7 @@ The screenshots come from the desktop simulator, which runs the same device core
 - **Read a reply before the speech ends.** Tap the screen, or press Up or Down, to see the whole text at once. [Talk, type, and interrupt](using-gadget.md)
 - **A reply you missed comes back.** If the screen went dark before you read a reply, the next wake shows it again from the top. [Device settings](using-gadget.md#device-settings-and-hardware-checks)
 - **Long tasks.** Once Hermes starts a turn, the device waits up to 30 minutes for it to end, with the screen lit. [Device settings](using-gadget.md#device-settings-and-hardware-checks)
+- **Interpreter.** Two people who speak different languages pass the gadget back and forth: it says each thing in the other language and shows the translation in large text. [Interpreter mode](using-gadget.md#interpreter-mode)
 - **Confirmation questions.** Hermes asks before risky commands; TALK or a tap means yes, CANCEL or a swipe down means no. [Confirmations](hermes-integration.md#confirmations)
 - **Cards and pictures.** The agent can put a reminder, a note or a picture on the screen. A card that arrives while the screen is dark waits for it to light. [Talk, type, and interrupt](using-gadget.md)
 - **Timers.** Ask for a timer by voice. The time left shows on every screen, and the alarm beeps for a minute on boards with a speaker. [Timers](using-gadget.md#timers)
@@ -106,7 +107,7 @@ The screenshots come from the desktop simulator, which runs the same device core
 - **Status tiles.** Put up to eight lines, such as a NAS's state, on that list from a script on the host. [The dashboard](using-gadget.md#watch-hermes-sessions-on-the-dashboard)
 - **Gadgets tab.** The Hermes web dashboard lists your devices with board, firmware, last seen, online state and battery. [The Gadgets tab](hermes-integration.md#the-gadgets-tab-in-the-hermes-dashboard)
 - **Gadgets page in Hermes Desktop.** A gadget that runs in the desktop app's window, pairing with one click, a live copy of each device's screen, and buttons to send a card or run an action. [The Gadgets page](hermes-integration.md#the-gadgets-page-in-hermes-desktop)
-- **Device commands.** `hermes gadget devices`, `info`, `pair`, `update`, `bot-chat` and `forget` manage devices from the host. [Hermes integration](hermes-integration.md#hermes-surfaces-the-sdk-uses)
+- **Device commands.** `hermes gadget devices`, `info`, `pair`, `update`, `interpret`, `bot-chat` and `forget` manage devices from the host. [Hermes integration](hermes-integration.md#hermes-surfaces-the-sdk-uses)
 - **Speech language.** Set the language gadget speech is transcribed in, whichever profile answers. [Fix the language of gadget speech](hermes-integration.md#fix-the-language-of-gadget-speech)
 - **Faster replies.** Settings in Hermes that shorten the wait for an answer. [Making replies fast](hermes-integration.md#making-replies-fast)
 
