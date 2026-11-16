@@ -156,6 +156,7 @@ HELP = """commands:
   image <path>                 send an image (needs Pillow)
   dashboard [json]             send a dashboard (sample sessions and tiles without json);
                                CANCEL on the idle screen opens it
+  play <path> | stop           play a sound file on every speaker (WAV; other formats need ffmpeg)
   update <path>                install a firmware image (firmware.bin) over the air
   quit"""
 
@@ -256,6 +257,17 @@ async def _console(hub: DeviceHub, brain: EchoBrain, stop: asyncio.Event) -> Non
                         await s.send_dashboard(dashboard.message(
                             given.get("sessions") or [], given.get("tiles") or [], charset=s.charset,
                             cols=s.display.get("text_cols")))
+            elif cmd in ("play", "stop"):
+                from hermes_gadget_plugin import playback
+
+                for s in sessions:
+                    if cmd == "stop":
+                        await playback.stop(s)
+                    elif s.has_speaker:
+                        path = Path(rest.strip()).expanduser()  # the developer's own file: any folder
+                        source = await asyncio.to_thread(
+                            playback.open_source, str(path), s.speaker_rate, roots=[path.resolve().parent])
+                        await playback.play(s, source, title=path.name, max_s=playback.max_seconds({}))
             elif cmd == "update":
                 for s in sessions:
                     s.spawn(_update(s, rest.strip()))

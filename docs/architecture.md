@@ -117,6 +117,7 @@ A board without PSRAM, or whose PSRAM fails the headroom check or the allocation
 | `tools.py` | Agent tools, run on agent worker threads and bridged to the hub loop with `run_coroutine_threadsafe` |
 | `textfmt.py` | Markdown → plain text, typography → ASCII |
 | `audio.py` | WAV packing, streaming resampler, file decoding (WAV natively, the rest through ffmpeg) |
+| `playback.py` | `gadget_play`: which files and URLs may be opened, decoding a chunk at a time (WAV natively, the rest through ffmpeg), and the task that feeds `AudioOut` no faster than it sends |
 | `imaging.py` | Any image → RGB565 that fits the device's image box (Pillow) |
 | `store.py` | Device keys and pending pairing codes in the plugin's data directory |
 
@@ -132,6 +133,7 @@ A board without PSRAM, or whose PSRAM fails the headroom check or the allocation
   - The key is sent once, at enrollment. After that the device proves possession with an HMAC over a fresh server nonce, so recorded traffic cannot be replayed.
   - Another device cannot take over an enrolled id.
 - **Authorization:** Hermes's own allowlists and DM pairing. Every message from a device is authorized by the gateway runner exactly like a message from a Telegram user, and pairing approval happens on the Hermes host. A device that switches profiles is approved once, in the default profile: the plugin approves it in each profile when it first switches there, and a revocation in the default profile sends it back.
+- **Audio the agent plays:** only a `gadget_play` tool call makes the gateway open a file or fetch a URL, never a device message. Files come from Hermes's audio cache and the folders in `play_dirs`; URLs are `http(s)` only and pass Hermes's URL policy (no private or internal addresses by default) at every connection and redirect; `ffmpeg` decodes what it is handed and may open nothing else. See [Playing audio](hermes-integration.md#playing-audio).
 - **Transport:** use `wss://` (`tls_cert`/`tls_key`) on any network you don't trust. On a home LAN, plain `ws://` exposes conversation content to anyone on the network, though not the device key after enrollment.
 
 ## Why not use an existing Hermes API instead of a plugin?

@@ -219,6 +219,11 @@ class AudioOut:
         self.done.set()
 
     @property
+    def backlog_s(self) -> float:
+        """Audio written but not yet sent. A long source is written no faster than this drains."""
+        return self._queue.qsize() * AUDIO_FRAME_MS / 1000
+
+    @property
     def playing(self) -> bool:
         """Still being sent, or sent and still in the device's buffer. A new stream now would cut it off."""
         if not self.done.is_set():
@@ -326,6 +331,7 @@ class DeviceSession:
         self._send_lock = asyncio.Lock()
         self._upload: _Upload | None = None
         self._audio_out: AudioOut | None = None
+        self.playback = None  # a gadget_play playback, waiting or playing (playback.Playback)
         self._stream_counter = 0
         self._pending: dict[str, asyncio.Future] = {}
         self._tasks: set[asyncio.Task] = set()
@@ -362,8 +368,12 @@ class DeviceSession:
 
     @property
     def audio_playing(self) -> bool:
-        """An outbound audio stream is still being sent or played; a new one would cut it off."""
-        return self._audio_out is not None and self._audio_out.playing
+        """Speech is still being sent or played; a new stream would cut it off. Audio the agent
+        plays with gadget_play does not count: speech waits for speech, and takes over from that."""
+        out = self._audio_out
+        if out is None or not out.playing:
+            return False
+        return self.playback is None or self.playback.out is not out
 
     @property
     def speaker_formats(self) -> list[str]:
@@ -1201,6 +1211,8 @@ class DeviceHub:
         if not 4000 <= rate <= 48000:
             await session.send_notice(f"Unsupported sample rate {rate}")
             return
+        # The device stops its speaker to record: stop sending it a stream it no longer plays.
+        await session.stop_audio()
         session._upload = _Upload(
             id=str(msg.get("id") or ""), stream=int(msg.get("stream") or 0), rate=rate, started=time.monotonic())
         _note(session, state="listening", heard="", reply="", status="")
