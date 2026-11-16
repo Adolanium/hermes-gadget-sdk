@@ -221,7 +221,8 @@ class App {
   // A choice from Hermes on a touchscreen (TouchGestures): whether its list takes the touch, a tap
   // on an answer, and a swipe up, which shows the next page of a list longer than the screen.
   bool choice_touch_live() const;
-  void choice_tap(int x, int y);
+  // held_ms: how long the finger was down. The press guard counts from when it went down.
+  void choice_tap(int x, int y, uint32_t held_ms = 0);
   bool choice_page_step();
   // The roster a welcome may bring: the device keeps the first kMaxProfiles entries.
   static constexpr size_t kMaxProfiles = 32;

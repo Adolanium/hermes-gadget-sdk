@@ -1566,8 +1566,8 @@ bool App::choice_touch_live() const {
   return profile_.touch_screen && !display_sleeping_ && choice_showing() && model_.screen == Screen::Choice;
 }
 
-void App::choice_tap(int x, int y) {
-  if (!choice_touch_live() || !ui_ || !choice_armed(now())) return;
+void App::choice_tap(int x, int y, uint32_t held_ms) {
+  if (!choice_touch_live() || !ui_ || !choice_armed(now() - held_ms)) return;
   const int row = ui_->choice_row_hit(model_, x, y);
   if (row < 0) return;
   answer_choice(row);

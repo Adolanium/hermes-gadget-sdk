@@ -212,7 +212,9 @@ def line(text: str, charset: str = "ascii", cols: int | None = None) -> str:
     """One row of a list (a card's item, a choice's answer): shaped like ``for_device``, on one
     line, and no longer than the device's line when it reports ``text_cols``."""
     text = " ".join(for_device(text, charset).split())
-    return text[:cols] if isinstance(cols, int) and cols > 4 else text
+    # By columns, as the device counts them: a wide character takes two, and what the device cut
+    # further would be cut unseen by the agent.
+    return text[:_cut(text, cols)] if isinstance(cols, int) and cols > 4 else text
 
 
 def for_device(text: str, charset: str = "ascii") -> str:

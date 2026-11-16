@@ -560,3 +560,19 @@ def test_the_simulated_firmware_answers_a_choice_by_touch_and_drops_one_that_tim
     with pytest.raises(gadget_hub.ActionError):
         late.result()
     assert sim.wait_for(lambda: sim.status()["screen"] != "choice", timeout=5)  # choice.close took it down
+
+
+def test_a_row_is_cut_by_the_columns_it_takes_on_the_screen():
+    from hermes_gadget_plugin import textfmt
+
+    wide = "中文" * 10  # 20 characters, two columns each
+    assert textfmt.line(wide, "cjk", 23) == wide[:11]  # 22 columns: the device would cut the rest unseen
+    assert textfmt.line("abc " + wide, "cjk", 10) == "abc " + wide[:3]
+    assert textfmt.line("A very long item that runs off", "ascii", 10) == "A very lon"
+
+
+def test_a_codes_text_keeps_its_spaces(tool):
+    device, _session = tool(caps={"card": CARD})
+    assert json.loads(tools.gadget_display({"title": "Wi-Fi", "qr": " pass word "}))["success"] is True
+    assert device.frames()[0]["qr"] == " pass word "
+    assert json.loads(tools.gadget_display({"qr": "   "}))["success"] is False  # nothing to show

@@ -47,7 +47,9 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
       case State::List: app_.settings_tap(x0_, y0_); break;
       case State::ListDrag: app_.settings_lift(); break;
       case State::Camera: app_.camera_tap(); break;
-      case State::Choice: app_.choice_tap(x0_, y0_); break;
+      case State::Choice:  // a tap picks; a finger that rested on the glass picks nothing
+        if (static_cast<int32_t>(now_ms - t0_) < static_cast<int32_t>(kTapMaxMs)) app_.choice_tap(x0_, y0_, now_ms - t0_);
+        break;
       case State::Side:  // a sideways swipe: travel enough, and more sideways than down or up
         if (std::abs(dx_) >= cfg_.swipe_px && std::abs(dx_) > 2 * std::abs(dy_)) {
           if (in_picker_) app_.profile_page_step(dx_ < 0 ? 1 : -1);  // the next page comes in from the right

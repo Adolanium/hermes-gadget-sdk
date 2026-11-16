@@ -226,7 +226,9 @@ def gadget_display(args: dict, **_kw) -> str:
             progress = max(0, min(100, int(progress)))
         except (TypeError, ValueError):
             return _error("progress must be a number from 0 to 100")
-    qr = str(args.get("qr") or "").strip()  # as given: a code must hold exactly what was asked for
+    qr = str(args.get("qr") or "")  # as given, spaces too: a code must hold exactly what was asked for
+    if not qr.strip():
+        qr = ""
     if len(qr.encode()) > QR_MAX_BYTES:
         return _error(f"qr holds at most {QR_MAX_BYTES} bytes")
     if not (text or title or items or progress is not None or qr):

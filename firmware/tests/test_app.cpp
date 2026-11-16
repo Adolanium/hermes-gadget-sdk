@@ -9860,6 +9860,33 @@ TEST("choice: a yes/no question asked meanwhile goes first and leaves the choice
   CHECK(reply && (*reply)["index"].as_int(-1) == 1);
 }
 
+TEST("choice: a finger held on an answer, or put down inside the press guard, picks nothing") {
+  Rig r(Rig::touch_profile());
+  r.fake.make_panel(320, 240, false);
+  r.bring_online(true);
+  hg::TouchGestures touch(r.app);
+  int row_y = -1;  // where a quick tap picks the first answer
+  for (int y = 0; y < 240 && row_y < 0; y += 4)
+    if (tap_answer(r, touch, 160, y) == 0) row_y = y + 8;
+  CHECK(row_y >= 0);
+  CHECK_EQ(tap_answer(r, touch, 160, row_y), 0);
+  const auto press = [&](uint32_t after_ms, uint32_t held_ms) {
+    r.fake.sent.clear();
+    r.server(R"({"type":"choice","id":"h","title":"Pick","options":["a","b","c","d","e","f"]})");
+    r.advance(after_ms);
+    touch.update(true, 160, row_y, r.fake.clock);
+    r.advance(held_ms);
+    touch.update(false, 0, 0, r.fake.clock);
+    const bool answered = r.fake.last("choice.reply") != nullptr;
+    r.server(R"({"type":"choice.close","id":"h"})");
+    r.advance(20);
+    return answered;
+  };
+  CHECK(press(700, 100));    // a tap
+  CHECK(!press(700, 1000));  // a hold: resting a finger on the glass answers nothing
+  CHECK(!press(500, 200));   // put down before the question could be read, lifted after
+}
+
 TEST("choice: a choice or a question that arrives over the open profile grid closes it and takes the tap") {
   Rig r(Rig::touch_profile());
   r.bring_online_with_profiles();
