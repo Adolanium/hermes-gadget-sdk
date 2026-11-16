@@ -455,7 +455,9 @@ class _HttpxFetch:
     def __init__(self, client, stream, response):
         self._client, self._stream, self._response = client, stream, response
         self.content_type = response.headers.get("content-type", "")
-        self._chunks = response.iter_bytes(64 * 1024)
+        # As it arrives: a block size here makes httpx hold the bytes until the block is full, and
+        # a 24 kbit/s stream needs 22 seconds to fill 64 KB.
+        self._chunks = response.iter_bytes()
 
     def __iter__(self):
         return self._chunks
@@ -508,23 +510,24 @@ class Playback:
             out = self.out = await session.open_audio(src.rate, src.channels)
             await session.send_notice(f"Playing {self.title}", ttl_s=5)
             limit = f"stopped at the {self.max_s / 60:g} minute limit"
+            ended = ""
             budget = int(self.max_s * src.rate) * 2 * src.channels  # of audio
             ends_at = heard_at = loop.time()
             ends_at += self.max_s                                    # and of time, however slowly it arrives
             while not out.done.is_set():
                 if loop.time() >= ends_at:
-                    self.outcome = limit
+                    ended = limit
                     break
                 # A short wait, so whatever ends the stream (a reply, a disconnect) is seen at once.
                 chunk = await asyncio.to_thread(src.read, POLL_S)
                 if chunk is None:
                     if loop.time() - heard_at > STALL_S:
-                        self.outcome = problem = "the stream stopped sending audio"
+                        ended = problem = "the stream stopped sending audio"
                         break
                     continue
                 if not chunk:
                     problem = src.error or ""
-                    self.outcome = problem or ("stopped" if src.closed else "finished")
+                    ended = problem or ("stopped" if src.closed else "finished")
                     break
                 heard_at = loop.time()
                 if self.volume < 100:
@@ -532,18 +535,23 @@ class Playback:
                 out.write(chunk[:budget])
                 budget -= len(chunk)
                 if budget <= 0:
-                    self.outcome = limit
+                    ended = limit
                     break
                 # The pacer sends in real time: decode no further ahead than it needs.
                 while out.backlog_s > BACKLOG_S and not out.done.is_set():
                     await asyncio.sleep(0.1)
             out.finish()
+            # The last of it is queued, not played: it stays this playback's, for a stop to end,
+            # until the device has played it.
+            await out.wait_played()
             if out.aborted:  # a spoken reply, a new recording or CANCEL on the device
                 self.outcome = "interrupted"
             elif out.failed or getattr(session, "closed", False):
                 self.outcome = "the device disconnected"
-            elif problem:
-                await session.send_notice(f"Playback stopped: {problem}"[:120])
+            else:
+                self.outcome = ended
+                if problem:
+                    await session.send_notice(f"Playback stopped: {problem}"[:120])
         except asyncio.CancelledError:
             self.outcome = self.outcome or "stopped"
             raise

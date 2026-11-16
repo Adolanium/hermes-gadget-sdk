@@ -425,7 +425,8 @@ def test_cancel_on_the_device_and_a_new_recording_both_end_a_playback(tmp_path):
         played = await playback.play(device, source, title="radio", max_s=3600)
         await _until(lambda: len(device.audio()) > 0)
         await hub._on_text(device, json.dumps(message))  # what the device sends
-        await asyncio.wait_for(played.task, 5)
+        await asyncio.wait({played.task}, timeout=5)
+        assert played.task.done()
         for task in list(device._tasks):
             task.cancel()
         return device, source, played
@@ -435,6 +436,85 @@ def test_cancel_on_the_device_and_a_new_recording_both_end_a_playback(tmp_path):
                     {"type": "audio.start", "stream": 4, "rate": RATE, "format": "flac"}):
         device, source, played = asyncio.run(run(message))
         assert "audio.abort" in device.types() and played.outcome == "interrupted" and source.closed
+
+
+def test_cancel_on_the_device_and_a_new_recording_both_end_a_playback_that_is_still_waiting(tmp_path):
+    from hermes_gadget_plugin.store import DeviceStore
+
+    async def run(message):
+        hub = hubmod.DeviceHub(DeviceStore(tmp_path / message["type"]), hubmod.HubDelegate())
+        device = FakeDevice()
+        device.hub = hub
+        busy = asyncio.Event()
+
+        async def idle(deadline):  # a reply is being spoken: the playback has no stream yet
+            await busy.wait()
+            return True
+
+        source = Endless()
+        played = await playback.play(device, source, title="radio", max_s=3600, idle=idle)
+        await asyncio.sleep(0.1)
+        await hub._on_text(device, json.dumps(message))  # what the device sends
+        busy.set()                                       # the reply is over: nothing may start now
+        await asyncio.sleep(0.3)
+        for task in list(device._tasks):
+            task.cancel()
+        return device, source, played
+
+    for message in ({"type": "cancel"}, {"type": "audio.start", "stream": 3, "rate": RATE, "format": "pcm16"},
+                    {"type": "session.new"}):
+        device, source, played = asyncio.run(run(message))
+        assert "audio.start" not in device.types() and source.read_s == 0
+        assert played.outcome == "interrupted" and source.closed and device.playback is None
+
+
+def test_a_stop_while_the_stream_is_being_opened_leaves_the_speaker_free():
+    async def run():
+        device = FakeDevice(send_delay=0.3)  # audio.start takes a while to go out
+        source = Endless()
+        played = await playback.play(device, source, title="radio", max_s=3600)
+        await _until(lambda: device._audio_out is not None)
+        assert played.out is None  # still inside open_audio
+        assert await playback.stop(device) is True
+        opened = device._audio_out
+        await asyncio.wait_for(opened.done.wait(), 2)  # no pump ever ran: only the open can end it
+        return device, source, opened
+
+    device, source, opened = asyncio.run(run())
+    assert opened.aborted and source.closed and len(device.audio()) == 0
+
+
+def test_a_playback_can_be_stopped_while_its_last_audio_is_still_playing(tmp_path):
+    async def run():
+        device = FakeDevice()
+        source = playback.open_source(str(_wav(tmp_path / "chime.wav", 1.5)), device.speaker_rate, roots=[tmp_path])
+        played = await playback.play(device, source, title="chime.wav", max_s=60)
+        await _until(lambda: played.out is not None and played.out.closed)  # all of it decoded and queued
+        stream = played.out.stream
+        assert not played.out.done.is_set() and device.playback is played
+        assert not device.audio_playing  # still music: a spoken reply takes over, it does not wait
+        assert await playback.stop(device) is True
+        sent = len(device.audio())
+        await asyncio.sleep(0.3)
+        return device, played, stream, sent
+
+    device, played, stream, sent = asyncio.run(run())
+    assert {"type": "audio.abort", "stream": stream} in device.messages and "audio.end" not in device.types()
+    assert played.outcome == "stopped" and len(device.audio()) == sent and device.playback is None
+
+
+def test_a_playback_that_plays_out_is_named_by_the_session_until_the_device_has_played_it(tmp_path):
+    async def run():
+        device = FakeDevice()
+        source = playback.open_source(str(_wav(tmp_path / "chime.wav", 0.3)), device.speaker_rate, roots=[tmp_path])
+        played = await playback.play(device, source, title="chime.wav", max_s=60)
+        await _until(lambda: "audio.end" in device.types())
+        named_at_the_end = device.playback is played  # sent, and up to the lead still in the device's buffer
+        await asyncio.wait_for(played.task, 5)
+        return device, played, named_at_the_end
+
+    device, played, named_at_the_end = asyncio.run(run())
+    assert named_at_the_end and played.outcome == "finished" and device.playback is None
 
 
 def test_a_playback_waits_for_the_reply_being_spoken_and_a_new_one_replaces_it():
@@ -687,6 +767,7 @@ def test_the_simulator_plays_a_file_and_cancel_on_the_device_stops_a_stream(loop
     source = playback.open_source(str(path), session.speaker_rate, roots=[tmp_path])
     played = loop_thread.run(playback.play(session, source, title="chime.wav", max_s=60))
     assert sim.wait_for(lambda: sim.last_received("audio.end") is not None, timeout=10)
+    assert sim.wait_for(lambda: played.task.done(), timeout=5)  # once the device has played what it was sent
     assert played.outcome == "finished"
     assert sim.wait_for(lambda: sim.speaker.last_file is not None, timeout=10)
     with wave.open(str(sim.speaker.last_file), "rb") as heard:  # what the device's speaker was given

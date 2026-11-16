@@ -265,8 +265,9 @@ async def _console(hub: DeviceHub, brain: EchoBrain, stop: asyncio.Event) -> Non
                         await playback.stop(s)
                     elif s.has_speaker:
                         path = Path(rest.strip()).expanduser()  # the developer's own file: any folder
-                        source = await asyncio.to_thread(
-                            playback.open_source, str(path), s.speaker_rate, roots=[path.resolve().parent])
+                        # Resolving reads the disk too: both off the loop that serves the devices.
+                        source = await asyncio.to_thread(lambda p=path, r=s.speaker_rate: playback.open_source(
+                            str(p), r, roots=[p.resolve().parent]))
                         await playback.play(s, source, title=path.name, max_s=playback.max_seconds({}))
             elif cmd == "update":
                 for s in sessions:

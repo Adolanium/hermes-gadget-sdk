@@ -414,3 +414,41 @@ def test_a_name_that_resolves_to_this_machine_only_when_connecting_is_refused(mo
         server.shutdown()
         server.server_close()
     assert asked == []  # nothing on this machine was asked for anything
+
+
+def test_a_slow_stream_is_passed_on_as_it_arrives_not_in_64_kb_blocks():
+    """A 24 kbit/s radio sends 3 KB a second: waiting for a full 64 KB block took longer than the
+    time a source is given to open."""
+    httpx = pytest.importorskip("httpx")
+    import http.server
+
+    class Radio(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/mpeg")
+            self.end_headers()
+            try:
+                for _ in range(100):
+                    self.wfile.write(bytes(300))
+                    self.wfile.flush()
+                    time.sleep(0.1)
+            except OSError:
+                pass
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Radio)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    client = httpx.Client(timeout=httpx.Timeout(10.0))
+    stream = client.stream("GET", f"http://127.0.0.1:{server.server_address[1]}/")
+    fetched = playback._HttpxFetch(client, stream, stream.__enter__())
+    try:
+        began = time.monotonic()
+        first = next(iter(fetched))
+        took = time.monotonic() - began
+    finally:
+        fetched.close()
+        server.shutdown()
+        server.server_close()
+    assert first and took < 2.0

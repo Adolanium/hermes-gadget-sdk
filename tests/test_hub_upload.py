@@ -30,6 +30,9 @@ class FakeSession:
     async def turn_end(self, turn, outcome="success"):
         pass
 
+    def end_playback(self, outcome):  # and a gadget_play playback, playing or waiting
+        pass
+
     async def stop_audio(self):  # a new recording stops whatever the device was being sent
         pass
 
