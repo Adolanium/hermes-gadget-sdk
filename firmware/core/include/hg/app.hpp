@@ -44,6 +44,9 @@ struct DeviceProfile {
   std::string default_access_token;
   uint32_t mic_rate = 16000;
   float vad_min_rms = 500.0f;  // tap mode: the quietest block that counts as speech (a quiet mic wants less)
+  // A held recording in which the microphone heard no speech is dropped, not sent: for boards whose
+  // vad_min_rms was measured on the board. Off, hold mode sends whatever was recorded.
+  bool drop_silent_recordings = false;
   uint32_t speaker_rate = 16000;
   bool has_cancel_button = true;
   bool has_scroll_buttons = false;
@@ -211,10 +214,29 @@ class App {
   // A tap or a scroll while a spoken reply's latest lines caption the talking face shows its whole text.
   bool show_reply_text();
   bool profile_picker_open() const { return overlay_ == Overlay::Profiles; }
+  // Widgets: pages the host set, one at a time over the whole panel. From the Ready screen DOWN,
+  // or a swipe from left to right, opens the first; the same again shows the next, and past the
+  // last one the Ready screen comes back. UP, or a swipe from right to left, goes back one, and
+  // from the first to Ready. CANCEL (swipe down) closes them.
+  bool widgets_open() const { return overlay_ == Overlay::Widgets; }
+  // A widget is what the screen shows: open, with no question, alarm or alert over it. Only then
+  // does a sideways swipe page them.
+  bool widgets_showing() const { return widgets_open() && model_.screen == Screen::Widget; }
+  // Whether DOWN or a swipe from left to right that starts now opens them: the Ready screen, with widgets.
+  bool widgets_can_open() const;
+  bool open_widgets();
+  // +1 the next widget, -1 the previous; off either end closes them.
+  bool widget_step(int dir);
   bool profile_switch_pending() const { return !profile_pending_.empty(); }
   static constexpr uint32_t kProfileReplyMs = 15000;
   int profile_row_hit(int x, int y) const;
   void profile_tap(int x, int y);
+  // A choice from Hermes on a touchscreen (TouchGestures): whether its list takes the touch, a tap
+  // on an answer, and a swipe up, which shows the next page of a list longer than the screen.
+  bool choice_touch_live() const;
+  // held_ms: how long the finger was down. The press guard counts from when it went down.
+  void choice_tap(int x, int y, uint32_t held_ms = 0);
+  bool choice_page_step();
   // The roster a welcome may bring: the device keeps the first kMaxProfiles entries.
   static constexpr size_t kMaxProfiles = 32;
   // Profile thumbnails' side: the grid's largest icon, held to this range (docs/protocol.md#profile-thumbnails).
@@ -369,6 +391,8 @@ class App {
   void h_error(const json::Value& m);
   void h_prompt(const json::Value& m);
   void h_prompt_close(const json::Value& m);
+  void h_choice(const json::Value& m);
+  void h_choice_close(const json::Value& m);
   void h_interpret(const json::Value& m);
   void h_dashboard(const json::Value& m);
   void h_ota_offer(const json::Value& m);
@@ -450,6 +474,7 @@ class App {
   bool can_talk() const;
   void start_listening(bool hands_free);
   void finish_listening();
+  void end_held_recording();
   void cancel_listening(std::string_view why);
   // The recording buffer (profile_.recording_alloc): see rec_ below.
   bool send_audio_start();
@@ -481,6 +506,20 @@ class App {
   bool prompt_armed(uint32_t pressed_at) const;
   void answer_prompt(bool yes);
   void clear_prompt();
+  // A choice is the question on screen (a yes/no question asked meanwhile goes over it).
+  bool choice_showing() const { return prompt_id_.empty() && !choice_id_.empty() && prompt_showing(); }
+  // How a choice is answered: a highlighted row that TALK picks (boards with Up/Down, and boards
+  // with neither those nor touch, where CANCEL steps to the next row and a last row cancels).
+  bool choice_keys() const { return profile_.has_scroll_buttons || !profile_.touch_screen; }
+  bool choice_steps() const { return !profile_.has_scroll_buttons && !profile_.touch_screen; }
+  bool can_choose() const {
+    return ui_ && (profile_.has_scroll_buttons || profile_.touch_screen || profile_.has_cancel_button);
+  }
+  int choice_row_count() const { return static_cast<int>(choice_options_.size()) + (choice_steps() ? 1 : 0); }
+  bool choice_armed(uint32_t pressed_at) const;
+  void choice_move(int delta, bool wrap);
+  void answer_choice(int index);  // an option's index; anything else cancels
+  void clear_choice();
   void flush_sensors();
   // Tells Hermes when the screen goes dark or lights up (docs/protocol.md#screen-sleep).
   void flush_display_state();
@@ -507,6 +546,16 @@ class App {
   json::Value timer_value() const;      // the `timer` object of status and timer.status
   void start_alarm();
   void dismiss_alarm();
+  // the face's expression (app_face.cpp)
+  void add_face_actions();
+  // False with `error` for an unknown name, or for `timed` seconds outside 1..3600.
+  bool set_expression(std::string_view name, int64_t seconds, bool timed, std::string& error);
+  // The user's next turn ends it: called where a recording starts, a typed message is sent and a
+  // new session is asked for. A turn Hermes starts by itself does not.
+  void end_expression();
+  mascot::Expression expression_now();  // ends it first when its seconds are over
+  bool expression_still() const;        // its mark has moved for long enough
+  std::string face_command(std::string_view args);
   bool alarm_flash() const;
   void beep_pattern();
 
@@ -816,11 +865,17 @@ class App {
   uint32_t id_counter_ = 0;
 
   // overlays
-  enum class Overlay : uint8_t { None, Card, Image, Dashboard, Profiles };
+  enum class Overlay : uint8_t { None, Card, Image, Dashboard, Profiles, Widgets };
   Overlay overlay_ = Overlay::None;
   uint32_t overlay_until_ = 0;  // 0 = until dismissed
   std::string card_title_, card_body_;
   int card_scroll_ = 0;
+  // a structured card (docs/protocol.md#display): its id, list, progress (-1: none) and code
+  std::string card_id_;
+  std::vector<std::string> card_items_;
+  int8_t card_progress_ = -1;
+  qr::Code card_qr_;
+  bool card_rich() const { return !card_items_.empty() || card_progress_ >= 0 || card_qr_.ok(); }
   int image_stream_ = -1;
   int image_w_ = 0, image_h_ = 0, image_x_ = 0, image_y_ = 0;
   size_t image_px_ = 0;
@@ -832,11 +887,26 @@ class App {
   std::string dash_headline_;
   int dash_scroll_ = 0;
   bool can_open_dashboard() const { return profile_.has_cancel_button || profile_.touch_screen; }
+  // the dashboard's widgets (layout 2), paged with the scroll buttons or sideways swipes; a board
+  // with neither asks for layout 1, where the host lists them as tiles
+  bool can_page_widgets() const { return profile_.has_scroll_buttons || profile_.touch_screen; }
+  std::vector<Widget> widgets_;
+  int widget_index_ = 0;
+  void clock_model(UiModel& m) const;  // makes `m` the resting clock face
+  void turn_takes_screen();  // a turn or a reply closes the widgets: it is shown, not held under them
 
   // a yes/no question from Hermes (confirmations, command approvals)
   std::string prompt_id_, prompt_title_, prompt_text_;
   uint32_t prompt_since_ = 0;
   uint32_t prompt_until_ = 0;  // 0 = until answered or withdrawn
+
+  // a choice from the agent: a title and a few answers (docs/protocol.md#questions)
+  std::string choice_id_, choice_title_;
+  std::vector<std::string> choice_options_;
+  int choice_sel_ = 0, choice_first_ = 0;  // the highlighted row, and the first one on screen
+  uint32_t choice_since_ = 0;  // when it last came to the front: presses just after answer nothing
+  bool choice_front_ = false;  // the Choice screen is what the model shows
+  uint32_t choice_until_ = 0;  // 0 = until answered or withdrawn
 
   // transient messages
   std::string notice_;
@@ -876,6 +946,12 @@ class App {
   uint32_t next_beep_at_ = 0;
   std::string timer_label_;
   std::vector<int16_t> beep_pcm_;  // built on the first beep
+
+  // the face's expression (app_face.cpp): RAM only
+  mascot::Expression expression_ = mascot::Expression::Neutral;
+  bool expression_timed_ = false;       // it ends at expression_until_
+  uint32_t expression_until_ = 0;
+  uint32_t expression_since_ = 0;       // when it was set: the mark moves for a minute from then
 
   // frame timing: the running statistics while `perf` is on, and the bench
   std::unique_ptr<FrameStats> frame_stats_;

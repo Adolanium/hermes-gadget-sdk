@@ -57,6 +57,13 @@ CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y
 
 CONFIG_HG_BOARD_WS_P4_TOUCH_LCD_7B=y
 
+# With the camera stack this image is the largest of the boards and outgrew the 1.9 MB app
+# slot of partitions.csv, which cannot grow on a board already flashed. A failed assert
+# aborts without its expression, file and line compiled in. On a board whose flashed partition
+# table has the `coredump` partition, `diag` still reports the crashed task with its `pc`,
+# `mcause`, `mtval`, `ra` and `sp`; this RISC-V chip's report has no backtrace.
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
+
 # Optional OV5647 on the 7B's two-lane MIPI-CSI connector. SCCB reuses the
 # board I2C bus (GPIO7/8); the module has no board-wired reset or PWDN signal.
 CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=y

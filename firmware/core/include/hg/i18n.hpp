@@ -238,6 +238,11 @@ namespace hg::i18n {
   X(HermesWaiting,          "Hermes is waiting for you") \
   X(AnsweredYes,            "Answered: yes") \
   X(AnsweredNo,             "Answered: no") \
+  X(AnsweredChoice,         "Answered: {0}") \
+  X(ChoiceTapHint,          "Tap an answer") \
+  X(ChoicePickHint,         "{0}: choose") \
+  X(ChoiceStepHint,         "{0}: next, {1}: choose") \
+  X(ChoiceCancel,           "Cancel") \
   X(Image,                  "Image") \
   /* Ready screen */ \
   X(Ready,                  "Ready") \

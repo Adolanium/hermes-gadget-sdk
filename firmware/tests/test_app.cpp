@@ -711,6 +711,70 @@ TEST("app: tap mode hears speech at the board's microphone level") {
   CHECK(d.fake.last("audio.cancel") != nullptr);
 }
 
+TEST("app: a held recording with no speech in it is not sent, on a board that asks for it") {
+  // Speech-to-text makes words out of silence, and Hermes would answer them.
+  const auto hold = [](Rig& r, int16_t level, int blocks) {
+    r.bring_online(true);
+    r.app.on_button(hg::Button::Talk, true);
+    std::vector<int16_t> pcm(1600);  // 100 ms blocks
+    for (size_t i = 0; i < pcm.size(); ++i) pcm[i] = (i / 8) % 2 ? level : static_cast<int16_t>(-level);
+    for (int i = 0; i < blocks; ++i) {
+      r.app.on_mic_samples(pcm.data(), pcm.size());
+      r.advance(100);
+    }
+    r.app.on_button(hg::Button::Talk, false);
+  };
+  hg::DeviceProfile measured = Rig::profile("ws://hermes.local:8765/gadget");
+  measured.vad_min_rms = 180;
+  measured.drop_silent_recordings = true;
+
+  Rig silent(measured);
+  hold(silent, 20, 15);  // room noise for 1.5 s
+  CHECK(silent.fake.last("audio.end") == nullptr);
+  const Value* cancel = silent.fake.last("audio.cancel");
+  CHECK(cancel != nullptr);
+  if (cancel) CHECK_EQ((*cancel)["reason"].as_string(), std::string("no speech"));
+  CHECK(silent.app.screen() == hg::Screen::Ready);
+
+  Rig spoken(measured);  // speech over the board's floor goes
+  hold(spoken, 300, 15);
+  CHECK(spoken.fake.last("audio.end") != nullptr);
+  CHECK(spoken.app.screen() == hg::Screen::Thinking);
+
+  Rig deaf(measured);  // a port that delivered no audio at all: sent as before
+  deaf.bring_online(true);
+  deaf.app.on_button(hg::Button::Talk, true);
+  deaf.advance(1000);
+  deaf.app.on_button(hg::Button::Talk, false);
+  CHECK(deaf.fake.last("audio.end") != nullptr);
+
+  // Audio that arrives late: 300 ms of it in a 400 ms press is enough to hold 200 ms of speech,
+  // so silence in it is dropped; 100 ms is not, and goes as before.
+  const auto late = [](Rig& r, int blocks) {
+    r.bring_online(true);
+    r.app.on_button(hg::Button::Talk, true);
+    std::vector<int16_t> pcm(1600);
+    for (size_t i = 0; i < pcm.size(); ++i) pcm[i] = (i / 8) % 2 ? 20 : -20;
+    r.advance(400 - 100 * blocks);
+    for (int i = 0; i < blocks; ++i) {
+      r.app.on_mic_samples(pcm.data(), pcm.size());
+      r.advance(100);
+    }
+    r.app.on_button(hg::Button::Talk, false);
+  };
+  Rig brief(measured);
+  late(brief, 3);
+  CHECK(brief.fake.last("audio.end") == nullptr);
+  CHECK(brief.fake.last("audio.cancel") != nullptr);
+  Rig scant(measured);
+  late(scant, 1);
+  CHECK(scant.fake.last("audio.end") != nullptr);
+
+  Rig other;  // a board that does not ask sends the silence, as hold mode always did
+  hold(other, 20, 15);
+  CHECK(other.fake.last("audio.end") != nullptr);
+}
+
 TEST("app: a short tap is discarded instead of sent") {
   Rig r;
   r.bring_online(true);
@@ -8624,7 +8688,7 @@ TEST("recording buffer: at 24 kHz the buffered upload goes in 960-sample (40 ms)
   Rig r(p);
   r.bring_online(true);
   r.app.on_button(hg::Button::Talk, true);
-  std::vector<int16_t> pcm(320, 7);  // the codec boards' 13 ms deliveries
+  std::vector<int16_t> pcm(320, 1000);  // the codec boards' 13 ms deliveries, at speech level
   for (int i = 0; i < 31; ++i) {
     r.app.on_mic_samples(pcm.data(), pcm.size());
     r.advance(10);
@@ -9452,6 +9516,1096 @@ TEST("camera: a card Hermes sends waits until the mode leaves, and what asks to 
   r.server(R"({"type":"prompt","id":"q","title":"Allow?","text":"rm -rf build"})");
   CHECK(!r.app.camera_open());  // a question takes the screen, as it takes it from settings
   CHECK(r.app.screen() == hg::Screen::Prompt);
+}
+
+// --- Structured cards and choices (docs/protocol.md#display, #questions) ---
+
+namespace {
+
+constexpr uint16_t kWhite = 0xFFFF;
+constexpr uint16_t kAccentInk = hg::rgb565(242, 179, 61);
+
+hg::DeviceProfile scroll_profile() {
+  hg::DeviceProfile p = Rig::profile("ws://hermes.local:8765/gadget");
+  p.has_scroll_buttons = true;
+  return p;
+}
+
+// The answer a tap at (x, y) gives to a fresh six-answer choice: its index, -1 when the tap
+// answered nothing, -2 when it cancelled.
+int tap_answer(Rig& r, hg::TouchGestures& touch, int x, int y) {
+  r.fake.sent.clear();
+  r.server(R"({"type":"choice","id":"t","title":"Pick","options":["a","b","c","d","e","f"]})");
+  r.advance(700);
+  touch.update(true, x, y, r.fake.clock);
+  r.advance(40);
+  touch.update(false, 0, 0, r.fake.clock);
+  const Value* reply = r.fake.last("choice.reply");
+  r.server(R"({"type":"choice.close","id":"t"})");
+  r.advance(20);
+  if (!reply) return -1;
+  return (*reply)["index"].is_number() ? static_cast<int>((*reply)["index"].as_int()) : -2;
+}
+
+}  // namespace
+
+TEST("qr: the bytes a card's code may hold match the encoder, version by version") {
+  // caps.card.qr comes from this table (app.cpp, kQrBytes).
+  const size_t bytes[hg::qr::kMaxVersion] = {14, 26, 42, 62, 84, 106, 122, 152, 180, 213, 251, 287};
+  for (int v = 1; v <= hg::qr::kMaxVersion; ++v) {
+    CHECK_EQ(hg::qr::smallest_version(std::string(bytes[v - 1], 'a')), v);
+    CHECK_EQ(hg::qr::smallest_version(std::string(bytes[v - 1] + 1, 'a')), v == hg::qr::kMaxVersion ? 0 : v + 1);
+  }
+}
+
+TEST("cards: hello offers structured cards on every panel, with the code size that fits") {
+  struct Panel {
+    int w, h;
+    bool round;
+  };
+  for (const Panel& p : {Panel{320, 240, false}, Panel{240, 135, false}, Panel{466, 466, true}, Panel{800, 480, false}}) {
+    Rig r;
+    r.fake.make_panel(p.w, p.h, p.round);
+    r.bring_online(true);
+    const Value* hello = r.fake.last("hello");
+    CHECK(hello != nullptr);
+    if (!hello) continue;
+    const Value& card = (*hello)["caps"]["card"];
+    CHECK_EQ(card["v"].as_int(), int64_t(1));
+    CHECK_EQ(card["items"].as_int(), int64_t(12));
+    const int64_t qr = card["qr"].as_int();
+    CHECK(qr >= 42);  // room for a short link, even at 240x135
+    // A payload of exactly that size draws as a code; one byte more is shown as text instead.
+    r.server(R"({"type":"display","title":"Link","qr":")" + std::string(static_cast<size_t>(qr), 'a') + R"(","ttl_s":0})");
+    r.advance(50);
+    CHECK(r.app.screen() == hg::Screen::Card && r.app.model().card_qr != nullptr);
+    CHECK(count_pixels(r.fake, kWhite) > 400);  // the code's light panel
+    if (qr < 287) {
+      const std::string longer(static_cast<size_t>(qr) + 1, 'a');
+      r.server(R"({"type":"display","title":"Link","qr":")" + longer + R"(","ttl_s":0})");
+      r.advance(50);
+      CHECK(r.app.model().card_qr == nullptr);
+      CHECK_EQ(r.app.model().hero ? r.app.model().detail : r.app.model().body, longer);
+    }
+  }
+}
+
+TEST("cards: a list and a progress bar draw in the text layout, and the same id updates in place") {
+  Rig r(scroll_profile());
+  r.bring_online(true);
+  std::string items;
+  for (int i = 0; i < 20; ++i) items += std::string(i ? "," : "") + "\"item " + std::to_string(i) + "\"";
+  r.server(R"({"type":"display","id":"build","title":"Build","body":"Compiling","progress":10,"ttl_s":0,"items":[)" +
+           items + "]}");
+  r.advance(50);
+  CHECK(r.app.screen() == hg::Screen::Card && !r.app.model().hero);
+  CHECK_EQ(r.app.model().items.size(), size_t(12));  // the first twelve rows are kept
+  CHECK_EQ(int(r.app.model().card_progress), 10);
+  CHECK_EQ(r.app.model().scroll, 0);
+  const size_t short_bar = count_pixels(r.fake, kAccentInk);
+
+  r.app.on_button(hg::Button::Down, true);
+  r.app.on_button(hg::Button::Down, false);
+  CHECK_EQ(r.app.model().scroll, 1);
+  // The same id: the bar grows and the reader keeps their place.
+  r.server(R"({"type":"display","id":"build","title":"Build","body":"Linking","progress":90,"ttl_s":0,"items":[)" +
+           items + "]}");
+  r.advance(50);
+  CHECK_EQ(r.app.model().scroll, 1);
+  CHECK_EQ(int(r.app.model().card_progress), 90);
+  CHECK(count_pixels(r.fake, kAccentInk) > short_bar);
+  // Scrolling stops at the last row.
+  for (int i = 0; i < 40; ++i) r.app.on_button(hg::Button::Down, true);
+  const int last = r.app.model().scroll;
+  CHECK(last > 1 && last < 13);
+  // Another id is another card, from its top; values out of range are held to 0..100.
+  r.server(R"({"type":"display","id":"other","title":"Done","progress":250,"ttl_s":0})");
+  r.advance(50);
+  CHECK_EQ(r.app.model().scroll, 0);
+  CHECK_EQ(int(r.app.model().card_progress), 100);
+  CHECK(r.app.model().items.empty());
+  // A plain card after it is plain again: the caption under the mascot.
+  r.server(R"({"type":"display","title":"Timer","body":"Pasta: 9 min"})");
+  r.advance(50);
+  CHECK(r.app.model().hero && int(r.app.model().card_progress) == -1);
+}
+
+TEST("cards: a list longer than the screen pages itself") {
+  Rig r;
+  r.fake.make_panel(240, 135);
+  r.bring_online(true);
+  r.server(R"({"type":"display","title":"Shopping","ttl_s":0,
+              "items":["Milk","Eggs","Bread","Butter","Jam","Tea","Rice","Salt","Oil","Soap","Pasta","Beans"]})");
+  r.advance(50);
+  CHECK(r.app.screen() == hg::Screen::Card && r.app.model().scroll == 0);
+  r.advance(20000);
+  CHECK(r.app.model().scroll > 0);
+}
+
+TEST("choice: hello offers choices only where the board can pick an answer") {
+  Rig keys;
+  keys.bring_online(true);
+  const Value* hello = keys.fake.last("hello");
+  CHECK(hello && (*hello)["caps"]["choice"]["v"].as_int() == 1 && (*hello)["caps"]["choice"]["options"].as_int() == 6);
+
+  hg::DeviceProfile p = Rig::profile("ws://hermes.local:8765/gadget");
+  p.has_cancel_button = false;  // TALK alone cannot move through a list
+  Rig one(p);
+  one.bring_online(true);
+  hello = one.fake.last("hello");
+  CHECK(hello && !(*hello)["caps"]["choice"].is_object());
+  CHECK((*hello)["caps"]["card"].is_object());
+  one.server(R"({"type":"choice","id":"c","title":"Pick","options":["a","b"]})");
+  one.advance(50);
+  CHECK(one.app.screen() != hg::Screen::Choice);
+}
+
+TEST("choice: Up and Down move the highlight, TALK answers and CANCEL cancels") {
+  Rig r(scroll_profile());
+  r.bring_online(true);
+  r.server(R"({"type":"choice","id":"c1","title":"Which list?","options":["Groceries","Hardware","Pharmacy"]})");
+  r.advance(50);
+  CHECK(r.app.screen() == hg::Screen::Choice && !r.app.model().hero);
+  CHECK_EQ(r.app.model().headline, std::string("Which list?"));
+  CHECK_EQ(r.app.model().items.size(), size_t(3));
+  CHECK_EQ(int(r.app.model().item_sel), 0);
+  CHECK_EQ(r.app.model().hint, std::string("TALK: choose"));
+  CHECK(r.app.status_json().find("\"choice\":\"c1\"") != std::string::npos);
+  // A press that was on its way when the choice appeared answers nothing.
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.last("choice.reply") == nullptr);
+  CHECK(!r.fake.mic_on);
+  r.advance(700);
+  r.app.on_button(hg::Button::Up, true);  // stops at the first answer
+  CHECK_EQ(int(r.app.model().item_sel), 0);
+  for (int i = 0; i < 5; ++i) r.app.on_button(hg::Button::Down, true);  // and at the last
+  CHECK_EQ(int(r.app.model().item_sel), 2);
+  r.app.on_button(hg::Button::Up, true);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  const Value* reply = r.fake.last("choice.reply");
+  CHECK(reply && (*reply)["id"].as_string() == "c1" && (*reply)["index"].as_int(-1) == 1);
+  CHECK(reply && !(*reply)["cancelled"].as_bool());
+  CHECK(r.app.screen() != hg::Screen::Choice);
+  CHECK(!r.fake.mic_on);  // the press answered; it recorded nothing
+  CHECK_EQ(r.app.model().hint, std::string("Answered: Hardware"));
+
+  r.fake.sent.clear();
+  r.server(R"({"type":"choice","id":"c2","title":"Again?","options":["One","Two"]})");
+  r.advance(700);
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Cancel, false);
+  reply = r.fake.last("choice.reply");
+  CHECK(reply && (*reply)["id"].as_string() == "c2" && (*reply)["cancelled"].as_bool());
+  CHECK(reply && !(*reply)["index"].is_number());
+  CHECK(r.fake.last("cancel") == nullptr);  // the turn goes on: only the choice was cancelled
+}
+
+TEST("choice: with TALK and CANCEL alone, CANCEL steps through the answers and a last row cancels") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"choice","id":"c1","title":"Pick","options":["Red","Green"]})");
+  r.advance(700);
+  CHECK(r.app.screen() == hg::Screen::Choice);
+  CHECK_EQ(r.app.model().items.size(), size_t(3));
+  CHECK_EQ(r.app.model().items.back(), std::string("Cancel"));
+  CHECK_EQ(r.app.model().hint, std::string("CANCEL: next, TALK: choose"));
+  const auto tap = [&](hg::Button b) {
+    r.app.on_button(b, true);
+    r.app.on_button(b, false);
+  };
+  tap(hg::Button::Cancel);
+  CHECK_EQ(int(r.app.model().item_sel), 1);
+  CHECK(r.fake.last("choice.reply") == nullptr);
+  tap(hg::Button::Cancel);
+  tap(hg::Button::Cancel);  // past the Cancel row, back to the first answer
+  CHECK_EQ(int(r.app.model().item_sel), 0);
+  tap(hg::Button::Cancel);
+  tap(hg::Button::Talk);
+  const Value* reply = r.fake.last("choice.reply");
+  CHECK(reply && (*reply)["index"].as_int(-1) == 1);
+
+  r.fake.sent.clear();
+  r.server(R"({"type":"choice","id":"c2","title":"Pick","options":["Red","Green"]})");
+  r.advance(700);
+  tap(hg::Button::Cancel);
+  tap(hg::Button::Cancel);
+  tap(hg::Button::Talk);  // the Cancel row
+  reply = r.fake.last("choice.reply");
+  CHECK(reply && (*reply)["id"].as_string() == "c2" && (*reply)["cancelled"].as_bool());
+}
+
+TEST("choice: on a touchscreen a tap on a row answers it, a swipe down cancels, a swipe up shows more") {
+  struct Panel {
+    int w, h;
+    bool round;
+  };
+  for (const Panel& p : {Panel{320, 240, false}, Panel{466, 466, true}, Panel{800, 480, false}}) {
+    Rig r(Rig::touch_profile());
+    r.fake.make_panel(p.w, p.h, p.round);
+    r.bring_online(true);
+    hg::TouchGestures touch(r.app);
+    r.server(R"({"type":"choice","id":"c","title":"Pick","options":["a","b","c","d","e","f"]})");
+    r.advance(50);
+    CHECK(r.app.screen() == hg::Screen::Choice);
+    CHECK_EQ(int(r.app.model().item_sel), -1);  // nothing to highlight: the finger points
+    CHECK_EQ(r.app.model().hint, std::string("Tap an answer"));
+    r.server(R"({"type":"choice.close","id":"c"})");
+    // Down the middle of the panel, the rows answer in order from the first, each at least 24 px tall.
+    int next = 0, rows = 0, run = 0;
+    for (int y = 0; y < p.h; y += 4) {
+      const int got = tap_answer(r, touch, p.w / 2, y);
+      CHECK(got == -1 || got == next || got == next - 1);
+      if (got == next) {
+        if (next) CHECK(run >= 6);
+        ++next, ++rows, run = 1;
+      } else if (got >= 0) {
+        ++run;
+      }
+    }
+    CHECK(rows >= 2);
+    if (rows < 6) {
+      // The rest are a swipe up away: the top row then answers with a later one.
+      r.fake.sent.clear();
+      r.server(R"({"type":"choice","id":"more","title":"Pick","options":["a","b","c","d","e","f"]})");
+      r.advance(700);
+      touch.update(true, p.w / 2, p.h * 2 / 3, r.fake.clock);
+      r.advance(30);
+      touch.update(true, p.w / 2, p.h * 2 / 3 - 90, r.fake.clock);
+      touch.update(false, 0, 0, r.fake.clock);
+      CHECK(r.fake.last("choice.reply") == nullptr);
+      CHECK(r.app.model().scroll > 0);
+      r.server(R"({"type":"choice.close","id":"more"})");
+    }
+    r.fake.sent.clear();
+    r.server(R"({"type":"choice","id":"no","title":"Pick","options":["a","b"]})");
+    r.advance(700);
+    touch.update(true, p.w / 2, p.h / 3, r.fake.clock);
+    r.advance(30);
+    touch.update(true, p.w / 2 + 2, p.h / 3 + 100, r.fake.clock);
+    touch.update(false, 0, 0, r.fake.clock);
+    const Value* reply = r.fake.last("choice.reply");
+    CHECK(reply && (*reply)["id"].as_string() == "no" && (*reply)["cancelled"].as_bool());
+    // A hold on a choice talks to nobody.
+    r.server(R"({"type":"choice","id":"hold","title":"Pick","options":["a","b"]})");
+    r.advance(700);
+    touch.update(true, p.w / 2, p.h - 4, r.fake.clock);
+    r.advance(400);
+    touch.tick(r.fake.clock);
+    CHECK(!r.fake.mic_on);
+    touch.update(false, 0, 0, r.fake.clock);
+  }
+}
+
+TEST("choice: it is withdrawn, expires, ends with the connection and takes the console's answer") {
+  Rig r(scroll_profile());
+  r.bring_online(true);
+  r.server(R"({"type":"choice","id":"c1","title":"Pick","options":["a","b"]})");
+  r.advance(50);
+  r.server(R"({"type":"choice.close","id":"other"})");
+  CHECK(r.app.screen() == hg::Screen::Choice);
+  r.server(R"({"type":"choice.close","id":"c1"})");
+  r.advance(20);
+  CHECK(r.app.screen() != hg::Screen::Choice);
+
+  r.server(R"({"type":"choice","id":"c2","title":"Quick","options":["a","b"],"ttl_s":5})");
+  r.advance(4000);
+  CHECK(r.app.screen() == hg::Screen::Choice);
+  r.advance(1500);
+  CHECK(r.app.screen() != hg::Screen::Choice);
+  CHECK(r.fake.last("choice.reply") == nullptr);  // expiry is silent, like a question's
+
+  // One answer is no choice; more than six keeps the first six.
+  r.server(R"({"type":"choice","id":"c3","title":"One","options":["only"]})");
+  r.advance(20);
+  CHECK(r.app.screen() != hg::Screen::Choice);
+  r.server(R"({"type":"choice","id":"c4","title":"Many","options":["1","2","3","4","5","6","7","8"]})");
+  r.advance(20);
+  CHECK_EQ(r.app.model().items.size(), size_t(6));
+  CHECK(r.app.console("choose 7").rfind("@error", 0) == 0);
+  CHECK_EQ(r.app.console("choose 6"), std::string("@ok choose"));
+  const Value* reply = r.fake.last("choice.reply");
+  CHECK(reply && (*reply)["id"].as_string() == "c4" && (*reply)["index"].as_int(-1) == 5);
+  CHECK(r.app.console("choose 1").rfind("@error", 0) == 0);  // nothing left to answer
+
+  r.server(R"({"type":"choice","id":"c5","title":"Pick","options":["a","b"]})");
+  r.advance(20);
+  r.app.on_transport_closed("bye");
+  r.advance(20);
+  CHECK(r.app.status_json().find("\"choice\"") == std::string::npos);
+}
+
+TEST("choice: a yes/no question asked meanwhile goes first and leaves the choice as it was") {
+  Rig r(scroll_profile());
+  r.bring_online(true);
+  r.server(R"({"type":"choice","id":"c1","title":"Pick","options":["a","b","c"]})");
+  r.advance(700);
+  r.app.on_button(hg::Button::Down, true);
+  r.server(R"({"type":"prompt","id":"q1","title":"Allow command?","text":"rm -rf build"})");
+  r.advance(700);
+  CHECK(r.app.screen() == hg::Screen::Prompt);
+  r.app.on_button(hg::Button::Down, true);  // the question has no list to move in
+  r.app.on_button(hg::Button::Cancel, true);
+  r.app.on_button(hg::Button::Cancel, false);
+  const Value* no = r.fake.last("prompt.reply");
+  CHECK(no && (*no)["id"].as_string() == "q1" && (*no)["answer"].as_string() == "no");
+  CHECK(r.fake.last("choice.reply") == nullptr);
+  CHECK(r.app.screen() == hg::Screen::Choice);
+  CHECK_EQ(int(r.app.model().item_sel), 1);
+  r.advance(700);
+  r.app.on_button(hg::Button::Talk, true);
+  r.app.on_button(hg::Button::Talk, false);
+  const Value* reply = r.fake.last("choice.reply");
+  CHECK(reply && (*reply)["index"].as_int(-1) == 1);
+}
+
+TEST("choice: a finger held on an answer, or put down inside the press guard, picks nothing") {
+  Rig r(Rig::touch_profile());
+  r.fake.make_panel(320, 240, false);
+  r.bring_online(true);
+  hg::TouchGestures touch(r.app);
+  int row_y = -1;  // where a quick tap picks the first answer
+  for (int y = 0; y < 240 && row_y < 0; y += 4)
+    if (tap_answer(r, touch, 160, y) == 0) row_y = y + 8;
+  CHECK(row_y >= 0);
+  CHECK_EQ(tap_answer(r, touch, 160, row_y), 0);
+  const auto press = [&](uint32_t after_ms, uint32_t held_ms) {
+    r.fake.sent.clear();
+    r.server(R"({"type":"choice","id":"h","title":"Pick","options":["a","b","c","d","e","f"]})");
+    r.advance(after_ms);
+    touch.update(true, 160, row_y, r.fake.clock);
+    r.advance(held_ms);
+    touch.update(false, 0, 0, r.fake.clock);
+    const bool answered = r.fake.last("choice.reply") != nullptr;
+    r.server(R"({"type":"choice.close","id":"h"})");
+    r.advance(20);
+    return answered;
+  };
+  CHECK(press(700, 100));    // a tap
+  CHECK(!press(700, 1000));  // a hold: resting a finger on the glass answers nothing
+  CHECK(!press(500, 200));   // put down before the question could be read, lifted after
+}
+
+TEST("choice: a choice or a question that arrives over the open profile grid closes it and takes the tap") {
+  Rig r(Rig::touch_profile());
+  r.bring_online_with_profiles();
+  hg::TouchGestures touch(r.app);
+  const auto tap = [&](int x, int y) {
+    touch.update(true, x, y, r.fake.clock);
+    r.advance(40);
+    touch.update(false, 0, 0, r.fake.clock);
+  };
+  CHECK(r.app.open_profile_picker());
+  r.server(R"({"type":"choice","id":"c1","title":"Pick","options":["a","b"]})");
+  r.advance(700);
+  CHECK(r.app.screen() == hg::Screen::Choice);
+  CHECK(!r.app.profile_picker_open());
+  for (int y = 0; y < 240 && !r.fake.last("choice.reply"); y += 8) tap(160, y);
+  const Value* reply = r.fake.last("choice.reply");
+  CHECK(reply && (*reply)["id"].as_string() == "c1" && (*reply)["index"].as_int(-1) == 0);
+  CHECK(r.fake.last("profile.select") == nullptr);
+  CHECK(r.app.screen() != hg::Screen::Profiles);  // the grid does not come back under the answer
+
+  CHECK(r.app.open_profile_picker());
+  r.server(R"({"type":"prompt","id":"q1","title":"Allow?","text":"rm -rf build"})");
+  r.advance(700);
+  CHECK(r.app.screen() == hg::Screen::Prompt);
+  CHECK(!r.app.profile_picker_open());
+  tap(160, 120);
+  const Value* yes = r.fake.last("prompt.reply");
+  CHECK(yes && (*yes)["id"].as_string() == "q1" && (*yes)["answer"].as_string() == "yes");
+  CHECK(r.fake.last("profile.select") == nullptr);
+}
+
+TEST("choice: a question longer than the header wraps above the answers, whole, on every panel") {
+  struct Panel {
+    int w, h;
+    bool round, touch;
+  };
+  for (const Panel& p : {Panel{320, 240, false, false}, Panel{240, 135, false, false}, Panel{466, 466, true, true},
+                         Panel{240, 320, false, true}}) {
+    Rig r(p.touch ? Rig::touch_profile() : scroll_profile());
+    r.fake.make_panel(p.w, p.h, p.round);
+    r.bring_online(true);
+    const Value* hello = r.fake.last("hello");
+    CHECK(hello != nullptr);
+    if (!hello) continue;
+    const int cols = static_cast<int>((*hello)["caps"]["choice"]["title_cols"].as_int());
+    const int lines = static_cast<int>((*hello)["caps"]["choice"]["title_lines"].as_int());
+    CHECK(cols >= 12 && lines >= 2);
+    if (cols < 1 || lines < 1) continue;
+    // A short question is the header, as before.
+    r.server(R"({"type":"choice","id":"s","title":"Pick","options":["a","b"]})");
+    r.advance(50);
+    CHECK_EQ(r.app.model().headline, std::string("Pick"));
+    CHECK(r.app.model().detail.empty());
+    // The longest question the device says it shows: every line full. Its last letter is on screen.
+    std::string question;
+    for (int i = 0; i < lines; ++i) question += std::string(i ? " " : "") + std::string(static_cast<size_t>(cols), 'm');
+    const auto shown = [&](const std::string& title) {
+      r.server(R"({"type":"choice","id":"q","title":")" + title + R"(","options":["a","b","c","d","e","f"]})");
+      r.advance(50);
+      return r.fake.fb;
+    };
+    const std::vector<uint16_t> whole = shown(question);
+    CHECK(r.app.screen() == hg::Screen::Choice);
+    CHECK_EQ(r.app.model().headline, std::string("Hermes asks"));
+    CHECK_EQ(r.app.model().detail, question);
+    question.back() = 'i';
+    CHECK(shown(question) != whole);
+    r.server(R"({"type":"choice.close","id":"q"})");
+    // At least two answers stay on screen under it, and still answer.
+    if (p.touch) {
+      hg::TouchGestures touch(r.app);
+      bool first = false, second = false;
+      for (int y = 0; y < p.h; y += 4) {
+        r.fake.sent.clear();
+        r.server(R"({"type":"choice","id":"t","title":")" + question + R"(","options":["a","b","c","d","e","f"]})");
+        r.advance(700);
+        touch.update(true, p.w / 2, y, r.fake.clock);
+        r.advance(40);
+        touch.update(false, 0, 0, r.fake.clock);
+        const Value* reply = r.fake.last("choice.reply");
+        first |= reply && (*reply)["index"].as_int(-1) == 0;
+        second |= reply && (*reply)["index"].as_int(-1) == 1;
+        r.server(R"({"type":"choice.close","id":"t"})");
+      }
+      CHECK(first && second);
+    }
+  }
+}
+
+TEST("choice: the press guard starts again when the choice comes back to the front") {
+  Rig r(scroll_profile());
+  r.bring_online(true);
+  r.server(R"({"type":"choice","id":"c1","title":"Pick","options":["a","b"]})");
+  r.advance(200);
+  r.server(R"({"type":"prompt","id":"q1","title":"Allow?","text":"rm -rf build"})");
+  r.advance(1500);
+  const auto press = [&](hg::Button b) {
+    r.app.on_button(b, true);
+    r.app.on_button(b, false);
+  };
+  press(hg::Button::Talk);  // yes to the question
+  CHECK(r.fake.last("prompt.reply") != nullptr);
+  CHECK(r.app.screen() == hg::Screen::Choice);
+  r.advance(120);
+  press(hg::Button::Talk);  // a second press meant for the question
+  CHECK(r.fake.last("choice.reply") == nullptr);
+  press(hg::Button::Cancel);
+  CHECK(r.fake.last("choice.reply") == nullptr);
+  r.advance(700);
+  press(hg::Button::Talk);
+  const Value* reply = r.fake.last("choice.reply");
+  CHECK(reply && (*reply)["index"].as_int(-1) == 0);
+}
+
+TEST("choice: options that are not all text are refused, so an index never means another option") {
+  Rig r(scroll_profile());
+  r.bring_online(true);
+  r.server(R"({"type":"choice","id":"c1","title":"Pick","options":["a",7,"b","c"]})");
+  r.advance(50);
+  CHECK(r.app.screen() != hg::Screen::Choice);
+  CHECK(r.app.status_json().find("\"choice\"") == std::string::npos);
+  r.server(R"({"type":"choice","id":"c2","title":"Pick","options":["a",null,"b"]})");
+  r.advance(50);
+  CHECK(r.app.screen() != hg::Screen::Choice);
+}
+
+TEST("cards: a code keeps its size with a progress bar, on the smallest panel too") {
+  Rig r;
+  r.fake.make_panel(240, 135);
+  r.bring_online(true);
+  const Value* hello = r.fake.last("hello");
+  const size_t qr = hello ? static_cast<size_t>((*hello)["caps"]["card"]["qr"].as_int()) : 0;
+  CHECK(qr >= 84);
+  r.server(R"({"type":"display","title":"Link","progress":40,"ttl_s":0,"qr":")" + std::string(qr, 'a') + "\"}");
+  r.advance(50);
+  CHECK(r.app.model().card_qr != nullptr);
+  CHECK_EQ(int(r.app.model().card_progress), 40);
+  const size_t bar = count_pixels(r.fake, kAccentInk);
+  CHECK(bar > 0);
+  r.server(R"({"type":"display","title":"Link","progress":90,"ttl_s":0,"qr":")" + std::string(qr, 'a') + "\"}");
+  r.advance(50);
+  CHECK(count_pixels(r.fake, kAccentInk) > bar);
+}
+
+// ---------------------------------------------------------------------------
+// Widgets: the dashboard's layout 2 (docs/protocol.md#widgets)
+
+namespace {
+const char* kWidgets =
+    R"({"type":"dashboard","v":2,"sessions":[{"label":"cli 77de","state":"idle"}],)"
+    R"("tiles":[{"label":"NAS","value":"up","state":"ok"}],"widgets":[)"
+    R"({"id":"office","kind":"value","label":"Office","value":"21.5","unit":"C","state":"ok"},)"
+    R"({"id":"backup","kind":"progress","label":"Backup","percent":62},)"
+    R"({"id":"today","kind":"list","label":"Today","items":["09:00 Standup","11:30 Dentist"]},)"
+    R"({"id":"playing","kind":"headline","label":"Now playing","title":"Blue in Green","text":"Miles Davis"}]})";
+void press(Rig& r, hg::Button b) {
+  r.app.on_button(b, true);
+  r.app.on_button(b, false);
+}
+
+// A straight swipe of `dx`, `dy` from (x, y), in steps a controller would report.
+void swipe(Rig& r, hg::TouchGestures& touch, int x, int y, int dx, int dy) {
+  touch.update(true, x, y, r.fake.clock);
+  for (int i = 1; i <= 5; ++i) {
+    r.advance(10);
+    touch.update(true, x + dx * i / 5, y + dy * i / 5, r.fake.clock);
+  }
+  touch.update(false, 0, 0, r.fake.clock);
+}
+}  // namespace
+
+TEST("widgets: a board that can page them asks for layout 2, and one that cannot for layout 1") {
+  Rig keys(scroll_profile());
+  keys.bring_online(true);
+  CHECK_EQ((*keys.fake.last("hello"))["caps"]["dashboard"]["v"].as_int(), int64_t(2));
+  Rig touch(Rig::touch_profile());
+  touch.bring_online(true);
+  CHECK_EQ((*touch.fake.last("hello"))["caps"]["dashboard"]["v"].as_int(), int64_t(2));
+
+  // TALK and CANCEL only: nothing could page widgets, so the host lists them as tiles.
+  Rig plain;
+  plain.bring_online(true);
+  CHECK_EQ((*plain.fake.last("hello"))["caps"]["dashboard"]["v"].as_int(), int64_t(1));
+  plain.server(kWidgets);  // a layout it didn't ask for: ignored whole
+  tap_cancel(plain);
+  CHECK(plain.app.screen() == hg::Screen::Ready);
+  plain.app.on_button(hg::Button::Down, true);
+  CHECK(plain.app.screen() == hg::Screen::Ready);
+
+  // A layout newer than this firmware is ignored, and what it showed stays.
+  keys.server(kWidgets);
+  keys.server(R"({"type":"dashboard","v":3,"sessions":[],"widgets":[]})");
+  press(keys, hg::Button::Down);
+  CHECK(keys.app.screen() == hg::Screen::Widget);
+}
+
+TEST("widgets: they arrive quietly; DOWN opens and pages them, UP goes back, and both ends lead to Ready") {
+  Rig r(scroll_profile());
+  r.bring_online(true);
+  press(r, hg::Button::Down);
+  CHECK(r.app.screen() == hg::Screen::Ready);  // none yet
+  r.server(kWidgets);
+  CHECK(r.app.screen() == hg::Screen::Ready);  // data, not a screen takeover
+  CHECK(!r.app.widgets_open());
+  press(r, hg::Button::Up);
+  CHECK(r.app.screen() == hg::Screen::Ready);  // UP is still the last reply's key
+
+  press(r, hg::Button::Down);
+  CHECK(r.app.screen() == hg::Screen::Widget);
+  CHECK(r.app.status_json().find("\"screen\":\"widget\"") != std::string::npos);
+  const hg::UiModel& m = r.app.model();
+  CHECK_EQ(int(m.widget_count), 4);
+  CHECK_EQ(int(m.widget_index), 0);
+  CHECK(m.widget.kind == hg::Widget::Kind::Value);
+  CHECK(m.widget.label == "Office" && m.widget.value == "21.5" && m.widget.unit == "C");
+  CHECK(m.widget.tone == hg::DashRow::Tone::Good);
+  CHECK(!m.widget_rest);
+
+  press(r, hg::Button::Down);
+  CHECK(m.widget.kind == hg::Widget::Kind::Progress);
+  CHECK_EQ(int(m.widget.percent), 62);
+  CHECK(m.widget.tone == hg::DashRow::Tone::Dim);
+  press(r, hg::Button::Down);
+  CHECK(m.widget.kind == hg::Widget::Kind::List);
+  CHECK_EQ(m.widget.items.size(), size_t(2));
+  CHECK_EQ(m.widget.items[1], std::string("11:30 Dentist"));
+  press(r, hg::Button::Down);
+  CHECK(m.widget.kind == hg::Widget::Kind::Headline);
+  CHECK(m.widget.value == "Blue in Green" && m.widget.text == "Miles Davis");
+  CHECK_EQ(int(m.widget_index), 3);
+  press(r, hg::Button::Up);
+  CHECK_EQ(int(m.widget_index), 2);
+  press(r, hg::Button::Down);
+  press(r, hg::Button::Down);  // past the last one
+  CHECK(r.app.screen() == hg::Screen::Ready);
+
+  press(r, hg::Button::Down);
+  CHECK_EQ(int(r.app.model().widget_index), 0);  // opens at the first again
+  press(r, hg::Button::Up);  // back from the first
+  CHECK(r.app.screen() == hg::Screen::Ready);
+
+  // CANCEL closes them, and on Ready it still opens the sessions list.
+  press(r, hg::Button::Down);
+  tap_cancel(r);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  tap_cancel(r);
+  CHECK(r.app.screen() == hg::Screen::Dashboard);
+  CHECK_EQ(r.app.model().dash.size(), size_t(4));  // the list holds sessions and tiles, not widgets
+  press(r, hg::Button::Down);
+  CHECK(r.app.screen() == hg::Screen::Dashboard);  // DOWN scrolls the list there
+}
+
+TEST("widgets: a newer snapshot replaces them in place, and one without widgets closes them") {
+  Rig r(scroll_profile());
+  r.bring_online(true);
+  r.server(kWidgets);
+  press(r, hg::Button::Down);
+  press(r, hg::Button::Down);
+  press(r, hg::Button::Down);
+  press(r, hg::Button::Down);
+  CHECK_EQ(int(r.app.model().widget_index), 3);
+  // Two left: the page moves to the last one there is.
+  r.server(R"({"type":"dashboard","v":2,"sessions":[],"widgets":[)"
+           R"({"kind":"value","label":"Office","value":"22.0"},{"kind":"progress","label":"Backup","percent":90}]})");
+  CHECK(r.app.screen() == hg::Screen::Widget);
+  CHECK_EQ(int(r.app.model().widget_count), 2);
+  CHECK_EQ(int(r.app.model().widget_index), 1);
+  CHECK_EQ(int(r.app.model().widget.percent), 90);
+  // A layout 1 snapshot has none: the widgets go, and the list's rows are the new ones.
+  r.server(kDashboard);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  press(r, hg::Button::Down);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  tap_cancel(r);
+  CHECK_EQ(r.app.model().dash.size(), size_t(7));
+}
+
+TEST("widgets: at most eight, four items each, a percent within 0 to 100, and unknown kinds are skipped") {
+  Rig r(scroll_profile());
+  r.bring_online(true);
+  std::string many = R"({"type":"dashboard","v":2,"sessions":[],"widgets":[)"
+                     R"({"kind":"gauge","label":"From a later firmware"},)"
+                     R"({"kind":"progress","label":"Over","percent":250},)"
+                     R"({"kind":"progress","label":"Under","percent":-5},)"
+                     R"({"kind":"list","label":"Long","items":["a","b","c","d","e","f"]})";
+  for (int i = 0; i < 9; ++i) many += R"(,{"kind":"value","label":"n","value":")" + std::to_string(i) + "\"}";
+  r.server(many + "]}");
+  press(r, hg::Button::Down);
+  const hg::UiModel& m = r.app.model();
+  CHECK_EQ(int(m.widget_count), 8);
+  CHECK(m.widget.label == "Over" && m.widget.percent == 100);  // the gauge is no page
+  press(r, hg::Button::Down);
+  CHECK(m.widget.label == "Under" && m.widget.percent == 0);
+  press(r, hg::Button::Down);
+  CHECK_EQ(m.widget.items.size(), size_t(4));
+  for (int i = 0; i < 5; ++i) press(r, hg::Button::Down);
+  CHECK_EQ(int(m.widget_index), 7);
+  CHECK_EQ(m.widget.value, std::string("4"));  // values 0 to 4 filled the eight
+  press(r, hg::Button::Down);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+}
+
+TEST("widgets: a reply on screen keeps DOWN for scrolling; talking, a question or a card takes over") {
+  Rig r(scroll_profile());
+  r.bring_online(true);
+  r.server(kWidgets);
+  r.server(R"({"type":"turn.start","turn":"t1"})");
+  r.server(R"({"type":"reply","turn":"t1","text":"It is sunny."})");
+  r.server(R"({"type":"turn.end","turn":"t1","outcome":"success"})");
+  r.advance(200);
+  CHECK_EQ(r.app.model().body, std::string("It is sunny."));
+  CHECK(!r.app.model().hero);
+  press(r, hg::Button::Down);
+  CHECK(r.app.screen() == hg::Screen::Ready);  // the reply is being read
+  CHECK(!r.app.widgets_open());
+  r.advance(21000);  // the text gave way to the mascot
+  CHECK(r.app.model().hero);
+  press(r, hg::Button::Up);
+  CHECK(!r.app.model().hero);  // UP brings the last reply back, as before
+  r.server(R"({"type":"ping"})");
+  r.advance(21000);
+  press(r, hg::Button::Down);
+  CHECK(r.app.screen() == hg::Screen::Widget);
+
+  r.app.on_button(hg::Button::Talk, true);  // talking takes the screen and records
+  CHECK(r.app.screen() == hg::Screen::Listening);
+  CHECK(r.fake.mic_on);
+  CHECK(!r.app.widgets_open());
+
+  Rig asked(scroll_profile());
+  asked.bring_online(true);
+  asked.server(kWidgets);
+  press(asked, hg::Button::Down);
+  asked.server(R"({"type":"prompt","id":"q","title":"Allow?","text":"rm -rf build"})");
+  CHECK(asked.app.screen() == hg::Screen::Prompt);
+  press(asked, hg::Button::Down);
+  CHECK(asked.app.screen() == hg::Screen::Prompt);  // no paging under a question
+
+  Rig carded(scroll_profile());
+  carded.bring_online(true);
+  carded.server(kWidgets);
+  press(carded, hg::Button::Down);
+  CHECK(carded.app.screen() == hg::Screen::Widget);
+  carded.server(R"({"type":"display","title":"Card","body":"milk","ttl_s":0})");
+  CHECK(carded.app.screen() == hg::Screen::Card);
+  tap_cancel(carded);
+  CHECK(carded.app.screen() == hg::Screen::Ready);  // the card replaced the widgets
+}
+
+TEST("widgets: a lost connection forgets them, and an unpaired device never opens them") {
+  Rig r(scroll_profile());
+  r.bring_online(true);
+  r.server(kWidgets);
+  press(r, hg::Button::Down);
+  CHECK(r.app.screen() == hg::Screen::Widget);
+  r.app.on_transport_closed("gone");
+  CHECK(r.app.screen() != hg::Screen::Widget);
+  CHECK(!r.app.widgets_open());
+  r.advance(3000);
+  r.app.on_transport_open();
+  r.server(R"({"type":"challenge","nonce":"bm9uY2U=","enrolled":true})");
+  r.server(R"({"type":"welcome","session":"s2","heartbeat_s":20,"paired":true})");
+  press(r, hg::Button::Down);
+  CHECK(r.app.screen() == hg::Screen::Ready);  // stale ones never come back
+
+  Rig unpaired(scroll_profile());
+  unpaired.bring_online(false);
+  unpaired.server(kWidgets);
+  press(unpaired, hg::Button::Down);
+  CHECK(!unpaired.app.widgets_open());
+}
+
+TEST("widgets: touch opens them with a swipe from left to right, pages both ways and closes with a swipe down") {
+  Rig r(Rig::touch_profile());
+  r.bring_online_with_profiles();
+  hg::TouchGestures touch(r.app);
+  swipe(r, touch, 60, 120, 140, 6);
+  CHECK(r.app.screen() == hg::Screen::Ready);  // no widgets yet: the swipe does nothing
+  r.server(kWidgets);
+  swipe(r, touch, 60, 120, 140, 6);
+  CHECK(r.app.screen() == hg::Screen::Widget);
+  CHECK_EQ(int(r.app.model().widget_index), 0);
+  CHECK(r.fake.last("audio.start") == nullptr);  // a swipe never records
+  swipe(r, touch, 60, 120, 140, -8);
+  CHECK_EQ(int(r.app.model().widget_index), 1);
+  swipe(r, touch, 200, 120, -140, 4);  // right to left: back one
+  CHECK_EQ(int(r.app.model().widget_index), 0);
+  swipe(r, touch, 200, 120, -140, 4);  // and from the first, the Ready screen, not the profile grid
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK(!r.app.profile_picker_open());
+
+  // The other gestures on Ready are what they were.
+  swipe(r, touch, 200, 120, -140, 4);
+  CHECK(r.app.profile_picker_open());
+  swipe(r, touch, 160, 60, 4, 140);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  swipe(r, touch, 60, 120, 140, 6);  // the grid's own sideways swipe turned no widget page meanwhile
+  CHECK_EQ(int(r.app.model().widget_index), 0);
+  CHECK(r.app.screen() == hg::Screen::Widget);
+
+  // A swipe down closes the widgets; the next one opens the sessions list.
+  swipe(r, touch, 160, 60, 4, 140);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  swipe(r, touch, 160, 60, 4, 140);
+  CHECK(r.app.screen() == hg::Screen::Dashboard);
+  swipe(r, touch, 60, 120, 140, 6);
+  CHECK(r.app.screen() == hg::Screen::Dashboard);  // no widgets from the list
+  swipe(r, touch, 160, 60, 4, 140);
+
+  // Past the last widget the Ready screen comes back.
+  for (int i = 0; i < 4; ++i) swipe(r, touch, 60, 120, 140, 6);
+  CHECK_EQ(int(r.app.model().widget_index), 3);
+  swipe(r, touch, 60, 120, 140, 6);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+
+  // A hold on a widget talks, as it does on Ready.
+  swipe(r, touch, 60, 120, 140, 6);
+  CHECK(r.app.screen() == hg::Screen::Widget);
+  touch.update(true, 160, 120, r.fake.clock);
+  r.advance(150);
+  touch.tick(r.fake.clock);
+  CHECK(r.fake.mic_on);
+  CHECK(r.app.screen() == hg::Screen::Listening);
+  r.advance(600);
+  touch.update(false, 0, 0, r.fake.clock);
+  CHECK(r.fake.last("audio.end") != nullptr);
+}
+
+TEST("widgets: left open, they time out like a list: dim, dark, closed, and the wake shows Ready") {
+  Rig r(scroll_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  CHECK_EQ(r.app.console("set screen_timeout 30"), std::string("@ok screen_timeout"));
+  r.server(kWidgets);
+  press(r, hg::Button::Down);
+  r.advance(16000);
+  CHECK_EQ(r.fake.brightness, 10);
+  CHECK(r.app.widgets_open());
+  r.server(R"({"type":"ping"})");
+  r.advance(15000);
+  CHECK_EQ(r.fake.brightness, 0);
+  CHECK(!r.app.widgets_open());
+  press(r, hg::Button::Talk);
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+}
+
+TEST("widgets: left open at rest, the clock takes turns with them, dimmed, and a touch brings the page back") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  r.fake.wall = kWallSaturday;  // 09:41:00
+  r.fake.wall_ok = true;
+  CHECK_EQ(r.app.console("set clock 5"), std::string("@ok clock"));
+  r.server(kWidgets);
+  hg::TouchGestures touch(r.app);
+  swipe(r, touch, 60, 120, 140, 6);
+  swipe(r, touch, 60, 120, 140, 6);
+  CHECK_EQ(int(r.app.model().widget_index), 1);
+  CHECK_EQ(r.fake.brightness, 100);
+  r.advance(6000);
+  // Four widgets and the clock: minute 41 is turn 1, the first widget.
+  CHECK(r.app.clock_showing());
+  CHECK_EQ(r.fake.brightness, 70);
+  CHECK(r.app.screen() == hg::Screen::Widget);
+  CHECK(r.app.model().widget_rest);
+  CHECK_EQ(int(r.app.model().widget_index), 0);
+  CHECK_EQ(int(r.app.model().clock_minute), 41);
+  const auto at_minute = [&r](uint8_t minute) {
+    r.fake.wall = hg::WallTime{2026, 10, 24, 6, 9, minute, 0};
+    r.advance(1100);
+  };
+  at_minute(42);
+  CHECK_EQ(int(r.app.model().widget_index), 1);
+  at_minute(44);
+  CHECK(r.app.model().widget.kind == hg::Widget::Kind::Headline);
+  at_minute(45);  // turn 0: the clock face itself
+  CHECK(r.app.screen() == hg::Screen::Clock);
+  CHECK_EQ(r.app.model().clock_time, std::string("09:45"));
+  at_minute(46);
+  CHECK(r.app.screen() == hg::Screen::Widget);
+  CHECK_EQ(int(r.app.model().widget_index), 0);
+  // Hermes is never told a resting screen is dark.
+  const Value* dark = last_display_state(r.fake);
+  CHECK(!dark || !(*dark)["display_sleeping"].as_bool());
+
+  // The touch that ends the rest only wakes: the page the user left, lit, and nothing recorded.
+  touch.update(true, 160, 120, r.fake.clock);
+  CHECK(!r.app.clock_showing());
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Widget);
+  CHECK(!r.app.model().widget_rest);
+  CHECK_EQ(int(r.app.model().widget_index), 1);
+  touch.update(false, 0, 0, r.fake.clock + 30);
+  CHECK(r.fake.last("audio.start") == nullptr);
+
+  // The Ready screen's rest is the clock alone, as before.
+  swipe(r, touch, 160, 60, 4, 140);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  r.advance(6000);
+  CHECK(r.app.screen() == hg::Screen::Clock);
+  at_minute(47);
+  CHECK(r.app.screen() == hg::Screen::Clock);
+}
+
+TEST("widgets: a turn or a reply takes the screen from an open widget") {
+  // A turn Hermes starts by itself (a cron delivery): Thinking, then the reply's text.
+  Rig r(scroll_profile());
+  r.bring_online(true);
+  r.server(kWidgets);
+  press(r, hg::Button::Down);
+  CHECK(r.app.screen() == hg::Screen::Widget);
+  r.server(R"({"type":"turn.start","turn":"c1"})");
+  CHECK(r.app.screen() == hg::Screen::Thinking);
+  CHECK(!r.app.widgets_open());
+  r.server(R"({"type":"reply","turn":"c1","text":"Your backup finished."})");
+  CHECK(r.app.screen() == hg::Screen::Responding);
+  CHECK_EQ(r.app.model().body, std::string("Your backup finished."));
+  r.server(R"({"type":"turn.end","turn":"c1","outcome":"success"})");
+  r.advance(500);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.app.model().body, std::string("Your backup finished."));  // read on Ready, not under a widget
+
+  // A reply outside any turn, and one that streams.
+  Rig alone(scroll_profile());
+  alone.bring_online(true);
+  alone.server(kWidgets);
+  press(alone, hg::Button::Down);
+  alone.server(R"({"type":"reply","text":"Dinner is ready."})");
+  CHECK(alone.app.screen() == hg::Screen::Responding);
+  CHECK_EQ(alone.app.model().body, std::string("Dinner is ready."));
+  Rig stream(scroll_profile());
+  stream.bring_online(true);
+  stream.server(kWidgets);
+  press(stream, hg::Button::Down);
+  stream.server(R"({"type":"reply.delta","turn":"s1","text":"Dinner"})");
+  CHECK(stream.app.screen() == hg::Screen::Responding);
+  CHECK_EQ(stream.app.model().body, std::string("Dinner"));
+
+  // Spoken audio is a reply too: the face talks instead of the widget staying up.
+  Rig spoken(scroll_profile());
+  spoken.bring_online(true);
+  spoken.server(kWidgets);
+  press(spoken, hg::Button::Down);
+  spoken.server(R"({"type":"audio.start","stream":1,"rate":16000,"format":"pcm16"})");
+  CHECK(spoken.app.screen() == hg::Screen::Responding);
+  CHECK(!spoken.app.widgets_open());
+}
+
+TEST("widgets: once the widgets are gone, the resting clock moves by its own minutes again") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  r.fake.wall = kWallSaturday;  // 09:41:00
+  r.fake.wall_ok = true;
+  CHECK_EQ(r.app.console("set clock 5"), std::string("@ok clock"));
+  r.server(kWidgets);
+  hg::TouchGestures touch(r.app);
+  swipe(r, touch, 60, 120, 140, 6);
+  r.advance(6000);
+  CHECK(r.app.model().widget_rest);
+  CHECK(r.app.model().shift_step >= 0);  // the round of turns sets the shift
+  r.server(R"({"type":"dashboard","v":2,"sessions":[],"tiles":[],"widgets":[]})");
+  r.advance(1100);
+  CHECK(r.app.clock_showing());
+  CHECK(r.app.screen() == hg::Screen::Clock);
+  CHECK_EQ(int(r.app.model().shift_step), -1);  // the clock's own minute, not the last round's
+}
+
+TEST("widgets: at rest every face is drawn at all nine burn-in offsets, for any number of widgets") {
+  for (int n = 1; n <= 8; ++n) {
+    Rig r(scroll_profile());
+    r.fake.backlight = true;
+    r.bring_online(true);
+    CHECK_EQ(r.app.console("set clock 5"), std::string("@ok clock"));
+    std::string msg = R"({"type":"dashboard","v":2,"sessions":[],"widgets":[)";
+    for (int i = 0; i < n; ++i)
+      msg += std::string(i ? "," : "") + R"({"kind":"value","label":"w","value":")" + std::to_string(i) + "\"}";
+    r.server(msg + "]}");
+    r.fake.wall = hg::WallTime{2026, 10, 24, 6, 9, 0, 0};
+    r.fake.wall_ok = true;
+    press(r, hg::Button::Down);
+    r.advance(6000);
+    CHECK(r.app.clock_showing());
+    // Nine turns of every face: the frames each widget was drawn as, and the clock's shift steps.
+    std::vector<std::vector<std::vector<uint16_t>>> frames(static_cast<size_t>(n));
+    std::vector<int> clock_steps;
+    int clock_turns = 0;
+    for (int t = 0; t < 9 * (n + 1); ++t) {
+      const int total = 9 * 60 + t;
+      r.fake.wall = hg::WallTime{2026, 10, 24, 6, static_cast<uint8_t>(total / 60), static_cast<uint8_t>(total % 60), 0};
+      r.server(R"({"type":"ping"})");
+      r.advance(1100);
+      const hg::UiModel& m = r.app.model();
+      if (m.screen == hg::Screen::Clock) {
+        ++clock_turns;
+        if (std::find(clock_steps.begin(), clock_steps.end(), m.shift_step % 9) == clock_steps.end())
+          clock_steps.push_back(m.shift_step % 9);
+        continue;
+      }
+      CHECK(m.screen == hg::Screen::Widget && m.widget_rest);
+      if (m.screen != hg::Screen::Widget) return;
+      auto& seen = frames[m.widget_index];
+      if (std::find(seen.begin(), seen.end(), r.fake.fb) == seen.end()) seen.push_back(r.fake.fb);
+    }
+    CHECK_EQ(clock_turns, 9);
+    CHECK_EQ(clock_steps.size(), size_t(9));
+    for (const auto& seen : frames) CHECK_EQ(seen.size(), size_t(9));
+  }
+}
+
+TEST("widgets: at rest UP and DOWN page from the widget on screen, and on the clock face they only wake") {
+  Rig r(scroll_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  r.fake.wall = kWallSaturday;  // 09:41
+  r.fake.wall_ok = true;
+  CHECK_EQ(r.app.console("set clock 5"), std::string("@ok clock"));
+  r.server(kWidgets);
+  press(r, hg::Button::Down);
+  press(r, hg::Button::Down);
+  CHECK_EQ(int(r.app.model().widget_index), 1);
+  r.advance(6000);
+  r.fake.wall = hg::WallTime{2026, 10, 24, 6, 9, 44, 0};  // the fourth widget's turn
+  r.advance(1100);
+  CHECK(r.app.model().widget_rest);
+  CHECK_EQ(int(r.app.model().widget_index), 3);
+  press(r, hg::Button::Up);  // from the one on screen, not the one left a while ago
+  CHECK(!r.app.clock_showing());
+  CHECK_EQ(r.fake.brightness, 100);
+  CHECK(r.app.screen() == hg::Screen::Widget);
+  CHECK_EQ(int(r.app.model().widget_index), 2);
+
+  r.server(R"({"type":"ping"})");
+  r.advance(6000);
+  r.fake.wall = hg::WallTime{2026, 10, 24, 6, 9, 45, 0};  // the clock face's turn
+  r.advance(1100);
+  CHECK(r.app.screen() == hg::Screen::Clock);
+  press(r, hg::Button::Down);
+  CHECK(r.app.screen() == hg::Screen::Widget);
+  CHECK_EQ(int(r.app.model().widget_index), 2);  // the page that was left, unmoved
+  press(r, hg::Button::Down);
+  CHECK_EQ(int(r.app.model().widget_index), 3);
+}
+
+TEST("widgets: one with nothing to draw is no page, and long text is cut on the device") {
+  Rig r(scroll_profile());
+  r.bring_online(true);
+  const std::string longer(300, 'x');
+  r.server(std::string(R"({"type":"dashboard","v":2,"sessions":[],"widgets":[)") +
+           R"({"kind":"list","label":"A string","items":"milk"},)"
+           R"({"kind":"list","label":"An object","items":{"a":"b"}},)"
+           R"({"kind":"list","label":"Blank lines","items":["",7,null]},)"
+           R"({"kind":"value","label":"A number","value":21.5},)"
+           R"({"kind":"value","label":"Empty","value":""},)"
+           R"({"kind":"headline","label":"No title","text":"only a second line"},)"
+           R"({"kind":"progress","label":"No percent"},)"
+           R"({"kind":"progress","label":"Words","percent":"half"},)"
+           R"({"kind":"list","label":"Mixed","items":["",3,"eggs"]},)"
+           R"({"kind":"value","label":")" + longer + R"(","value":")" + longer + R"(","unit":")" + longer + R"("},)"
+           R"({"kind":"headline","title":")" + longer + R"(","text":")" + longer + R"("},)"
+           R"({"kind":"list","items":[")" + longer + R"("]}]})");
+  press(r, hg::Button::Down);
+  const hg::UiModel& m = r.app.model();
+  CHECK_EQ(int(m.widget_count), 4);
+  CHECK(m.widget.label == "Mixed");
+  CHECK_EQ(m.widget.items.size(), size_t(1));  // only the lines with text
+  press(r, hg::Button::Down);
+  CHECK_EQ(m.widget.label.size(), size_t(64));
+  CHECK_EQ(m.widget.value.size(), size_t(64));
+  CHECK_EQ(m.widget.unit.size(), size_t(64));
+  press(r, hg::Button::Down);
+  CHECK(m.widget.value.size() == 64 && m.widget.text.size() == 64);
+  press(r, hg::Button::Down);
+  CHECK_EQ(m.widget.items[0].size(), size_t(64));
+
+  // Nothing drawable at all: no widgets, so nothing opens.
+  r.server(R"({"type":"dashboard","v":2,"sessions":[],"widgets":[{"kind":"value","label":"x"},{"kind":"list"}]})");
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  press(r, hg::Button::Down);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+}
+
+TEST("widgets: a swipe down closes them with swipe-to-cancel off, and records nothing") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  r.server(kWidgets);
+  hg::TouchGestures::Config cfg;
+  cfg.swipe_cancel = false;
+  hg::TouchGestures touch(r.app, cfg);
+  swipe(r, touch, 60, 120, 140, 6);
+  CHECK(r.app.screen() == hg::Screen::Widget);
+  const std::string hint = r.app.model().hint;
+  swipe(r, touch, 160, 60, 4, 140);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK(!r.app.widgets_open());
+  CHECK(r.fake.last("audio.start") == nullptr);
+  CHECK(!r.fake.mic_on);
+  CHECK(r.app.model().hint.find("while speaking") == std::string::npos);
+}
+
+TEST("widgets: under a question a sideways swipe does nothing, and the widgets are still there after it") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  r.server(kWidgets);
+  hg::TouchGestures touch(r.app);
+  swipe(r, touch, 60, 120, 140, 6);
+  swipe(r, touch, 60, 120, 140, 6);
+  CHECK_EQ(int(r.app.model().widget_index), 1);
+  r.server(R"({"type":"prompt","id":"q","title":"Allow?","text":"rm -rf build"})");
+  CHECK(r.app.screen() == hg::Screen::Prompt);
+  swipe(r, touch, 60, 120, 140, 6);
+  swipe(r, touch, 200, 120, -140, 4);
+  swipe(r, touch, 200, 120, -140, 4);
+  CHECK(r.app.screen() == hg::Screen::Prompt);  // unanswered
+  CHECK(r.fake.last("prompt.reply") == nullptr);
+  r.server(R"({"type":"prompt.close","id":"q"})");
+  CHECK(r.app.screen() == hg::Screen::Widget);
+  CHECK_EQ(int(r.app.model().widget_index), 1);  // where the question found them
 }
 
 // --------------------------------------------------------------------------

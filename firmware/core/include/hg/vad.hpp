@@ -34,6 +34,8 @@ class Vad {
   // Enough speech to be an utterance rather than a click (what EndOfSpeech requires).
   static constexpr uint32_t kMinSpeechMs = 200;
   bool spoke() const { return speech_ms_ >= kMinSpeechMs; }
+  // How much audio has been fed since reset().
+  uint32_t heard_ms() const { return elapsed_ms_; }
 
  private:
   // The level of a block as speech sees it: through a second-order low-pass, so a whistle from
@@ -46,6 +48,7 @@ class Vad {
   float noise_ = 0;
   uint32_t elapsed_ms_ = 0;
   uint32_t speech_ms_ = 0;
+  uint32_t carry_ = 0;  // samples * 1000 not yet a whole millisecond
   uint32_t silence_ms_ = 0;
 };
 

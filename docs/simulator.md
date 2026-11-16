@@ -48,11 +48,12 @@ A first session, start to finish:
 | Input | Action |
 |---|---|
 | Hold **Space** / TALK button | Push-to-talk |
-| **Esc** / CANCEL | Discard a recording, close a card, stop a turn; on the idle screen, open or close the [dashboard](using-gadget.md#watch-hermes-sessions-on-the-dashboard). With `hermes-gadget devserver`, type `dashboard` there to send sample sessions and tiles |
+| **Esc** / CANCEL | Discard a recording, close a card, stop a turn; on the idle screen, open or close the [dashboard](using-gadget.md#watch-hermes-sessions-on-the-dashboard). With `hermes-gadget devserver`, type `dashboard` there to send sample sessions, tiles and one [widget](using-gadget.md#glance-at-widgets) of each kind |
 | Hold **Esc** / CANCEL for 2 s | Start a new Hermes session (`/new`); a countdown shows in the hint bar. In [interpreter mode](using-gadget.md#interpreter-mode) it leaves the mode instead, and a short press switches who speaks next. With `hermes-gadget devserver`, type `interpret es en` there to try the mode: the translation is a stand-in that labels your text, and the tone it plays stands in for the speech |
 | Hold **Space + Esc** for 1 s | Open or close the device's settings and local hardware checks |
 | **Space** / **Esc** on a question | Answer yes / no |
-| **Up / Down** | Scroll a long reply (long replies also page by themselves) |
+| A [choice](using-gadget.md#pick-an-answer) | Click an answer on a touch board; otherwise **Up / Down** then **Space**, and **Esc** cancels. On a board with neither, **Esc** moves to the next answer. `choose 2` or `choose cancel` in the device console answers it too |
+| **Up / Down** | Scroll a long reply (long replies also page by themselves). On the idle screen, **Down** opens the widgets and pages them, and **Up** goes back. On a touch board, drag from left to right instead |
 | **Ctrl+S** | Save a PNG screenshot into the state directory |
 | Text box | Send a typed message, as from a keyboard device |
 | **Speak WAV...** | Hold TALK while a WAV file plays into the microphone |
@@ -62,6 +63,8 @@ A first session, start to finish:
 | **Developer tools**, sensors | Battery and temperature sliders, reported to Hermes as telemetry |
 | **Developer tools**, serial console | The same commands as the board's UART console (`help`, `status`, `set server ...`) |
 | **Developer tools**, Power (simulated) | Supply a complete power-driver reading, independently of the generic telemetry sliders |
+
+The face's [expressions](architecture.md#the-mascot) are in the core, so the simulator draws them. In the serial console, `face happy` sets one, `face sleepy 10` sets one for 10 seconds, `face neutral` clears it and `face` reports it; the `face.set` action does the same from Hermes.
 
 The simulated device registers two demo actions the agent can use: `led.set` (a virtual LED in the window) and `buzzer.beep`.
 
@@ -81,6 +84,8 @@ Power starts unavailable. In **Developer tools → Power (simulated)**, select *
 The **Telemetry battery %** slider remains an independent generic sensor, not the header battery source. No estimator or indicator is automatically enabled. To preview the LCD-1.54's approximate display estimate, use `sim-240x240`, name `Waveshare 1.54`, enter `set battery_estimate liion` then `set battery_display percentage` in the console, and apply 3750 mV with no native percentage: the header shows 50%. See the [fitted-battery caveat and estimate limitations](using-gadget.md#device-settings-and-hardware-checks) before enabling this on hardware.
 
 Rebuilding the window for a board change or starting a new simulator resets the power fixture to unavailable. Firmware settings persist in `nvs.json`; fixtures do not. Rebuild the simulator library after this ABI 8 update, which adds the host's wall-clock time for the resting clock; Linux native-core clients still default to no power device.
+
+To hear a sound file on the simulated speaker, type `play <path>` in the dev server's console and `stop` to end it (WAV, or anything `ffmpeg` decodes). With Hermes, ask the agent, which uses [`gadget_play`](hermes-integration.md#playing-audio).
 
 Like a board, the simulated device takes firmware updates (`hermes gadget update`, or `update <path>` in the dev server). It checks the image the way the core does and keeps only ESP32 app images. Then it "restarts": it drops the connection and connects again, still running the simulator.
 
@@ -129,7 +134,7 @@ Script commands, one per line:
 | `time <YYYY-MM-DDTHH:MM>` \| `time now` | Pin the simulated clock's time at that moment, or follow the computer's clock again |
 | `expect <text>` | Fail unless the last reply contains `<text>` |
 
-Screens are `boot`, `offline`, `connecting`, `pairing`, `ready`, `listening`, `thinking`, `responding`, `card`, `image`, `prompt`, `updating`, `settings`, `setup`, `dashboard`, `profiles`, `alarm`, `clock`, `low_battery`, `charging`, `charged` and `error`. The `setup` screen belongs to the ESP32 phone-setup flow; the simulator does not start a Wi-Fi access point.
+Screens are `boot`, `offline`, `connecting`, `pairing`, `ready`, `listening`, `thinking`, `responding`, `card`, `image`, `prompt`, `updating`, `settings`, `setup`, `dashboard`, `widget`, `profiles`, `alarm`, `clock`, `low_battery`, `charging`, `charged` and `error`. The `setup` screen belongs to the ESP32 phone-setup flow; the simulator does not start a Wi-Fi access point.
 
 For example, after `wait ready 20`:
 
@@ -143,6 +148,12 @@ screenshot /tmp/hg-battery-50.png
 power null
 sleep 5.2
 status
+```
+
+`console face <expression> [seconds]` sets the face's expression in a script, and `status` reports it as `expression` while one is set. `examples/scripts/faces.txt` shows each one and saves a screenshot of it:
+
+```bash
+hermes-gadget sim --headless --url ws://127.0.0.1:8765/gadget --script examples/scripts/faces.txt
 ```
 
 Power objects accept only `battery_present`, `battery_mv`, `battery_percent`, `charging`, and `external_power`. Missing fields or JSON `null` values are unknown; `{}` is an available reading with every field unknown. Booleans must be `true`/`false`, voltage an integer 0–65535, and percentage an integer 0–100; booleans are not numeric inputs. Invalid JSON, keys, types, or ranges stop a script with a line-numbered error and leave the applied fixture unchanged. Voltage-only `status.power` never gains a derived `battery_percent`, even when the header displays an estimate.

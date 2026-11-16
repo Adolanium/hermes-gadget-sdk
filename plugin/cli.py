@@ -99,6 +99,11 @@ def _cmd_forget(args) -> None:
         return
     store.forget(device_id)
     print(f"Forgot the key for {device_id}; the device will re-enroll on its next connection.")
+    try:
+        if _tiles().clear_widgets(device=device_id):
+            print("Removed the widgets set for it. Widgets set for every gadget stay.")
+    except OSError as exc:
+        print(f"Could not remove the widgets set for it: {exc}")
     print(f"To also remove its chat approval: hermes pairing revoke gadget {device_id}")
 
 
@@ -446,6 +451,55 @@ def _cmd_tile(args) -> None:
             print(f"{tile['id']:<16} {tile['label']:<16} {tile['value']:<16} {tile.get('state', '-')}")
 
 
+def _widget_kind(args) -> str:
+    """The widget kind the options given describe; exits when they describe none, or two."""
+    kinds = [kind for kind, given in (("value", args.value is not None), ("progress", args.percent is not None),
+                                      ("list", bool(args.item)), ("headline", args.title is not None)) if given]
+    if len(kinds) != 1:
+        sys.exit("Give one of --value, --percent, --item or --title: it decides what the widget shows.")
+    return kinds[0]
+
+
+def _cmd_widget(args) -> None:
+    from .dashboard import ALL_DEVICES, widget_summary
+
+    tiles = _tiles()
+    device, where = None, "every gadget"
+    if getattr(args, "device", None):
+        store = _store()
+        device = _match(store, args.device)
+        if device is None:
+            sys.exit(1)
+        where = store.devices()[device].get("name") or device
+    if args.widget_command == "set":
+        try:
+            widget = tiles.set_widget(
+                args.name, _widget_kind(args), device=device, label=args.label, value=args.value, unit=args.unit,
+                percent=args.percent, items=args.item, title=args.title, text=args.text, state=args.state,
+                ttl_s=args.ttl)
+        except (ValueError, OSError) as exc:
+            sys.exit(str(exc))
+        print(f"Set {args.name} ({widget['kind']}) for {where}: {widget_summary(widget)}. "
+              "Connected gadgets get it within a few seconds.")
+    elif args.widget_command == "clear":
+        if not args.name and not args.all:
+            sys.exit("Give a widget name, or --all.")
+        if tiles.clear_widgets(None if args.all else args.name, device=device):
+            print("Cleared " + (f"every widget set for {where}." if args.all else f"{args.name} for {where}."))
+        else:
+            print(f"No such widget is set for {where}." if args.name else f"No widgets were set for {where}.")
+    else:
+        scopes = tiles.widget_scopes()
+        if not scopes:
+            print("No widgets. Add one: hermes gadget widget set office --value 21.5 --unit C --label Office")
+        names = {d: r.get("name") or d for d, r in _store().devices().items()} if set(scopes) - {ALL_DEVICES} else {}
+        for scope, widgets in scopes.items():
+            target = "all" if scope == ALL_DEVICES else names.get(scope, scope)
+            for w in widgets:
+                print(f"{w['id']:<16} {w['kind']:<9} {target:<14} {w['label']:<16} {widget_summary(w):<20} "
+                      f"{w.get('state', '-')}")
+
+
 def setup_argparse(parser) -> None:
     subs = parser.add_subparsers(dest="gadget_command")
     subs.add_parser("devices", aliases=["ls"], help="List gadgets that have enrolled with this Hermes")
@@ -493,11 +547,31 @@ def setup_argparse(parser) -> None:
     tile_clear.add_argument("name", nargs="?", help="The tile to remove")
     tile_clear.add_argument("--all", action="store_true", help="Remove every tile")
     tile_subs.add_parser("list", help="Show the tiles")
+    widget = subs.add_parser("widget", help="Set the full-screen widgets a gadget pages through from its home screen")
+    widget_subs = widget.add_subparsers(dest="widget_command")
+    widget_set = widget_subs.add_parser(
+        "set", help="Add a widget or replace it. One of --value, --percent, --item and --title picks its kind")
+    widget_set.add_argument("name", help="The widget's name, e.g. office")
+    widget_set.add_argument("--value", help="A big value, e.g. 21.5")
+    widget_set.add_argument("--unit", help="With --value: its unit, e.g. C")
+    widget_set.add_argument("--percent", type=float, help="A progress bar, 0 to 100")
+    widget_set.add_argument("--item", action="append", help="A line of a short list; up to four")
+    widget_set.add_argument("--title", help="The first line of a two-line headline")
+    widget_set.add_argument("--text", help="With --title: the second line")
+    widget_set.add_argument("--label", help="The small heading; the name by default")
+    widget_set.add_argument("--state", choices=["ok", "warn", "bad"], help="Colours it green, yellow or red")
+    widget_set.add_argument("--ttl", type=float, help="Seconds until it disappears unless set again")
+    widget_clear = widget_subs.add_parser("clear", help="Remove a widget")
+    widget_clear.add_argument("name", nargs="?", help="The widget to remove")
+    widget_clear.add_argument("--all", action="store_true", help="Remove every widget")
+    for sub in (widget_set, widget_clear):
+        sub.add_argument("--device", help="Only this gadget (id or name); every gadget without it")
+    widget_subs.add_parser("list", help="Show the widgets")
     parser.set_defaults(func=handle)
 
 
 _COMMANDS = {"devices": _cmd_devices, "ls": _cmd_devices, "forget": _cmd_forget, "info": _cmd_info,
-             "pair": _cmd_pair, "update": _cmd_update, "diag": _cmd_diag, "tile": _cmd_tile, "interpret": _cmd_interpret, "bot-chat": _cmd_bot_chat}
+             "pair": _cmd_pair, "update": _cmd_update, "diag": _cmd_diag, "tile": _cmd_tile, "widget": _cmd_widget, "interpret": _cmd_interpret, "bot-chat": _cmd_bot_chat}
 
 
 def handle(args) -> None:

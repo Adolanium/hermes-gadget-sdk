@@ -36,6 +36,9 @@ MAX_THUMB_PX = 128           # the largest profile thumbnail a device may ask fo
 MAX_THUMBS = 32              # the profiles a device keeps from welcome, and so thumbnails at most
 MIN_UTTERANCE_S = 0.25
 MAX_FRAME_BYTES = 1 << 20
+MAX_CARD_ITEMS = 12          # list rows a structured card carries, at most (caps.card.items may be fewer)
+MAX_CHOICE_OPTIONS = 6       # answers a choice carries, at most (caps.choice.options may be fewer)
+PROGRESS_BAR_CELLS = 10      # the text bar a plain card shows in place of a progress bar
 MAX_PENDING_DEVICES = 16     # unapproved devices the store keeps, in total...
 MAX_PENDING_PER_ADDRESS = 4  # ...and from one network address
 
@@ -132,6 +135,22 @@ class Rejected(Exception):
         self.message = message
 
 
+def plain_card_body(body: str, items: list[str] | None = None, progress: int | None = None,
+                    qr: str | None = None) -> str:
+    """A structured card as the body of a plain one, for a device without ``caps.card`` (or a
+    code it cannot draw): a text bar, the body, one line per item and the code's text."""
+    parts = []
+    if progress is not None:
+        filled = progress * PROGRESS_BAR_CELLS // 100
+        parts.append(f"[{'#' * filled}{'-' * (PROGRESS_BAR_CELLS - filled)}] {progress}%")
+    if body:
+        parts.append(body)
+    parts.extend(f"* {item}" for item in items or [])
+    if qr:
+        parts.append(qr)
+    return "\n".join(parts)
+
+
 class ActionError(RuntimeError):
     pass
 
@@ -158,7 +177,7 @@ class _Held:
     """
     status: str | None = None
     dashboard: dict | None = None
-    view: tuple | None = None  # ("card", title, body) or ("image", width, height, rgb565)
+    view: tuple | None = None  # ("card", title, body, extras) or ("image", width, height, rgb565)
     ttl_s: float = 0
     held_at: float = 0.0
 
@@ -234,7 +253,13 @@ class AudioOut:
             await self._session.send_json(protocol.message("audio.abort", stream=self.stream))
         except Exception:
             pass
-        self.done.set()
+        finally:
+            self.done.set()
+
+    @property
+    def backlog_s(self) -> float:
+        """Audio written but not yet sent. A long source is written no faster than this drains."""
+        return self._queue.qsize() * AUDIO_FRAME_MS / 1000
 
     @property
     def playing(self) -> bool:
@@ -346,6 +371,8 @@ class DeviceSession:
         self._send_lock = asyncio.Lock()
         self._upload: _Upload | None = None
         self._audio_out: AudioOut | None = None
+        self.playback = None  # a gadget_play playback, waiting or playing (playback.Playback)
+        self.playback_lock = asyncio.Lock()  # one gadget_play start or stop at a time
         self._stream_counter = 0
         self._pending: dict[str, asyncio.Future] = {}
         self._tasks: set[asyncio.Task] = set()
@@ -368,6 +395,9 @@ class DeviceSession:
         self._ota_inbox: asyncio.Queue | None = None  # the device's ota.* replies, while an update runs
         self._dashboard_sent: dict | None = None  # the last dashboard this connection delivered
         self._dashboards = 0  # dashboards offered, sent or held
+        # The choice on the device's screen: its id, how many answers it has, and the future a
+        # choice.reply resolves. Kept apart from _pending, whose ids action.result and diag answer.
+        self._choice: tuple[str, int, asyncio.Future] | None = None
 
     # -- capabilities -----------------------------------------------------------
 
@@ -382,8 +412,12 @@ class DeviceSession:
 
     @property
     def audio_playing(self) -> bool:
-        """An outbound audio stream is still being sent or played; a new one would cut it off."""
-        return self._audio_out is not None and self._audio_out.playing
+        """Speech is still being sent or played; a new stream would cut it off. Audio the agent
+        plays with gadget_play does not count: speech waits for speech, and takes over from that."""
+        out = self._audio_out
+        if out is None or not out.playing:
+            return False
+        return self.playback is None or self.playback.out is not out
 
     @property
     def speaker_formats(self) -> list[str]:
@@ -454,6 +488,37 @@ class DeviceSession:
         dash = self.caps.get("dashboard")
         v = dash.get("v") if isinstance(dash, dict) else None
         return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else 0
+
+    @staticmethod
+    def _cap(value: Any, key: str) -> int:
+        n = value.get(key) if isinstance(value, dict) else None
+        return n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else 0
+
+    @property
+    def card_items(self) -> int:
+        """List rows a structured card may carry (``caps.card``), or 0 when the device draws plain cards only."""
+        card = self.caps.get("card")
+        return min(MAX_CARD_ITEMS, self._cap(card, "items")) if self._cap(card, "v") else 0
+
+    @property
+    def card_qr_bytes(self) -> int:
+        """The longest code text the device draws on a card (``caps.card.qr``), in bytes; 0 for none."""
+        card = self.caps.get("card")
+        return self._cap(card, "qr") if self._cap(card, "v") else 0
+
+    @property
+    def choice_options(self) -> int:
+        """Answers a choice may offer (``caps.choice``), or 0 when the device cannot take one."""
+        choice = self.caps.get("choice")
+        return min(MAX_CHOICE_OPTIONS, self._cap(choice, "options")) if self._cap(choice, "v") else 0
+
+    @property
+    def choice_title_box(self) -> tuple[int, int] | None:
+        """The room a choice's question has above its answers: (columns, lines), from
+        ``caps.choice.title_cols`` and ``title_lines``; None when the device does not say."""
+        choice = self.caps.get("choice")
+        cols, lines = self._cap(choice, "title_cols"), self._cap(choice, "title_lines")
+        return (cols, lines) if cols and lines else None
 
     def action_names(self) -> list[str]:
         return [a["name"] for a in self.actions]
@@ -563,6 +628,49 @@ class DeviceSession:
 
     async def close_prompt(self, prompt_id: str) -> None:
         await self.send_json(protocol.message("prompt.close", id=prompt_id))
+
+    async def ask_choice(self, title: str, options: list[str], timeout: float = 60.0) -> int | None:
+        """Show a choice and wait for the answer: the picked option's index, or None when the
+        user cancelled. Raises ``ActionError`` when the device cannot take one, is already
+        showing one, disconnects or does not answer in time. Like a question, it is sent at
+        once and lights a dark screen."""
+        limit = self.choice_options
+        if not limit:
+            raise ActionError(f"{self.name} cannot take a choice on its screen")
+        if not 2 <= len(options) <= limit:
+            raise ActionError(f"{self.name} takes 2 to {limit} options")
+        if self._choice is not None:
+            raise ActionError(f"{self.name} is already showing a choice")
+        choice_id = uuid.uuid4().hex[:12]
+        fut = asyncio.get_running_loop().create_future()
+        self._choice = (choice_id, len(options), fut)
+        try:
+            await self.send_json(protocol.message(
+                "choice", id=choice_id, title=title, options=list(options), ttl_s=math.ceil(timeout)))
+            return await asyncio.wait_for(fut, timeout)
+        except asyncio.TimeoutError:
+            raise ActionError(f"{self.name} got no answer within {timeout:.0f}s") from None
+        finally:
+            self._choice = None
+            if not fut.done() or fut.cancelled():  # timed out or the wait was cancelled: take it off the screen
+                try:
+                    await self.send_json(protocol.message("choice.close", id=choice_id))
+                except Exception:
+                    pass
+
+    async def withdraw_choice(self, why: str) -> None:
+        """Take the choice off the screen unanswered; the tool that asked it fails with ``why``. For
+        a device that is about to be in other hands (interpreter mode): a tap there must not come
+        back as the user's answer."""
+        if self._choice is None:
+            return
+        choice_id, _count, fut = self._choice
+        if not fut.done():
+            fut.set_exception(ActionError(why))
+        try:
+            await self.send_json(protocol.message("choice.close", id=choice_id))
+        except Exception:
+            pass
 
     async def send_profiles(self, roster: list[dict], offered: "set[str] | None" = None) -> None:
         """The offered profiles changed since the welcome: send the new list (docs/protocol.md#profiles),
@@ -717,12 +825,45 @@ class DeviceSession:
                 else:
                     self._thumbs_dirty = True  # look again with the list as it is now
 
-    async def show_card(self, title: str, body: str, ttl_s: float = 15) -> bool:
-        """Show a card. False when it is held until the screen lights up."""
-        if self._hold_view(("card", title, body), ttl_s):
+    async def show_card(self, title: str, body: str, ttl_s: float = 15, *, items: list[str] | None = None,
+                        progress: int | None = None, qr: str | None = None, card_id: str | None = None) -> bool:
+        """Show a card. False when it is held until the screen lights up.
+
+        ``items`` (list rows), ``progress`` (0 to 100) and ``qr`` (a code's text) make it a
+        structured card, and one with the ``card_id`` of the card on screen updates that card
+        in place. A device without ``caps.card`` gets the same content as a plain card
+        (``plain_card_body``), and so does a code longer than the device draws."""
+        extras = {"items": items or None, "progress": progress, "qr": qr or None, "card_id": card_id or None}
+        if self._hold_view(("card", title, body, extras), ttl_s):
             return False
-        await self.send_json(protocol.message("display", title=title, body=body, ttl_s=ttl_s))
+        fields: dict = {}
+        limit = self.card_items
+        if limit:
+            if items:
+                fields["items"] = list(items[:limit])
+            if progress is not None:
+                fields["progress"] = max(0, min(100, int(progress)))
+            if qr and len(qr.encode()) <= self.card_qr_bytes:
+                fields["qr"] = qr
+            elif qr:
+                body = plain_card_body(body, qr=qr)
+            if card_id:
+                fields["id"] = card_id
+        else:
+            body = plain_card_body(body, (items or [])[:MAX_CARD_ITEMS],
+                                   None if progress is None else max(0, min(100, int(progress))), qr)
+        await self.send_json(protocol.message("display", title=title, body=body, ttl_s=ttl_s, **fields))
         return True
+
+    def card_shown_as(self, *, items: list[str] | None = None, progress: int | None = None,
+                      qr: str | None = None) -> str:
+        """How ``show_card`` puts this content on the device: ``card`` (structured), ``text`` (a
+        plain card with the same content) or ``qr_as_text`` (structured, the code as its text)."""
+        if not (items or progress is not None or qr):
+            return "card"
+        if not self.card_items:
+            return "text"
+        return "qr_as_text" if qr and len(qr.encode()) > self.card_qr_bytes else "card"
 
     async def show_image(self, width: int, height: int, rgb565: bytes, ttl_s: float = 30) -> bool:
         """Show an image. False when it is held until the screen lights up."""
@@ -789,7 +930,7 @@ class DeviceSession:
                 return
             ttl_s = math.ceil(left)
         if held.view[0] == "card":
-            await self.show_card(held.view[1], held.view[2], ttl_s)
+            await self.show_card(held.view[1], held.view[2], ttl_s, **held.view[3])
         else:
             await self.show_image(held.view[1], held.view[2], held.view[3], ttl_s)
 
@@ -803,7 +944,13 @@ class DeviceSession:
             await self._audio_out.abort()
         out = AudioOut(self, self._next_stream(), src_rate, channels)
         self._audio_out = out
-        await out.start(turn=turn)
+        try:
+            await out.start(turn=turn)
+        except BaseException:
+            # Cancelled or failed while audio.start went out: its pump never started, so nothing
+            # else would end the stream, and the speaker would look busy from then on.
+            await out.abort()
+            raise
         return out
 
     async def play_pcm(self, pcm: bytes, rate: int, *, turn: str | None = None) -> AudioOut:
@@ -815,6 +962,13 @@ class DeviceSession:
     async def stop_audio(self) -> None:
         if self._audio_out:
             await self._audio_out.abort()
+
+    def end_playback(self, outcome: str) -> None:
+        """End a gadget_play playback, playing or still waiting for the speaker. One that waits has
+        no stream for ``stop_audio`` to abort, and would start once the device was free."""
+        if self.playback is not None:
+            self.playback.end(outcome)
+            self.playback = None
 
     async def invoke_action(self, name: str, args: dict | None = None, timeout: float = 10.0) -> dict:
         if name not in self.action_names():
@@ -888,7 +1042,8 @@ class DeviceSession:
             self._face_task.cancel()
         if self._thumb_task:
             self._thumb_task.cancel()
-        for fut in self._pending.values():
+        waiting = list(self._pending.values()) + ([self._choice[2]] if self._choice else [])
+        for fut in waiting:
             if not fut.done():
                 fut.set_exception(ActionError(f"{self.name} disconnected"))
         if self._ota_inbox is not None:
@@ -896,6 +1051,7 @@ class DeviceSession:
                 protocol.message("ota.error", code="disconnected", message=f"{self.name} disconnected"))
         if self._audio_out and self._audio_out._task:
             self._audio_out._task.cancel()
+        self.end_playback("the device disconnected")  # its source (a download, ffmpeg) ends with the connection
 
     # -- description ----------------------------------------------------------------
 
@@ -1235,6 +1391,10 @@ class DeviceHub:
             session.spawn(self.delegate.on_text(session, str(msg.get("id") or ""), text[:4000]))
 
     async def _h_audio_start(self, session: DeviceSession, msg: dict) -> None:
+        # The device stops its speaker to record, whatever becomes of the recording: stop sending
+        # it a stream it no longer plays.
+        session.end_playback("interrupted")
+        await session.stop_audio()
         fmt = msg.get("format", "pcm16")
         if fmt != "pcm16":
             await session.send_notice(f"Unsupported audio format {fmt!r}")
@@ -1291,10 +1451,12 @@ class DeviceHub:
         _note(session, state="ready")
 
     async def _h_cancel(self, session: DeviceSession, msg: dict) -> None:
+        session.end_playback("interrupted")
         await session.stop_audio()
         session.spawn(self.delegate.on_cancel(session))
 
     async def _h_session_new(self, session: DeviceSession, msg: dict) -> None:
+        session.end_playback("interrupted")
         await session.stop_audio()
         session.spawn(self.delegate.on_new_session(session))
 
@@ -1310,6 +1472,18 @@ class DeviceHub:
         answer = msg.get("answer")
         if prompt_id and answer in ("yes", "no"):
             session.spawn(self.delegate.on_prompt_reply(session, prompt_id, answer == "yes"))
+
+    async def _h_choice_reply(self, session: DeviceSession, msg: dict) -> None:
+        if session._choice is None:
+            return
+        choice_id, count, fut = session._choice
+        if fut.done() or str(msg.get("id") or "") != choice_id:
+            return
+        index = msg.get("index")
+        if msg.get("cancelled") is True:
+            fut.set_result(None)
+        elif isinstance(index, int) and not isinstance(index, bool) and 0 <= index < count:
+            fut.set_result(index)
 
     async def _h_action_result(self, session: DeviceSession, msg: dict) -> None:
         fut = session._pending.get(str(msg.get("id") or ""))
@@ -1373,6 +1547,7 @@ class DeviceHub:
         "interpret.flip": _h_interpret_flip,
         "interpret.stop": _h_interpret_stop,
         "prompt.reply": _h_prompt_reply,
+        "choice.reply": _h_choice_reply,
         "action.result": _h_action_result,
         "diag": _h_diag,
         "state": _h_state,

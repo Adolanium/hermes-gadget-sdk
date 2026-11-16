@@ -12,7 +12,8 @@ Hermes's gateway runs "platform adapters": Telegram, Slack and about twenty othe
 | `__init__.py` | `register(ctx)`: platform entry, agent tools, `hermes gadget` CLI |
 | `adapter.py` | `GadgetAdapter(BasePlatformAdapter)`: the Hermes-facing side |
 | `hub.py` | WebSocket server, auth, audio, images, actions (no Hermes imports) |
-| `tools.py` | `gadget_devices`, `gadget_display`, `gadget_action`, `gadget_interpret` |
+| `tools.py` | `gadget_devices`, `gadget_display`, `gadget_ask`, `gadget_action`, `gadget_play`, `gadget_widget`, `gadget_interpret` |
+| `playback.py` | What `gadget_play` may open, decoding a chunk at a time, and the playback task (see [Playing audio](#playing-audio)) |
 | `interpret.py` | [Interpreter mode](#interpreter-mode): its state, the translation request and the device message (no Hermes imports) |
 | `store.py`, `status.py`, `protocol.py`, `audio.py`, `textfmt.py`, `imaging.py` | Support modules (no Hermes imports) |
 | `dashboard/` | The **Gadgets** tab of the Hermes web dashboard: `manifest.json`, the backend routes in `plugin_api.py`, and the tab's bundle in `dist/`, built from `src/` (see [The Gadgets tab](#the-gadgets-tab-in-the-hermes-dashboard)) |
@@ -39,6 +40,8 @@ platforms:
       # heartbeat_s: 20
       # max_utterance_s: 60
       # opus_bitrate: 24000    # Opus speaker audio for devices that decode it; 0 = PCM16 only
+      # play_dirs: [~/Music]   # folders gadget_play may read sound files from (see Playing audio)
+      # play_max_minutes: 60   # the longest one gadget_play playback runs
       # dashboard: true        # Hermes's sessions and status tiles on devices that draw them
       # profiles: [work, home] # profiles gadgets may switch to, or "all"; off without it (see below)
       # profile_mode: virtual  # each picked profile gets its own routed chat; no Hermes hook needed (see below)
@@ -152,7 +155,7 @@ The Hermes desktop app gets a **Gadgets** page: a sidebar row, a route at `/gadg
 | Images from the agent | `send_image_file()` / `send_image()` | Converted to RGB565 to fit the screen (needs Pillow) |
 | Confirmations (`/new`, `/undo`, model switches) | `send_slash_confirm()` + `tools.slash_confirm.resolve()` | Shown as a `prompt`; TALK resolves `once`, CANCEL `cancel`. The handler's reply goes back with `send()` |
 | Dangerous-command approvals | `_send_exec_approval_prompt(ExecApprovalPrompt)` + `tools.approval.resolve_gateway_approval()` | Shown as a `prompt`; TALK resolves `once`, CANCEL `deny`. The prompt's `ttl_s` is Hermes's approval timeout (`approvals.timeout`, read by `compat.approval_timeout_s()`), so the device and the adapter both drop it when that time passes. On timeout Hermes calls `edit_message()` on the prompt, which withdraws it |
-| Agent questions (the `clarify` tool) | `send_clarify()` | Hermes's text fallback (the question with numbered choices; the next message, spoken or typed, is the answer), also spoken with Hermes's text-to-speech when the device speaks replies. The device has no multiple-choice prompt |
+| Agent questions (the `clarify` tool) | `send_clarify()` | Hermes's text fallback (the question with numbered choices; the next message, spoken or typed, is the answer), also spoken with Hermes's text-to-speech when the device speaks replies. `clarify` does not use the device's [choice screen](protocol.md#choices); the agent reaches that with the `gadget_ask` tool |
 | Pairing | Hermes DM pairing (`gateway/pairing.py`, `hermes pairing approve`; `hermes gadget pair` approves through the same `PairingStore`) | See below |
 | Authorization state | `BasePlatformAdapter._is_sender_authorized()` | The runner-installed check; used to mirror approval and revocation to the device |
 | Agent tools | `ctx.register_tool(toolset="gadget")` | Part of the implicit `hermes-gadget` toolset; also usable from other chats |
@@ -209,6 +212,7 @@ What it does not enforce: the words go to the configured STT, model and TTS prov
 - The device keeps the mode through a lost connection, and marks what is typed or recorded in it (`interpret: true` in `text` and `audio.start`), a recording it sends again after reconnecting included. The hub hands a marked message to `on_interpret_text` or `on_interpret_utterance`, never to `on_text` or `on_utterance`. The adapter translates it while the mode is on, and otherwise drops it and tells the device the mode is off. A mode that expires on a message drops that message too.
 - When a device connects, the adapter states the mode in so many words, on or off, before anything else.
 - While the mode is on, the adapter shows no Hermes question on the device (`prompt`) and ignores an answer from it; the question stays queued, and is shown when the mode ends unless it was answered elsewhere. A question on screen when the mode starts is withdrawn from the device.
+- The agent cannot ask the gadget a question either. `gadget_ask` answers with an error while the mode is on, and a choice that is on the screen when the mode starts is withdrawn and its tool call fails: a tap by whoever holds the gadget is never returned to the agent as the user's answer.
 - A device event with `notify` starts no turn while the mode is on.
 - A message sent to the device outside a turn the owner started (`send_message`, cron delivery) is held, up to 20, and delivered when the mode ends. `send_voice`, `play_tts` and images are refused with an error.
 - Holding CANCEL sends `interpret.stop`, never `session.new`, so it cannot reset the owner's conversation.
@@ -271,6 +275,74 @@ Hermes asks before destructive commands (`/new`, `/undo`), costly model switches
 ### Agent tools and Hermes tool search
 
 Hermes keeps the core tool schema narrow. Plugin tools are therefore deferred behind its tool-search bridge (`tool_search` / `tool_describe` / `tool_call`), and their names and descriptions appear in the bridge's manifest. A model invokes `gadget_action` through `tool_call`, and the end-to-end test exercises exactly that. The per-device context names the available actions so the model knows they exist.
+
+The seven tools:
+
+| Tool | What it does |
+|---|---|
+| `gadget_devices` | Lists connected gadgets with their screen, audio, actions and sensor readings |
+| `gadget_display` | Shows a card: `title` and `text`, and optionally `items` (a list), `progress` (0 to 100) or `qr` (text to show as a QR code). A card sent again with the same `id` replaces the one on screen in place, which is how a progress bar moves |
+| `gadget_ask` | Shows `question` with 2 to 6 `options`, waits up to `seconds` (60 by default, 300 at most) and returns the option the user picked, as the agent wrote it, with its `index`; `cancelled: true` when the user cancelled; an error when nobody answered |
+| `gadget_action` | Runs an action the device declared |
+| `gadget_play` | Plays a sound file or an audio stream on the device's speaker, and stops it (see [Playing audio](#playing-audio)) |
+| `gadget_widget` | Sets, lists and clears home-screen widgets (see [Widgets from the agent](#widgets-from-the-agent)) |
+| `gadget_interpret` | Turns a gadget into an interpreter between two languages, and back (see [Interpreter mode](#interpreter-mode)) |
+
+`gadget_display` and `gadget_ask` shape their text for the device: Markdown is stripped, characters are folded to its `charset`, and each list row or answer is one line of at most `text_cols` less 2 characters, the room left after its bullet. A QR code's text is sent unchanged.
+
+The agent learns when the user saw something else than it wrote. `gadget_ask` blocks the turn, so its screen is all the user has to go on: a question longer than the device shows (`caps.choice.title_cols` by `title_lines`) is cut to fit and returned as `question_shown`, options that were cut come back as `options_shown`, and `note` says so. `gadget_display` returns `items_shown` when the device keeps fewer rows than the list has.
+
+What a device cannot draw still reaches the user. A gadget without `caps.card` (older firmware, the Linux client) gets a list, a progress value and a code's text as a plain card, and the tool's result says so in `note`. A gadget without `caps.choice` gets the options as a numbered card; `gadget_ask` then fails with `shown_as_card: true` and tells the agent to ask for the answer by voice. See [structured cards](protocol.md#structured-cards) and [choices](protocol.md#choices).
+
+`gadget_ask` is separate from [confirmations](#confirmations). A dangerous command is still approved through Hermes's own yes/no question, with the rules above; an agent cannot stand in for that approval with a choice.
+
+### Playing audio
+
+`gadget_play` plays something other than speech on a gadget's speaker: a sound file on the Hermes computer, or the `http://` or `https://` URL of an audio file, a podcast episode or an internet radio stream. Ask for it in words ("play the BBC World Service on the kitchen gadget", "stop the music").
+
+| Argument | Meaning |
+|---|---|
+| `source` | A file path on the Hermes computer, or an http(s) URL of the audio itself |
+| `stop` | `true` stops what `gadget_play` is playing |
+| `volume` | 1 to 100: the level of this playback, as a percentage of the source's own. The speaker's volume is still the device's `speaker.volume` action |
+| `title` | A short name for the notice on the screen; the file name or the host otherwise |
+| `device` | Which gadget, as for the other tools |
+
+How it plays:
+
+- **On the Hermes computer.** The plugin decodes the source and sends it through the same paced stream as a spoken reply ([Audio to the device](protocol.md#audio-to-the-device)), so it needs no firmware support beyond a speaker. Plain PCM WAV is read in Python. Every other format, and every URL, needs `ffmpeg` on the Hermes computer.
+- **A chunk at a time.** The source is decoded about a second ahead of what the device has been sent, and a URL is downloaded only as fast as it plays. A long file or an endless stream is never held in memory.
+- **After the reply.** The tool answers once the source has been opened and its first audio decoded, so a URL that does not answer or a file that is not audio is the tool's error. A source that gives no audio within 15 seconds of the tool call is given up on, and the download and `ffmpeg` started for it are ended. The audio starts when the gadget has finished the turn and its spoken reply; a gadget that stays busy for two minutes never starts it. The screen shows `Playing <title>` as a notice.
+- **Until something else needs the speaker.** Playback ends at the end of the source, at `play_max_minutes` (60 by default, counted both as audio played and as time on the clock, so a stream that arrives slowly ends on time too), when a stream sends no audio for 20 seconds, on `stop: true`, when the device disconnects, on CANCEL on the device, when you start talking to the gadget, or when Hermes speaks: a reply, or a message sent outside a turn such as a reminder, which does not wait for the music to end. It does not resume afterwards. A playback that is still waiting for the reply to end is ended the same way by CANCEL, by a new recording and by `stop: true`, and never starts. After the source has ended, `stop: true` still ends the audio that has not been sent to the device. What the device has already been sent, half a second of audio and up to 3 seconds on a device with a large buffer, plays out: the firmware ignores `audio.abort` for a stream whose `audio.end` it has received. A second `gadget_play` replaces the first.
+
+What it may open:
+
+- **Local files** only inside Hermes's audio cache (where its text-to-speech files and received audio are kept) and the folders listed in `platforms.gadget.extra.play_dirs`. The path is resolved first, so a symbolic link or `..` that leads elsewhere is refused, with the same answer whether or not the path exists. A playlist file (`.m3u`, `.m3u8`, `.pls`, or a file that begins like one) is refused, because it names other files. Without `play_dirs`, nothing else on the host can be played.
+- **URLs** only with the `http` or `https` scheme, without a user name or password. They are fetched with Hermes's own guarded HTTP client under Hermes's URL policy: private, loopback and link-local addresses are refused when the name is resolved, when the connection is made and on every redirect, unless Hermes's `security.allow_private_urls` is `true`; cloud metadata addresses are refused always. When Hermes runs behind a proxy (`HTTP_PROXY`, `HTTPS_PROXY` or `ALL_PROXY` is set), it leaves name resolution to the proxy: the check when the connection is made does not apply, and a name the Hermes computer cannot resolve itself is passed to the proxy unchecked. Restrict what the proxy may reach in that case. To play from a media server on your own network, set that Hermes option. One URL sends at most 512 MB.
+- **`ffmpeg` gets no access of its own.** A URL's data is piped into it and it may open nothing else (`-protocol_whitelist pipe`); for a local file it may open files only. In both cases it reads audio containers only (`-format_whitelist`: MP3, AAC, Ogg, FLAC, WAV, MP4/M4A, Matroska/WebM, MPEG-TS, ASF/WMA, AIFF, AU, CAF, AC-3, AMR, APE, TTA, WavPack), not the playlist formats that open other files or URLs by name, so a playlist or container cannot make the Hermes computer read or fetch anything else.
+- **Playlists are not followed.** For an `.m3u` or `.pls` URL the tool returns up to three of the stream URLs the playlist lists, and the agent picks one. That text comes from the remote server: only plain `http(s)` URLs of at most 200 characters are passed on. HLS streams (`.m3u8`) are not supported.
+- **Errors say little.** What `ffmpeg` prints about data it could not decode, and the details of a failed download, go to the gateway log, not to the agent.
+- **Only a tool call fetches.** Nothing a device sends, and no message text, makes the plugin open a file or a URL.
+
+### Widgets from the agent
+
+`gadget_widget` sets, lists and clears [home-screen widgets](using-gadget.md#glance-at-widgets). It writes the same file as `hermes gadget widget` (`dashboard.json` in the plugin's data folder), so a widget the agent sets and one a cron job sets are the same thing, and either can replace or clear the other's.
+
+| Argument | Meaning |
+|---|---|
+| `action` | `set` (the default), `clear` or `list` |
+| `name` | The widget's name. Setting it again replaces the widget. `clear` without a name removes every widget of that scope |
+| `kind` | `value`, `progress`, `list` or `headline` |
+| `label`, `value`, `unit`, `percent`, `items`, `title`, `text`, `state` | The widget's fields, as in the [protocol](protocol.md#widgets) |
+| `ttl_s` | Seconds until the widget disappears unless it is set again |
+| `device` | A gadget's name or id, connected or not. Without it the widget is for every gadget |
+
+- The tool does not take the screen and does not wait for a device: the gateway sends the changed dashboard to connected gadgets at once, and to the others when they connect or their screens light up.
+- The limits are the CLI's: eight widgets for a gadget, counting the shared ones with its own, four list items, and text cut to the device's line. A widget for every gadget is refused when it would give any gadget a ninth, and the error names that gadget, so a shared widget never displaces a gadget's own. `ttl_s` is a positive number of seconds.
+- The tool answers with an error, and stores nothing, for a widget no device could draw: a missing value, a percent that is not a number, more than four items. It also answers with an error when the file cannot be read or written.
+- Every change is one locked read-modify-write of `dashboard.json`: the CLI, a cron job, the tool and the gateway can change tiles and widgets at the same time without losing each other's changes. A change waits up to 10 seconds for another to finish. The lock is the operating system's lock on `dashboard.json.lock`, so it ends with the process that holds it: a process that died blocks nobody, and a lock is never taken over because its file is old.
+- The gateway picks each device's layout from its `caps.dashboard.v`. Older firmware, and boards that cannot page, get each widget as a tile on the sessions list.
+- With `dashboard: false` the tool reports that the dashboard is off.
 
 ## Making replies fast
 
