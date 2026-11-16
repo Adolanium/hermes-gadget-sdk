@@ -222,6 +222,11 @@ const Entry kSpanish[] = {
     {Msg::HermesWaiting, "Hermes espera tu respuesta"},
     {Msg::AnsweredYes, "Respondiste: sí"},
     {Msg::AnsweredNo, "Respondiste: no"},
+    {Msg::AnsweredChoice, "Respondiste: {0}"},
+    {Msg::ChoiceTapHint, "Toca una respuesta"},
+    {Msg::ChoicePickHint, "{0}: elegir"},
+    {Msg::ChoiceStepHint, "{0}: otra, {1}: elegir"},
+    {Msg::ChoiceCancel, "Cancelar"},
     {Msg::Image, "Imagen"},
     // Ready screen
     {Msg::Ready, "Listo"},

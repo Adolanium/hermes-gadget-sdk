@@ -83,7 +83,7 @@ hermes-gadget sim --url ws://127.0.0.1:8765/gadget --board sim-466x466-round
 
 **You know it worked when:** the device reaches Ready and displays a streamed echo of your message. This is a scripted reply, not an agent response.
 
-In the development server terminal, try `card Shopping | eggs, milk` to display a card, or `action led.set {"color": "red"}` to change the virtual LED.
+In the development server terminal, try `card Shopping | eggs, milk` to display a card, `show {"title":"Shopping","items":["eggs","milk"],"progress":50}` for a list with a progress bar, `show {"title":"Link","qr":"https://example.org"}` for a QR code, `choose Which list? | Groceries | Hardware` to ask for an answer, or `action led.set {"color": "red"}` to change the virtual LED.
 
 ## 4. Try audio
 

@@ -17,7 +17,9 @@ tags: [gateway, hardware, esp32, voice, iot]
 provides_tools:
   - gadget_devices
   - gadget_display
+  - gadget_ask
   - gadget_action
+  - gadget_play
   - gadget_widget
 provides_hooks:  # session state for the device's dashboard (dashboard.SessionBoard.HOOKS)
   - on_session_start

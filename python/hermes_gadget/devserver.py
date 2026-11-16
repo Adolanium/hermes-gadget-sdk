@@ -150,6 +150,10 @@ HELP = """commands:
   approve <CODE>               approve a pairing code
   say <text>                   push a reply to every device
   card <title> | <body>        show a card
+  show <json>                  show a structured card, e.g.
+                               show {"title":"Build","progress":40,"items":["core","sim"],"id":"b"}
+                               show {"title":"Join","qr":"https://example.org"}
+  choose <title> | <a> | <b>.. ask for one of 2 to 6 answers and print the one picked
   notice <text>                show a notice line
   ask <title> | <question>     ask a yes/no question (TALK = yes, CANCEL = no)
   action <name> [json-args]    invoke a device action, e.g. action led.set {"color":"red"}
@@ -157,6 +161,7 @@ HELP = """commands:
   dashboard [json]             send a dashboard (sample sessions, tiles and widgets without json);
                                CANCEL on the idle screen opens the list, DOWN or a swipe
                                from left to right the widgets
+  play <path> | stop           play a sound file on every speaker (WAV; other formats need ffmpeg)
   update <path>                install a firmware image (firmware.bin) over the air
   quit"""
 
@@ -234,6 +239,17 @@ async def _console(hub: DeviceHub, brain: EchoBrain, stop: asyncio.Event) -> Non
                 title, _, body = rest.partition("|")
                 for s in sessions:
                     await s.show_card(title.strip(), body.strip())
+            elif cmd == "show":
+                given = json.loads(rest)
+                for s in sessions:
+                    await s.show_card(
+                        str(given.get("title") or ""), str(given.get("body") or ""), given.get("seconds", 0),
+                        items=[str(i) for i in given.get("items") or []], progress=given.get("progress"),
+                        qr=given.get("qr"), card_id=given.get("id"))
+            elif cmd == "choose":
+                title, *options = [part.strip() for part in rest.split("|")]
+                for s in sessions:
+                    s.spawn(_choose(s, title, options))
             elif cmd == "notice":
                 for s in sessions:
                     await s.send_notice(rest)
@@ -263,6 +279,18 @@ async def _console(hub: DeviceHub, brain: EchoBrain, stop: asyncio.Event) -> Non
                         await s.send_dashboard(dashboard.message(
                             given.get("sessions") or [], given.get("tiles") or [], given.get("widgets") or [],
                             charset=s.charset, cols=s.display.get("text_cols"), version=s.dashboard_version))
+            elif cmd in ("play", "stop"):
+                from hermes_gadget_plugin import playback
+
+                for s in sessions:
+                    if cmd == "stop":
+                        await playback.stop(s)
+                    elif s.has_speaker:
+                        path = Path(rest.strip()).expanduser()  # the developer's own file: any folder
+                        # Resolving reads the disk too: both off the loop that serves the devices.
+                        source = await asyncio.to_thread(lambda p=path, r=s.speaker_rate: playback.open_source(
+                            str(p), r, roots=[p.resolve().parent]))
+                        await playback.play(s, source, title=path.name, max_s=playback.max_seconds({}))
             elif cmd == "update":
                 for s in sessions:
                     s.spawn(_update(s, rest.strip()))
@@ -272,6 +300,15 @@ async def _console(hub: DeviceHub, brain: EchoBrain, stop: asyncio.Event) -> Non
                 print("unknown command; type help")
         except Exception as exc:
             print(f"  error: {exc}")
+
+
+async def _choose(session, title: str, options: list[str]) -> None:
+    """Asks one device and prints what it answered; the console stays free meanwhile."""
+    try:
+        index = await session.ask_choice(title, options)
+        print(f"  {session.name}: " + ("cancelled" if index is None else options[index]))
+    except Exception as exc:
+        print(f"  {session.name}: {exc}")
 
 
 async def serve(host: str, port: int, path: str, state_dir: Path, *, require_pairing: bool,

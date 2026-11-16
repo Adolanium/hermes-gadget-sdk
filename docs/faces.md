@@ -218,6 +218,23 @@ again. Removing a profile's face file and avatar brings its initial back. A pict
 the device shows, and is tried again only once the files change. A profile parked or taken off the offer
 since the device connected is not looked at again.
 
+## Expressions
+
+Hermes can give the face an expression: happy, confused, alert or sleepy
+([the `face.set` action](protocol.md#the-faceset-action)). The device makes each one from the three
+frames a face already has and a small mark it draws itself, so a face needs no extra artwork:
+
+| Face | What an expression shows |
+|---|---|
+| The mascot, or a face file | The mark, where `--think-dot` puts the thinking dots. Sleepy holds the blink frame, and alert holds the talk frame and stops blinking |
+| A face made with `--plain` | The mark only: its blink and talk frames are the idle picture |
+| A colour avatar with blink and talk pictures | The mark, drawn over the picture. Sleepy holds the blink picture and alert the talk picture |
+| A colour avatar with one of them, or neither | The mark, and the frame it has; the missing one stays the idle picture |
+
+The mark is a pair of sparkles, a `?`, a `!` or `zZ`, in the device's own colours. Its box is about a sixth of
+the face's width and starts at the thinking dots' anchor, moved in where it would leave the screen.
+Check that corner in `build/face-check.png`: artwork that fills it sits under the mark.
+
 ## Placing the eye and the mouth
 
 The device blinks and talks, so the generator has to know where the face's features are. It

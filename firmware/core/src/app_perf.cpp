@@ -129,6 +129,7 @@ void App::bench_step() {
     m.code.clear();
     m.level = 0;
     m.frame = 0;
+    m.expression = mascot::Expression::Neutral;  // the bench draws the same frames whatever Hermes set
     m.hint = "perf bench";
     m.hero = bench_ == Bench::Mascot;
     m.speaking = bench_ == Bench::Mascot;

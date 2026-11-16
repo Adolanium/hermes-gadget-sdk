@@ -43,7 +43,7 @@ def registered_platform():
 
     ctx = _Ctx()
     hermes_gadget_plugin.register(ctx)
-    assert set(ctx.tools) == {"gadget_devices", "gadget_display", "gadget_action", "gadget_widget"}
+    assert set(ctx.tools) == {"gadget_devices", "gadget_display", "gadget_ask", "gadget_action", "gadget_play", "gadget_widget"}
     assert ctx.cli == ["gadget"]
     assert "pre_llm_call" in ctx.hooks and "pre_approval_request" in ctx.hooks
     return ctx

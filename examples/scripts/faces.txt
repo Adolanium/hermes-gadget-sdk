@@ -1,0 +1,22 @@
+# The face's expressions, one after another, with a screenshot of each.
+# Works against `hermes-gadget devserver` or a Hermes gateway where this device is approved.
+#   hermes-gadget sim --headless --url ws://127.0.0.1:8765/gadget --script examples/scripts/faces.txt
+# `face <expression> [seconds]` is a serial-console command, so it works on a board too;
+# Hermes sets the same expressions with the face.set action.
+wait ready 30
+console face happy
+sleep 0.5
+screenshot face-happy.png
+console face confused
+sleep 0.5
+screenshot face-confused.png
+console face alert
+sleep 0.5
+screenshot face-alert.png
+# With seconds, the face goes back to neutral by itself.
+console face sleepy 2
+sleep 0.5
+screenshot face-sleepy.png
+console face
+sleep 2
+console face
