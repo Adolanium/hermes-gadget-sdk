@@ -1226,6 +1226,10 @@ void App::h_interpret(const json::Value& m) {
     return;
   }
   wake_display();
+  // From here on the gadget may be in other hands: a question or a choice on screen goes
+  // unanswered, as when it expires, and none is shown while the mode lasts (h_prompt, h_choice).
+  clear_prompt();
+  clear_choice();
   interpret_ = true;
   interpret_label_ = m["label"].as_string().substr(0, 24);
 }
@@ -1567,6 +1571,7 @@ void App::h_image_end(const json::Value& m) {
 }
 
 void App::h_prompt(const json::Value& m) {
+  if (interpret_) return;  // whoever holds an interpreting gadget answers nothing for its owner
   close_setup_screens();
   wake_display();
   if (settings_open()) close_settings();
@@ -1633,7 +1638,7 @@ void App::h_choice(const json::Value& m) {
     if (!given[i].is_string()) return;
     if (options.size() < kChoiceMaxOptions) options.push_back(given[i].as_string());
   }
-  if (id.empty() || options.size() < 2 || !can_choose()) return;
+  if (id.empty() || options.size() < 2 || !can_choose() || interpret_) return;
   close_setup_screens();
   wake_display();
   if (settings_open()) close_settings();
@@ -3139,7 +3144,9 @@ void App::update_model() {
     m.hint = tr(Msg::ButtonToStop, {cancel});
   } else if (mode_ == Mode::Responding) {
     m.screen = Screen::Responding;
-    m.headline = m.speaking ? tr(Msg::Speaking) : interpret_ ? interpret_label_.c_str() : "Hermes";
+    // In interpreter mode the label stays while the translation is spoken: it names who speaks
+    // next, and that person may answer before the speech has ended.
+    m.headline = interpret_ ? interpret_label_.c_str() : m.speaking ? tr(Msg::Speaking) : "Hermes";
     m.detail = status_;
     m.body = reply_;
     m.hint = profile_.touch_screen && touch_talk_ ? std::string(tr(Msg::HoldToReply)) : tr(Msg::ButtonToReply, {talk});

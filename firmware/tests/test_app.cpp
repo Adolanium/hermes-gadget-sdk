@@ -10779,3 +10779,60 @@ TEST("interpret: a recording made in the mode is marked when it is sent again, e
   const Value* next = r.fake.last("audio.start");
   CHECK(next && next != again && !(*next).has("interpret"));
 }
+
+TEST("interpret: the reply names who speaks next while the translation is spoken too") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  r.server(R"({"type":"turn.start","turn":"a1"})");
+  r.server(R"({"type":"reply","turn":"a1","text":"Good morning"})");
+  // The gadget changes hands when the translation is out: the label already names the other person.
+  r.server(R"({"type":"interpret","on":true,"label":"EN > ES"})");
+  r.server(R"({"type":"audio.start","stream":2,"rate":16000,"format":"pcm16"})");
+  CHECK(r.app.screen() == hg::Screen::Responding && r.app.model().speaking);
+  CHECK_EQ(r.app.model().headline, std::string("EN > ES"));
+  // Outside the mode a spoken reply says so, as before.
+  r.server(R"({"type":"audio.end","stream":2})");
+  r.server(R"({"type":"turn.end","turn":"a1","outcome":"success"})");
+  r.server(R"({"type":"interpret","on":false})");
+  r.server(R"({"type":"turn.start","turn":"a2"})");
+  r.server(R"({"type":"reply","turn":"a2","text":"Good morning"})");
+  r.server(R"({"type":"audio.start","stream":4,"rate":16000,"format":"pcm16"})");
+  CHECK(r.app.model().speaking);
+  CHECK_EQ(r.app.model().headline, std::string("Speaking"));
+}
+
+TEST("interpret: a choice or a question on screen goes when the mode starts, and none is taken in it") {
+  Rig r(scroll_profile());
+  r.bring_online(true);
+  // On screen, and old enough to be answered, when the gadget changes hands.
+  r.server(R"({"type":"choice","id":"c1","title":"Delete the backup?","options":["Yes","No"]})");
+  r.advance(700);
+  CHECK(r.app.screen() == hg::Screen::Choice);
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  r.advance(20);
+  CHECK(r.app.screen() != hg::Screen::Choice);
+  CHECK(r.app.status_json().find("\"choice\"") == std::string::npos);
+  CHECK(r.app.console("choose 1").rfind("@error", 0) == 0);
+  CHECK(r.fake.last("choice.reply") == nullptr);  // gone unanswered: nothing was sent for it
+  r.server(R"({"type":"interpret","on":false})");
+
+  r.server(R"({"type":"prompt","id":"q1","title":"Allow command?","text":"rm -rf build"})");
+  r.advance(700);
+  CHECK(r.app.screen() == hg::Screen::Prompt);
+  r.server(R"({"type":"interpret","on":true,"label":"ES > EN"})");
+  r.advance(20);
+  CHECK(r.app.screen() != hg::Screen::Prompt);
+  CHECK(r.app.status_json().find("\"prompt\"") == std::string::npos);
+
+  // One that arrives in the mode is not shown: TALK stays the microphone, never an answer.
+  r.server(R"({"type":"choice","id":"c2","title":"Delete the backup?","options":["Yes","No"]})");
+  r.server(R"({"type":"prompt","id":"q2","title":"Allow command?","text":"rm -rf build"})");
+  r.advance(700);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.app.model().headline, std::string("ES > EN"));
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK(r.fake.mic_on);
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK(r.fake.last("choice.reply") == nullptr && r.fake.last("prompt.reply") == nullptr);
+}
