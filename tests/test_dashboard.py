@@ -866,3 +866,40 @@ def test_each_session_gets_its_own_widgets_in_the_layout_it_draws(tmp_path):
     assert old["v"] == 1 and "widgets" not in old
     assert [(t["id"], t["label"]) for t in old["tiles"]] == [("nas", "nas"), ("temp", "Büro")]  # not the kitchen's
     assert dashboard.message_for(newer, sessions, store)["v"] == dashboard.VERSION
+
+
+def test_a_lock_that_is_held_is_never_taken_over_however_old_its_file_is(tmp_path, monkeypatch):
+    # Age is not ownership: a writer that removed an old lock file could remove the lock another
+    # writer had just taken, and both then changed the same file.
+    import os
+
+    monkeypatch.setattr(dashboard, "LOCK_WAIT_S", 0.3)
+    store = TileStore(tmp_path)
+    with store._locked():
+        lock = tmp_path / (TileStore.FILENAME + ".lock")
+        old = time.time() - 3600
+        os.utime(lock, (old, old))
+        with pytest.raises(TimeoutError):
+            with TileStore(tmp_path)._locked():
+                pass
+    store.set("nas", "up")  # released: the next change goes through
+    assert sorted(p.name for p in tmp_path.iterdir()) == [TileStore.FILENAME]
+
+
+def test_a_lock_file_left_by_a_process_that_died_blocks_nobody(tmp_path):
+    (tmp_path / (TileStore.FILENAME + ".lock")).write_bytes(b"")
+    TileStore(tmp_path).set("nas", "up")
+    assert [t["id"] for t in TileStore(tmp_path).tiles()] == ["nas"]
+
+
+def test_setting_an_expired_tile_again_counts_as_a_new_one(tmp_path):
+    now = [1000.0]
+    store = TileStore(tmp_path, clock=lambda: now[0])
+    store.set("old", "x", ttl_s=10)
+    now[0] += 60
+    for i in range(dashboard.MAX_TILES):
+        store.set(f"t{i}", str(i))
+    with pytest.raises(ValueError, match="clear one first"):
+        store.set("old", "back")  # it would be a ninth, and hide the last of the others
+    assert len(store.tiles()) == dashboard.MAX_TILES
+    store.set("t0", "again")  # a live one is replaced as before

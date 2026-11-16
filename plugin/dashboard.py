@@ -41,7 +41,6 @@ WIDGET_KINDS = ("value", "progress", "list", "headline")
 ALL_DEVICES = "*"          # in the file: the widgets every device gets
 RETRIES, RETRY_S = 10, 0.01  # a file Windows holds for another process frees up within milliseconds
 LOCK_WAIT_S = 10.0         # how long a change waits for another one to finish
-LOCK_STALE_S = 30.0        # a lock file older than this was left by a process that died
 IDLE_KEEP_S = 30 * 60      # an idle session leaves the dashboard this long after its last turn
 ACTIVE_KEEP_S = 6 * 3600   # ...and one that never reported its end, after this long
 TILE_STATES = ("ok", "warn", "bad")
@@ -163,6 +162,20 @@ class SessionBoard:
 BOARD = SessionBoard()  # this process's sessions; the plugin registers its hooks
 
 
+def _os_lock(fh) -> None:
+    """Take the operating system's exclusive lock on an open file, or raise OSError when another
+    open file holds it. Closing the file, or its process ending, releases it."""
+    if os.name == "nt":
+        import msvcrt
+
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
 class TileStore:
     """Status tiles and widgets in ``dashboard.json``; written by the CLI and the agent's tool,
     read by the gateway. Every change is one locked read-modify-write of the whole file."""
@@ -181,29 +194,37 @@ class TileStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         lock = self.path.with_name(self.path.name + ".lock")
         deadline = time.monotonic() + LOCK_WAIT_S
+        # The lock is the operating system's, on the open file: it ends with its holder, so a
+        # process that died holds nothing and no lock is ever taken over by its age.
         while True:
+            fh = None
             try:
-                os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
-                break
-            except (FileExistsError, PermissionError):  # held; on Windows also while it is being removed
-                try:
-                    if time.time() - lock.stat().st_mtime > LOCK_STALE_S:
-                        lock.unlink(missing_ok=True)  # its holder died before removing it
-                        continue
-                except OSError:
-                    pass  # gone meanwhile, or busy: try again
-                if time.monotonic() >= deadline:
-                    raise TimeoutError(f"{self.path.name} is locked by another process") from None
-                time.sleep(0.002)
+                fh = open(lock, "a+b")  # Windows refuses this while the file is being removed
+                _os_lock(fh)
+                # The holder before removed the file as it let go: this one is no longer the
+                # file the next writer opens. Start over on the one that is.
+                if os.name == "nt" or os.fstat(fh.fileno()).st_ino == os.stat(lock).st_ino:
+                    break
+            except OSError:
+                pass
+            if fh is not None:
+                fh.close()
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"{self.path.name} is locked by another process") from None
+            time.sleep(0.002)
         try:
             yield
         finally:
-            for attempt in range(RETRIES):
-                try:
-                    lock.unlink(missing_ok=True)
-                    break
-                except PermissionError:  # Windows: another process is looking at it this instant
-                    time.sleep(RETRY_S)
+            # Removed so the folder holds the dashboard alone. POSIX: while the lock is held, so a
+            # waiter sees the file is gone. Windows refuses to remove a file that is open: after
+            # closing, and not at all while another writer has it open.
+            if os.name != "nt":
+                with contextlib.suppress(OSError):
+                    lock.unlink()
+            fh.close()
+            if os.name == "nt":
+                with contextlib.suppress(OSError):
+                    lock.unlink()
 
     def _load(self) -> dict[str, dict]:
         """The file's two sections: ``tiles`` (name -> tile) and ``widgets`` (device id or ``*`` ->
@@ -289,7 +310,9 @@ class TileStore:
             tile["expires"] = expires
         with self._locked():
             doc = self._load()
-            if name not in doc["tiles"] and len(self._live_tiles(doc["tiles"])) >= MAX_TILES:
+            live = self._live_tiles(doc["tiles"])
+            # An expired tile set again is a new one: its name is still stored, and it is not shown.
+            if name not in {t["id"] for t in live} and len(live) >= MAX_TILES:
                 raise ValueError(f"the dashboard holds {MAX_TILES} tiles; clear one first")
             doc["tiles"][name] = tile
             self._save(doc)

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "hg/font.hpp"
+#include "hg/font_cjk.hpp"
 
 namespace hg {
 namespace {
@@ -2442,20 +2443,24 @@ void Ui::draw_widget(const UiModel& m) {
     switch (w.kind) {
       case Widget::Kind::Value: {
         // The value as large as fits with its unit beside it, at about half the size, on its baseline.
+        // Rows a line of text takes at scale 1, and where a narrow glyph's last row is in it: the
+        // CJK font's lines are 12 rows, with narrow glyphs 3 rows down.
+        const int rows = HG_CJK_FONT ? font::kCjkSize : font::kGlyphHeight;
+        const int base = font::kAsciiYOffset + font::kGlyphHeight;
         int k = s + 1, us = s;
         for (int kk = 10; kk > s; --kk) {
           const int u = std::max(s, (kk + 1) / 2);
           const int width = Canvas::text_width(w.value, kk) + (w.unit.empty() ? 0 : kk + Canvas::text_width(w.unit, u));
-          if (width > box_w || font::kGlyphHeight * kk > room) continue;
+          if (width > box_w || rows * kk > room) continue;
           k = kk, us = u;
           break;
         }
         const int unit_w = w.unit.empty() ? 0 : k + Canvas::text_width(fit(w.unit, cols(us)), us);
         const std::string value = fit(w.value, std::max(1, (box_w - unit_w + k) / (font::kCellWidth * k)));
         const int vw = Canvas::text_width(value, k);
-        const int x = cx - (vw + unit_w) / 2, y = top + std::max(0, room - font::kGlyphHeight * k) / 2;
+        const int x = cx - (vw + unit_w) / 2, y = top + std::max(0, room - rows * k) / 2;
         panel.text(x, y, value, k, ink);
-        if (unit_w) panel.text(x + vw + k, y + font::kGlyphHeight * (k - us), fit(w.unit, cols(us)), us, kDim);
+        if (unit_w) panel.text(x + vw + k, y + base * (k - us), fit(w.unit, cols(us)), us, kDim);
         break;
       }
       case Widget::Kind::Progress: {

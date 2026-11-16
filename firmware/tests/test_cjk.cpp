@@ -82,3 +82,45 @@ TEST("face: with the CJK font, a step of an expression's mark leaves nothing of 
     }
   }
 }
+
+namespace {
+
+struct SmallPanel : hg::Display {
+  static constexpr int kW = 240, kH = 135;
+  std::vector<uint16_t> fb = std::vector<uint16_t>(static_cast<size_t>(kW * kH), 0);
+  hg::DisplayInfo info() const override {
+    hg::DisplayInfo d;
+    d.width = kW;
+    d.height = kH;
+    d.emissive = true;
+    return d;
+  }
+  uint16_t* framebuffer() override { return fb.data(); }
+  void flush(uint16_t, uint16_t) override {}
+  int last_inked_row() const {
+    for (int y = kH - 1; y >= 0; --y)
+      for (int x = 0; x < kW; ++x)
+        if (fb[static_cast<size_t>(y * kW + x)]) return y;
+    return -1;
+  }
+};
+
+}  // namespace
+
+TEST("widget: with the CJK font a value is drawn whole on a small panel") {
+  // A wide character is 12 rows tall and a narrow one sits 3 rows down its line: a value sized
+  // by the 7 rows of the narrow glyph alone ran off the bottom of a 240x135 screen.
+  for (const char* value : {"ä¸­", "21"}) {
+    hg::UiModel m;
+    m.screen = hg::Screen::Widget;
+    m.widget.kind = hg::Widget::Kind::Value;
+    m.widget.label = "Office";
+    m.widget.value = value;
+    m.widget_count = 1;
+    SmallPanel p;
+    hg::Ui ui(p);
+    ui.render(m);
+    CHECK(p.last_inked_row() >= 0);
+    CHECK(p.last_inked_row() < SmallPanel::kH - 2);
+  }
+}

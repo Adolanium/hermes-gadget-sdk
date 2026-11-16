@@ -10436,6 +10436,26 @@ TEST("widgets: a turn or a reply takes the screen from an open widget") {
   CHECK(!spoken.app.widgets_open());
 }
 
+TEST("widgets: once the widgets are gone, the resting clock moves by its own minutes again") {
+  Rig r(Rig::touch_profile());
+  r.fake.backlight = true;
+  r.bring_online(true);
+  r.fake.wall = kWallSaturday;  // 09:41:00
+  r.fake.wall_ok = true;
+  CHECK_EQ(r.app.console("set clock 5"), std::string("@ok clock"));
+  r.server(kWidgets);
+  hg::TouchGestures touch(r.app);
+  swipe(r, touch, 60, 120, 140, 6);
+  r.advance(6000);
+  CHECK(r.app.model().widget_rest);
+  CHECK(r.app.model().shift_step >= 0);  // the round of turns sets the shift
+  r.server(R"({"type":"dashboard","v":2,"sessions":[],"tiles":[],"widgets":[]})");
+  r.advance(1100);
+  CHECK(r.app.clock_showing());
+  CHECK(r.app.screen() == hg::Screen::Clock);
+  CHECK_EQ(int(r.app.model().shift_step), -1);  // the clock's own minute, not the last round's
+}
+
 TEST("widgets: at rest every face is drawn at all nine burn-in offsets, for any number of widgets") {
   for (int n = 1; n <= 8; ++n) {
     Rig r(scroll_profile());

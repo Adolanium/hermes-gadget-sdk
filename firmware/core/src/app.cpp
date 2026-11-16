@@ -2785,6 +2785,8 @@ void App::update_model() {
   m.card_progress = -1;
   m.card_qr = nullptr;
   m.item_sel = -1;
+  m.widget_rest = false;
+  m.shift_step = -1;  // the clock's own minute; a round of resting widgets sets its own below
   m.hero = false;
   m.name_target = false;
   m.caption_lines = 1;
