@@ -228,6 +228,48 @@ def test_messages_sent_together_play_one_after_another(gadget, make_sim, monkeyp
     assert _types(sim, "audio.abort") == []  # none cut off the one before it
 
 
+def test_cron_output_that_arrives_during_a_turn_is_spoken_after_it(gadget, make_sim, monkeypatch, tmp_path):
+    said = _fake_tts(monkeypatch, tmp_path)
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+
+    async def still_working(event):  # the turn is still running when the cron output arrives
+        if event.text == "long task":
+            await asyncio.sleep(2)
+
+    gadget.reply = still_working
+    sim.type_text("long task")
+    assert sim.wait_for(lambda: _types(sim, "turn.start"), timeout=5)
+    assert gadget.run(gadget.adapter.send(device_id, "Dinner is ready.", metadata={"job_id": "abc123"})).success
+    assert said == [] and _types(sim, "audio.start") == []  # nothing is spoken over the turn
+    assert sim.wait_for(lambda: _types(sim, "audio.end"), timeout=15)
+    assert said == ["Dinner is ready."]
+    kinds = [m["type"] for m in list(sim.received)]
+    assert kinds.index("turn.end") < kinds.index("audio.start")
+
+
+def test_a_message_is_not_spoken_when_the_device_stays_busy(gadget, make_sim, monkeypatch, tmp_path):
+    from hermes_gadget_plugin import adapter as adapter_module
+
+    said = _fake_tts(monkeypatch, tmp_path)
+    monkeypatch.setattr(adapter_module, "SPEECH_QUEUE_WAIT_S", 0.5)
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+
+    async def still_working(event):
+        if event.text == "long task":
+            await asyncio.sleep(3)
+
+    gadget.reply = still_working
+    sim.type_text("long task")
+    assert sim.wait_for(lambda: _types(sim, "turn.start"), timeout=5)
+    gadget.run(gadget.adapter.send(device_id, "Dinner is ready.", metadata={"job_id": "abc123"}))
+    assert sim.wait_for(lambda: "Dinner is ready." in json.dumps(list(sim.received)), timeout=5)  # still shown
+    assert sim.wait_for(lambda: _types(sim, "turn.end"), timeout=10)
+    sim.run_for(1.0)
+    assert said == [] and _types(sim, "audio.start") == []
+
+
 def test_some_messages_are_not_spoken(gadget, make_sim, monkeypatch, tmp_path):
     from hermes_gadget_plugin import audio
 

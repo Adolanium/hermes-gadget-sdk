@@ -94,7 +94,7 @@ _PAIRING_CMD = re.compile(r"(hermes\s+(?:-p\s+\S+\s+)?pairing\s+approve\s+\S+\s+
 _CRON_WRAP = re.compile(r"^Cronjob Response: .*?\n-{5,}\n\n(.*?)(?:\n\nTo stop or manage this job.*)?$", re.S)
 _TRUNCATED_NOTE = re.compile(r"\n\n\.\.\. \[truncated, full output saved to [^\]]*\]\s*$")
 # A message that arrives while the device is busy (a turn, or audio already playing) waits this long
-# for it to finish before it is spoken anyway.
+# for it to finish; after that it stays text only.
 SPEECH_QUEUE_WAIT_S = 120.0
 _NOT_SPOKEN = "_gadget_not_spoken"  # metadata: this text is played or spoken another way (a caption, a question)
 # The gateway echoes speech-to-text results with this translated line: a microphone emoji and the
@@ -1381,8 +1381,10 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             await session.send_reply(text, turn=self._turns.get(session.device_id), interim=interim)
         # Hermes speaks only replies to voice turns, so a message pushed outside a turn (send_message,
         # cron delivery) would stay silent on a device that has no screen worth reading. Speak it.
+        # During a turn the text is the turn's own reply, which Hermes speaks itself when the turn was
+        # spoken. Cron output is never part of a turn, so it is queued to follow the turn.
         meta = metadata or {}
-        if (self._turns.get(session.device_id) is None and not meta.get("_interim_send")
+        if ((self._turns.get(session.device_id) is None or meta.get("job_id")) and not meta.get("_interim_send")
                 and not meta.get(_NOT_SPOKEN) and session.has_speaker and self._should_auto_tts_for_chat(chat_id)
                 and (spoken := spoken_message(content, meta))):
             session.spawn(self.speak_queued(chat_id, spoken))
@@ -1392,15 +1394,20 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         """Speak ``text`` after anything the device is already saying or doing, one message at a time.
 
         Waits (up to SPEECH_QUEUE_WAIT_S) for a turn in progress and for audio already playing, so a
-        message never cuts off a spoken reply or an earlier message."""
+        message never cuts off a spoken reply or an earlier message. A device that stays busy that
+        long keeps the message as text only."""
         device_id = self._device_id(chat_id)
         lock = self._speech_locks.setdefault(device_id, asyncio.Lock())
         async with lock:
             deadline = time.monotonic() + SPEECH_QUEUE_WAIT_S
-            while time.monotonic() < deadline:
+            while True:
                 session = self._session(chat_id)
                 if session is None or (device_id not in self._turns and not session.audio_playing):
                     break
+                if time.monotonic() >= deadline:
+                    logger.warning("[%s] %s stayed busy for %d s; a message was shown but not spoken",
+                                   self.name, device_id, int(SPEECH_QUEUE_WAIT_S))
+                    return SendResult(success=False, error="the device stayed busy")
                 await asyncio.sleep(0.2)
             return await self._speak(chat_id, text, wait=True)
 
