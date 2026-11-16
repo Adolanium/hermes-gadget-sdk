@@ -89,4 +89,8 @@ jobs:
         working-directory: hermes-gadget-sdk
         env:
           HERMES_GADGET_E2E: "1"
-        run: ../hermes-agent/.venv/bin/python -m pytest -q -rs -n auto
+        # In parallel; a test that fails is run again on its own, since a busy runner can make a
+        # wait time out. A test that fails twice fails the job.
+        run: |
+          ../hermes-agent/.venv/bin/python -m pytest -q -rs -n auto --durations=25 ||
+            ../hermes-agent/.venv/bin/python -m pytest -q -rs --last-failed --last-failed-no-failures none

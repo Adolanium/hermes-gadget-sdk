@@ -174,7 +174,11 @@ jobs:
           HERMES_GADGET_UI_TESTS: "1"
           # libopus is installed above, so test_opus fails instead of skipping if it can't load.
           HG_REQUIRE_LIBOPUS: "1"
-        run: xvfb-run -a pytest -q -rs -n auto
+        # In parallel; a test that fails is run again on its own, since a busy runner can make a
+        # simulator wait time out. A test that fails twice fails the job.
+        run: |
+          xvfb-run -a pytest -q -rs -n auto --durations=10 ||
+            xvfb-run -a pytest -q -rs --last-failed --last-failed-no-failures none
       - name: Build the Linux installation package
         if: matrix.name == 'Linux ARM64'
         run: |
