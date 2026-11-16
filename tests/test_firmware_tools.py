@@ -284,6 +284,19 @@ def test_idf_build_is_staged_and_packaged_like_a_platformio_one(project, tmp_pat
         assert archive.read("p4/components/example__dsi/LICENSE") == b"DSI driver license\n"
 
 
+def test_staging_a_build_without_an_elf_removes_the_previous_one(tmp_path, monkeypatch):
+    monkeypatch.setattr(stage_idf_build, "IDF_BOARDS", {"p4": "a test"})
+    build = _idf_build(tmp_path / "idf-build")
+    project = tmp_path / "esp32"
+    (build / "hermes_gadget.elf").write_bytes(b"ELF first build")
+    assert stage_idf_build.main(["p4", str(build), "--project", str(project)]) == 0
+    staged = project / ".pio" / "build" / "p4" / "firmware.elf"
+    assert staged.read_bytes() == b"ELF first build"
+    (build / "hermes_gadget.elf").unlink()
+    assert stage_idf_build.main(["p4", str(build), "--project", str(project)]) == 0
+    assert not staged.exists()
+
+
 def test_staging_refuses_a_bootloader_offset_the_packager_disagrees_with(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(stage_idf_build, "IDF_BOARDS", {"p4": "a test"})
     build = _idf_build(tmp_path / "idf-build", bootloader="0x0")
