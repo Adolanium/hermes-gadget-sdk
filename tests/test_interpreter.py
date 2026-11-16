@@ -1568,6 +1568,30 @@ def test_an_owner_turn_running_when_the_mode_starts_reaches_the_gadget_no_more(g
 @requires_hermes
 @requires_sim
 @hermes
+def test_a_status_phrase_scheduled_just_before_the_mode_starts_is_not_shown(gadget, make_sim, monkeypatch, tmp_path):
+    # Hermes sets the phrase from its own thread, and it is sent later on the gateway's loop: the mode
+    # can start in between. The phrase is checked again where it is sent.
+    it = _interpreter(gadget, make_sim, monkeypatch, tmp_path)
+    adapter = gadget.adapter
+    adapter._turns[it.device_id] = "owner-turn"  # not the turn that started the mode
+    it.sim.received.clear()
+    real = adapter._owner_output_held
+    calls = []
+
+    def held_from_the_second_look(device_id):
+        calls.append(device_id)
+        return False if len(calls) == 1 else real(device_id)  # the mode "starts" after the first look
+
+    monkeypatch.setattr(adapter, "_owner_output_held", held_from_the_second_look)
+    adapter.set_status_text(it.device_id, "Checking your bank account")
+    it.sim.run_for(0.5)
+    assert _replies_and_deltas(it.sim) == []
+    adapter._turns.pop(it.device_id)
+
+
+@requires_hermes
+@requires_sim
+@hermes
 def test_only_the_turn_that_started_the_mode_on_this_gadget_finishes_its_reply(gadget, make_sim, monkeypatch):
     from gateway import session_context
     from hermes_fixtures import _paired_sim

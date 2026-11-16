@@ -1778,7 +1778,13 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         session = self._session(chat_id)
         if session is None or self._loop is None or self._owner_output_held(session.device_id):
             return
-        coro = session.send_status(text or "")
+
+        async def send_status() -> None:
+            # Looked at again where it is sent: the mode can start between Hermes's thread and this loop.
+            if not self._owner_output_held(session.device_id):
+                await session.send_status(text or "")
+
+        coro = send_status()
         try:
             running = asyncio.get_running_loop()
         except RuntimeError:
