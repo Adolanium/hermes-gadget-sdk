@@ -138,7 +138,7 @@ def _adapter():
     return runtime.active(get_session_env("HERMES_SESSION_PROFILE") or None)
 
 
-def _run(adapter, coro, timeout: float = CALL_TIMEOUT_S) -> Any:
+def _run(adapter, coro, timeout: float | None = None) -> Any:
     loop = adapter.loop
     if loop is None or loop.is_closed():
         coro.close()
@@ -148,7 +148,7 @@ def _run(adapter, coro, timeout: float = CALL_TIMEOUT_S) -> Any:
         raise RuntimeError("gadget tools cannot block the gateway event loop")
     future = asyncio.run_coroutine_threadsafe(coro, loop)
     try:
-        return future.result(timeout)
+        return future.result(CALL_TIMEOUT_S if timeout is None else timeout)
     except BaseException:
         # The caller reports a failure: the work must not finish behind its back, and a choice left
         # on screen is withdrawn.
