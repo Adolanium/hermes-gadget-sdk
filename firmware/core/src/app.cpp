@@ -1984,7 +1984,9 @@ void App::on_mic_samples(const int16_t* samples, size_t count) {
     off += n;
     if (mic_pending_.size() == frame) send_mic_frame();
   }
-  // A held recording ends with the button; the detector only notes whether anyone spoke.
+  // A held recording ends with the button; on a board that drops silent ones, the detector
+  // only notes whether anyone spoke. The other boards skip its filter in hold mode.
+  if (!hands_free_ && !profile_.drop_silent_recordings) return;
   const Vad::Result r = vad_.feed(samples, count);
   if (hands_free_) {
     if (r == Vad::Result::EndOfSpeech) {
