@@ -565,8 +565,10 @@ BoardConfig make() {
   b.expander_levels.addr = 0x21;
   // P1.1 LCD, P1.2 system, P1.4 codec and amplifier, P1.7 battery ADC divider. The BSP
   // also powers the SD slot (P1.0), the Himax AI chip (P1.3) and Grove (P1.6), which this
-  // profile doesn't use: they stay off.
+  // profile doesn't use: they are switched off, since the PCA9535 keeps whatever the
+  // previous firmware left on across a reset of the S3.
   b.expander_levels.startup_high = 0x9600;
+  b.expander_levels.low = 0x4900;  // P1.0 microSD, P1.3 Himax, P1.6 Grove off
   b.expander_levels.power_hold = 0x0400;  // P1.2 keeps the battery supply on
   b.pwr_key = {true, 0x21, 3, false};     // wheel button, PCA9535 P0.3, active low
   b.pwr_key.bus = b.i2c;                  // the expander is on the general bus, not touch's

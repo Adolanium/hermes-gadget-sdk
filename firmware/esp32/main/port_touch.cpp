@@ -541,10 +541,14 @@ void TouchInput::task(void* arg) {
   auto* self = static_cast<TouchInput*>(arg);
   self->task_ = xTaskGetCurrentTaskHandle();
   bool was_touching = false, key_down = false;
-  // A key already down when the task starts is the press that powered the board on
-  // (the SenseCAP Watcher's wheel), not CANCEL: ignore it until it is let go.
-  bool held_from_boot = false;
-  if (self->key_dev_ && self->read_key(key_down)) held_from_boot = key_down;
+  // A key already down at the first successful read is the press that powered the board
+  // on (the SenseCAP Watcher's wheel), not CANCEL: ignore it until it is let go. A failed
+  // first read leaves the baseline to the next one that succeeds.
+  bool held_from_boot = false, key_baseline = false;
+  if (self->key_dev_ && self->read_key(key_down)) {
+    held_from_boot = key_down;
+    key_baseline = true;
+  }
   hg::Cst816Fault fault;
   TouchSample last{};
   // Touch INT on the key's expander (TouchConfig::int_expander_bit): one read of its input
@@ -607,7 +611,10 @@ void TouchInput::task(void* arg) {
       }
     }
     const bool pressed = port_ok && self->key_level(port);
-    if (port_ok && pressed != key_down) {
+    if (port_ok && !key_baseline) {
+      key_baseline = true;
+      key_down = held_from_boot = pressed;
+    } else if (port_ok && pressed != key_down) {
       key_down = pressed;
       if (held_from_boot) {
         held_from_boot = false;  // the power-on hold ended; the next press is a real one

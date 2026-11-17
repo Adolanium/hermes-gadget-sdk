@@ -268,7 +268,7 @@ Seeed writes per-device data (the device's identity and keys for SenseCraft) to
 an `nvsfactory` partition at 0x9000, 200 KB long. Nothing can restore it once
 it is erased. This profile uses its own partition table,
 `partitions-sensecap-watcher.csv`, which keeps that partition and puts the
-firmware after it. `pio run -t upload` and the browser installer never write
+firmware after it. `pio run -e sensecap-watcher -t upload` and the browser installer never write
 there. **Don't write the release's full image with esptool at 0x0, and don't
 run `erase_flash`**: both erase it.
 
