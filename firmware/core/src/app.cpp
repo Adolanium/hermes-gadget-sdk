@@ -1712,6 +1712,29 @@ bool App::choice_page_step() {
   return true;
 }
 
+bool App::choice_page_back() {
+  if (!choice_touch_live() || !ui_ || choice_first_ <= 0) return false;
+  choice_first_ = std::max(0, choice_first_ - ui_->choice_rows(model_));
+  update_model();
+  return true;
+}
+
+bool App::choice_drag_start() {
+  if (!choice_touch_live() || !ui_ || choice_row_count() <= ui_->choice_rows(model_)) return false;
+  choice_drag_first_ = choice_first_;
+  return true;
+}
+
+void App::choice_drag(int dy) {
+  if (!choice_touch_live() || !ui_) return;
+  const int row_h = std::max(1, ui_->choice_row_h(model_));
+  const int moved = (dy >= 0 ? dy + row_h / 2 : dy - row_h / 2) / row_h;  // to the nearest row
+  const int first = std::clamp(choice_drag_first_ - moved, 0, std::max(0, choice_row_count() - ui_->choice_rows(model_)));
+  if (first == choice_first_) return;
+  choice_first_ = first;
+  update_model();
+}
+
 void App::answer_choice(int index) {
   if (choice_id_.empty()) return;
   const bool picked = index >= 0 && index < static_cast<int>(choice_options_.size());

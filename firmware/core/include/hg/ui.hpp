@@ -263,6 +263,9 @@ class Ui {
   // under a panel point (-1: none).
   int choice_question_lines() const;
   int choice_rows(const UiModel& m) const;
+  // The height of this choice's rows: on a touchscreen a short list shares the room under the
+  // question, so that two or three answers are buttons a thumb finds.
+  int choice_row_h(const UiModel& m) const;
   int choice_row_hit(const UiModel& m, int x, int y) const;
   // The largest size the Ready screen draws the face at (one caption line, no name panel): a colour face
   // is sent at this size and scaled down where there is less room.

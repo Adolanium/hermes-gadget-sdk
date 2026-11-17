@@ -45,7 +45,7 @@ Hermes can ask a question with two to six answers, for example which of three li
 
 | Board | Pick | Cancel |
 |---|---|---|
-| Touchscreen | Tap the answer. Swipe up for more answers when the list is longer than the screen | Swipe down |
+| Touchscreen | Tap the answer; the answers are buttons, taller when there are only a few. A list longer than the screen follows your finger up and down | Swipe down while the first answers are on screen |
 | Up and Down buttons, or a knob | Move the highlight, then press TALK | CANCEL |
 | TALK and CANCEL only | Press CANCEL to move to the next answer, then TALK | Move to the last row, **Cancel**, and press TALK |
 

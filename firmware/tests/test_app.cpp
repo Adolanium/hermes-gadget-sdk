@@ -9798,6 +9798,79 @@ TEST("choice: on a touchscreen a tap on a row answers it, a swipe down cancels, 
   }
 }
 
+TEST("choice: on a touchscreen a list longer than the screen follows the finger, row by row") {
+  for (const bool round : {true, false}) {
+    Rig r(Rig::touch_profile());
+    if (round) r.fake.make_round(466);
+    else r.fake.make_panel(320, 240, false);
+    const int w = round ? 466 : 320, h = round ? 466 : 240;
+    r.bring_online(true);
+    hg::TouchGestures touch(r.app);
+    // Six answers (the most a choice has) under a question of several lines: more than the screen holds.
+    r.server(R"({"type":"choice","id":"m","title":"Which of these should I put on the list for the weekend trip to the lake?","options":["a","b","c","d","e","f"]})");
+    r.advance(700);
+    CHECK(r.app.screen() == hg::Screen::Choice);
+    CHECK_EQ(r.app.model().scroll, 0);
+    const int end = static_cast<int>(r.app.model().items.size()) - r.app.choice_rows_shown();
+    CHECK(end >= 2);
+    const int row_h = r.app.choice_row_px();
+    const auto drag = [&](int from, int to) {
+      touch.update(true, w / 2, from, r.fake.clock);
+      for (int i = 1; i <= 10; ++i) {
+        r.advance(20);
+        touch.update(true, w / 2, from + (to - from) * i / 10, r.fake.clock);
+      }
+      touch.update(false, 0, 0, r.fake.clock);
+      r.advance(100);
+    };
+    const int mid = h * 2 / 3;
+    drag(mid, mid - row_h);  // up by a row: the next row comes in
+    CHECK_EQ(r.app.model().scroll, 1);
+    drag(mid, mid - 10 * row_h);  // far up: to the end, and no further
+    CHECK_EQ(r.app.model().scroll, end);
+    drag(h / 3, h / 3 + row_h);  // down by a row: the list goes back, nothing is cancelled
+    CHECK_EQ(r.app.model().scroll, end - 1);
+    drag(h / 4, h / 4 + 10 * row_h);
+    CHECK_EQ(r.app.model().scroll, 0);
+    CHECK(r.fake.last("choice.reply") == nullptr);  // no drag picked or cancelled anything
+    drag(h / 4, h / 4 + 100);  // at the top a swipe down still cancels
+    const Value* reply = r.fake.last("choice.reply");
+    CHECK(reply && (*reply)["id"].as_string() == "m" && (*reply)["cancelled"].as_bool());
+  }
+}
+
+TEST("choice: on a touchscreen a short list is large buttons, and a tap just under the last one picks it") {
+  Rig r(Rig::touch_profile());
+  r.fake.make_round(466);
+  r.bring_online(true);
+  hg::TouchGestures touch(r.app);
+  r.server(R"({"type":"choice","id":"long","title":"Pick","options":["a","b","c","d","e","f"]})");
+  r.advance(700);
+  const int six = r.app.choice_row_px();  // six answers fill the screen: rows about as tall as a line
+  r.server(R"({"type":"choice.close","id":"long"})");
+  r.server(R"({"type":"choice","id":"two","title":"Pick","options":["Yes, go on","No"]})");
+  r.advance(700);
+  const int row_h = r.app.choice_row_px();
+  CHECK(row_h > six);  // two answers share the room under the question
+  CHECK(row_h <= 2 * six);
+  // Down the middle: the first answer, then the second, then a strip under it that is still the second.
+  int last = -1, first_y = -1, second_y = -1, under = 0;
+  for (int y = 0; y < 466; y += 2) {
+    const int got = r.app.choice_row_at(233, y);
+    if (got == 0 && first_y < 0) first_y = y;
+    if (got == 1 && second_y < 0) second_y = y;
+    if (got == 1) last = y;
+  }
+  CHECK(first_y >= 0 && second_y > first_y);
+  under = last - (second_y + row_h - 1);
+  CHECK(under > 0 && under < row_h / 2 + 2);  // the thumb's slack, not a whole row
+  touch.update(true, 233, last, r.fake.clock);
+  r.advance(40);
+  touch.update(false, 0, 0, r.fake.clock);
+  const Value* reply = r.fake.last("choice.reply");
+  CHECK(reply && (*reply)["id"].as_string() == "two" && (*reply)["index"].as_int() == 1);
+}
+
 TEST("choice: it is withdrawn, expires, ends with the connection and takes the console's answer") {
   Rig r(scroll_profile());
   r.bring_online(true);

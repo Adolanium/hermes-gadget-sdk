@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Firmware
+
+- A question with answers is easier to use with a thumb on a touchscreen. A list longer than the screen follows the finger up and down, a row at a time, instead of paging with a swipe up; a swipe down cancels only while its first answers are on screen, so a finger moving back up the list no longer cancels it. The answers are drawn as buttons with the label one size larger where it fits, and the rows of a short list share the room under the question, up to twice their height; a tap in the upper half of the row under the last answer still picks it, because a thumb lands low. Host tests on round and rectangular panels; on an M5Stack StopWatch, a thumb tapped, scrolled and cancelled choices of six answers. [Pick an answer](docs/using-gadget.md#pick-an-answer).
+
 ## 0.6.0
 
 Hermes Gadget 0.6.0 gives the agent more to do with a gadget. It can play a sound file or a radio stream on the speaker (`gadget_play`), show lists, progress bars and QR codes, ask a question with up to six answers on the screen (`gadget_ask`), set the face's expression, and fill the idle screen with widgets such as a disk's fill level or the room temperature. Interpreter mode turns a gadget into a translator that two people pass back and forth. Messages and cron jobs sent to a gadget outside a turn are spoken, and `hermes gadget bot-chat` lets a gadget talk to Hermes Bot Mode. Profile switching works on a stock Hermes with `profile_mode: virtual`, and a board's diagnostics report comes over the network, with the reason for a hang or a restart. The M5Stack CoreS3 gains its camera, as a `camera.capture` action and a camera mode with a live view. Five experimental board profiles arrive: the M5Stack StopWatch, the M5Stack Cardputer ADV, the Seeed Studio SenseCAP Watcher W1-A, the Waveshare ESP32-S3-Touch-LCD-1.47 and the LCDWIKI ES3C28P. The Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C boots on esp-hosted 2.12, and its speaker pops less when it turns on and off. Details by area follow.

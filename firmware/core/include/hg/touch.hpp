@@ -10,8 +10,9 @@
 //                      left to right the widgets; on the grid, turns its page; on a widget,
 //                      left to right shows the next and right to left the one before
 //   tap a grid cell    asks Hermes for that profile
-//   on a choice        a tap on an answer picks it, a swipe up shows more answers, a swipe
-//                      down cancels; holds do nothing
+//   on a choice        a tap on an answer picks it; a list longer than the screen follows
+//                      the finger up and down; a swipe down on its first rows cancels;
+//                      holds do nothing
 //   in settings        a drag scrolls the list (or moves the selected row's slider,
 //                      when it starts on it), a tap changes the row under it; with a
 //                      hardware check running, a tap and a swipe down are TALK and CANCEL
@@ -53,7 +54,7 @@ class TouchGestures {
   void tick(uint32_t now_ms);
 
  private:
-  enum class State : uint8_t { Idle, Pending, Settings, Picker, PickerDrag, Side, List, ListDrag, Camera, Choice, ChoiceDrag, Talk, Swipe, Ignored };
+  enum class State : uint8_t { Idle, Pending, Settings, Picker, PickerDrag, Side, List, ListDrag, Camera, Choice, ChoiceDrag, ChoiceScroll, Talk, Swipe, Ignored };
   void press(Button b);
   void release(Button b);
 
