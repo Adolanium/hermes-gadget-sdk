@@ -135,6 +135,7 @@ bool LatchPower::power_off() {
   if (!cfg_.power_off_supported) return false;
   // Supported boards use a battery latch that disconnects the supply. USB may
   // still power the device independently.
+  if (cfg_.enable < 0) return board_power_off ? board_power_off() : false;
   return gpio_set_level(static_cast<gpio_num_t>(cfg_.enable), 0) == ESP_OK;
 }
 

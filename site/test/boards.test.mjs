@@ -62,6 +62,14 @@ test("keeping the settings writes around the settings partition", () => {
   assert.deepEqual(imageParts({ ...AMOLED, settings: null }, 0x150000, true), [{ start: 0, end: 0x150000 }]);
 });
 
+test("a board's factory data is never written", () => {
+  const watcher = {
+    ...AMOLED, settings: { offset: 0x3b000, size: 0x6000 }, keep: [{ offset: 0x9000, size: 0x32000 }],
+  };
+  assert.deepEqual(imageParts(watcher, 0x150000, false), [{ start: 0, end: 0x9000 }, { start: 0x3b000, end: 0x150000 }]);
+  assert.deepEqual(imageParts(watcher, 0x150000, true), [{ start: 0, end: 0x9000 }, { start: 0x41000, end: 0x150000 }]);
+});
+
 test("the link from hermes gateway setup fills in the server", () => {
   // As plugin/cli.py's installer_link() encodes it: urllib.parse.quote(server, safe="").
   const link = "#server=ws%3A%2F%2F192.168.1.20%3A8765%2Fgadget";

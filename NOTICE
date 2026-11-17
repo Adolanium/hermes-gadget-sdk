@@ -393,3 +393,14 @@ bf64d3178ab43928fa02365fbe3937cec99716ad, M5Unified commit
 96576a14247ddc935149145aa6b51943464120f1, and M5GFX commit
 28d47949bdc84f30881623476f555398e2194313. The driver and local text editor are
 independent implementations; no M5Stack or Adafruit source is copied.
+
+The Seeed Studio SenseCAP Watcher W1-A pin numbers, PCA9535 address and rail
+bits, ES7243/ES7243E addresses, microphone I2S slot, battery divider and the
+`nvsfactory` partition in firmware/esp32/main/board.cpp and
+firmware/esp32/partitions-sensecap-watcher.csv follow Seeed's SenseCAP Watcher
+board support package and factory firmware,
+https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware/tree/8e37f7ccd3d836bb99f483e0f6e74e8252406644,
+Apache License 2.0, cross-checked against xiaozhi-esp32's sensecap-watcher
+board,
+https://github.com/78/xiaozhi-esp32/tree/aaf1eb7798cabee87a0c6a0649aabf4d17e9e383/main/boards/sensecap-watcher,
+MIT License. Only these hardware facts are used. No vendor source is copied.

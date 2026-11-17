@@ -41,7 +41,7 @@ bool axs5106_read(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t* data, size_
 }  // namespace
 
 bool TouchInput::begin(const TouchConfig& touch, const ExpanderKeyConfig& key, const EncoderConfig& encoder,
-                       i2c_master_bus_handle_t bus) {
+                       i2c_master_bus_handle_t bus, i2c_master_bus_handle_t key_bus) {
   if (!bus) return false;
   touch_ = touch;
   key_ = key;
@@ -159,7 +159,7 @@ bool TouchInput::begin(const TouchConfig& touch, const ExpanderKeyConfig& key, c
     dev.dev_addr_length = I2C_ADDR_BIT_LEN_7;
     dev.device_address = key.addr;
     dev.scl_speed_hz = 400000;
-    if (i2c_master_bus_add_device(bus, &dev, &key_dev_) != ESP_OK) key_dev_ = nullptr;
+    if (i2c_master_bus_add_device(key_bus ? key_bus : bus, &dev, &key_dev_) != ESP_OK) key_dev_ = nullptr;
     if (key_dev_ && key.pcf8574) {
       // A PCF8574 pin reads as an input only while its output latch is high.
       const uint8_t release = 0xFF;
@@ -168,6 +168,7 @@ bool TouchInput::begin(const TouchConfig& touch, const ExpanderKeyConfig& key, c
   }
   if (encoder.a >= 0 && encoder.b >= 0) {
     encoder_pulse_per_detent_ = encoder.pulse_per_detent;
+    encoder_steps_ = static_cast<int8_t>(encoder.steps_per_detent == 2 ? 2 : 4);
     gpio_config_t pins = {};
     pins.pin_bit_mask = (1ULL << encoder.a) | (1ULL << encoder.b);
     pins.mode = GPIO_MODE_INPUT;
@@ -355,17 +356,26 @@ bool TouchInput::begin_box_touch(i2c_master_bus_handle_t bus) {
   return true;
 }
 
-bool TouchInput::read_key(bool& pressed) {
-  uint8_t reg = kTca9554Input, value = 0;
+bool TouchInput::read_port(uint8_t& value) {
+  uint8_t reg = kTca9554Input;
   const esp_err_t err = key_.pcf8574 ? i2c_master_receive(key_dev_, &value, 1, 20)
                                      : i2c_master_transmit_receive(key_dev_, &reg, 1, &value, 1, 20);
-  if (err != ESP_OK) return false;
-  bool high = (value >> key_.bit) & 1;
-  pressed = key_.active_high ? high : !high;
+  return err == ESP_OK;
+}
+
+bool TouchInput::key_level(uint8_t port) const {
+  const bool high = (port >> key_.bit) & 1;
+  return key_.active_high ? high : !high;
+}
+
+bool TouchInput::read_key(bool& pressed) {
+  uint8_t value = 0;
+  if (!read_port(value)) return false;
+  pressed = key_level(value);
   return true;
 }
 
-// A quadrature step table: four steps make one detent.
+// A quadrature step table: EncoderConfig::steps_per_detent steps (4 or 2) make one detent.
 // Runs on every A/B edge: one quadrature step toward the next detent; the
 // fourth step is a whole detent, parked for the task to post. Polling at the
 // task's 20 ms cadence skipped edges on fast turns and dropped most detents.
@@ -375,8 +385,9 @@ void IRAM_ATTR TouchInput::on_encoder_edge(void* arg) {
   const uint8_t state = static_cast<uint8_t>((gpio_get_level(self->encoder_a_) << 1) | gpio_get_level(self->encoder_b_));
   int8_t accum = static_cast<int8_t>(self->encoder_accumulator_ + kStep[(self->encoder_state_ << 2) | state]);
   self->encoder_state_ = state;
+  self->encoder_edges_.fetch_add(1, std::memory_order_relaxed);
   BaseType_t woken = pdFALSE;
-  if (accum >= 4 || accum <= -4) {
+  if (accum >= self->encoder_steps_ || accum <= -self->encoder_steps_) {
     self->encoder_pending_ += accum > 0 ? 1 : -1;
     accum = 0;
     if (self->task_) vTaskNotifyGiveFromISR(static_cast<TaskHandle_t>(self->task_), &woken);
@@ -530,13 +541,39 @@ void TouchInput::task(void* arg) {
   auto* self = static_cast<TouchInput*>(arg);
   self->task_ = xTaskGetCurrentTaskHandle();
   bool was_touching = false, key_down = false;
+  // A key already down at the first successful read is the press that powered the board
+  // on (the SenseCAP Watcher's wheel), not CANCEL: ignore it until it is let go. A failed
+  // first read leaves the baseline to the next one that succeeds.
+  bool held_from_boot = false, key_baseline = false;
+  if (self->key_dev_ && self->read_key(key_down)) {
+    held_from_boot = key_down;
+    key_baseline = true;
+  }
   hg::Cst816Fault fault;
   TouchSample last{};
+  // Touch INT on the key's expander (TouchConfig::int_expander_bit): one read of its input
+  // port serves both. The first second is read regardless, so a controller still in its boot
+  // state (its INT not yet meaningful) gets the reads that start it.
+  const bool expander_int = self->key_dev_ && self->touch_.int_expander_bit >= 0;
+  const int64_t ungated_until_us = esp_timer_get_time() + 1000000;
   for (;;) {
     self->last_loop_us_.store(esp_timer_get_time(), std::memory_order_relaxed);
+    uint8_t port = 0;
+    const bool port_ok = self->key_dev_ && self->read_port(port);
+    bool touch_due = false;
+    if (expander_int) {
+      // Between reports the SPD2010 answers "no points", which would read as a lift, so a
+      // finger held down stays down until INT says the controller has something new.
+      const bool int_low = port_ok && !((port >> self->touch_.int_expander_bit) & 1);
+      self->int_low_.store(int_low, std::memory_order_relaxed);
+      // The ungated first second must not read during a touch either, or a held finger lifts.
+      touch_due = int_low || (!was_touching && esp_timer_get_time() < ungated_until_us);
+    } else {
+      touch_due = self->may_read(was_touching);
+    }
     TouchSample s{};
     bool read = false, ok = false;
-    if (self->has_touch() && self->may_read(was_touching)) {
+    if (self->has_touch() && touch_due) {
       read = true;
       ok = self->read_touch(s);
       self->reads_.fetch_add(1, std::memory_order_relaxed);
@@ -574,11 +611,18 @@ void TouchInput::task(void* arg) {
                  self->touch_.controller == TouchController::Axs5106 ? "AXS5106" : "CST816");
       }
     }
-    bool pressed = false;
-    if (self->key_dev_ && self->read_key(pressed) && pressed != key_down) {
+    const bool pressed = port_ok && self->key_level(port);
+    if (port_ok && !key_baseline) {
+      key_baseline = true;
+      key_down = held_from_boot = pressed;
+    } else if (port_ok && pressed != key_down) {
       key_down = pressed;
-      KeySample k{pressed};
-      events::post(EventType::Key, &k, sizeof(k));
+      if (held_from_boot) {
+        held_from_boot = false;  // the power-on hold ended; the next press is a real one
+      } else {
+        KeySample k{pressed};
+        events::post(EventType::Key, &k, sizeof(k));
+      }
     }
     // Encoder detents arrive from the ISR (one per quadrature cycle); post each.
     int8_t pending = self->encoder_pending_.exchange(0);
@@ -587,6 +631,7 @@ void TouchInput::task(void* arg) {
       pending = static_cast<int8_t>(pending - step);
       EncoderSample e{step};
       events::post(EventType::Encoder, &e, sizeof(e));
+      self->encoder_detents_.fetch_add(1, std::memory_order_relaxed);
     }
     // Solo-pulse timeout: a detent whose partner never showed (fast spin or
     // a stop mid-pair) posts from its leading channel once 200 ms pass quiet.
@@ -609,13 +654,13 @@ void TouchInput::task(void* arg) {
 }
 
 hg::json::Value TouchInput::stats() const {
-  static const char* const kControllers[] = {"cst9217", "box3", "ft5x06", "cst816", "gt911", "spd2010"};
+  static const char* const kControllers[] = {"cst9217", "box3", "ft5x06", "cst816", "gt911", "spd2010", "axs5106"};
   const int64_t now = esp_timer_get_time();
   const auto ago_ms = [now](int64_t at) { return at ? static_cast<long long>((now - at) / 1000) : -1LL; };
   hg::json::Value t = hg::json::Value::object();
   if (has_touch()) {
     t.set("controller", kControllers[static_cast<int>(touch_.controller)])
-        .set("read_on", int_gated_ ? "int" : "poll")
+        .set("read_on", touch_.int_expander_bit >= 0 && key_dev_ ? "expander_int" : int_gated_ ? "int" : "poll")
         .set("reads", static_cast<unsigned>(reads_.load(std::memory_order_relaxed)))
         .set("read_errors", static_cast<unsigned>(read_errors_.load(std::memory_order_relaxed)))
         .set("error_streak", static_cast<unsigned>(error_streak_.load(std::memory_order_relaxed)))
@@ -626,6 +671,14 @@ hg::json::Value TouchInput::stats() const {
       t.set("int_edges", static_cast<unsigned>(int_edges_.load(std::memory_order_relaxed)))
           .set("int_low", gpio_get_level(static_cast<gpio_num_t>(touch_.int_gpio)) == 0);
     }
+  }
+  if (touch_.int_expander_bit >= 0 && key_dev_) t.set("int_low", int_low_.load(std::memory_order_relaxed));
+  if (encoder_a_ != GPIO_NUM_NC) {
+    t.set("encoder", hg::json::Value::object()
+                         .set("edges", static_cast<unsigned>(encoder_edges_.load(std::memory_order_relaxed)))
+                         .set("detents", static_cast<unsigned>(encoder_detents_.load(std::memory_order_relaxed)))
+                         .set("a", gpio_get_level(encoder_a_))
+                         .set("b", gpio_get_level(encoder_b_)));
   }
   // The task loops at least once a second, even dozing: a larger number means it is stuck.
   t.set("task_ms_ago", ago_ms(last_loop_us_.load(std::memory_order_relaxed)));

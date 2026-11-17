@@ -6,6 +6,8 @@
 #include <cstring>
 
 #include "esp_codec_dev_defaults.h"
+#include "es7243_adc.h"
+#include "es7243e_adc.h"
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -154,14 +156,30 @@ bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus)
   if (!shared) {
     audio_codec_i2c_cfg_t adc_i2c = {};
     adc_i2c.port = I2C_NUM_0;
-    adc_i2c.addr = ES7210_CODEC_DEFAULT_ADDR;
+    // Seeed's Watcher BSP probes the older ES7243 at 0x13 before its ES7243E: units carry either.
+    constexpr uint8_t kEs7243Addr = 0x13;
+    es7243_fitted_ = cfg.mic == MicCodec::Es7243e && i2c_master_probe(bus, cfg.mic_addr, 50) != ESP_OK &&
+                     i2c_master_probe(bus, kEs7243Addr, 50) == ESP_OK;
+    // esp_codec_dev takes the 8-bit address form; mic_addr is the 7-bit one.
+    adc_i2c.addr = cfg.mic != MicCodec::Es7243e ? ES7210_CODEC_DEFAULT_ADDR
+                 : static_cast<uint8_t>((es7243_fitted_ ? kEs7243Addr : cfg.mic_addr) << 1);
     adc_i2c.bus_handle = bus;
-    es7210_codec_cfg_t adc = {};
-    adc.ctrl_if = audio_codec_new_i2c_ctrl(&adc_i2c);
-    adc.mic_selected = cfg.es7210_mics;
     esp_codec_dev_cfg_t in_cfg = {};
     in_cfg.dev_type = ESP_CODEC_DEV_TYPE_IN;
-    in_cfg.codec_if = es7210_codec_new(&adc);
+    if (es7243_fitted_) {
+      es7243_codec_cfg_t adc = {};
+      adc.ctrl_if = audio_codec_new_i2c_ctrl(&adc_i2c);
+      in_cfg.codec_if = es7243_codec_new(&adc);
+    } else if (cfg.mic == MicCodec::Es7243e) {
+      es7243e_codec_cfg_t adc = {};
+      adc.ctrl_if = audio_codec_new_i2c_ctrl(&adc_i2c);
+      in_cfg.codec_if = es7243e_codec_new(&adc);
+    } else {
+      es7210_codec_cfg_t adc = {};
+      adc.ctrl_if = audio_codec_new_i2c_ctrl(&adc_i2c);
+      adc.mic_selected = cfg.es7210_mics;
+      in_cfg.codec_if = es7210_codec_new(&adc);
+    }
     in_cfg.data_if = data_if;
     in_ = in_cfg.codec_if ? esp_codec_dev_new(&in_cfg) : nullptr;
   }
@@ -171,9 +189,17 @@ bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus)
   fs.sample_rate = kRate;
   fs.channel = cfg.stereo32 ? 2 : 1;
   fs.bits_per_sample = cfg.stereo32 ? 32 : 16;
+  // esp_codec_dev turns a 1-channel open into "2 channels, keep channel 0" and sets the
+  // I2S slot mask from that, so the right slot has to be asked for the same way: two
+  // channels, keep channel 1. The I2S channel then reads mono samples from the right slot.
+  esp_codec_dev_sample_info_t in_fs = fs;
+  if (cfg.mic_right_slot && !cfg.stereo32) {
+    in_fs.channel = 2;
+    in_fs.channel_mask = ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1);
+  }
   if (out_ && esp_codec_dev_open(out_, &fs) != ESP_CODEC_DEV_OK) out_ = nullptr;
   if (shared) in_ = out_;  // one handle, opened once
-  else if (in_ && esp_codec_dev_open(in_, &fs) != ESP_CODEC_DEV_OK) in_ = nullptr;
+  else if (in_ && esp_codec_dev_open(in_, &in_fs) != ESP_CODEC_DEV_OK) in_ = nullptr;
   if (out_) {
     esp_codec_dev_set_out_vol(out_, 70);
     esp_codec_dev_set_out_mute(out_, true);  // unmuted while something plays
@@ -182,9 +208,14 @@ bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus)
     if (cfg.dac_fade_ramp && cfg.speaker == SpeakerCodec::Es8311) esp_codec_dev_write_reg(out_, 0x37, 0x38);
   }
   if (in_) esp_codec_dev_set_in_gain(in_, cfg.mic_gain_db);
-  mic_link_ = {in_ && in_ != out_, rx_, fs, cfg.mic_gain_db};
+  mic_link_ = {in_ && in_ != out_, rx_, shared ? fs : in_fs, cfg.mic_gain_db};
+  out_format_ = fs;
+  mic_name_ = shared                         ? "es8311"
+              : es7243_fitted_               ? "es7243"
+              : cfg.mic == MicCodec::Es7243e ? "es7243e"
+                                             : "es7210";
   ESP_LOGI(TAG, "codecs: speaker %s, microphones %s (%s)", out_ ? "ready" : "missing", in_ ? "ready" : "missing",
-           shared ? "es8311 analog" : "es7210");
+           shared ? "es8311 analog" : mic_name_);
   return out_ || in_;
 }
 

@@ -228,6 +228,73 @@ Record the results with the [hardware checklist](hardware-validation.md#record-a
 
 References: [Waveshare documentation](https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.46), the [schematic](https://files.waveshare.com/wiki/ESP32-S3-Touch-LCD-1.46/ESP32-S3-Touch-LCD-1.46.pdf) and the [factory demo at fda89ff](https://github.com/waveshareteam/ESP32-S3-Touch-LCD-1.46/tree/fda89ff2ff32eb1bce561901225c6a36fa684237). The demo repository has no license. Pin numbers come from the wiki. The microphone part and the L/R tie to 3V3 come from the schematic. The expander address, the EXIO bit map and the backlight on-level come from the demo. Display and touch drivers are Espressif components. See [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).
 
+## SenseCAP Watcher W1-A
+
+Use `sensecap-watcher` for the Seeed Studio SenseCAP Watcher W1-A, hardware
+revision v0.2. This is a separate experimental profile, not a Waveshare
+profile: the board has an ESP32-S3 with 32 MB flash and 8 MB octal PSRAM, a
+round 412×412 SPD2010 display and touch controller, a scroll wheel and button,
+an ES8311 speaker codec with an ES7243E microphone ADC (an older ES7243 is used
+when that answers instead), and a PCA9535 expander. The camera/HX6538 and
+microSD slot are intentionally not exposed.
+
+Hold the screen to talk. The wheel scrolls, and pressing it is CANCEL (holding
+it 2 s starts a new session); swipe down cancels too. The press that powered the
+Watcher on is ignored until you let go of the wheel. **Power off** in the
+settings menu releases the battery latch; on USB power the board keeps running.
+
+| Part | Connection |
+|---|---|
+| SPD2010 display (QSPI) | PCLK 7, DATA0 9, DATA1 1, DATA2 14, DATA3 13, CS 45, backlight 8 (active high). No D/C or reset pin |
+| SPD2010 touch | I2C1 SDA 39, SCL 38, address 0x53; interrupt on PCA9535 P0.5, read every 20 ms with the wheel button. The controller is read only while it is low: between reports it answers "no points", which would end a held touch |
+| General I2C / PCA9535 | SDA 47, SCL 48; expander address 0x21, wheel button P0.3 (active low) |
+| PCA9535 supplies | Driven high at boot: P1.1 LCD, P1.2 system (the battery latch), P1.4 codec and amplifier, P1.7 battery divider. Left off: P1.0 microSD, P1.3 Himax AI chip, P1.6 Grove |
+| Audio | ES8311 (0x18) speaker; ES7243E (0x14) microphone in the right I2S slot; MCLK 10, BCLK 11, WS 12, microphone DIN 15, speaker DOUT 16 |
+| Wheel | GPIO 41 (B) and 42 (A), swapped from the BSP so the scroll goes the way the owner expected; quadrature, a detent every two steps. `diag` counts its edges and detents under `touch.encoder` |
+| Battery | ADC GPIO 3 through a 62 k/20 k divider (ratio 4, as Seeed's BSP rounds it, so readings are about 2.5% low); voltage is reported, charge state is not |
+
+The pin table is checked against Seeed's
+[SenseCAP Watcher v1.0 schematic](https://github.com/Seeed-Studio/OSHW-SenseCAP-Watcher/blob/3ca69aefa8441f57d38993a39df714048633d032/Hardware/SenseCAP_Watcher_v1.0_SCH.pdf),
+the pinned
+[official BSP](https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware/blob/8e37f7ccd3d836bb99f483e0f6e74e8252406644/components/sensecap-watcher/sensecap-watcher.c)
+and [xiaozhi-esp32's Watcher board](https://github.com/78/xiaozhi-esp32/tree/aaf1eb7798cabee87a0c6a0649aabf4d17e9e383/main/boards/sensecap-watcher).
+The system rail is latched early in boot, before Wi-Fi starts, so on battery you
+hold the wheel only until the board has started. The camera, Himax flashing
+UART, and microSD CS/detect remain unsupported.
+
+### Factory data
+
+Seeed writes per-device data (the device's identity and keys for SenseCraft) to
+an `nvsfactory` partition at 0x9000, 200 KB long. Nothing can restore it once
+it is erased. This profile uses its own partition table,
+`partitions-sensecap-watcher.csv`, which keeps that partition and puts the
+firmware after it. `pio run -e sensecap-watcher -t upload` and the browser installer never write
+there. **Don't write the release's full image with esptool at 0x0, and don't
+run `erase_flash`**: both erase it.
+
+Back it up before the first flash anyway:
+
+```bash
+esptool.py --chip esp32s3 --port <port> read_flash 0x9000 204800 nvsfactory.bin
+```
+
+Use the USB-C port on the bottom edge; the one on the back only supplies power.
+The data port is a WCH USB-to-dual-UART bridge, so it shows up as two serial
+ports, one for the ESP32-S3 and one for the Himax chip. Try each until the boot
+log appears. The console runs on the ESP32-S3's UART0, at 115200 baud.
+
+Build without touching a connected device:
+
+```bash
+cd firmware/esp32
+pio run -e sensecap-watcher
+```
+
+For simulator coverage use `hermes-gadget sim --board sim-412x412-round`.
+Compilation and simulation are not physical verification; keep this profile
+experimental until the checklist in [hardware validation](hardware-validation.md)
+has been completed for the exact W1-A revision.
+
 ## Waveshare ESP32-S3-Touch-LCD-1.47
 
 Board option `esp32-s3-touch-lcd-147`, for the 1.47" module: an ESP32-S3R8 (8 MB octal PSRAM) with 16 MB flash, a 172×320 panel used landscape (320×172) and an AXS5106L touchscreen. **This board has no microphone, speaker or audio codec**, so it works as a text gadget: Hermes replies, cards and prompts appear on the screen and typed messages go out the USB console. Holding TALK shows that no microphone is available. Nothing needs wiring. The microSD slot and the battery ADC stay unused.

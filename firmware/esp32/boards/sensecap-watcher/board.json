@@ -1,0 +1,6 @@
+{
+  "title": "Seeed Studio SenseCAP Watcher W1-A",
+  "summary": "412×412 round touchscreen with wheel, microphone, speaker and battery sensing. Experimental.",
+  "docs": "docs/hardware.md#sensecap-watcher-w1-a",
+  "ready_made": true
+}

@@ -220,6 +220,29 @@ def test_release_image_puts_every_part_at_its_address(project, tmp_path):
     assert f"{hashlib.sha256(app).hexdigest()}  hermes-gadget-amoled-0.2.0-app.bin" in sums
 
 
+def test_release_never_writes_a_factory_partition(project, tmp_path):
+    # partitions-sensecap-watcher.csv: Seeed's nvsfactory first, then the firmware's own nvs.
+    layout = [(0x01, 0x02, "nvsfactory", 0x9000, 0x32000), (0x01, 0x02, "nvs", 0x3B000, 0x6000),
+              (0x01, 0x00, "otadata", 0x41000, 0x2000), (0x01, 0x01, "phy_init", 0x43000, 0x1000),
+              (0x00, 0x10, "ota_0", 0x60000, 0x1F0000), (0x00, 0x11, "ota_1", 0x250000, 0x1F0000)]
+    out_dir = project("watcher", flash="32MB", meta={"title": "Watcher"})
+    (out_dir / "partitions.bin").write_bytes(_partition_table(layout))
+    dist = tmp_path / "dist"
+    assert _package(project, "--board", "watcher", "--out", str(dist), "--notes", str(tmp_path / "notes.md")) == 0
+
+    build = json.loads((dist / "manifest.json").read_text(encoding="utf-8"))["builds"][0]
+    assert build["settings"] == {"offset": 0x3B000, "size": 0x6000}  # the firmware's nvs, not the factory one
+    assert build["keep"] == [{"offset": 0x9000, "size": 0x32000}]
+    assert "Don't write the full image of Watcher with esptool" in (tmp_path / "notes.md").read_text(encoding="utf-8")
+
+
+def test_release_lists_no_factory_partition_for_an_ordinary_table(project, tmp_path):
+    project("amoled", meta={"title": "Round AMOLED"})
+    dist = tmp_path / "dist"
+    assert _package(project, "--board", "amoled", "--out", str(dist)) == 0
+    assert "keep" not in json.loads((dist / "manifest.json").read_text(encoding="utf-8"))["builds"][0]
+
+
 def test_esp32p4_image_has_its_bootloader_at_0x2000(project, tmp_path, monkeypatch):
     """The ESP32-P4's ROM loads the bootloader from 0x2000; one written at 0 doesn't boot."""
     monkeypatch.setattr(package_release, "IDF_BOARDS", {"p4": "a test"})

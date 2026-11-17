@@ -71,14 +71,20 @@ export function checkChip(build, chip) {
   return problems;
 }
 
-/** The parts of the image to write: all of it, or everything around the settings partition. */
+/** The parts of the image to write: all of it, or everything around the settings partition.
+ * A build's `keep` ranges (a vendor's factory data, which nothing can restore) are never written. */
 export function imageParts(build, imageLength, keepSettings) {
-  const settings = build.settings;
-  if (!keepSettings || !settings) return [{ start: 0, end: imageLength }];
-  return [
-    { start: 0, end: Math.min(settings.offset, imageLength) },
-    { start: Math.min(settings.offset + settings.size, imageLength), end: imageLength },
-  ].filter((part) => part.end > part.start);
+  const skip = [...(build.keep ?? [])];
+  if (keepSettings && build.settings) skip.push(build.settings);
+  skip.sort((a, b) => a.offset - b.offset);
+  const parts = [];
+  let start = 0;
+  for (const range of skip) {
+    parts.push({ start, end: Math.min(range.offset, imageLength) });
+    start = Math.max(start, Math.min(range.offset + range.size, imageLength));
+  }
+  parts.push({ start, end: imageLength });
+  return parts.filter((part) => part.end > part.start);
 }
 
 /** A device URL the firmware accepts: ws:// or wss://, a host, an optional port and path. */

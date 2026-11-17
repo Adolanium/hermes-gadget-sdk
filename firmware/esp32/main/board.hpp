@@ -166,13 +166,13 @@ struct I2cBusConfig {
 };
 
 // ES8311, ES8388 or AW88298 (speaker) and the microphone ADC sharing one duplex
-// I2S bus, controlled over the I2C bus. Es8388 is the speaker only. The
-// microphone stays an ES7210. No board selects Es8388 yet.
+// I2S bus, controlled over the I2C bus. Es8388 is the speaker only. No board
+// selects Es8388 yet.
 enum class SpeakerCodec { Es8311, Aw88298, Es8388 };
 
-// The microphone ADC: an ES7210 for MEMS microphones, or the ES8311's own ADC
-// when the board wires an analog microphone to the speaker codec.
-enum class MicCodec { Es7210, Es8311 };
+// The microphone ADC: an ES7210 or ES7243E for MEMS microphones, or the
+// ES8311's own ADC when the board wires an analog microphone to the speaker codec.
+enum class MicCodec { Es7210, Es7243e, Es8311 };
 
 struct CodecAudioConfig {
   bool enabled = false;
@@ -190,6 +190,12 @@ struct CodecAudioConfig {
   bool dac_fade_ramp = false; // ES8311 speaker only: its DAC ramps volume on mute/unmute (reg 0x37)
   bool dac_mclk = true;       // false: the ES8311 derives its clock from BCLK
   uint8_t es7210_mics = 0x03;  // ES7210_SEL_MIC1 | ES7210_SEL_MIC2
+  // ES7243E 7-bit I2C address when MicCodec::Es7243e (CodecAudio::begin shifts it to the
+  // 8-bit form esp_codec_dev takes). An older ES7243 at 0x13 is used instead when it answers
+  // and this address doesn't.
+  uint8_t mic_addr = 0x10;
+  // Read the microphone from the right I2S slot instead of the left (mono 16-bit only).
+  bool mic_right_slot = false;
 };
 
 // Capacitive touch on the I2C bus: hold to talk, tap, swipe down to cancel.
@@ -212,8 +218,12 @@ struct TouchConfig {
   uint16_t ppi = 0;
   TouchController controller = TouchController::Cst9217;
   // The touch controller's own I2C bus; unset = the board's shared bus. When set,
-  // an expander key (pwr_key) is read on this bus too.
+  // an expander key (pwr_key) is read on this bus too, unless pwr_key names its own.
   I2cBusConfig bus{};
+  // Touch INT wired to the pwr_key expander instead of a GPIO: its bit in input port 0,
+  // active low; -1 when not. The touch controller is then read only while INT is low.
+  // An SPD2010 polled between reports answers "no points", which reads as a lift.
+  int8_t int_expander_bit = -1;
 };
 
 // An accelerometer on the I2C bus (face-down sleep). The port maps its
@@ -248,6 +258,10 @@ struct ExpanderKeyConfig {
   uint8_t bit = 0;
   bool active_high = true;
   bool pcf8574 = false;  // a PCF8574 has no registers: read its port directly
+  // The expander's own I2C bus when it isn't the touch controller's (TouchConfig::bus).
+  // Register 0 is read either way: a PCA9535's input port 0 sits there too, so `bit`
+  // 0-7 covers its P0 pins.
+  I2cBusConfig bus{};
 };
 
 // Reset lines on a TCA9554 I/O expander, pulsed before the display and touch
@@ -258,15 +272,24 @@ struct ExpanderResetConfig {
   uint16_t hold_ms = 10, settle_ms = 50;  // low pulse, then the wait before the display starts
 };
 
-// TCA9554 outputs that stay owned after boot. `low` is driven low and held
+// TCA9554 or PCA9535 outputs that stay owned after boot. `low` is driven low and held
 // (an active-low enable). `reset` is pulsed low, then left high. `backlight`
 // starts high and follows screen brightness as on or off. `addr` 0 probes
 // 0x38 (TCA9554A, A2=A1=A0=0) and then 0x20 (TCA9554).
+//
+// A PCA9535 (16 bits, P0 in the low byte) also takes `startup_high`: supply
+// switches driven high at boot. Its bits are set before the app brings up
+// Wi-Fi, so a `power_hold` among them latches the supply while the power key
+// is still held. Driving `power_hold` low again powers the board off.
+// `startup_high` and `power_hold` are ignored on a TCA9554.
 struct ExpanderLevelConfig {
   bool enabled = false;
   uint8_t addr = 0;
-  uint8_t low = 0, reset = 0, backlight = 0;
+  bool pca9535 = false;
+  uint16_t low = 0, reset = 0, backlight = 0;
+  uint16_t startup_high = 0;
   uint16_t hold_ms = 10, settle_ms = 20;
+  uint16_t power_hold = 0;
 };
 
 // A supply switch driven straight from a GPIO, set once at boot before any
@@ -287,6 +310,9 @@ struct EncoderConfig {
   // Mouse-wheel style encoder: one low pulse per detent on exactly one channel,
   // and the channel picks the direction. False = classic quadrature.
   bool pulse_per_detent = false;
+  // Quadrature steps from one detent to the next: 4 when the wheel rests only at A=B=1,
+  // 2 when it rests at both A=B=1 and A=B=0 (the SenseCAP Watcher's wheel).
+  uint8_t steps_per_detent = 4;
 };
 
 // A battery behind a resistive divider, with a latch that keeps it powered.

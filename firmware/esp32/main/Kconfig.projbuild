@@ -117,6 +117,8 @@ menu "Hermes Gadget"
             bool "Waveshare ESP32-S3-Touch-LCD-1.85C V2 (experimental, ST77916, CST816, codecs)"
         config HG_BOARD_WS_ESP32S3_TOUCH_LCD_146
             bool "Waveshare ESP32-S3-Touch-LCD-1.46 (experimental, SPD2010 412x412, I2S mic, PCM5101)"
+        config HG_BOARD_SENSECAP_WATCHER
+            bool "Seeed Studio SenseCAP Watcher W1-A (experimental, round SPD2010 412x412, touch, wheel, codecs)"
         config HG_BOARD_WS_ESP32S3_TOUCH_LCD_147
             bool "Waveshare ESP32-S3-Touch-LCD-1.47 (experimental, ST7789 320x172 landscape, AXS5106L, text only)"
         config HG_BOARD_WS_KNOB_LCD_18
