@@ -745,12 +745,16 @@ def test_owner_check_is_default_scoped_and_ignores_other_profiles(routing_rig):
     assert adapter._owner_trusts(DEVICE) is False
 
 
-def test_an_unknown_profile_falls_back_to_the_launch_home(routing_rig):
-    # Why the plugin refuses unknown profiles itself: Hermes only warns.
-    from gateway.session_identity import resolve_identity
+def test_an_unknown_profile_never_reaches_another_home(routing_rig):
+    # Why the plugin refuses unknown profiles itself: Hermes releases up to v0.23.1 only warn and run the
+    # chat in the launch home. Hermes main refuses the identity instead. Either way no other home answers.
+    from gateway.session_identity import IdentityUnresolved, resolve_identity
 
     runner, adapter, home = routing_rig
-    identity = resolve_identity(adapter._source(_session("nosuch")), runner=runner, adapter=adapter)
+    try:
+        identity = resolve_identity(adapter._source(_session("nosuch")), runner=runner, adapter=adapter)
+    except IdentityUnresolved:
+        return
     assert identity.runtime_home == home
 
 
