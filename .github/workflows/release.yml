@@ -124,7 +124,7 @@ jobs:
       actions: write  # to start the installer site's deploy
       id-token: write  # to sign the build provenance
       attestations: write  # to store it with the repository
-    timeout-minutes: 60
+    timeout-minutes: 120
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
     steps:
