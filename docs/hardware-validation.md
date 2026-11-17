@@ -352,7 +352,7 @@ The port stays experimental.
 One unit, owner-operated, on a home LAN. Covers bring-up and about 90 minutes online with a real Hermes gateway; most of the checklist is still open.
 
 - **Model / PCB revision:** Seeed Studio SenseCAP Watcher W1-A, hardware revision v0.2. ESP32-S3 (rev v0.2), 32 MB flash, 8 MB octal PSRAM.
-- **Firmware version / commit:** local build of 0.5.0 from commit `ac04bac` on the contributor's fork, whose firmware sources match this port's first commit `cfb8c45`, with ESP-IDF 6.1.0, environment `sensecap-watcher`; not a published release. Installed over USB through the data USB-C port (UART0 via the USB-to-UART bridge), keeping the `nvsfactory` partition.
+- **Firmware version / commit:** local build of 0.5.0 from commit `ac04bac` on the contributor's fork, whose firmware sources match this port's first commit `4b71440`, with ESP-IDF 6.1.0, environment `sensecap-watcher`; not a published release. Installed over USB through the data USB-C port (UART0 via the USB-to-UART bridge), keeping the `nvsfactory` partition.
 - **Hermes version / host OS:** Hermes Agent 0.23.1; host OS not recorded. The gateway is reached over Wi-Fi through a `wss://` endpoint, not over USB.
 - **Power supply / battery / peripherals:** the built-in battery and USB. Camera/HX6538 and microSD unused and unpowered.
 - **USB install and recovery:** the first build booted with every part detected; `diag` lists `display spd2010`, `microphone es7243e`, `speaker es8311`, `touch true`, `key true`; I²C answered at `0x14`, `0x18`, `0x21` and `0x51` (the PCF8563 at `0x51` is not used: `rtc none`). Restoring the factory image was not attempted.
