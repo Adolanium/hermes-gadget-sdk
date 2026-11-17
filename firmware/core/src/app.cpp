@@ -1662,6 +1662,7 @@ void App::h_choice(const json::Value& m) {
   choice_title_ = m["title"].as_string();
   choice_options_ = std::move(options);
   choice_sel_ = choice_first_ = 0;
+  choice_drag_first_ = -1;  // a drag of the choice before moves nothing here
   choice_front_ = false;  // update_model starts the press guard when it shows
   double ttl = m["ttl_s"].as_number(0);
   choice_until_ = ttl <= 0 ? 0 : now() + static_cast<uint32_t>(ttl * 1000);
@@ -1726,7 +1727,7 @@ bool App::choice_drag_start() {
 }
 
 void App::choice_drag(int dy) {
-  if (!choice_touch_live() || !ui_) return;
+  if (!choice_touch_live() || !ui_ || choice_drag_first_ < 0) return;
   const int row_h = std::max(1, ui_->choice_row_h(model_));
   const int moved = (dy >= 0 ? dy + row_h / 2 : dy - row_h / 2) / row_h;  // to the nearest row
   const int first = std::clamp(choice_drag_first_ - moved, 0, std::max(0, choice_row_count() - ui_->choice_rows(model_)));
@@ -1754,6 +1755,7 @@ void App::clear_choice() {
   choice_title_.clear();
   choice_options_.clear();
   choice_sel_ = choice_first_ = 0;
+  choice_drag_first_ = -1;  // a drag of the choice before moves nothing here
   choice_until_ = 0;
   choice_front_ = false;
 }

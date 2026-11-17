@@ -1274,8 +1274,11 @@ int Ui::choice_row_hit(const UiModel& m, int x, int y) const {
   if (x < ox_ || x >= ox_ + info_.width || y < top) return -1;
   const int row_h = choice_row_h(m);
   int row = (y - top) / row_h;
-  // A thumb lands low: just under the last answer on a touchscreen still means that answer.
-  if (touch_px_ && row == std::min(rows, total - first) && (y - top) % row_h < row_h / 2) --row;
+  // A thumb lands low: just under the last answer on a touchscreen still means that answer, as long
+  // as it is the list's last (not one with more below it) and the point is above the hint bar.
+  if (touch_px_ && row > 0 && first + row == total && row <= rows && y - oy_ < info_.height - layout_.bottom_h &&
+      (y - top) % row_h < row_h / 2)
+    --row;
   return row < rows && first + row < total ? first + row : -1;
 }
 

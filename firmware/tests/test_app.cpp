@@ -9839,6 +9839,57 @@ TEST("choice: on a touchscreen a list longer than the screen follows the finger,
   }
 }
 
+TEST("choice: a finger that first goes sideways still scrolls, and a drag outlives no choice") {
+  Rig r(Rig::touch_profile());
+  r.fake.make_panel(320, 240, false);
+  r.bring_online(true);
+  hg::TouchGestures touch(r.app);
+  r.server(R"({"type":"choice","id":"a","title":"Which of these should I put on the list for the weekend trip to the lake?","options":["a","b","c","d","e","f"]})");
+  r.advance(700);
+  const int row_h = r.app.choice_row_px();
+  CHECK(static_cast<int>(r.app.model().items.size()) - r.app.choice_rows_shown() >= 2);
+  // Sideways past the slop first, then up by a row: the list follows, and the release picks nothing.
+  touch.update(true, 160, 180, r.fake.clock);
+  r.advance(20);
+  touch.update(true, 185, 178, r.fake.clock);
+  r.advance(20);
+  touch.update(true, 185, 180 - row_h - 2, r.fake.clock);
+  CHECK_EQ(r.app.model().scroll, 1);
+  touch.update(false, 0, 0, r.fake.clock);
+  r.advance(100);
+  CHECK(r.fake.last("choice.reply") == nullptr);
+  // A drag of choice A that goes on after choice B replaced it moves nothing in B.
+  touch.update(true, 160, 200, r.fake.clock);
+  r.advance(20);
+  touch.update(true, 160, 200 - row_h, r.fake.clock);
+  CHECK_EQ(r.app.model().scroll, 2);
+  r.server(R"({"type":"choice","id":"b","title":"Which of these should I put on the list for the weekend trip to the lake?","options":["a","b","c","d","e","f"]})");
+  CHECK_EQ(r.app.model().scroll, 0);
+  r.advance(20);
+  touch.update(true, 160, 200 - 3 * row_h, r.fake.clock);
+  CHECK_EQ(r.app.model().scroll, 0);
+  touch.update(false, 0, 0, r.fake.clock);
+  r.advance(100);
+  CHECK(r.fake.last("choice.reply") == nullptr);
+}
+
+TEST("choice: a tap under the last row shown is no answer while more answers follow") {
+  Rig r(Rig::touch_profile());
+  r.fake.make_panel(320, 240, false);
+  r.bring_online(true);
+  r.server(R"({"type":"choice","id":"m","title":"Pick","options":["a","b","c","d","e","f"]})");
+  r.advance(700);
+  const int rows = r.app.choice_rows_shown();
+  CHECK(rows < 6);  // more answers below the screen
+  const int row_h = r.app.choice_row_px();
+  int start = -1;  // where the last row shown begins
+  for (int y = 0; y < 240 && start < 0; ++y)
+    if (r.app.choice_row_at(160, y) == rows - 1) start = y;
+  CHECK(start >= 0);
+  CHECK_EQ(r.app.choice_row_at(160, start + row_h - 1), rows - 1);
+  for (int y = start + row_h; y < 240; ++y) CHECK_EQ(r.app.choice_row_at(160, y), -1);  // no slack: more is to come
+}
+
 TEST("choice: on a touchscreen a short list is large buttons, and a tap just under the last one picks it") {
   Rig r(Rig::touch_profile());
   r.fake.make_round(466);

@@ -920,7 +920,7 @@ class App {
   uint32_t choice_since_ = 0;  // when it last came to the front: presses just after answer nothing
   bool choice_front_ = false;  // the Choice screen is what the model shows
   uint32_t choice_until_ = 0;  // 0 = until answered or withdrawn
-  int choice_drag_first_ = 0;  // the first row shown when the drag began
+  int choice_drag_first_ = -1;  // the first row shown when the drag began; -1: no drag of this choice
 
   // transient messages
   std::string notice_;
