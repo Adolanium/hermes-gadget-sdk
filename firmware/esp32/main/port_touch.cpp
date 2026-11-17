@@ -566,7 +566,8 @@ void TouchInput::task(void* arg) {
       // finger held down stays down until INT says the controller has something new.
       const bool int_low = port_ok && !((port >> self->touch_.int_expander_bit) & 1);
       self->int_low_.store(int_low, std::memory_order_relaxed);
-      touch_due = int_low || esp_timer_get_time() < ungated_until_us;
+      // The ungated first second must not read during a touch either, or a held finger lifts.
+      touch_due = int_low || (!was_touching && esp_timer_get_time() < ungated_until_us);
     } else {
       touch_due = self->may_read(was_touching);
     }
