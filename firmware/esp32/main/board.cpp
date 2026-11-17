@@ -50,6 +50,8 @@ namespace {
 #define HG_BOARD_NAME "waveshare-esp32-s3-touch-lcd-1.85c-v2"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_TOUCH_LCD_146
 #define HG_BOARD_NAME "esp32-s3-touch-lcd-146"
+#elif CONFIG_HG_BOARD_SENSECAP_WATCHER
+#define HG_BOARD_NAME "sensecap-watcher"
 #elif CONFIG_HG_BOARD_WS_KNOB_LCD_18
 #define HG_BOARD_NAME "waveshare-esp32s3-knob-touch-lcd-1.8"
 #elif CONFIG_HG_BOARD_ESP_VOCAT
@@ -515,6 +517,67 @@ BoardConfig make() {
   b.buttons = {0, -1, -1, -1};  // wiki lists BOOT and does not print the GPIO
   b.talk_label = "BOOT";
   b.cancel_label = "Swipe down";
+  return b;
+}
+#elif CONFIG_HG_BOARD_SENSECAP_WATCHER
+// Seeed Studio SenseCAP Watcher W1-A, revision v0.2. Round 412x412 SPD2010
+// QSPI display, SPD2010 touch, ES8311 + ES7243E audio, PCA9535 expander.
+// Pins: docs/hardware.md#sensecap-watcher-w1-a.
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.lcd.enabled = true;
+  b.lcd.controller = LcdController::Spd2010;
+  b.lcd.width = b.lcd.height = 412;
+  b.lcd.swap_xy = b.lcd.mirror_x = b.lcd.mirror_y = false;
+  b.lcd.invert = false;
+  b.lcd.round = true;
+  b.lcd.sclk = 7;
+  b.lcd.mosi = 9;
+  b.lcd.d1 = 1;  // the BSP also names GPIO 1 as D/C; in QSPI mode it is DATA1, so no D/C pin
+  b.lcd.d2 = 14;
+  b.lcd.d3 = 13;
+  b.lcd.cs = 45;
+  b.lcd.backlight = 8;  // active high
+  b.lcd.spi_mhz = 40;
+  b.i2c = {47, 48, 400000};
+  b.touch.enabled = true;
+  b.touch.controller = TouchController::Spd2010;
+  b.touch.addr = 0x53;
+  b.touch.width = b.touch.height = 412;
+  b.touch.ppi = 282;  // estimate (see TouchConfig::ppi)
+  b.touch.bus = {39, 38, 400000};
+  b.touch.int_expander_bit = 5;  // INT is PCA9535 P0.5, read with the wheel button
+  b.codec.enabled = true;
+  b.codec.mclk = 10;
+  b.codec.bclk = 11;
+  b.codec.ws = 12;
+  b.codec.dout = 16;
+  b.codec.din = 15;
+  b.codec.mic = MicCodec::Es7243e;
+  b.codec.mic_addr = 0x14;        // 7-bit; the BSP probes an older ES7243 at 0x13 first
+  b.codec.mic_right_slot = true;  // the BSP and xiaozhi read the right slot
+  b.codec.mic_gain_db = 27.0f;
+  // PCA9535 at 0x21 (A0 high): P0 inputs (charge, standby, USB power, wheel button,
+  // SD detect, touch INT), P1 supply switches.
+  b.expander_levels.enabled = true;
+  b.expander_levels.pca9535 = true;
+  b.expander_levels.addr = 0x21;
+  // P1.1 LCD, P1.2 system, P1.4 codec and amplifier, P1.7 battery ADC divider. The BSP
+  // also powers the SD slot (P1.0), the Himax AI chip (P1.3) and Grove (P1.6), which this
+  // profile doesn't use: they stay off.
+  b.expander_levels.startup_high = 0x9600;
+  b.expander_levels.power_hold = 0x0400;  // P1.2 keeps the battery supply on
+  b.pwr_key = {true, 0x21, 3, false};     // wheel button, PCA9535 P0.3, active low
+  b.pwr_key.bus = b.i2c;                  // the expander is on the general bus, not touch's
+  // A and B swapped from the BSP order: the owner found the scroll backwards. Swap back to reverse.
+  b.encoder = {42, 41, false};
+  b.encoder.steps_per_detent = 2;  // Seeed's knob driver rests at A = B: a detent every half cycle
+  b.latch_power.enabled = true;
+  b.latch_power.adc = 3;
+  b.latch_power.mv_ratio = 4;  // (62 k + 20 k) / 20 k = 4.1, rounded down as the BSP does
+  b.talk_label = "Hold screen";
+  b.cancel_label = "Wheel button";
   return b;
 }
 #elif CONFIG_HG_BOARD_WS_KNOB_LCD_18

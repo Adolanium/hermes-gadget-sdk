@@ -1,0 +1,21 @@
+# SenseCAP Watcher W1-A, hardware revision v0.2.
+CONFIG_IDF_TARGET="esp32s3"
+# CONFIG_ESPTOOLPY_FLASHSIZE_4MB is not set
+CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
+# Keeps Seeed's factory data partition at 0x9000 (partitions-sensecap-watcher.csv).
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-sensecap-watcher.csv"
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+# The console stays on UART0 (the base default): the data USB-C port reaches the
+# S3 through a WCH USB-to-dual-UART bridge, not its own USB Serial/JTAG.
+CONFIG_HG_BOARD_SENSECAP_WATCHER=y
+
+# TCP windows for links with a long round trip.
+CONFIG_LWIP_TCP_WND_DEFAULT=32768
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y

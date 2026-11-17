@@ -472,6 +472,9 @@ bool tca9554_reset(i2c_master_bus_handle_t bus, const ExpanderResetConfig& reset
 bool tca9554_levels_begin(i2c_master_bus_handle_t bus, const ExpanderLevelConfig& levels);
 // On when percent > 0. No effect until tca9554_levels_begin succeeds.
 void tca9554_backlight(uint8_t percent);
+// Drives ExpanderLevelConfig::power_hold low (a PCA9535 board's battery supply latch).
+// False when no latch was configured or the write failed.
+bool expander_power_off();
 
 namespace i2c {
 // The board's shared I2C master bus (created on first use).
@@ -500,11 +503,18 @@ class CodecAudio {
     float gain_db = 0;
   };
   MicLink mic_link() const { return mic_link_; }
+  // How the speaker was opened, for CodecSpeaker::allow_power_down. The microphone's
+  // format can differ (CodecAudioConfig::mic_right_slot).
+  esp_codec_dev_sample_info_t out_format() const { return out_format_; }
+  const char* mic_name() const { return mic_name_; }  // the microphone ADC begin() found, for diag
 
  private:
   i2s_chan_handle_t tx_ = nullptr, rx_ = nullptr;
   esp_codec_dev_handle_t out_ = nullptr, in_ = nullptr;
   MicLink mic_link_;
+  esp_codec_dev_sample_info_t out_format_ = {};
+  bool es7243_fitted_ = false;  // an ES7243 answered in place of the configured ES7243E
+  const char* mic_name_ = "none";
 };
 
 class CodecMic final : public hg::AudioIn {
@@ -573,7 +583,7 @@ class CodecSpeaker final : public hg::AudioOut {
 class TouchInput {
  public:
   bool begin(const TouchConfig& touch, const ExpanderKeyConfig& key, const EncoderConfig& encoder,
-             i2c_master_bus_handle_t bus);
+             i2c_master_bus_handle_t bus, i2c_master_bus_handle_t key_bus = nullptr);
   bool has_touch() const { return touch_dev_ != nullptr || managed_touch_ != nullptr; }
   bool has_key() const { return key_dev_ != nullptr; }
   void nudge();  // ends the task's wait now, e.g. so a doze's end re-arms the INT edge at once
@@ -600,6 +610,8 @@ class TouchInput {
   static esp_err_t on_sleep_exit(int64_t slept_us, void* arg);  // IRAM: a low INT after light sleep
   void wait(uint32_t ms);
   bool read_key(bool& pressed);
+  bool read_port(uint8_t& value);  // the key expander's input port 0
+  bool key_level(uint8_t port) const;
   TouchConfig touch_{};
   ExpanderKeyConfig key_{};
   i2c_master_dev_handle_t touch_dev_ = nullptr;
@@ -616,6 +628,9 @@ class TouchInput {
   gpio_num_t encoder_b_ = GPIO_NUM_NC;
   volatile uint8_t encoder_state_ = 0;      // last A/B sample (ISR-written)
   volatile int8_t encoder_accumulator_ = 0;  // quadrature steps toward the next detent (ISR-written)
+  int8_t encoder_steps_ = 4;                 // EncoderConfig::steps_per_detent
+  std::atomic<uint32_t> encoder_edges_{0}, encoder_detents_{0};  // for stats()
+  std::atomic<bool> int_low_{false};         // the expander INT bit at the last poll (stats())
   std::atomic<int8_t> encoder_pending_{0};   // whole detents waiting for the task to post
   bool encoder_pulse_per_detent_ = false;    // knob-ring encoder: channel = direction
   volatile int8_t encoder_first_ = 0;        // leading channel of the current detent (0 = idle)
@@ -811,6 +826,9 @@ class LatchPower final : public hg::Power {
   std::optional<bool> external_power() override;
   bool take_key_press() override;
   static constexpr int64_t kKeyHoldMs = 2500;
+  // A supply latch that isn't an ESP32 pin (the SenseCAP Watcher's PCA9535 P1.2).
+  // Used by power_off() when the config has no enable pin; set it before the app starts.
+  std::function<bool()> board_power_off;
 
  private:
   bool charging_signal() const;

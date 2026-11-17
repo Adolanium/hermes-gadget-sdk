@@ -11,7 +11,7 @@ dependencies:
     version: "1.6.5"
     rules:
       - if: target in [esp32p4]
-  # ES8311 / ES7210 / AW88298 codecs on boards that use them
+  # ES8311 / ES7210 / ES7243E / AW88298 codecs on boards that use them
   espressif/esp_codec_dev: "~1.5"
   # M5Stack CoreS3: the GC0308 camera over the S3 DVP backend of esp32-camera.
   espressif/esp32-camera:

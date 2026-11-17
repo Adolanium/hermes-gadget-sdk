@@ -378,7 +378,12 @@ extern "C" void app_main(void) {
   // speaker do nothing. Blocks for about 0.6 s.
   if (board.speaker_dac >= 0) hgp::dac_beep(board.speaker_dac);
 #if !CONFIG_HG_BOARD_ESP32_CYD
+  // A PCA9535 that holds the supply (the SenseCAP Watcher's wheel powers it on only while
+  // held) is latched now, before Wi-Fi start-up, not later with the other expanders.
+  const bool early_levels = board.expander_levels.enabled && board.expander_levels.pca9535 &&
+                            hgp::tca9554_levels_begin(hgp::i2c::bus(board.i2c), board.expander_levels);
   const bool latch_power = board.latch_power.enabled && g_latch_power.begin(board.latch_power);
+  if (early_levels && board.expander_levels.power_hold) g_latch_power.board_power_off = [] { return hgp::expander_power_off(); };
 #endif
   const char* version = esp_app_get_description()->version;
   ESP_LOGI(TAG, "Hermes Gadget %s on %s", version, board.name);
@@ -452,7 +457,8 @@ extern "C" void app_main(void) {
       (!board.sticks3 || g_sticks3.begin(i2c_bus)) &&
       (!board.stopwatch || g_stopwatch.begin(i2c_bus)) &&
       (!board.expander_reset.mask || hgp::tca9554_reset(i2c_bus, board.expander_reset)) &&
-      (!board.expander_levels.enabled || hgp::tca9554_levels_begin(i2c_bus, board.expander_levels));
+      (!board.expander_levels.enabled ||
+       (board.expander_levels.pca9535 ? early_levels : hgp::tca9554_levels_begin(i2c_bus, board.expander_levels)));
   if (board.cores3 && peripherals_ready)
     g_display.board_backlight = [](uint8_t percent) { g_cores3.set_backlight(percent); };
   if (board.expander_levels.backlight && peripherals_ready)
@@ -517,14 +523,15 @@ extern "C" void app_main(void) {
     g_codec_speaker.es8311_fade_ramp = board.codec.dac_fade_ramp && board.codec.speaker == hgp::SpeakerCodec::Es8311;
     if (g_codec_speaker.begin(g_codec.out(), board.codec.stereo32, board.codec.speaker_pa ? board.codec.pa : -1)) hal.speaker = &g_codec_speaker;
     // Light-sleep boards power the DAC down while dozing, if the mics don't share it.
-    if (board.light_sleep && g_codec.mic_link().switchable) g_codec_speaker.allow_power_down(g_codec.mic_link().format);
+    if (board.light_sleep && g_codec.mic_link().switchable) g_codec_speaker.allow_power_down(g_codec.out_format());
   }
   if (hal.speaker) hal.speaker_decoder = &g_opus;  // Opus replies when Hermes offers them
   const bool imu = peripherals_ready && board.imu.enabled && g_motion.begin(board.imu, i2c_bus);
   g_time.begin(board.rtc, i2c_bus, g_storage);
   const bool touch = peripherals_ready && (board.touch.enabled || board.pwr_key.enabled || board.encoder.a >= 0) &&
                      g_touch.begin(board.touch, board.pwr_key, board.encoder,
-                                   board.touch.bus.sda >= 0 ? hgp::i2c::touch_bus(board.touch.bus) : i2c_bus);
+                                   board.touch.bus.sda >= 0 ? hgp::i2c::touch_bus(board.touch.bus) : i2c_bus,
+                                   board.pwr_key.bus.sda >= 0 ? hgp::i2c::bus(board.pwr_key.bus) : nullptr);
 
   hgp::diag::Parts parts;
 #if SOC_MIPI_DSI_SUPPORTED
@@ -539,7 +546,7 @@ extern "C" void app_main(void) {
                     : hal.display == &g_amoled ? "co5300"
                                               : "none";
   }
-  parts.mic = hal.mic == &g_codec_mic ? (board.codec.mic == hgp::MicCodec::Es8311 ? "es8311" : "es7210")
+  parts.mic = hal.mic == &g_codec_mic ? g_codec.mic_name()
               : hal.mic == &g_mic ? (board.mic.pdm ? "pdm" : "i2s") : "none";
 #if SOC_MIPI_DSI_SUPPORTED
   if (hal.speaker == &g_p4_speaker) parts.speaker = "i2s";

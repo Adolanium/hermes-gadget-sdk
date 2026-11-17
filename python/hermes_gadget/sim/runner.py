@@ -57,6 +57,8 @@ BOARDS = {
     "sim-240x320": Board("sim-240x320", 240, 320, scroll_buttons=False, touch=True),
     # A 1.28" round 240x240 LCD with touch (e.g. Spotpear ESP32-S3-1.28-BOX): no scroll buttons.
     "sim-240x240-round": Board("sim-240x240-round", 240, 240, scroll_buttons=False, round=True, touch=True),
+    # Round 412x412 touch boards (SenseCAP Watcher W1-A, Waveshare 1.46): no scroll buttons.
+    "sim-412x412-round": Board("sim-412x412-round", 412, 412, scroll_buttons=False, round=True, touch=True),
     # Waveshare 1.85C V2: round LCD and touch, no scroll buttons.
     "sim-360x360-round": Board("sim-360x360-round", 360, 360, scroll_buttons=False, round=True, touch=True),
     # Waveshare ESP32-S3-Knob-Touch-LCD-1.8: same round 360x360 screen as the 1.85C V2,
