@@ -569,6 +569,30 @@ def _recording_approvals(monkeypatch):
     return resolved
 
 
+
+def test_an_approval_answers_only_the_request_it_was_asked_for(gadget, make_sim, monkeypatch):
+    import tools.approval as approval
+
+    carded, denied_only = [], []
+    monkeypatch.setattr(approval, "resolve_gateway_approval_card",
+                        lambda session_key, choice, request_id, **kw: carded.append((session_key, choice, request_id)) or 1)
+    monkeypatch.setattr(approval, "restrict_gateway_approval_card_to_deny",
+                        lambda session_key, request_id, restricted=True: denied_only.append((request_id, restricted)))
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+
+    gadget.run(gadget.adapter.send_exec_approval(chat_id=device_id, command="ls", session_key="sk", request_id="r1"))
+    assert sim.wait_screen("prompt", timeout=5)
+    sim.run_for(0.7)
+    sim.tap("talk")
+    assert sim.wait_for(lambda: carded == [("sk", "once", "r1")], timeout=5)  # not the session's oldest
+
+    # A command the screen cannot show stays Deny-only in Hermes as well, not only on the device.
+    gadget.run(gadget.adapter.send_exec_approval(chat_id=device_id, command="ls\nrm -rf ~", session_key="sk",
+                                                 request_id="r2"))
+    assert sim.wait_for(lambda: (sim.last_received("prompt") or {}).get("title") == "Can't show this command", timeout=5)
+    assert ("r2", True) in denied_only
+
 @pytest.mark.parametrize("command", ["ls <think>x</think>", "echo [a](b)", "a|b", "rm -rf *_build_*"])
 def test_an_approval_shows_the_command_byte_for_byte(gadget, make_sim, monkeypatch, command):
     resolved = _recording_approvals(monkeypatch)

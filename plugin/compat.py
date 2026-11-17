@@ -17,7 +17,7 @@ printed here.
 from __future__ import annotations
 
 import importlib
-from typing import Callable
+from typing import Callable, Optional
 
 TESTED_HERMES_COMMIT = "2eceb0275501b09febdec88d08b80d1fff730cf8"
 
@@ -98,3 +98,30 @@ def approval_timeout_s() -> int:
         return int(approval_timeout_seconds())
     except Exception:
         return APPROVAL_TIMEOUT_DEFAULT_S
+
+
+def resolve_approval(session_key: str, choice: str, request_id: Optional[str]) -> int:
+    """Answer the command approval a device question was asked for, and only that one.
+
+    With a request id, Hermes's card path resolves exactly that request: a YES for a question whose
+    request already settled resolves nothing instead of the next one queued in the session, and a
+    request Hermes keeps Deny-only refuses it. A Hermes without the card path (or a question without a
+    request id) gets the older answer, which resolves the session's oldest open approval."""
+    from tools import approval
+
+    card = getattr(approval, "resolve_gateway_approval_card", None)
+    if request_id and card is not None:
+        return card(session_key, choice, request_id)
+    return approval.resolve_gateway_approval(session_key, choice)
+
+
+def approval_deny_only(session_key: str, request_id: Optional[str]) -> None:
+    """Keep a request Deny-only in Hermes when the device cannot show its whole command: Hermes lifted
+    the mark for its own card text, but the device's screen is narrower. Optional: older Hermes lacks it."""
+    if not request_id:
+        return
+    try:
+        from tools.approval import restrict_gateway_approval_card_to_deny
+    except ImportError:
+        return
+    restrict_gateway_approval_card_to_deny(session_key, request_id)
