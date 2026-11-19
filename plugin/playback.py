@@ -226,7 +226,7 @@ class FfmpegSource(Source):
             [ffmpeg, "-nostdin", "-v", "error", *given, "-vn", "-f", "s16le", "-acodec", "pcm_s16le",
              "-ac", "1", "-ar", str(rate), "pipe:1"],
             stdin=subprocess.PIPE if body is not None else subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=audio.ffmpeg_env())
         self._stderr: collections.deque[bytes] = collections.deque(maxlen=4)
         self._chunks: queue.Queue[bytes] = queue.Queue(maxsize=2)
         threading.Thread(target=self._drain_stderr, daemon=True).start()
