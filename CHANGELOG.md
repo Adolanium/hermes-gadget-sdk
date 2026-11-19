@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Hermes plugin
+
+- **Speech queued for a busy gadget is no longer dropped silently.** A message that is not spoken within `speech_queue_wait_s` (600 s by default, was a fixed two minutes), or whose text-to-speech or playback fails, goes to `speech_overflow_target` with `send_message`, such as `telegram`, or to the log when no target is set. A `send_message` from another chat that arrives during a turn is now spoken after the turn, like cron output: the adapter recognises the turn's own reply by the task that runs the turn, not by whether a turn is active. A device that becomes idle only after the deadline no longer speaks the expired message, playback rechecks that the device is still connected and paired after waiting, and a device that disconnects before its audio starts no longer leaves its speech queue stuck. [Hermes integration](docs/hermes-integration.md#scheduled-delivery). Contributed by @NickJLange.
+
 ## 0.6.0
 
 Hermes Gadget 0.6.0 gives the agent more to do with a gadget. It can play a sound file or a radio stream on the speaker (`gadget_play`), show lists, progress bars and QR codes, ask a question with up to six answers on the screen (`gadget_ask`), set the face's expression, and fill the idle screen with widgets such as a disk's fill level or the room temperature. Interpreter mode turns a gadget into a translator that two people pass back and forth. Messages and cron jobs sent to a gadget outside a turn are spoken, and `hermes gadget bot-chat` lets a gadget talk to Hermes Bot Mode. Profile switching works on a stock Hermes with `profile_mode: virtual`, and a board's diagnostics report comes over the network, with the reason for a hang or a restart. The M5Stack CoreS3 gains its camera, as a `camera.capture` action and a camera mode with a live view. Five experimental board profiles arrive: the M5Stack StopWatch, the M5Stack Cardputer ADV, the Seeed Studio SenseCAP Watcher W1-A, the Waveshare ESP32-S3-Touch-LCD-1.47 and the LCDWIKI ES3C28P. The Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C boots on esp-hosted 2.12, and its speaker pops less when it turns on and off. Details by area follow.

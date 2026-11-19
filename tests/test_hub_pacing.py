@@ -258,3 +258,19 @@ def test_a_stream_the_connection_dropped_is_failed_not_played(monkeypatch):
     out, waited = asyncio.run(run())
     assert out.failed and not out.aborted and not out.playing
     assert waited < 0.5  # nothing left to wait for
+
+
+def test_a_stream_cut_off_by_a_disconnect_before_its_pump_ran_is_failed_and_done():
+    """A device that disconnects right after audio.start: the pump is cancelled before it runs its
+    finally, and a speech queue waiting on the stream must not wait forever."""
+    async def run():
+        out = hubmod.AudioOut(RecordingSession(VirtualClock()), stream=3, src_rate=RATE)
+        await out.start()  # the pump task exists but has not run yet
+        session = SimpleNamespace(closed=False, _face_task=None, _thumb_task=None, _pending={}, _choice=None,
+                                  _ota_inbox=None, _audio_out=out, end_playback=lambda reason: None)
+        hubmod.DeviceSession._shutdown(session)
+        await asyncio.wait_for(out.wait_played(), 1)
+        return out
+
+    out = asyncio.run(run())
+    assert out.done.is_set() and out.failed and not out.playing
