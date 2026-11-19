@@ -459,7 +459,7 @@ Attach the report to a pull request that makes the two changes for that board an
 
 ## Tailnet
 
-Reaching Hermes over a [Tailscale tailnet](tailnet.md) is off on every board. Turning it on adds TailTiny, a Tailscale client, to the image: about 119 KB of flash on the AMOLED-1.75C (measured with TailTiny 3.2.0: 1,760,592 → 1,882,528 bytes), four more tasks with 27 KB of internal-RAM stacks, and PSRAM while it syncs the tailnet's map. It needs a board with PSRAM. On the AMOLED-1.75C it doesn't fit beside [Bluetooth](#bluetooth): the two together leave 7% of the app slot free, under the 10% the build requires. So each board turns it on only after someone has checked it on that board.
+Reaching Hermes over a [Tailscale tailnet](tailnet.md) is off on every board. Turning it on adds TailTiny, a Tailscale client, to the image: about 119 KB of flash on the AMOLED-1.75C (measured with TailTiny 3.2.0: 1,760,592 → 1,882,528 bytes), four more tasks with 27 KB of internal-RAM stacks, and PSRAM while it syncs the tailnet's map. It needs a board with PSRAM. On the AMOLED-1.75C it doesn't fit the size check on its own: the build leaves 7% of the app slot free, under the 10% the build requires, so `pio run` stops after building the image and `-t upload` doesn't flash it. The image still fits the slot and can be installed by OTA; [#329](https://github.com/Adolanium/hermes-gadget-sdk/issues/329) tracks the fix. So each board turns it on only after someone has checked it on that board.
 
 To try it on a board, build it yourself with two changes, then flash over USB:
 
