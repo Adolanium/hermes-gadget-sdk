@@ -40,6 +40,7 @@ static const char *TAG = "ml_wg_mgr";
 /* Forward declarations */
 static void disco_send_call_me_maybe(tailtiny_t *ml, int peer_idx);
 static void disco_send_ping_to_peer(tailtiny_t *ml, int peer_idx, bool force);
+static void remove_peer_at(tailtiny_t *ml, int idx, const char *why);
 
 /* DISCO message types */
 #define DISCO_MSG_PING          0x01
@@ -51,6 +52,59 @@ static const uint8_t DISCO_MAGIC[6] = { 'T', 'S', 0xf0, 0x9f, 0x92, 0xac };
 
 #define DISCO_TXID_LEN 12
 #define DISCO_NONCE_LEN 24
+
+/* DISCO box keys, one per peer DISCO key (upstream PR #31). nacl_box() and
+ * nacl_box_open() derive the shared key with an X25519 every time, so every
+ * DISCO packet in or out cost one: on an ESP32-S3 30-40 ms of the WireGuard
+ * task's time, while WireGuard packets waited in its queue. Our DISCO private
+ * key is fixed while the task runs, so the shared key depends only on the
+ * peer's. The table is emptied (and wiped) when the task starts and exits.
+ * ml_wg_mgr_send_cmm() runs on the caller's task, hence the lock. */
+#define DISCO_KEY_SLOTS 8
+static struct {
+    bool valid;
+    uint8_t peer_pub[32];
+    uint8_t shared[32];
+} s_disco_keys[DISCO_KEY_SLOTS];
+static int s_disco_keys_next;
+static portMUX_TYPE s_disco_keys_lock = portMUX_INITIALIZER_UNLOCKED;
+
+static void disco_shared_key(const tailtiny_t *ml, const uint8_t *peer_pub, uint8_t *shared) {
+    taskENTER_CRITICAL(&s_disco_keys_lock);
+    for (int i = 0; i < DISCO_KEY_SLOTS; i++) {
+        if (s_disco_keys[i].valid && memcmp(s_disco_keys[i].peer_pub, peer_pub, 32) == 0) {
+            memcpy(shared, s_disco_keys[i].shared, 32);
+            taskEXIT_CRITICAL(&s_disco_keys_lock);
+            return;
+        }
+    }
+    taskEXIT_CRITICAL(&s_disco_keys_lock);
+
+    nacl_box_beforenm(shared, peer_pub, ml->disco_private_key);
+
+    taskENTER_CRITICAL(&s_disco_keys_lock);
+    int slot = s_disco_keys_next;
+    s_disco_keys_next = (slot + 1) % DISCO_KEY_SLOTS;
+    memcpy(s_disco_keys[slot].peer_pub, peer_pub, 32);
+    memcpy(s_disco_keys[slot].shared, shared, 32);
+    s_disco_keys[slot].valid = true;
+    taskEXIT_CRITICAL(&s_disco_keys_lock);
+}
+
+static void disco_shared_keys_wipe(void) {
+    taskENTER_CRITICAL(&s_disco_keys_lock);
+    memset(s_disco_keys, 0, sizeof(s_disco_keys));
+    s_disco_keys_next = 0;
+    taskEXIT_CRITICAL(&s_disco_keys_lock);
+}
+
+static void disco_seal(const tailtiny_t *ml, uint8_t *ciphertext, const uint8_t *plaintext,
+                       size_t len, const uint8_t *nonce, const uint8_t *peer_pub) {
+    uint8_t shared[32];
+    disco_shared_key(ml, peer_pub, shared);
+    nacl_box_afternm(ciphertext, plaintext, len, nonce, shared);
+    memset(shared, 0, sizeof(shared));
+}
 
 /* Check if an IP (host byte order) is a LAN address */
 static inline bool is_lan_ip(uint32_t ip) {
@@ -420,6 +474,56 @@ static int find_peer_by_disco_key(tailtiny_t *ml, const uint8_t *disco_key) {
     return -1;
 }
 
+static bool key_is_zero(const uint8_t *key) {
+    uint8_t acc = 0;
+    for (int i = 0; i < 32; i++) acc |= key[i];
+    return acc == 0;
+}
+
+/* The peer a removal or patch names: by NodeID (what Tailscale sends), else
+ * by node key. */
+static int find_peer_for_update(tailtiny_t *ml, const ml_peer_update_t *u) {
+    if (u->node_id != 0) {
+        for (int i = 0; i < ml->peer_count; i++) {
+            if (ml->peers[i].active && ml->peers[i].node_id == u->node_id) return i;
+        }
+        return -1;
+    }
+    return key_is_zero(u->public_key) ? -1 : find_peer_by_key(ml, u->public_key);
+}
+
+/* Whether an update for a peer we already have changes nothing that matters:
+ * the same VPN address, DISCO key, home DERP region and endpoints, and it is
+ * already in wireguard-lwip. (Peers loaded from the NVS cache at boot aren't
+ * yet.) */
+static bool peer_update_unchanged(const ml_peer_t *p, const ml_peer_update_t *u) {
+    if (p->wg_peer_index < 0 || p->vpn_ip != u->vpn_ip || p->derp_region != u->derp_region ||
+        memcmp(p->disco_key, u->disco_key, 32) != 0 ||
+        p->endpoint_count != u->endpoint_count) {
+        return false;
+    }
+    for (int i = 0; i < u->endpoint_count && i < ML_MAX_ENDPOINTS; i++) {
+        if (p->endpoints[i].ip != u->endpoints[i].ip ||
+            p->endpoints[i].port != u->endpoints[i].port ||
+            p->endpoints[i].is_ipv6 != u->endpoints[i].is_ipv6) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void notify_peer(tailtiny_t *ml, const ml_peer_t *p) {
+    if (!ml->peer_cb) return;
+    tailtiny_peer_info_t info = {
+        .vpn_ip = p->vpn_ip,
+        .online = p->online,
+        .direct_path = p->has_direct_path,
+    };
+    strncpy(info.hostname, p->hostname, sizeof(info.hostname) - 1);
+    memcpy(info.public_key, p->public_key, 32);
+    ml->peer_cb(ml, &info, ml->peer_cb_data);
+}
+
 static int add_peer(tailtiny_t *ml, const ml_peer_update_t *update) {
     /* Peer allowlist filter: don't waste WG slots on non-allowed peers.
      * Still process updates for existing peers (they may become allowed later). */
@@ -429,7 +533,55 @@ static int add_peer(tailtiny_t *ml, const ml_peer_update_t *update) {
 
     /* Check if peer already exists */
     int idx = find_peer_by_key(ml, update->public_key);
+    if (idx < 0) {
+        /* The same node under a new node key (re-authenticated, or the key
+         * expired and was renewed): drop the old key first. Kept, it held a
+         * second WireGuard peer with the same /32, and outgoing packets could
+         * go to the dead key. */
+        int old = -1;
+        if (update->node_id != 0) {
+            for (int i = 0; i < ml->peer_count; i++) {
+                if (ml->peers[i].active && ml->peers[i].node_id == update->node_id) { old = i; break; }
+            }
+        }
+        if (old < 0 && update->vpn_ip != 0) old = find_peer_by_ip(ml, update->vpn_ip);
+        if (old >= 0) remove_peer_at(ml, old, "its node key changed");
+    }
     bool is_new = idx < 0;
+    if (idx >= 0 && peer_update_unchanged(&ml->peers[idx], update)) {
+        /* The control server resends peers that haven't changed (every
+         * long-poll update lists them all). Re-adding one reset its direct
+         * path, so traffic fell back to DERP until DISCO found the path again,
+         * and every peer sent a CallMeMaybe and a probe and rewrote the NVS
+         * peer table: about a second of the WireGuard task's time for a dozen
+         * peers, while packets for live sessions waited. Only what can change
+         * here (online, hostname) is taken. */
+        ml_peer_t *p = &ml->peers[idx];
+        bool changed = false;
+        if (update->node_id != 0) p->node_id = update->node_id;
+        if (update->sync_gen != 0) p->sync_gen = update->sync_gen;
+        if (update->online >= 0 && p->online != (update->online == 1)) {
+            p->online = update->online == 1;
+            changed = true;
+        }
+        if (strncmp(p->hostname, update->hostname, sizeof(p->hostname) - 1) != 0) {
+            strncpy(p->hostname, update->hostname, sizeof(p->hostname) - 1);
+            p->hostname[sizeof(p->hostname) - 1] = '\0';
+            changed = true;
+        }
+        /* Writes only if the stored entry differs: an endpoint patch
+         * (ML_PEER_UPDATE_ENDPOINT) changes the peer without saving it. */
+        ml_peer_nvs_save(p);
+        /* Still a CallMeMaybe on each update, as before: it retries a lost one
+         * and carries our endpoints after a rebind changed them. It's one small
+         * packet; the path state stays as it is. */
+        if (!ml_at_socket_is_ready()) {
+            disco_send_call_me_maybe(ml, idx);
+        }
+        ESP_LOGD(TAG, "Peer %s unchanged (idx=%d)", p->hostname, idx);
+        if (changed) notify_peer(ml, p);
+        return idx;
+    }
     if (idx >= 0) {
         ESP_LOGI(TAG, "Updating existing peer %s (idx=%d)", update->hostname, idx);
     } else {
@@ -483,7 +635,15 @@ static int add_peer(tailtiny_t *ml, const ml_peer_update_t *update) {
     }
 
     ml_peer_t *p = &ml->peers[idx];
+    if (!is_new && p->vpn_ip != update->vpn_ip && p->wg_peer_index >= 0 && ml->wg_netif) {
+        /* A new VPN address under the same key: wireguardif_add_peer() returns
+         * the existing peer as it is, allowed IP included, so remove it first
+         * and let the add below create it with the new address. */
+        wireguardif_remove_peer((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index);
+    }
     p->vpn_ip = update->vpn_ip;
+    if (update->node_id != 0) p->node_id = update->node_id;
+    if (update->sync_gen != 0) p->sync_gen = update->sync_gen;
     memcpy(p->public_key, update->public_key, 32);
     memcpy(p->disco_key, update->disco_key, 32);
     strncpy(p->hostname, update->hostname, sizeof(p->hostname) - 1);
@@ -550,18 +710,17 @@ static int add_peer(tailtiny_t *ml, const ml_peer_update_t *update) {
         IP4_ADDR(&wg_peer.allowed_ip.u_addr.ip4, ip_a, ip_b, ip_c, ip_d);
         IP4_ADDR(&wg_peer.allowed_mask.u_addr.ip4, 255, 255, 255, 255);
 
-        /* Set endpoint if available, otherwise leave blank for DERP-only */
-        if (p->endpoint_count > 0 && p->endpoints[0].ip != 0) {
-            uint8_t ea = (p->endpoints[0].ip >> 24) & 0xFF;
-            uint8_t eb = (p->endpoints[0].ip >> 16) & 0xFF;
-            uint8_t ec = (p->endpoints[0].ip >> 8) & 0xFF;
-            uint8_t ed = p->endpoints[0].ip & 0xFF;
-            IP4_ADDR(&wg_peer.endpoint_ip.u_addr.ip4, ea, eb, ec, ed);
-            wg_peer.endport_port = p->endpoints[0].port;
-        } else {
-            ip_addr_set_any(false, &wg_peer.endpoint_ip);
-            wg_peer.endport_port = 0;
-        }
+        /* No WireGuard endpoint until DISCO confirms one (upstream #18). The
+         * netmap's first endpoint used to be copied here, and wireguardif
+         * sends to any endpoint it has: for a peer behind carrier-grade NAT,
+         * or one whose first endpoint is a LAN address it has since left,
+         * every reply went to an address that doesn't reach it, while its
+         * packets came in over DERP (a one-way tunnel). Like Tailscale's
+         * magicsock, WireGuard goes over DERP until a direct PONG sets the
+         * endpoint (process_disco_pong), or the peer's own packets arrive
+         * directly. The netmap endpoints are still the DISCO probe targets. */
+        ip_addr_set_any(false, &wg_peer.endpoint_ip);
+        wg_peer.endport_port = 0;
 
         wg_peer.keep_alive = 25;
 
@@ -625,25 +784,13 @@ static int add_peer(tailtiny_t *ml, const ml_peer_update_t *update) {
         }
     }
 
-    /* Notify app via callback */
-    if (ml->peer_cb) {
-        tailtiny_peer_info_t info = {
-            .vpn_ip = p->vpn_ip,
-            .online = p->online,
-            .direct_path = false,
-        };
-        strncpy(info.hostname, p->hostname, sizeof(info.hostname) - 1);
-        memcpy(info.public_key, p->public_key, 32);
-        ml->peer_cb(ml, &info, ml->peer_cb_data);
-    }
+    /* Notify app via callback (has_direct_path was just reset: false) */
+    notify_peer(ml, p);
 
     return idx;
 }
 
-static void remove_peer(tailtiny_t *ml, const ml_peer_update_t *update) {
-    int idx = find_peer_by_key(ml, update->public_key);
-    if (idx < 0) return;
-
+static void remove_peer_at(tailtiny_t *ml, int idx, const char *why) {
     /* Remove from wireguard-lwip */
     if (ml->wg_netif && ml->peers[idx].wg_peer_index >= 0) {
         struct netif *netif = (struct netif *)ml->wg_netif;
@@ -652,14 +799,37 @@ static void remove_peer(tailtiny_t *ml, const ml_peer_update_t *update) {
 
     char ip_str[16];
     tailtiny_ip_to_str(ml->peers[idx].vpn_ip, ip_str);
-    ESP_LOGI(TAG, "Peer removed: %s (%s)", ml->peers[idx].hostname, ip_str);
+    ESP_LOGI(TAG, "Peer removed: %s (%s, %s)", ml->peers[idx].hostname, ip_str, why);
 
     ml->peers[idx].active = false;
+    ml->peers[idx].wg_peer_index = -1;
+    ml->peers[idx].has_direct_path = false;
+    /* Or the next boot preloads it again into one of the peer slots */
+    ml_peer_nvs_remove(ml->peers[idx].public_key);
 
     /* Compact peer_count */
     while (ml->peer_count > 0 && !ml->peers[ml->peer_count - 1].active) {
         ml->peer_count--;
     }
+}
+
+static void remove_peer(tailtiny_t *ml, const ml_peer_update_t *update) {
+    int idx = find_peer_for_update(ml, update);
+    if (idx >= 0) remove_peer_at(ml, idx, "removed by the control plane");
+}
+
+/* After a full peer list: drop every peer it didn't name. Deleted nodes, and
+ * NVS-cached peers from an older tailnet state, kept a slot (8 on a chip
+ * without PSRAM) and kept getting DISCO probes. */
+static void sweep_peers(tailtiny_t *ml, uint32_t gen) {
+    int removed = 0;
+    for (int i = 0; i < ml->peer_count; i++) {
+        if (ml->peers[i].active && ml->peers[i].sync_gen != gen) {
+            remove_peer_at(ml, i, "not in the peer list");
+            removed++;
+        }
+    }
+    if (removed) ESP_LOGI(TAG, "Peer list: %d stale peer(s) removed", removed);
 }
 
 static void process_peer_updates(tailtiny_t *ml) {
@@ -673,12 +843,31 @@ static void process_peer_updates(tailtiny_t *ml) {
         case ML_PEER_REMOVE:
             remove_peer(ml, update);
             break;
+        case ML_PEER_SWEEP:
+            sweep_peers(ml, update->sync_gen);
+            break;
         case ML_PEER_UPDATE_ENDPOINT:
             /* Update endpoint/DERP for existing peer (delta patch) */
             {
-                int idx = find_peer_by_key(ml, update->public_key);
+                int idx = find_peer_for_update(ml, update);
                 if (idx >= 0) {
                     ml_peer_t *p = &ml->peers[idx];
+                    if (!key_is_zero(update->disco_key) &&
+                        memcmp(p->disco_key, update->disco_key, 32) != 0) {
+                        /* A new DISCO key: the peer's client restarted. Its
+                         * direct path has to be found again. */
+                        memcpy(p->disco_key, update->disco_key, 32);
+                        p->has_direct_path = false;
+                        p->trust_until_ms = 0;
+                        p->best_ip = 0;
+                        p->best_port = 0;
+                        if (ml->wg_netif && p->wg_peer_index >= 0) {
+                            wireguardif_clear_endpoint((struct netif *)ml->wg_netif,
+                                                       (u8_t)p->wg_peer_index);
+                        }
+                        ml_peer_nvs_save(p);
+                        ESP_LOGI(TAG, "Peer %s has a new DISCO key", p->hostname);
+                    }
                     if (update->endpoint_count > 0) {
                         p->endpoint_count = update->endpoint_count;
                         for (int i = 0; i < update->endpoint_count && i < ML_MAX_ENDPOINTS; i++) {
@@ -693,8 +882,9 @@ static void process_peer_updates(tailtiny_t *ml) {
                     if (update->online >= 0) {
                         p->online = update->online == 1;
                     }
-                    ESP_LOGI(TAG, "Peer patched: %s (eps=%d derp=%d)",
-                             p->hostname, p->endpoint_count, p->derp_region);
+                    ESP_LOGI(TAG, "Peer patched: %s (eps=%d derp=%d online=%d)",
+                             p->hostname, p->endpoint_count, p->derp_region, (int)p->online);
+                    notify_peer(ml, p);
                 }
             }
             break;
@@ -728,8 +918,7 @@ static void disco_build_ping(tailtiny_t *ml, int peer_idx,
 
     /* Encrypt with NaCl box: our disco private key -> peer's disco public key */
     uint8_t ciphertext[46 + NACL_BOX_MACBYTES];
-    nacl_box(ciphertext, plaintext, sizeof(plaintext), nonce,
-             p->disco_key, ml->disco_private_key);
+    disco_seal(ml, ciphertext, plaintext, sizeof(plaintext), nonce, p->disco_key);
 
     /* Build packet: magic(6) + our_disco_pubkey(32) + nonce(24) + ciphertext(62) = 124 bytes */
     size_t pos = 0;
@@ -791,8 +980,7 @@ static void disco_build_pong(tailtiny_t *ml, int peer_idx,
 
     /* Encrypt */
     uint8_t ciphertext[32 + NACL_BOX_MACBYTES];
-    nacl_box(ciphertext, plaintext, sizeof(plaintext), nonce,
-             p->disco_key, ml->disco_private_key);
+    disco_seal(ml, ciphertext, plaintext, sizeof(plaintext), nonce, p->disco_key);
 
     /* Build packet */
     size_t pos = 0;
@@ -1004,6 +1192,10 @@ static void process_disco_pong(tailtiny_t *ml, const ml_rx_packet_t *pkt,
         if (!keep_current && !pkt->via_derp && pkt->src_ip != 0) {
             bool path_changed = !p->has_direct_path || p->best_ip != pkt->src_ip ||
                                 p->best_port != pkt->src_port;
+            /* A new path may try its one handshake again (below): if the one
+             * for the previous path was lost, the latch kept this peer from
+             * ever trying one directly again. */
+            if (path_changed) p->tried_initial_handshake = false;
             p->best_ip = pkt->src_ip;
             p->best_port = pkt->src_port;
             p->has_direct_path = true;
@@ -1029,10 +1221,16 @@ static void process_disco_pong(tailtiny_t *ml, const ml_rx_packet_t *pkt,
                 err_t is_up = wireguardif_peer_is_up(netif, (u8_t)p->wg_peer_index,
                                                        &cur_ip, &cur_port);
                 if (is_up == ERR_OK) {
-                    /* Check if endpoint actually changed */
+                    /* Switch when DISCO found a new path, or the session is
+                     * still on DERP. Not merely because WireGuard's endpoint
+                     * differs: it follows where the peer's packets come from,
+                     * and a peer reachable on two addresses (LAN and a NAT
+                     * hairpin or port forward) sends from the other one, so
+                     * every 3 s heartbeat PONG forced a new handshake. */
                     uint32_t cur_ip_u32 = ip4_addr_get_u32(ip_2_ip4(&cur_ip));
                     uint32_t new_ip_u32 = htonl(pkt->src_ip);
-                    if (cur_ip_u32 != new_ip_u32 || cur_port != pkt->src_port) {
+                    bool on_new = cur_ip_u32 == new_ip_u32 && cur_port == pkt->src_port;
+                    if (ip_addr_isany(&cur_ip) || cur_port == 0 || (path_changed && !on_new)) {
                         wireguardif_connect(netif, (u8_t)p->wg_peer_index);
                         ESP_LOGI(TAG, "WG endpoint SWITCHED to direct: %d.%d.%d.%d:%d for %s",
                                  (int)((pkt->src_ip >> 24) & 0xFF), (int)((pkt->src_ip >> 16) & 0xFF),
@@ -1121,8 +1319,11 @@ static void process_disco_packet(tailtiny_t *ml, const ml_rx_packet_t *pkt) {
     uint8_t *plaintext = malloc(plaintext_len);
     if (!plaintext) return;
 
-    if (nacl_box_open(plaintext, ciphertext, ciphertext_len, nonce,
-                      sender_disco_key, ml->disco_private_key) != 0) {
+    uint8_t shared[32];
+    disco_shared_key(ml, sender_disco_key, shared);
+    int open_err = nacl_box_open_afternm(plaintext, ciphertext, ciphertext_len, nonce, shared);
+    memset(shared, 0, sizeof(shared));
+    if (open_err != 0) {
         ESP_LOGW(TAG, "DISCO decrypt failed");
         free(plaintext);
         return;
@@ -1159,11 +1360,11 @@ static void process_disco_packet(tailtiny_t *ml, const ml_rx_packet_t *pkt) {
                      ml->peers[peer_idx].hostname, ep_count,
                      disco_has_udp_path(ml), ml_at_socket_is_ready());
 
-            /* Reply with our own CallMeMaybe (bidirectional NAT traversal).
-             * Skip on cellular: our endpoints are behind CGNAT and unreachable. */
-            if (!ml_at_socket_is_ready()) {
-                disco_send_call_me_maybe(ml, peer_idx);
-            }
+            /* No CallMeMaybe in reply: a peer that sends one is already pinging
+             * our endpoints, and Tailscale's handleCallMeMaybe() never answers
+             * one. Two TailTiny/MicroLink devices answering each other's kept
+             * a CallMeMaybe going back and forth every round trip. Ours go out
+             * on peer add/update, after STUN and from ml_wg_mgr_send_cmm(). */
 
             /* Probe each endpoint with a DISCO ping.
              * Skip on cellular: direct UDP impossible, saves TX queue capacity. */
@@ -1261,6 +1462,18 @@ static void process_wg_packet(tailtiny_t *ml, const ml_rx_packet_t *pkt) {
     ip_addr_t addr;
     if (pkt->via_derp) {
         ip_addr_set_any(false, &addr);
+        /* Upstream #41: a peer that talks to us over DERP while DISCO trusts no
+         * direct path to it (a phone that left WiFi for mobile data, say) may
+         * still have a direct endpoint here, from its last direct packet.
+         * wireguardif keeps that endpoint for DERP packets, so every reply
+         * went to an address the peer had left. Answer where it is: DERP.
+         * A DISCO-trusted path is kept, as magicsock keeps its best address. */
+        int idx = find_peer_by_key(ml, pkt->src_pubkey);
+        if (idx >= 0 && !ml->peers[idx].has_direct_path && ml->peers[idx].wg_peer_index >= 0 &&
+            wireguardif_clear_endpoint(netif, (u8_t)ml->peers[idx].wg_peer_index)) {
+            ESP_LOGI(TAG, "%s reached us over DERP: replies go over DERP until a direct path is confirmed",
+                     ml->peers[idx].hostname);
+        }
     } else {
         IP_SET_TYPE_VAL(addr, IPADDR_TYPE_V4);
         ip4_addr_set_u32(ip_2_ip4(&addr), htonl(pkt->src_ip));
@@ -1354,8 +1567,7 @@ static void disco_send_call_me_maybe(tailtiny_t *ml, int peer_idx) {
     esp_fill_random(nonce, DISCO_NONCE_LEN);
 
     uint8_t ciphertext[sizeof(plaintext) + NACL_BOX_MACBYTES];
-    nacl_box(ciphertext, plaintext, pt_len, nonce,
-             p->disco_key, ml->disco_private_key);
+    disco_seal(ml, ciphertext, plaintext, pt_len, nonce, p->disco_key);
 
     /* Build packet: magic(6) + disco_pubkey(32) + nonce(24) + ciphertext */
     uint8_t pkt[256];
@@ -1418,11 +1630,13 @@ esp_err_t ml_wg_mgr_trigger_handshake(tailtiny_t *ml, uint32_t dest_vpn_ip) {
     wireguardif_connect_derp(netif, (u8_t)p->wg_peer_index);
     ESP_LOGI(TAG, "WG handshake triggered (DERP) to %s", p->hostname);
 
-    /* Path 2: Direct UDP (if DISCO has a known endpoint).
+    /* Path 2: Direct UDP (if DISCO trusts a direct path right now).
      * This wakes the peer's magicsock via receiveIPv4 → noteRecvActivity.
      * Set connect_ip first, then call wireguardif_connect which copies
-     * connect_ip → ip and starts a second handshake to the direct endpoint. */
-    if (p->best_ip != 0 && p->best_port != 0) {
+     * connect_ip → ip and starts a second handshake to the direct endpoint.
+     * best_ip outlives the trust: after it expired this put the session's
+     * data on an address that had stopped answering. */
+    if (p->has_direct_path && p->best_ip != 0 && p->best_port != 0) {
         ip_addr_t ep_ip;
         IP_SET_TYPE_VAL(ep_ip, IPADDR_TYPE_V4);
         ip4_addr_set_u32(ip_2_ip4(&ep_ip), htonl(p->best_ip));
@@ -1526,6 +1740,10 @@ static void disco_periodic_probes(tailtiny_t *ml) {
                     if (is_up == ERR_OK) {
                         wireguardif_connect_derp(netif, (u8_t)p->wg_peer_index);
                         ESP_LOGI(TAG, "  WG session active, falling back to DERP for %s", p->hostname);
+                    } else {
+                        /* No session now, but the next one (often the peer's,
+                         * over DERP) would have sent its data to this address. */
+                        wireguardif_clear_endpoint(netif, (u8_t)p->wg_peer_index);
                     }
                 }
 
@@ -1601,6 +1819,7 @@ void ml_wg_notify(tailtiny_t *ml) {
 /* Every exit of the WireGuard task: clear the handle so no new notify starts,
  * wait out the ones already holding it, then delete. */
 static void wg_mgr_exit(tailtiny_t *ml) {
+    disco_shared_keys_wipe();
     taskENTER_CRITICAL(&ml_wg_task_lock);
     ml->wg_mgr_task = NULL;
     taskEXIT_CRITICAL(&ml_wg_task_lock);
@@ -1611,6 +1830,7 @@ static void wg_mgr_exit(tailtiny_t *ml) {
         if (!busy) break;
         vTaskDelay(1);
     }
+    ml_task_exit(ml, ML_TASK_BIT_WG_MGR);
     vTaskDelete(NULL);
 }
 
@@ -1620,6 +1840,7 @@ void ml_wg_mgr_task(void *arg) {
 
     /* Initialize probe tracking */
     memset(pending_probes, 0, sizeof(pending_probes));
+    disco_shared_keys_wipe();
 
     /* Load cached peers from NVS for fast boot */
     int cached = ml_peer_nvs_load_all(ml->peers, ML_MAX_PEERS);
@@ -1753,20 +1974,38 @@ void ml_wg_mgr_task(void *arg) {
 
         /* Every producer for the queues above notifies this task after
          * queueing. The queues stay the source of truth; the notification is
-         * latched, so work queued after the drain still wakes this wait. The
-         * 100 ms cap keeps timers, STUN and shutdown checks running. */
-        ulTaskNotifyTake(pdTRUE, ML_DELAY_TICKS(100));
+         * latched, so work queued after the drain still wakes this wait. It
+         * lasts until the next periodic job is due: WireGuard's timers every
+         * 400 ms (a handshake an outgoing packet asks for is sent from them)
+         * and the DISCO probes every second. */
+        {
+            uint64_t t = ml_get_time_ms();
+            uint64_t due = last_disco_probe_ms + 1001;
+            if (ml->wg_netif && last_wg_periodic_ms + 400 < due) due = last_wg_periodic_ms + 400;
+            uint32_t wait_ms = due > t ? (uint32_t)(due - t) : 0;
+            if (wait_ms > 1000) wait_ms = 1000;
+            /* Rounded up to whole ticks: rounding down woke the task up to a
+             * tick before the job was due, only to wait again. */
+            ulTaskNotifyTake(pdTRUE, wait_ms ? pdMS_TO_TICKS(wait_ms + portTICK_PERIOD_MS - 1) : 0);
+        }
     }
 
     /* Shutdown WireGuard interface */
     if (ml->wg_netif) {
         struct netif *netif = (struct netif *)ml->wg_netif;
+        /* Unpublished first: the zero-copy receive callback reads
+         * ml->wg_netif on lwIP's thread, and the two calls below run there
+         * after any callback already started. */
+        ml->wg_netif = NULL;
         wireguardif_shutdown(netif);
         ml_tcpip_run(wg_netif_down_on_tcpip, netif);
         vTaskDelay(pdMS_TO_TICKS(100));
         ml_tcpip_run(wg_netif_remove_on_tcpip, netif);
+        /* The WireGuard device (~15 KB with its peer table) and its mutex
+         * leaked on every stop, so each restart (ml_net_switch's full-restart
+         * path, or an application's) cost that much RAM. */
+        wireguardif_free_device(netif);
         free(netif);
-        ml->wg_netif = NULL;
     }
 
     ESP_LOGI(TAG, "WG Manager task exiting");

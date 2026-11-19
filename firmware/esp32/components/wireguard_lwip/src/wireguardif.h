@@ -120,6 +120,14 @@ err_t wireguardif_remove_peer(struct netif *netif, u8_t peer_index);
 // Update the "connect" IP of the given peer
 err_t wireguardif_update_endpoint(struct netif *netif, u8_t peer_index, const ip_addr_t *ip, u16_t port);
 
+// Free the device (keys wiped) once the netif is out of lwIP's list and
+// nothing calls into it any more. netif->state is NULL afterwards.
+void wireguardif_free_device(struct netif *netif);
+
+// Forget the peer's direct endpoint (current and "connect" one), so its packets
+// go over the DERP callback. Returns true if there was one to forget.
+bool wireguardif_clear_endpoint(struct netif *netif, u8_t peer_index);
+
 // Try and connect to the given peer
 err_t wireguardif_connect(struct netif *netif, u8_t peer_index);
 

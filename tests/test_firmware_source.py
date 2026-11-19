@@ -173,6 +173,26 @@ def test_tailnet_relay_certificate_is_verified():
     assert not found, found
 
 
+def test_tailnet_relay_handshake_runs_off_the_ui_core():
+    # The DERP relay's TLS handshake takes about 3 s of CPU at priority 5. On core 0 it starves
+    # app_main's UI loop (core 0, priority 1) and the screen freezes while the tailnet connects.
+    # TailTiny 3.2.0's CONFIG_ML_TASK_DERP_CORE moves the task; the tailnet build settings in
+    # docs/hardware-validation.md#tailnet set it to 1, and no board may pin it back to 0.
+    esp32 = FIRMWARE / "esp32"
+    internal = (esp32 / "components" / "tailtiny" / "include" / "tailtiny_internal.h").read_text(encoding="utf-8")
+    assert re.search(r"#define ML_TASK_DERP_CORE\s+CONFIG_ML_TASK_DERP_CORE\b", internal)
+    assert re.search(r"#define ML_TASK_DERP_TX_CORE\s+ML_TASK_DERP_CORE\b", internal)
+    docs = (REPO / "docs" / "hardware-validation.md").read_text(encoding="utf-8")
+    section = docs[docs.index("## Tailnet"):]
+    snippet = re.search(r"```text\n(.*?)```", section, re.S)
+    assert snippet and re.search(r"^\s*CONFIG_ML_TASK_DERP_CORE=1$", snippet.group(1), re.M), \
+        "the tailnet build settings should move the DERP task to core 1"
+    pinned = re.compile(r"^CONFIG_ML_TASK_DERP_CORE=0$", re.M)
+    found = [str(p.relative_to(REPO)) for p in sorted(esp32.rglob("sdkconfig.defaults*"))
+             if ".pio" not in p.parts and pinned.search(p.read_text())]
+    assert not found, found
+
+
 def test_every_console_command_the_core_answers_is_registered_on_the_esp32():
     # ESP-IDF's console runs only the names registered in port_console.cpp's kCommands: a command the
     # core answers but that list lacks works in the simulator and is "Unrecognized command" on a

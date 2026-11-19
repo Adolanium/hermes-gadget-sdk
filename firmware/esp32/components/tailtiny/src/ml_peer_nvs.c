@@ -54,6 +54,9 @@ typedef struct __attribute__((packed)) {
 static nvs_handle_t s_nvs = 0;
 static bool s_initialized = false;
 static peer_nvs_table_t *s_table = NULL;  /* PSRAM-allocated working copy */
+/* The working copy has changes flash doesn't (a failed write, or entries
+ * changed since the last one): an identical save must still write. */
+static bool s_dirty = false;
 
 static void load_table(void) {
     if (!s_table) {
@@ -74,8 +77,9 @@ static esp_err_t flush_table(void) {
                        s_table->count * sizeof(peer_nvs_entry_t);
     esp_err_t err = nvs_set_blob(s_nvs, PEER_NVS_BLOB_KEY, s_table, blob_size);
     if (err == ESP_OK) {
-        nvs_commit(s_nvs);
+        err = nvs_commit(s_nvs);
     }
+    s_dirty = err != ESP_OK;
     return err;
 }
 
@@ -148,6 +152,16 @@ esp_err_t ml_peer_nvs_save(const ml_peer_t *peer) {
     }
 
     if (slot >= 0) {
+        /* The same peer data again (a reconnect's peer list repeats them):
+         * keep the table as written. A flash write stalls both cores, and
+         * writing the table once per peer cost a burst of them. Only the
+         * in-memory LRU order moves. */
+        peer_nvs_entry_t same = s_table->entries[slot];
+        same.lru_counter = entry.lru_counter;
+        if (!s_dirty && memcmp(&same, &entry, sizeof(entry)) == 0) {
+            s_table->entries[slot].lru_counter = entry.lru_counter;
+            return ESP_OK;
+        }
         /* Update existing entry */
         s_table->entries[slot] = entry;
     } else if (s_table->count < ML_NVS_MAX_PEERS) {
@@ -220,6 +234,20 @@ int ml_peer_nvs_load_all(ml_peer_t *peers, int max_peers) {
 
     ESP_LOGI(TAG, "Loaded %d cached peers from NVS", loaded);
     return loaded;
+}
+
+/* Drops a peer the control plane no longer lists, so the next boot doesn't
+ * preload it into one of the few peer slots. */
+esp_err_t ml_peer_nvs_remove(const uint8_t *public_key) {
+    if (!s_initialized || !public_key || !s_table) return ESP_ERR_INVALID_STATE;
+    for (int i = 0; i < s_table->count; i++) {
+        if (memcmp(s_table->entries[i].public_key, public_key, 32) == 0) {
+            s_table->entries[i] = s_table->entries[s_table->count - 1];
+            s_table->count--;
+            return flush_table();
+        }
+    }
+    return ESP_ERR_NOT_FOUND;
 }
 
 esp_err_t ml_peer_nvs_clear(void) {

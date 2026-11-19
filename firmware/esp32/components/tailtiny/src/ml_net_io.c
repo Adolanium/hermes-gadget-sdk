@@ -14,6 +14,7 @@
  */
 
 #include "tailtiny_internal.h"
+#include <unistd.h>
 #include "esp_log.h"
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
@@ -83,7 +84,7 @@ static void route_udp_packet(tailtiny_t *ml, uint8_t *data, size_t len,
 
     switch (type) {
     case PKT_STUN:
-        if (xQueueSend(ml->stun_rx_queue, &pkt, 0) != pdTRUE) {
+        if (ml_coord_queue_send(ml, ml->stun_rx_queue, &pkt, 0) != pdTRUE) {
             free(data);  /* Queue full, drop */
         }
         break;
@@ -105,6 +106,13 @@ static void route_udp_packet(tailtiny_t *ml, uint8_t *data, size_t len,
     }
 }
 
+void ml_net_io_wake(tailtiny_t *ml) {
+    if (ml->net_io_wake_fd >= 0) {
+        const uint64_t one = 1;
+        (void)write(ml->net_io_wake_fd, &one, sizeof(one));
+    }
+}
+
 void ml_net_io_task(void *arg) {
     tailtiny_t *ml = (tailtiny_t *)arg;
     ESP_LOGI(TAG, "Net I/O task started (Core %d)", xPortGetCoreID());
@@ -115,7 +123,12 @@ void ml_net_io_task(void *arg) {
 
         /* ---- UDP sockets via select() ---- */
         fd_set read_fds;
-        struct timeval tv = { .tv_sec = 0, .tv_usec = 50000 };  /* 50ms select timeout */
+        /* With its eventfd (not on cellular, whose AT sockets select()
+         * separately), wait up to 1 s: rebind and stop wake it. Without it,
+         * the old 50 ms timeout. */
+        const bool evwait = ml->net_io_wake_fd >= 0 && ml->net_io_wake_fd < FD_SETSIZE &&
+                            !ml_at_socket_is_ready();
+        struct timeval tv = { .tv_sec = evwait ? 1 : 0, .tv_usec = evwait ? 0 : 50000 };
         int max_fd = -1;
 
         FD_ZERO(&read_fds);
@@ -143,6 +156,10 @@ void ml_net_io_task(void *arg) {
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
+        if (evwait) {
+            FD_SET(ml->net_io_wake_fd, &read_fds);
+            if (ml->net_io_wake_fd > max_fd) max_fd = ml->net_io_wake_fd;
+        }
 
         int sel = ml_select_fds(max_fd + 1, &read_fds, NULL, NULL, &tv);
         if (sel < 0) {
@@ -153,6 +170,12 @@ void ml_net_io_task(void *arg) {
             continue;
         }
         if (sel == 0) continue;  /* Timeout */
+        if (evwait && FD_ISSET(ml->net_io_wake_fd, &read_fds)) {
+            /* A wake (rebind, stop): drain it and rebuild the set. */
+            uint64_t count;
+            (void)read(ml->net_io_wake_fd, &count, sizeof(count));
+            continue;
+        }
 
         /* Process DISCO UDP socket */
         if (ml->disco_sock4 >= 0 && FD_ISSET(ml->disco_sock4, &read_fds)) {
@@ -188,7 +211,7 @@ void ml_net_io_task(void *arg) {
                         .src_port = ntohs(src_addr.sin_port),
                         .via_derp = false,
                     };
-                    if (xQueueSend(ml->stun_rx_queue, &pkt, 0) != pdTRUE) {
+                    if (ml_coord_queue_send(ml, ml->stun_rx_queue, &pkt, 0) != pdTRUE) {
                         free(pkt_data);
                     }
                 }
@@ -212,7 +235,7 @@ void ml_net_io_task(void *arg) {
                         .src_port = ntohs(src_addr6.sin6_port),
                         .via_derp = false,
                     };
-                    if (xQueueSend(ml->stun_rx_queue, &pkt, 0) != pdTRUE) {
+                    if (ml_coord_queue_send(ml, ml->stun_rx_queue, &pkt, 0) != pdTRUE) {
                         free(pkt_data);
                     }
                 }
@@ -221,5 +244,6 @@ void ml_net_io_task(void *arg) {
     }
 
     ESP_LOGI(TAG, "Net I/O task exiting");
+    ml_task_exit(ml, ML_TASK_BIT_NET_IO);
     vTaskDelete(NULL);
 }
