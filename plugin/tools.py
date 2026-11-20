@@ -1,5 +1,6 @@
 """Agent tools for gadgets: inspect devices, show content on a screen, ask the
-user to pick an answer there, invoke device-declared actions, turn a gadget into an interpreter.
+user to pick an answer there, say something out loud, invoke device-declared actions, turn a
+gadget into an interpreter.
 
 Schemas are static (prompt caching); what a device can do is discovered at run
 time through ``gadget_devices`` and the per-device context Hermes receives with
@@ -100,6 +101,25 @@ ACTION_SCHEMA = {
             "device": _DEVICE_PARAM,
         },
         "required": ["action"],
+    },
+}
+
+SPEAK_SCHEMA = {
+    "name": "gadget_speak",
+    "description": "Say something out loud on a gadget with a speaker, with Hermes's text-to-speech, for example "
+                   "to tell someone in another room something from any chat. It is queued at once and spoken "
+                   "as soon as the gadget is free, after a conversation in progress and anything it is "
+                   "already saying, never over them; it stops music or a sound from gadget_play, as Hermes's "
+                   "own speech does. Don't schedule a cron job for it. Write plain spoken sentences, "
+                   "without Markdown. Not for the gadget you are answering now: your reply there is spoken "
+                   "already. For music or a sound file use gadget_play.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "text": {"type": "string", "description": "What to say."},
+            "device": _DEVICE_PARAM,
+        },
+        "required": ["text"],
     },
 }
 
@@ -415,6 +435,42 @@ def _play_roots(extra: dict) -> list:
     return [get_audio_cache_dir(), *playback.play_dirs(extra)]
 
 
+def gadget_speak(args: dict, **_kw) -> str:
+    adapter = _adapter()
+    if adapter is None:
+        return _error("gadget hub is not running in this process")
+    session, err = _resolve(adapter, args.get("device"))
+    if err:
+        return _error(err)
+    if (err := _usable(session)):
+        return _error(err)
+    if not session.has_speaker:
+        return _error(f"{session.name} has no speaker")
+    text = textfmt.strip_markdown(str(args.get("text") or "")).strip()
+    if not text:
+        return _error("text is required")
+    if not adapter._should_auto_tts_for_chat(session.device_id):
+        return _error(f"voice is off on {session.name} (/voice on, or speak_replies, turns it back on)")
+    if (refused := adapter._interpret_refusal(session.device_id)):  # it would be dropped, not held
+        return _error(refused.error)
+
+    async def queue() -> bool:
+        """Queue the text on the gateway's loop and say whether it waits; the tool does not wait for it.
+        Read before the spawn: a message that holds the speech lock is still being synthesized."""
+        lock = adapter._speech_locks.get(session.device_id)
+        busy = (adapter._turns.get(session.device_id) is not None or session.audio_playing
+                or (lock is not None and lock.locked()))
+        session.spawn(adapter.speak_queued(session.device_id, text))
+        return busy
+
+    try:
+        busy = _run(adapter, queue())
+    except Exception as exc:
+        return _error(f"could not reach {session.name}: {exc}")
+    return json.dumps({"success": True, "device": session.name,
+                       "status": "queued behind what it is saying now" if busy else "speaking"})
+
+
 def gadget_play(args: dict, **_kw) -> str:
     adapter = _adapter()
     if adapter is None:
@@ -553,6 +609,7 @@ def register_tools(ctx) -> None:
         (DISPLAY_SCHEMA, gadget_display, "🖥️"),
         (ASK_SCHEMA, gadget_ask, "🔘"),
         (ACTION_SCHEMA, gadget_action, "🎛️"),
+        (SPEAK_SCHEMA, gadget_speak, "🗨️"),
         (PLAY_SCHEMA, gadget_play, "🔊"),
         (WIDGET_SCHEMA, gadget_widget, "🧩"),
         (INTERPRET_SCHEMA, gadget_interpret, "🗣️"),
