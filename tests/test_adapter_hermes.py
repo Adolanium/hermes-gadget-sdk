@@ -270,6 +270,76 @@ def test_a_message_is_not_spoken_when_the_device_stays_busy(gadget, make_sim, mo
     assert said == [] and _types(sim, "audio.start") == []
 
 
+def test_a_message_from_another_chat_during_a_turn_is_spoken_after_it(gadget, make_sim, monkeypatch, tmp_path):
+    said = _fake_tts(monkeypatch, tmp_path)
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+    release = asyncio.Event()
+
+    async def still_working(event):  # send_message from another chat lands while this turn runs
+        await release.wait()
+        return "The turn's reply."
+
+    gadget.reply = still_working
+    sim.type_text("long task")
+    assert sim.wait_for(lambda: _types(sim, "turn.start"), timeout=5)
+    gadget.run(gadget.adapter.send(device_id, "Dinner is ready."))  # no job_id: like send_message
+    sim.run_for(0.5)
+    assert said == [] and _types(sim, "audio.start") == []  # nothing is spoken over the turn
+    gadget.loop.call_soon_threadsafe(release.set)
+    assert sim.wait_for(lambda: "Dinner is ready." in said, timeout=15)
+    assert sim.wait_for(lambda: _types(sim, "audio.start"), timeout=5)  # the speech is synthesized first
+    kinds = [m["type"] for m in list(sim.received)]
+    assert kinds.index("turn.end") < kinds.index("audio.start")
+    # The turn's own reply came from the turn's task: Hermes speaks it, the queue doesn't.
+    assert "The turn's reply." not in said and _types(sim, "audio.abort") == []
+
+
+def test_a_message_that_is_not_spoken_goes_to_the_overflow_target(gadget, make_sim, monkeypatch, tmp_path):
+    import tools.send_message_tool as smt
+    from hermes_gadget_plugin import adapter as adapter_module
+
+    sent = []
+    monkeypatch.setattr(smt, "send_message_tool", lambda args, **kw: sent.append(args) or json.dumps({"success": True}))
+    _fake_tts(monkeypatch, tmp_path, fail=True)
+    sim = _paired_sim(gadget, make_sim, name="Kitchen")
+    device_id = sim.status()["device_id"]
+    gadget.adapter._speech_overflow_target = "telegram"
+    gadget.run(gadget.adapter.send(device_id, "**Bins** go out tonight."))  # text-to-speech fails
+    assert sim.wait_for(lambda: len(sent) == 1, timeout=5)
+    assert sent[0]["target"] == "telegram"
+    assert "Kitchen" in sent[0]["message"] and "**Bins** go out tonight." in sent[0]["message"]
+    # A device busy past the wait: forwarded, never spoken over the turn.
+    monkeypatch.setattr(adapter_module, "SPEECH_QUEUE_WAIT_S", 0.5)
+    gadget.adapter._turns[device_id] = "busy"
+    gadget.run(gadget.adapter.send(device_id, "Still busy?", metadata={"job_id": "j1"}))
+    assert sim.wait_for(lambda: len(sent) == 2, timeout=5)
+    assert "stayed busy" in sent[1]["message"] and _types(sim, "audio.start") == []
+    # Voice turned off is the user's choice, not a lost message.
+    del gadget.adapter._turns[device_id]
+    gadget.adapter._auto_tts_disabled_chats.add(device_id)
+    assert gadget.run(gadget.adapter.speak_queued(device_id, "Quiet.")).error == "voice is off"
+    sim.run_for(0.5)
+    assert len(sent) == 2
+    # Voice turned off while a message waits behind a busy device past the wait: not forwarded either.
+    gadget.adapter._auto_tts_disabled_chats.discard(device_id)
+    gadget.adapter._turns[device_id] = "busy"
+    waiting = asyncio.run_coroutine_threadsafe(gadget.adapter.speak_queued(device_id, "Muted later."), gadget.loop)
+    sim.run_for(0.1)
+    gadget.adapter._auto_tts_disabled_chats.add(device_id)
+    assert waiting.result(timeout=5).error == "the device stayed busy"
+    sim.run_for(0.5)
+    assert len(sent) == 2
+    del gadget.adapter._turns[device_id]
+
+
+def test_an_idle_device_past_the_deadline_is_too_late(gadget, make_sim):
+    sim = _paired_sim(gadget, make_sim)
+    device_id = sim.status()["device_id"]
+    assert gadget.run(gadget.adapter._device_idle(device_id, time.monotonic() + 5)) is True
+    assert gadget.run(gadget.adapter._device_idle(device_id, time.monotonic() - 0.1)) is False
+
+
 def test_some_messages_are_not_spoken(gadget, make_sim, monkeypatch, tmp_path):
     from hermes_gadget_plugin import audio
 

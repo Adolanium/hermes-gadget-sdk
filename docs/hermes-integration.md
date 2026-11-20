@@ -35,6 +35,8 @@ platforms:
       port: 8765
       path: /gadget
       speak_replies: true    # spoken replies for devices with a speaker
+      # speech_queue_wait_s: 600          # how long a message waits for a busy device to be spoken
+      # speech_overflow_target: telegram  # where a message that couldn't be spoken goes (a send_message target)
       auto_home: true        # first approved device becomes the gadget home channel
       unauthorized_dm_behavior: pair
       # heartbeat_s: 20
@@ -169,7 +171,7 @@ The Hermes desktop app gets a **Gadgets** page: a sidebar row, a route at `/gadg
 
 Set a cron job's `deliver` to `gadget:hg-0123456789abcdef`, replacing the example ID with one from `hermes gadget devices`. The gadget must be paired and online, with the gateway running, to receive the scheduled message.
 
-On a device that speaks replies, a message sent outside a turn, by cron or by `send_message`, is also read aloud with Hermes's text-to-speech: Hermes itself speaks only replies to voice turns, and a speaker with no screen would otherwise stay silent. Markdown is removed, and for cron output so are Hermes's header, footer and truncation note. Messages play one at a time per device, each after any audio already playing. Cron output that arrives during a turn is spoken after the turn. A message that has waited two minutes for the device stays text only. The caption of a voice file and the text of a clarify question are not spoken again. `/voice off` in the device's chat, or `speak_replies: false`, keeps these messages silent too.
+On a device that speaks replies, a message sent outside a turn, by cron or by `send_message`, is also read aloud with Hermes's text-to-speech: Hermes itself speaks only replies to voice turns, and a speaker with no screen would otherwise stay silent. Markdown is removed, and for cron output so are Hermes's header, footer and truncation note. Messages play one at a time per device, each after any audio already playing. A message that arrives during a turn, other than that turn's own reply (cron output, or `send_message` from another chat), is spoken after the turn. Nothing is dropped silently: a message not spoken within `speech_queue_wait_s` of arriving (600 s by default), or whose text-to-speech or playback fails, is sent with `send_message` to `speech_overflow_target`, such as `telegram` or `discord:1234`, prefixed with the device name and the reason. Without a target it is logged as a warning; the device has shown its text either way. The queue lives in memory, so a gateway restart loses messages still waiting. The caption of a voice file and the text of a clarify question are not spoken again. `/voice off` in the device's chat, or `speak_replies: false`, keeps these messages silent too.
 
 To use `deliver="gadget"`, configure the gadget home channel. By default, `auto_home: true` makes the first approved device the home channel. An explicit `GADGET_HOME_CHANNEL` device ID in the profile's `.env` overrides that default. A target with an explicit device ID does not require this environment variable.
 
