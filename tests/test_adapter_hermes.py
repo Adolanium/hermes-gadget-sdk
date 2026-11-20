@@ -512,9 +512,25 @@ def test_gadget_speak_queues_speech_from_any_chat(gadget, make_sim, monkeypatch,
     assert len(_types(sim, "audio.start")) == starts  # the tool returned; nothing spoke over the turn
     gadget.loop.call_soon_threadsafe(release.set)
     assert sim.wait_for(lambda: "The bins go out tonight." in said, timeout=15)
+    assert sim.wait_for(lambda: len(_types(sim, "audio.start")) > starts, timeout=5)  # synthesized first
     kinds = [m["type"] for m in list(sim.received)]
     assert kinds.index("turn.end") < len(kinds) - 1 - kinds[::-1].index("audio.start")
     assert _types(sim, "audio.abort") == []
+
+    # A second message while the first is still being synthesized waits for it.
+    sim.run_for(1.0)
+    lock = gadget.adapter._speech_locks[device_id]
+    gadget.run(lock.acquire())  # what a message being synthesized holds
+    assert call({"device": "Kitchen", "text": "Second."})["status"].startswith("queued")
+    gadget.loop.call_soon_threadsafe(lock.release)
+    assert sim.wait_for(lambda: "Second." in said, timeout=15)
+
+    # In interpreter mode the message would be dropped: refused instead of reported as spoken.
+    from hermes_gadget_plugin import interpret
+
+    gadget.adapter._interpreting[device_id] = interpret.Session("en", "es")
+    assert "interpreter mode" in call({"device": "Kitchen", "text": "Hello?"})["error"]
+    del gadget.adapter._interpreting[device_id]
 
     gadget.adapter._auto_tts_disabled_chats.add(device_id)  # "/voice off"
     assert "voice is off" in call({"device": "Kitchen", "text": "Quiet."})["error"]

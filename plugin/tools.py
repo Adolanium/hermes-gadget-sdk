@@ -108,8 +108,9 @@ SPEAK_SCHEMA = {
     "name": "gadget_speak",
     "description": "Say something out loud on a gadget with a speaker, with Hermes's text-to-speech, for example "
                    "to tell someone in another room something from any chat. It is queued at once and spoken "
-                   "as soon as the gadget is free, after a conversation in progress and anything already "
-                   "playing, never over it; don't schedule a cron job for it. Write plain spoken sentences, "
+                   "as soon as the gadget is free, after a conversation in progress and anything it is "
+                   "already saying, never over them; it stops music or a sound from gadget_play, as Hermes's "
+                   "own speech does. Don't schedule a cron job for it. Write plain spoken sentences, "
                    "without Markdown. Not for the gadget you are answering now: your reply there is spoken "
                    "already. For music or a sound file use gadget_play.",
     "parameters": {
@@ -450,15 +451,22 @@ def gadget_speak(args: dict, **_kw) -> str:
         return _error("text is required")
     if not adapter._should_auto_tts_for_chat(session.device_id):
         return _error(f"voice is off on {session.name} (/voice on, or speak_replies, turns it back on)")
+    if (refused := adapter._interpret_refusal(session.device_id)):  # it would be dropped, not held
+        return _error(refused.error)
 
-    async def queue():  # speak_queued waits its turn on the gateway's loop; the tool does not wait for it
+    async def queue() -> bool:
+        """Queue the text on the gateway's loop and say whether it waits; the tool does not wait for it.
+        Read before the spawn: a message that holds the speech lock is still being synthesized."""
+        lock = adapter._speech_locks.get(session.device_id)
+        busy = (adapter._turns.get(session.device_id) is not None or session.audio_playing
+                or (lock is not None and lock.locked()))
         session.spawn(adapter.speak_queued(session.device_id, text))
+        return busy
 
     try:
-        _run(adapter, queue())
+        busy = _run(adapter, queue())
     except Exception as exc:
         return _error(f"could not reach {session.name}: {exc}")
-    busy = adapter._turns.get(session.device_id) is not None or session.audio_playing
     return json.dumps({"success": True, "device": session.name,
                        "status": "queued behind what it is saying now" if busy else "speaking"})
 
