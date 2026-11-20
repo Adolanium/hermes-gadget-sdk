@@ -301,7 +301,6 @@ def two_profile_gateway(tmp_path, request):
         shutil.copytree(REPO / "plugin", where / "plugins" / "gadget", ignore=shutil.ignore_patterns("__pycache__"))
     config = CONFIG.format(api=api_port, gadget=gadget_port).replace(
         "      unauthorized_dm_behavior: pair\n", "      unauthorized_dm_behavior: pair\n      profiles: all\n"
-        + ("      profile_mode: virtual\n" if getattr(request, "param", None) in ("virtual", "admin") else "")
         + (f"      allow_admin_from: [{ADMIN_DEVICE}]\n" if getattr(request, "param", None) == "admin" else ""))
     (home / "config.yaml").write_text(config + "gateway:\n  multiplex_profiles: true\n", encoding="utf-8")
     (ops / "config.yaml").write_text(OPS_CONFIG.format(api=api_port), encoding="utf-8")
@@ -332,10 +331,8 @@ def two_profile_gateway(tmp_path, request):
             proc.kill()
 
 
-# "stamp" marks the device's own chat with the picked profile, which Hermes versions with native session
-# admission accept only through validate_native_profile_route (NousResearch/hermes-agent#147690); "virtual"
-# gives each picked profile its own routed chat, which they accept as it is.
-@pytest.mark.parametrize("two_profile_gateway", ["stamp", "virtual"], indirect=True)
+# The device's own chat is marked with the picked profile, which Hermes versions with native session
+# admission accept only through validate_native_profile_route (NousResearch/hermes-agent#147690).
 def test_a_device_switches_to_a_second_profile_and_that_profile_answers(two_profile_gateway, make_sim):
     from hermes_gadget_plugin.face import ProfileFace
 
@@ -427,10 +424,8 @@ def test_bot_chat_moves_a_profiles_bot_chat_onto_the_gadget_through_hermes(two_p
             conn.close()
 
     assert bot_chat_row()[0] != "gadget"
-    # Ops hasn't approved the device: the gateway says so instead of sending a resume Hermes would refuse.
-    refused = _hermes(home, "gadget", "bot-chat", "Lead", "ops", "--timeout", "60")
-    assert refused.returncode == 1 and "ops hasn't approved this gadget yet" in refused.stdout + refused.stderr
-    assert bot_chat_row()[0] != "gadget"
+    _select_next_profile(sim)  # ops
+    assert sim.wait_for(lambda: sim.last_received("profile") == {"type": "profile", "profile": "ops"}, timeout=30)
 
     def says(text):
         sim.received.clear()
@@ -439,12 +434,12 @@ def test_bot_chat_moves_a_profiles_bot_chat_onto_the_gadget_through_hermes(two_p
                             and sim.last_received("reply") is not None, timeout=90), sim.received
         return sim.last_received("reply").get("text", "")
 
-    offer = re.search(r"hermes -p ops pairing approve gadget (\w+)", says("hello ops"))  # the device is on ops now
+    offer = re.search(r"hermes -p ops pairing approve gadget (\w+)", says("hello ops"))
     assert offer, sim.received
     approved = _hermes(home, "-p", "ops", "pairing", "approve", "gadget", offer.group(1))
     assert approved.returncode == 0, approved.stdout + approved.stderr
     moved = _hermes(home, "gadget", "bot-chat", "Lead", "ops", "--timeout", "90")
     assert moved.returncode == 0, moved.stdout + moved.stderr
     assert "now talks in ops's Bot Chat" in moved.stdout
-    assert bot_chat_row() == ("gadget", f"{ADMIN_DEVICE}~ops")
-    assert sim.wait_for(lambda: sim.last_received("profile") == {"type": "profile", "profile": "ops"}, timeout=10)
+    assert bot_chat_row() == ("gadget", ADMIN_DEVICE)
+    assert sim.status().get("profile") == "ops"

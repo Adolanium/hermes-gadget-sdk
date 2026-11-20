@@ -10,6 +10,7 @@ present.
 from __future__ import annotations
 
 import io
+import os
 import shutil
 import subprocess
 import sys
@@ -104,6 +105,16 @@ def resample(pcm: bytes, src_rate: int, dst_rate: int, channels: int = 1) -> byt
     return Resampler(src_rate, dst_rate, channels).process(pcm)
 
 
+# What ffmpeg gets of Hermes's environment: the search path and the locale. SYSTEMROOT is there
+# because a Windows process can't start without it. API keys and other secrets stay behind.
+_FFMPEG_ENV_KEYS = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "SYSTEMROOT")
+
+
+def ffmpeg_env() -> dict:
+    """A minimal environment for an ffmpeg child process."""
+    return {k: os.environ[k] for k in _FFMPEG_ENV_KEYS if k in os.environ}
+
+
 def decode_file(path: str, rate: int) -> bytes:
     """Decode an audio file to mono PCM16 at ``rate``."""
     try:
@@ -121,6 +132,7 @@ def decode_file(path: str, rate: int) -> bytes:
          "-ar", str(rate), "-"],
         capture_output=True,
         timeout=120,
+        env=ffmpeg_env(),
     )
     if proc.returncode != 0:
         raise AudioDecodeError(f"ffmpeg failed: {proc.stderr.decode(errors='replace').strip()[:200]}")

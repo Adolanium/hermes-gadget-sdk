@@ -225,7 +225,7 @@ def _resolve(adapter, ref: str | None):
             return None, f"no connected gadget matches {ref!r}; connected: {known}"
         return session, None
     if get_session_env("HERMES_SESSION_PLATFORM") == "gadget":
-        # The device behind the chat, a virtual <device>~<profile> one included (profile_mode: virtual).
+        # The device behind the chat the turn runs in.
         session = hub.get(adapter._device_id(get_session_env("HERMES_SESSION_CHAT_ID") or ""))
         if session is not None:
             return session, None

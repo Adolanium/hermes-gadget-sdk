@@ -35,7 +35,7 @@ def test_the_queue_keeps_one_request_per_device_and_its_report(tmp_path):
     first = queue.request(DEVICE_ID, "ops")
     assert queue.pending() == [DEVICE_ID] and queue.load(DEVICE_ID) | {"requested_at": 0} == {
         "id": first, "profile": "ops", "requested_at": 0}
-    queue.report(DEVICE_ID, id=first, state="sent", chat_id=f"{DEVICE_ID}~ops")
+    queue.report(DEVICE_ID, id=first, state="sent", chat_id=DEVICE_ID)
     assert queue.pending() == [DEVICE_ID]  # a report is not a request
     second = queue.request(DEVICE_ID, "default")  # another run replaces the request
     assert second != first
@@ -197,18 +197,13 @@ def test_already_there_only_while_the_device_is_on_that_profile(rig, capsys):
 
 
 @requires_hermes
-@pytest.mark.parametrize("virtual", [False, True], ids=["stamp", "virtual"])
-def test_it_waits_until_the_bot_chat_is_on_the_gadgets_chat(rig, capsys, virtual):
+def test_it_waits_until_the_bot_chat_is_on_the_gadgets_chat(rig, capsys):
     """Sent is not done: the command waits until the Bot Chat row is on the gadget's chat."""
-    if virtual:
-        rig.extra["profile_mode"] = "virtual"
-    chat_id = f"{DEVICE_ID}~ops" if virtual else DEVICE_ID
-
     def gateway_sends():
         assert rig.queue.load(DEVICE_ID)["profile"] == "ops"
-        rig.answer(state="sent", profile="ops", chat_id=chat_id)
+        rig.answer(state="sent", profile="ops", chat_id=DEVICE_ID)
 
-    rig.gateway += [gateway_sends, lambda: None, lambda: _state_db(rig.homes["ops"], chat_id=chat_id, source="gadget")]
+    rig.gateway += [gateway_sends, lambda: None, lambda: _state_db(rig.homes["ops"], chat_id=DEVICE_ID, source="gadget")]
     _run("ops")
     assert "now talks in ops's Bot Chat" in capsys.readouterr().out
 

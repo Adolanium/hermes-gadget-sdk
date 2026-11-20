@@ -61,6 +61,11 @@ void wireguard_random_bytes(void *bytes, size_t size);
 // The remote end of the Wireguard tunnel will use this value in handshake replay detection
 void wireguard_tai64n_now(uint8_t *output);
 
+// The current Unix time from a trusted source (TailTiny: the control server's
+// ControlTime), for wireguard_tai64n_now() while the system clock isn't set.
+// The system clock itself is left alone.
+void wireguard_set_time_hint(int64_t unix_seconds);
+
 // Is the system under load - i.e. should we generate cookie reply message in response to initiation messages
 bool wireguard_is_under_load();
 
@@ -71,6 +76,7 @@ bool wireguard_is_under_load();
 void *wireguard_platform_lock_create(void);
 void wireguard_platform_lock(void *lock);
 void wireguard_platform_unlock(void *lock);
+void wireguard_platform_lock_free(void *lock);
 
 
 #endif /* _WIREGUARD_PLATFORM_H_ */
