@@ -1874,7 +1874,9 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                     result = await self._speak(chat_id, text, wait=True, idle_by=deadline)
             finally:
                 lock.release()
-        if not result.success and result.error != "voice is off":  # outside the lock: the next need not wait
+        # Outside the lock: the next need not wait. Voice turned off while it waited, even one that then
+        # timed out behind a busy device, is the user's choice, not a lost message.
+        if not result.success and result.error != "voice is off" and chat_id not in self._auto_tts_disabled_chats:
             await self._speech_overflow(chat_id, shown if shown is not None else text, result.error)
         return result
 

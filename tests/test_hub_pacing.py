@@ -274,3 +274,46 @@ def test_a_stream_cut_off_by_a_disconnect_before_its_pump_ran_is_failed_and_done
 
     out = asyncio.run(run())
     assert out.done.is_set() and out.failed and not out.playing
+
+
+def test_a_disconnect_while_the_device_plays_its_buffer_fails_the_stream(monkeypatch):
+    """Everything was sent, but the device still had it buffered when it disconnected: it never played
+    the end, so whoever waits on the stream must hear it failed, not that it was played."""
+    clock = _virtual_time(monkeypatch)
+
+    async def run():
+        loop = asyncio.get_running_loop()
+        monkeypatch.setattr(loop, "time", lambda: clock.now)
+        out = hubmod.AudioOut(RecordingSession(clock), stream=4, src_rate=RATE)
+        await out.start()
+        out.write(b"\x00" * (FRAME_BYTES * 50))  # two seconds
+        out.finish()
+        await asyncio.wait_for(out.done.wait(), 5)
+        buffered = out.playing
+        session = SimpleNamespace(closed=False, _face_task=None, _thumb_task=None, _pending={}, _choice=None,
+                                  _ota_inbox=None, _audio_out=out, end_playback=lambda reason: None)
+        hubmod.DeviceSession._shutdown(session)
+        return out, buffered
+
+    out, buffered = asyncio.run(run())
+    assert buffered and out.failed and not out.playing
+
+
+def test_a_disconnect_after_the_device_played_the_stream_leaves_it_played(monkeypatch):
+    clock = _virtual_time(monkeypatch)
+
+    async def run():
+        loop = asyncio.get_running_loop()
+        monkeypatch.setattr(loop, "time", lambda: clock.now)
+        out = hubmod.AudioOut(RecordingSession(clock), stream=5, src_rate=RATE)
+        await out.start()
+        out.write(b"\x00" * (FRAME_BYTES * 5))
+        out.finish()
+        await asyncio.wait_for(out.wait_played(), 5)
+        session = SimpleNamespace(closed=False, _face_task=None, _thumb_task=None, _pending={}, _choice=None,
+                                  _ota_inbox=None, _audio_out=out, end_playback=lambda reason: None)
+        hubmod.DeviceSession._shutdown(session)
+        return out
+
+    out = asyncio.run(run())
+    assert not out.failed

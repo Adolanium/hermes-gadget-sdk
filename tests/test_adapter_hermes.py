@@ -288,6 +288,7 @@ def test_a_message_from_another_chat_during_a_turn_is_spoken_after_it(gadget, ma
     assert said == [] and _types(sim, "audio.start") == []  # nothing is spoken over the turn
     gadget.loop.call_soon_threadsafe(release.set)
     assert sim.wait_for(lambda: "Dinner is ready." in said, timeout=15)
+    assert sim.wait_for(lambda: _types(sim, "audio.start"), timeout=5)  # the speech is synthesized first
     kinds = [m["type"] for m in list(sim.received)]
     assert kinds.index("turn.end") < kinds.index("audio.start")
     # The turn's own reply came from the turn's task: Hermes speaks it, the queue doesn't.
@@ -320,6 +321,16 @@ def test_a_message_that_is_not_spoken_goes_to_the_overflow_target(gadget, make_s
     assert gadget.run(gadget.adapter.speak_queued(device_id, "Quiet.")).error == "voice is off"
     sim.run_for(0.5)
     assert len(sent) == 2
+    # Voice turned off while a message waits behind a busy device past the wait: not forwarded either.
+    gadget.adapter._auto_tts_disabled_chats.discard(device_id)
+    gadget.adapter._turns[device_id] = "busy"
+    waiting = asyncio.run_coroutine_threadsafe(gadget.adapter.speak_queued(device_id, "Muted later."), gadget.loop)
+    sim.run_for(0.1)
+    gadget.adapter._auto_tts_disabled_chats.add(device_id)
+    assert waiting.result(timeout=5).error == "the device stayed busy"
+    sim.run_for(0.5)
+    assert len(sent) == 2
+    del gadget.adapter._turns[device_id]
 
 
 def test_an_idle_device_past_the_deadline_is_too_late(gadget, make_sim):
