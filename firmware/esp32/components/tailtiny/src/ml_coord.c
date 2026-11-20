@@ -22,6 +22,8 @@
  */
 
 #include "tailtiny_internal.h"
+#include "ml_idle_wait.h"
+#include <unistd.h>
 #include "x25519.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -32,6 +34,7 @@
 #include "lwip/netdb.h"
 #include "mbedtls/base64.h"
 #include "ml_json_strip.h"
+#include "wireguard-platform.h"   /* wireguard_set_time_hint() */
 #include <string.h>
 #include <errno.h>
 
@@ -434,7 +437,10 @@ static int do_noise_handshake(tailtiny_t *ml, ml_noise_state_t *noise) {
     int body_buf_len = 0;
 
     if (body_len > 0) {
-        body_buf = ml_psram_malloc(body_len);
+        /* At least 512: with 1 or 2 body bytes, the 3-byte frame header below
+         * was read into a buffer of that size (a heap overflow a captive portal
+         * or anyone on the path could trigger: the control link is plain HTTP). */
+        body_buf = ml_psram_malloc(body_len < 512 ? 512 : body_len);
         if (body_buf) {
             memcpy(body_buf, body_start, body_len);
             body_buf_len = body_len;
@@ -466,6 +472,13 @@ static int do_noise_handshake(tailtiny_t *ml, ml_noise_state_t *noise) {
 
     if (msg_type != 0x02) {
         ESP_LOGE(TAG, "Unexpected Noise msg type: 0x%02x (expected 0x02)", msg_type);
+        free(body_buf);
+        return -1;
+    }
+
+    /* Noise IK msg2 is e (32) + an empty encrypted payload (16) */
+    if (payload_len != 48) {
+        ESP_LOGE(TAG, "Unexpected Noise msg2 length %d (expected 48)", payload_len);
         free(body_buf);
         return -1;
     }
@@ -1102,12 +1115,130 @@ static int do_register(tailtiny_t *ml, ml_noise_state_t *noise) {
  * State: FETCH_PEERS - Send MapRequest, parse MapResponse
  * ========================================================================== */
 
+/* Queues an ML_PEER_UPDATE_ENDPOINT for one peer, named by NodeID (or, in
+ * the old object form, by nodekey). patch may be NULL (online state only). */
+static void queue_peer_patch(tailtiny_t *ml, cJSON *patch, int64_t node_id,
+                             const char *nodekey, int online) {
+    ml_peer_update_t *update = ml_psram_calloc(1, sizeof(ml_peer_update_t));
+    if (!update) return;
+    update->action = ML_PEER_UPDATE_ENDPOINT;
+    update->node_id = node_id;
+    update->online = online;
+    if (nodekey) {
+        const char *hex = nodekey;
+        if (strncmp(hex, "nodekey:", 8) == 0) hex += 8;
+        hex_to_bytes(hex, update->public_key, 32);
+    }
+
+    if (patch) {
+        cJSON *patch_online = cJSON_GetObjectItem(patch, "Online");
+        if (cJSON_IsBool(patch_online)) update->online = cJSON_IsTrue(patch_online) ? 1 : 0;
+
+        cJSON *disco = cJSON_GetObjectItem(patch, "DiscoKey");
+        if (disco && disco->valuestring) {
+            const char *hex = disco->valuestring;
+            if (strncmp(hex, "discokey:", 9) == 0) hex += 9;
+            hex_to_bytes(hex, update->disco_key, 32);
+        }
+
+        /* DERP region: DERPRegion (int) first, then the legacy DERP string */
+        cJSON *patch_derp_region = cJSON_GetObjectItem(patch, "DERPRegion");
+        if (patch_derp_region && cJSON_IsNumber(patch_derp_region) && patch_derp_region->valueint > 0) {
+            update->derp_region = (uint16_t)patch_derp_region->valueint;
+        } else {
+            cJSON *derp = cJSON_GetObjectItem(patch, "DERP");
+            if (derp && derp->valuestring) {
+                unsigned dr;
+                if (sscanf(derp->valuestring, "127.3.3.40:%u", &dr) == 1) {
+                    update->derp_region = (uint16_t)dr;
+                }
+            }
+        }
+
+        cJSON *endpoints = cJSON_GetObjectItem(patch, "Endpoints");
+        if (endpoints) {
+            int ep_count = 0;
+            cJSON *ep;
+            cJSON_ArrayForEach(ep, endpoints) {
+                if (ep_count >= ML_MAX_ENDPOINTS) break;
+                if (ep->valuestring) {
+                    unsigned ea, eb, ec, ed, eport;
+                    if (sscanf(ep->valuestring, "%u.%u.%u.%u:%u",
+                               &ea, &eb, &ec, &ed, &eport) == 5) {
+                        update->endpoints[ep_count].ip =
+                            (ea << 24) | (eb << 16) | (ec << 8) | ed;
+                        update->endpoints[ep_count].port = (uint16_t)eport;
+                        update->endpoints[ep_count].is_ipv6 = false;
+                        ep_count++;
+                    }
+                }
+            }
+            update->endpoint_count = ep_count;
+        }
+    }
+
+    ESP_LOGD(TAG, "  Patch peer: node %lld eps=%d derp=%d online=%d",
+             (long long)node_id, update->endpoint_count, update->derp_region, update->online);
+
+    if (ml_wg_queue_send(ml, ml->peer_update_queue, &update, pdMS_TO_TICKS(100)) != pdTRUE) {
+        free(update);
+    }
+}
+
+/* "2026-11-11T12:34:56.123Z" -> Unix seconds (UTC only, as control sends
+ * it); 0 if it doesn't parse. */
+static int64_t parse_rfc3339_utc(const char *s) {
+    int y, mo, d, h, mi, sec;
+    if (!s || sscanf(s, "%4d-%2d-%2dT%2d:%2d:%2d", &y, &mo, &d, &h, &mi, &sec) != 6) return 0;
+    if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || sec > 60) return 0;
+    /* days_from_civil (H. Hinnant) */
+    y -= mo <= 2;
+    int64_t era = (y >= 0 ? y : y - 399) / 400;
+    int64_t yoe = y - era * 400;
+    int64_t doy = (153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    int64_t days = era * 146097 + doe - 719468;
+    return days * 86400 + h * 3600 + mi * 60 + sec;
+}
+
+/* Where the MapResponse JSON starts. It follows a 4-byte little-endian
+ * length, so offset 4 when a '{' is there. Taking the first '{' in the first
+ * 8 bytes picked a length byte that happened to be 0x7b (1 size in 256), and
+ * that netmap never parsed. -1 if there is no '{'. */
+static int map_json_offset(const uint8_t *buf, size_t len) {
+    if (len > 4 && buf[4] == '{') return 4;
+    for (int i = 0; i < 8 && i < (int)len; i++) {
+        if (buf[i] == '{') return i;
+    }
+    return -1;
+}
+
 static void parse_peers_from_map_response(tailtiny_t *ml, cJSON *root) {
+    /* ControlTime: the control server's clock. WireGuard's handshake timestamp
+     * uses it while the system clock isn't set (no SNTP or RTC), so a peer
+     * doesn't drop our initiations after a reboot as replays. */
+    cJSON *control_time = cJSON_GetObjectItem(root, "ControlTime");
+    if (cJSON_IsString(control_time)) {
+        int64_t t = parse_rfc3339_utc(control_time->valuestring);
+        if (t > 0) wireguard_set_time_hint(t);
+    }
+
     /* Try all field names used by Tailscale (copied from v1 lines 3176-3184):
      *   "Peers"        - Full peer list (initial Stream=false response)
      *   "PeersChanged" - Incremental updates (Stream=true long-poll)
      *   "peers"        - Lowercase fallback */
     cJSON *peers = cJSON_GetObjectItem(root, "Peers");
+    /* "Peers" is the whole list: a peer it doesn't name has been removed (or,
+     * from the NVS cache, is long gone). The SWEEP after its updates tells
+     * the WireGuard task so; skipped if any update was dropped here. */
+    static uint32_t s_peer_list_gen;
+    bool full_list = cJSON_IsArray(peers);
+    uint32_t list_gen = 0;
+    bool list_complete = true;
+    if (full_list) {
+        if (++s_peer_list_gen == 0) s_peer_list_gen = 1;
+        list_gen = s_peer_list_gen;
+    }
     if (!peers) {
         peers = cJSON_GetObjectItem(root, "PeersChanged");
         if (peers) ESP_LOGI(TAG, "Using 'PeersChanged' field for peer list");
@@ -1128,9 +1259,12 @@ static void parse_peers_from_map_response(tailtiny_t *ml, cJSON *root) {
     cJSON_ArrayForEach(peer, peers) {
         /* Allocate peer update (freed by wg_mgr after processing) */
         ml_peer_update_t *update = ml_psram_calloc(1, sizeof(ml_peer_update_t));
-        if (!update) continue;
+        if (!update) { list_complete = false; continue; }
 
         update->action = ML_PEER_ADD;
+        update->sync_gen = list_gen;
+        cJSON *node_id = cJSON_GetObjectItem(peer, "ID");
+        if (cJSON_IsNumber(node_id)) update->node_id = (int64_t)node_id->valuedouble;
 
         /* Node.Online: the control plane's view of whether the peer is up */
         cJSON *online = cJSON_GetObjectItem(peer, "Online");
@@ -1223,11 +1357,26 @@ static void parse_peers_from_map_response(tailtiny_t *ml, cJSON *root) {
         if (ml_wg_queue_send(ml, ml->peer_update_queue, &update, pdMS_TO_TICKS(100)) != pdTRUE) {
             ESP_LOGW(TAG, "Peer update queue full, dropping %s", update->hostname);
             free(update);
+            list_complete = false;
+        }
+    }
+
+    if (full_list && list_complete) {
+        ml_peer_update_t *sweep = ml_psram_calloc(1, sizeof(ml_peer_update_t));
+        if (sweep) {
+            sweep->action = ML_PEER_SWEEP;
+            sweep->sync_gen = list_gen;
+            if (ml_wg_queue_send(ml, ml->peer_update_queue, &sweep, pdMS_TO_TICKS(100)) != pdTRUE) {
+                free(sweep);
+            }
         }
     }
 
 check_removed:
-    /* Handle PeersRemoved — array of nodekey strings (long-poll delta updates) */
+    /* Handle PeersRemoved (long-poll delta updates). Tailscale sends NodeIDs
+     * (tailcfg.MapResponse.PeersRemoved is []NodeID, numbers); a nodekey
+     * string is still taken. Only strings were read before, so no removal
+     * from the real control plane ever arrived. */
     cJSON *removed = cJSON_GetObjectItem(root, "PeersRemoved");
     if (removed && cJSON_IsArray(removed)) {
         int rm_count = cJSON_GetArraySize(removed);
@@ -1235,20 +1384,24 @@ check_removed:
 
         cJSON *key_item;
         cJSON_ArrayForEach(key_item, removed) {
-            if (!key_item->valuestring) continue;
+            if (!cJSON_IsNumber(key_item) && !key_item->valuestring) continue;
 
             ml_peer_update_t *update = ml_psram_calloc(1, sizeof(ml_peer_update_t));
             if (!update) continue;
 
             update->action = ML_PEER_REMOVE;
 
-            const char *hex = key_item->valuestring;
-            if (strncmp(hex, "nodekey:", 8) == 0) hex += 8;
-            hex_to_bytes(hex, update->public_key, 32);
-
-            ESP_LOGI(TAG, "  Remove peer: %02x%02x%02x%02x...",
-                     update->public_key[0], update->public_key[1],
-                     update->public_key[2], update->public_key[3]);
+            if (cJSON_IsNumber(key_item)) {
+                update->node_id = (int64_t)key_item->valuedouble;
+                ESP_LOGI(TAG, "  Remove peer: node %lld", (long long)update->node_id);
+            } else {
+                const char *hex = key_item->valuestring;
+                if (strncmp(hex, "nodekey:", 8) == 0) hex += 8;
+                hex_to_bytes(hex, update->public_key, 32);
+                ESP_LOGI(TAG, "  Remove peer: %02x%02x%02x%02x...",
+                         update->public_key[0], update->public_key[1],
+                         update->public_key[2], update->public_key[3]);
+            }
 
             if (ml_wg_queue_send(ml, ml->peer_update_queue, &update, pdMS_TO_TICKS(100)) != pdTRUE) {
                 free(update);
@@ -1256,74 +1409,32 @@ check_removed:
         }
     }
 
-    /* Handle PeersChangedPatch — lightweight endpoint-only updates */
+    /* Handle PeersChangedPatch: small changes to known peers. Tailscale sends
+     * an array of tailcfg.PeerChange, each naming its peer by "NodeID". It was
+     * read as an object keyed by nodekey, so every patch was ignored: a peer's
+     * new endpoints, home DERP region, disco key (a restarted client) and
+     * online state never arrived. The object form is still taken. */
     cJSON *patches = cJSON_GetObjectItem(root, "PeersChangedPatch");
-    if (patches && cJSON_IsObject(patches)) {
-        ESP_LOGI(TAG, "PeersChangedPatch: processing lightweight updates");
-        cJSON *patch = patches->child;
-        while (patch) {
-            if (patch->string && cJSON_IsObject(patch)) {
-                /* Key is nodekey string, value has optional fields like Endpoints, DERP */
-                ml_peer_update_t *update = ml_psram_calloc(1, sizeof(ml_peer_update_t));
-                if (update) {
-                    update->action = ML_PEER_UPDATE_ENDPOINT;
+    if (cJSON_IsArray(patches) || cJSON_IsObject(patches)) {
+        cJSON *patch;
+        cJSON_ArrayForEach(patch, patches) {
+            if (!cJSON_IsObject(patch)) continue;
+            cJSON *nid = cJSON_GetObjectItem(patch, "NodeID");
+            if (!cJSON_IsNumber(nid) && !patch->string) continue;
+            queue_peer_patch(ml, patch, cJSON_IsNumber(nid) ? (int64_t)nid->valuedouble : 0,
+                             cJSON_IsNumber(nid) ? NULL : patch->string, -1);
+        }
+    }
 
-                    cJSON *patch_online = cJSON_GetObjectItem(patch, "Online");
-                    update->online = cJSON_IsBool(patch_online) ?
-                                     (cJSON_IsTrue(patch_online) ? 1 : 0) : -1;
-
-                    const char *hex = patch->string;
-                    if (strncmp(hex, "nodekey:", 8) == 0) hex += 8;
-                    hex_to_bytes(hex, update->public_key, 32);
-
-                    /* Parse DERP region if present — try DERPRegion (int) first,
-                     * then legacy DERP string */
-                    cJSON *patch_derp_region = cJSON_GetObjectItem(patch, "DERPRegion");
-                    if (patch_derp_region && cJSON_IsNumber(patch_derp_region) && patch_derp_region->valueint > 0) {
-                        update->derp_region = (uint16_t)patch_derp_region->valueint;
-                    } else {
-                        cJSON *derp = cJSON_GetObjectItem(patch, "DERP");
-                        if (derp && derp->valuestring) {
-                            unsigned dr;
-                            if (sscanf(derp->valuestring, "127.3.3.40:%u", &dr) == 1) {
-                                update->derp_region = (uint16_t)dr;
-                            }
-                        }
-                    }
-
-                    /* Parse endpoints if present */
-                    cJSON *endpoints = cJSON_GetObjectItem(patch, "Endpoints");
-                    if (endpoints) {
-                        int ep_count = 0;
-                        cJSON *ep;
-                        cJSON_ArrayForEach(ep, endpoints) {
-                            if (ep_count >= ML_MAX_ENDPOINTS) break;
-                            if (ep->valuestring) {
-                                unsigned ea, eb, ec, ed, eport;
-                                if (sscanf(ep->valuestring, "%u.%u.%u.%u:%u",
-                                           &ea, &eb, &ec, &ed, &eport) == 5) {
-                                    update->endpoints[ep_count].ip =
-                                        (ea << 24) | (eb << 16) | (ec << 8) | ed;
-                                    update->endpoints[ep_count].port = (uint16_t)eport;
-                                    update->endpoints[ep_count].is_ipv6 = false;
-                                    ep_count++;
-                                }
-                            }
-                        }
-                        update->endpoint_count = ep_count;
-                    }
-
-                    ESP_LOGI(TAG, "  Patch peer: %02x%02x%02x%02x... eps=%d",
-                             update->public_key[0], update->public_key[1],
-                             update->public_key[2], update->public_key[3],
-                             update->endpoint_count);
-
-                    if (ml_wg_queue_send(ml, ml->peer_update_queue, &update, pdMS_TO_TICKS(100)) != pdTRUE) {
-                        free(update);
-                    }
-                }
-            }
-            patch = patch->next;
+    /* OnlineChange: {"<NodeID>": true|false}. tailcfg.MapResponse sends a
+     * peer going on- or offline this way; it wasn't read. */
+    cJSON *online_change = cJSON_GetObjectItem(root, "OnlineChange");
+    if (cJSON_IsObject(online_change)) {
+        cJSON *oc;
+        cJSON_ArrayForEach(oc, online_change) {
+            if (!oc->string || !cJSON_IsBool(oc)) continue;
+            int64_t id = strtoll(oc->string, NULL, 10);
+            if (id != 0) queue_peer_patch(ml, NULL, id, NULL, cJSON_IsTrue(oc) ? 1 : 0);
         }
     }
 }
@@ -1765,15 +1876,13 @@ static int do_fetch_peers(tailtiny_t *ml, ml_noise_state_t *noise) {
     ESP_LOGI(TAG, "MapResponse JSON: %d bytes", (int)json_total);
 
     /* Drop members we never read before cJSON builds its DOM */
-    for (int i = 0; i < 8 && i < (int)json_total; i++) {
-        if (resp_buf[i] == '{') {
-            size_t stripped = ml_json_strip_keys((char *)resp_buf + i, json_total - i,
-                                                 s_unused_map_keys);
-            ESP_LOGI(TAG, "MapResponse JSON: %d bytes after dropping unused fields",
-                     (int)(i + stripped));
-            json_total = i + stripped;
-            break;
-        }
+    int strip_at = map_json_offset(resp_buf, json_total);
+    if (strip_at >= 0) {
+        size_t stripped = ml_json_strip_keys((char *)resp_buf + strip_at, json_total - strip_at,
+                                             s_unused_map_keys);
+        ESP_LOGI(TAG, "MapResponse JSON: %d bytes after dropping unused fields",
+                 (int)(strip_at + stripped));
+        json_total = strip_at + stripped;
     }
 
     /* Give the unused tail of the receive buffer back to the heap before
@@ -1798,14 +1907,8 @@ static int do_fetch_peers(tailtiny_t *ml, ml_noise_state_t *noise) {
     char *parse_start = (char *)resp_buf;
     size_t parse_len = json_total;
 
-    /* Find the start of JSON - look for '{' in first 8 bytes */
-    int json_offset = -1;
-    for (int i = 0; i < 8 && i < (int)json_total; i++) {
-        if (resp_buf[i] == '{') {
-            json_offset = i;
-            break;
-        }
-    }
+    /* Find the start of JSON */
+    int json_offset = map_json_offset(resp_buf, json_total);
     if (json_offset > 0) {
         ESP_LOGI(TAG, "JSON starts at offset %d (skipping %d-byte prefix)", json_offset, json_offset);
         parse_start += json_offset;
@@ -2390,6 +2493,32 @@ static void lp_feed_body(tailtiny_t *ml, const uint8_t *data, size_t len) {
     }
 }
 
+void ml_coord_wake(tailtiny_t *ml) {
+    if (ml->coord_wake_fd >= 0) {
+        const uint64_t one = 1;
+        (void)write(ml->coord_wake_fd, &one, sizeof(one));
+    }
+}
+
+/* The long-poll's idle wait: until the control connection has data, or a STUN
+ * reply, a command, a DERP region change or stop arrives (ml_coord_wake()),
+ * for at most timeout_ms so the periodic work below still runs (the H2 PING
+ * every 5 s and STUN retries every 2 s are the tightest). Without an eventfd,
+ * or on an AT modem socket, it sleeps 50 ms as before. */
+static void coord_wait_work(tailtiny_t *ml, uint32_t timeout_ms) {
+    if (ml->coord_wake_fd < 0 || ml->coord_sock < 0 || ml_at_socket_is_at_fd(ml->coord_sock)) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        return;
+    }
+    if (uxQueueMessagesWaiting(ml->stun_rx_queue) || uxQueueMessagesWaiting(ml->coord_cmd_queue) ||
+        (xEventGroupGetBits(ml->events) & (ML_EVT_SHUTDOWN_REQUEST | ML_EVT_DERP_REGION_CHANGED)))
+        return;
+    if (ml_idle_wait(ml->coord_sock, ml->coord_wake_fd, timeout_ms) < 0 && errno != EINTR) {
+        ESP_LOGW(TAG, "Control readiness wait failed: %d", errno);
+        vTaskDelay(pdMS_TO_TICKS(50));  /* avoid spinning on a bad descriptor */
+    }
+}
+
 /* Read whatever the control connection has ready (non-blocking).
  * Returns 2 if long-poll (stream 5) DATA arrived, 1 if only other frames
  * arrived, 0 if nothing was ready, and -1 if the connection or the long-poll
@@ -2403,7 +2532,11 @@ static int poll_map_update(tailtiny_t *ml, ml_noise_state_t *noise) {
         fd_set readfds;
         FD_ZERO(&readfds);
         FD_SET(ml->coord_sock, &readfds);
-        struct timeval tv = { .tv_sec = 0, .tv_usec = msgs == 0 ? 50000 : 0 };
+        /* With its eventfd, the coord task has already waited for data in
+         * coord_wait_work(): this only checks. Without it, the first check
+         * waits up to 50 ms, the task's old polling rhythm. */
+        const bool waited = ml->coord_wake_fd >= 0 && !ml_at_socket_is_at_fd(ml->coord_sock);
+        struct timeval tv = { .tv_sec = 0, .tv_usec = (msgs == 0 && !waited) ? 50000 : 0 };
         int sel = ml_select_fds(ml->coord_sock + 1, &readfds, NULL, NULL, &tv);
         if (sel <= 0) break;  /* No data available or error */
 
@@ -2563,6 +2696,7 @@ void ml_coord_task(void *arg) {
                              pdFALSE, pdFALSE, portMAX_DELAY);
         if (wb & ML_EVT_SHUTDOWN_REQUEST) {
             ESP_LOGI(TAG, "Shutdown requested before WiFi, exiting");
+            ml_task_exit(ml, ML_TASK_BIT_COORD);
             vTaskDelete(NULL);
             return;
         }
@@ -2703,8 +2837,8 @@ void ml_coord_task(void *arg) {
                 ml_derp_wake(ml);
                 /* Wait for DERP to connect (up to 15s) before continuing */
                 ESP_LOGI(TAG, "Waiting for DERP I/O task to connect...");
-                xEventGroupWaitBits(ml->events, ML_EVT_DERP_CONNECTED,
-                                    pdFALSE, pdTRUE, pdMS_TO_TICKS(15000));
+                xEventGroupWaitBits(ml->events, ML_EVT_DERP_CONNECTED | ML_EVT_SHUTDOWN_REQUEST,
+                                    pdFALSE, pdFALSE, pdMS_TO_TICKS(15000));
             }
 
             /* Start streaming long-poll for incremental updates. Without it
@@ -2976,7 +3110,7 @@ void ml_coord_task(void *arg) {
                     break;
                 }
 
-                vTaskDelay(pdMS_TO_TICKS(50));
+                coord_wait_work(ml, 1000);
             }
             break;
 
@@ -3027,5 +3161,6 @@ void ml_coord_task(void *arg) {
     lp_reset();
 
     ESP_LOGI(TAG, "Coord task exiting");
+    ml_task_exit(ml, ML_TASK_BIT_COORD);
     vTaskDelete(NULL);
 }

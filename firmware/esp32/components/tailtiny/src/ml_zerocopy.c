@@ -105,7 +105,7 @@ static void zc_pcb_recv_cb(void *arg, struct udp_pcb *pcb,
                 .src_port = port,
                 .via_derp = false,
             };
-            if (xQueueSend(ml->stun_rx_queue, &pkt, 0) != pdTRUE) {
+            if (ml_coord_queue_send(ml, ml->stun_rx_queue, &pkt, 0) != pdTRUE) {
                 free(pkt_data);
             }
         }

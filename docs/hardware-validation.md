@@ -459,7 +459,7 @@ Attach the report to a pull request that makes the two changes for that board an
 
 ## Tailnet
 
-Reaching Hermes over a [Tailscale tailnet](tailnet.md) is off on every board. Turning it on adds TailTiny, a Tailscale client, to the image: about 114 KB of flash on the AMOLED-1.75C (measured with TailTiny 3.1.0: 1,628,976 → 1,745,296 bytes), four more tasks with 27 KB of internal-RAM stacks, and PSRAM while it syncs the tailnet's map. It needs a board with PSRAM. On the AMOLED-1.75C it doesn't fit beside [Bluetooth](#bluetooth): the two together leave 7% of the app slot free, under the 10% the build requires. So each board turns it on only after someone has checked it on that board.
+Reaching Hermes over a [Tailscale tailnet](tailnet.md) is off on every board. Turning it on adds TailTiny, a Tailscale client, to the image: about 119 KB of flash on the AMOLED-1.75C (measured with TailTiny 3.2.0: 1,760,592 → 1,882,528 bytes), four more tasks with 27 KB of internal-RAM stacks, and PSRAM while it syncs the tailnet's map. It needs a board with PSRAM. On the AMOLED-1.75C it doesn't fit the size check on its own: the build leaves 7% of the app slot free, under the 10% the build requires, so `pio run` stops after building the image and `-t upload` doesn't flash it. The image still fits the slot and can be installed by OTA; [#329](https://github.com/Adolanium/hermes-gadget-sdk/issues/329) tracks the fix. So each board turns it on only after someone has checked it on that board.
 
 To try it on a board, build it yourself with two changes, then flash over USB:
 
@@ -473,6 +473,8 @@ To try it on a board, build it yourself with two changes, then flash over USB:
    CONFIG_LWIP_SO_RCVBUF=y
    # Internal RAM: the relay's always-open TLS buffers in PSRAM.
    CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+   # The relay's TLS handshake (about 3 s of CPU) on core 1, so the screen doesn't freeze.
+   CONFIG_ML_TASK_DERP_CORE=1
    ```
 
 Delete the generated `firmware/esp32/sdkconfig.<board>` before building, or the configuration check stops the build. A board with the flag but without these lines logs `this board enables the tailnet, but the build has no CONFIG_HG_TAILNET` and runs without it.
@@ -507,6 +509,18 @@ Failed or untested steps:
 ```
 
 Attach the report to a pull request that makes the two changes for that board and adds the tailnet to its row in the table above. Release images include it only once a board has such a report and someone other than their author has reviewed the changes to TailTiny's encryption and TLS code (`firmware/esp32/components/TAILTINY.md`, changes 2 to 4).
+
+### AMOLED-1.75C with TailTiny 3.2.0
+
+A check of the TailTiny 3.2.0 update on one board, not a full report in the format above.
+
+- **Board:** the Waveshare ESP32-S3-Touch-AMOLED-1.75C from the [physical report](#waveshare-amoled-175c-physical-report).
+- **Firmware:** `firmware/tailtiny-3.2.0` on `main` at `7168ea9`, with the two changes above (including `CONFIG_ML_TASK_DERP_CORE=1`), ESP-IDF 6.1 through PlatformIO; ELF SHA-256 `390f78982…`. Installed by OTA over the tailnet and kept. The image leaves 7% of the app slot free, under the 10% the build check asks for ([#329](https://github.com/Adolanium/hermes-gadget-sdk/issues/329)).
+- **Network:** a phone hotspot, Tailscale's control server and relays, a key already stored on the board.
+- **Screen while connecting:** five restarts, each watched. No freeze. The log shows the DERP task on core 1 and the relay's TLS handshake still taking 2.9 to 3.0 s. Before, with the task on core 0, the screen stood still for 2.6 to 2.9 s at every connect.
+- **Connect:** in all five, `hg.tailnet: up` 12.7 to 17.7 s after boot and `online (paired)` 14.1 to 18.3 s after, with no failed connect or reset. `diag`: `tailnet.hermes.path` `direct`.
+- **Voice turn (USB):** a 4.8 s recording with 0 frames lost. The reply played at 1.00x real time with 2 underruns (119 ms in all, the longest 79 ms) and 0 bytes dropped. TailTiny's task stacks had 2.0 to 3.5 KB free, as with 3.1.0. Internal RAM low point 25.9 KB, down from 41.4 KB at the 3.1.0 check; that image was built on an older `main`, so this doesn't separate TailTiny from the rest of 0.6.0.
+- **Not run on this image:** the refusal, Wi-Fi changes, turning it off, the two-hour battery comparison and the one-hour run.
 
 ### AMOLED-1.75C with TailTiny 3.1.0
 

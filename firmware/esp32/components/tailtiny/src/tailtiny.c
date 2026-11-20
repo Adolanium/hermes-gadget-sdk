@@ -203,6 +203,8 @@ tailtiny_t *tailtiny_init(const tailtiny_config_t *config) {
     }
 
     ml->derp_wake_fd = -1;
+    ml->coord_wake_fd = -1;
+    ml->net_io_wake_fd = -1;
 
     /* Copy config */
     ml->config = *config;
@@ -346,6 +348,17 @@ tailtiny_t *tailtiny_init(const tailtiny_config_t *config) {
                  esp_err_to_name(event_err), errno);
         ml->derp_wake_fd = -1;
     }
+    /* The coord and net_io tasks' waits: each falls back to polling on its
+     * own if its eventfd can't be had (the default VFS config allows 5). */
+    if (event_err == ESP_OK || event_err == ESP_ERR_INVALID_STATE) {
+        ml->coord_wake_fd = eventfd(0, 0);
+        ml->net_io_wake_fd = eventfd(0, 0);
+    }
+    if (ml->coord_wake_fd < 0 || ml->net_io_wake_fd < 0) {
+        ESP_LOGW(TAG, "No eventfd for the %s: it polls, light sleep limited",
+                 ml->coord_wake_fd < 0 && ml->net_io_wake_fd < 0 ? "coord and net_io tasks"
+                 : ml->coord_wake_fd < 0 ? "coord task" : "net_io task");
+    }
 #else
     /* Without VFS select() an eventfd can't be waited on with the socket;
      * the DERP task keeps polling (derp_wake_fd stays -1). */
@@ -355,6 +368,8 @@ tailtiny_t *tailtiny_init(const tailtiny_config_t *config) {
     ESP_LOGI(TAG, "TailTiny initialized (max_peers=%d)", ml->config.max_peers);
     return ml;
 }
+
+static void ml_task_mark(tailtiny_t *ml, uint32_t bit);
 
 esp_err_t tailtiny_start(tailtiny_t *ml) {
     if (!ml) return ESP_ERR_INVALID_ARG;
@@ -426,34 +441,45 @@ skip_bsd_socket:
     ;
 #endif
 
-    /* Create tasks */
+    /* Create tasks. A stop before this one left the shutdown bit set, and
+     * every task started now would have exited at once. */
+    xEventGroupClearBits(ml->events, ML_EVT_SHUTDOWN_REQUEST);
+    ml->stop_incomplete = false;
     BaseType_t ret;
 
+    ml_task_mark(ml, ML_TASK_BIT_NET_IO);
     ret = xTaskCreatePinnedToCore(ml_net_io_task, "ml_net_io", ML_TASK_NET_IO_STACK,
                                    ml, ML_TASK_NET_IO_PRIO, &ml->net_io_task, ML_TASK_NET_IO_CORE);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create net_io task");
+        ml_task_exit(ml, ML_TASK_BIT_NET_IO);
         return ESP_FAIL;
     }
 
+    ml_task_mark(ml, ML_TASK_BIT_DERP);
     ret = xTaskCreatePinnedToCore(ml_derp_tx_task, "ml_derp_tx", ML_TASK_DERP_TX_STACK,
                                    ml, ML_TASK_DERP_TX_PRIO, &ml->derp_tx_task, ML_TASK_DERP_TX_CORE);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create derp_tx task");
+        ml_task_exit(ml, ML_TASK_BIT_DERP);
         return ESP_FAIL;
     }
 
+    ml_task_mark(ml, ML_TASK_BIT_COORD);
     ret = xTaskCreatePinnedToCore(ml_coord_task, "ml_coord", ML_TASK_COORD_STACK,
                                    ml, ML_TASK_COORD_PRIO, &ml->coord_task, ML_TASK_COORD_CORE);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create coord task");
+        ml_task_exit(ml, ML_TASK_BIT_COORD);
         return ESP_FAIL;
     }
 
+    ml_task_mark(ml, ML_TASK_BIT_WG_MGR);
     ret = xTaskCreatePinnedToCore(ml_wg_mgr_task, "ml_wg_mgr", ML_TASK_WG_MGR_STACK,
                                    ml, ML_TASK_WG_MGR_PRIO, &ml->wg_mgr_task, ML_TASK_WG_MGR_CORE);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create wg_mgr task");
+        ml_task_exit(ml, ML_TASK_BIT_WG_MGR);
         return ESP_FAIL;
     }
 
@@ -463,7 +489,7 @@ skip_bsd_socket:
 
     /* Signal coord task to start connecting */
     ml_coord_cmd_t cmd = ML_CMD_CONNECT;
-    xQueueSend(ml->coord_cmd_queue, &cmd, 0);
+    ml_coord_queue_send(ml, ml->coord_cmd_queue, &cmd, 0);
 
     /* Start HTTP config server (binds port 80, serves config page + REST API) */
     if (ml->config_httpd) {
@@ -480,8 +506,8 @@ esp_err_t tailtiny_rebind(tailtiny_t *ml) {
 
     ESP_LOGI(TAG, "=== Rebinding to new network interface ===");
 
-    /* Step 1: Invalidate socket FDs FIRST, then delay to let net_io_task's
-     * select() cycle complete (50ms timeout). Only THEN close the old FDs.
+    /* Step 1: Invalidate socket FDs FIRST, wake net_io_task out of select()
+     * and give it time to cycle out. Only THEN close the old FDs.
      * Closing a socket while another thread has it in select() deadlocks
      * on lwIP's global socket lock. */
     int old_disco = ml->disco_sock4;
@@ -493,7 +519,9 @@ esp_err_t tailtiny_rebind(tailtiny_t *ml) {
     ml->stun_sock = -1;
     ml->stun_sock6 = -1;
 
-    /* Wait for net_io_task select() to cycle out (50ms timeout + margin) */
+    /* Wake net_io_task's select() (without its eventfd it times out within
+     * 50 ms), then wait for it to cycle out */
+    ml_net_io_wake(ml);
     vTaskDelay(pdMS_TO_TICKS(100));
 
     /* Now safe to close the old FDs */
@@ -508,7 +536,7 @@ esp_err_t tailtiny_rebind(tailtiny_t *ml) {
      * Peers and WG state are preserved. */
     xEventGroupClearBits(ml->events, ML_EVT_COORD_REGISTERED);
     ml_coord_cmd_t cmd = ML_CMD_FORCE_RECONNECT;
-    xQueueSend(ml->coord_cmd_queue, &cmd, pdMS_TO_TICKS(100));
+    ml_coord_queue_send(ml, ml->coord_cmd_queue, &cmd, pdMS_TO_TICKS(100));
 
     /* Step 3: Signal DERP to reconnect. ML_EVT_DERP_RECONNECT triggers
      * derp_tx_task to close TLS, then reconnect with full handshake.
@@ -565,20 +593,51 @@ rebind_wg_update:
     return ESP_OK;
 }
 
+static portMUX_TYPE s_tasks_lock = portMUX_INITIALIZER_UNLOCKED;
+
+static void ml_task_mark(tailtiny_t *ml, uint32_t bit) {
+    taskENTER_CRITICAL(&s_tasks_lock);
+    ml->tasks_alive |= bit;
+    taskEXIT_CRITICAL(&s_tasks_lock);
+}
+
+void ml_task_exit(tailtiny_t *ml, uint32_t bit) {
+    taskENTER_CRITICAL(&s_tasks_lock);
+    ml->tasks_alive &= ~bit;
+    taskEXIT_CRITICAL(&s_tasks_lock);
+}
+
 esp_err_t tailtiny_stop(tailtiny_t *ml) {
     if (!ml) return ESP_ERR_INVALID_ARG;
 
     ESP_LOGI(TAG, "Stopping...");
     xEventGroupSetBits(ml->events, ML_EVT_SHUTDOWN_REQUEST);
     ml_derp_wake(ml);
+    ml_coord_wake(ml);
+    ml_net_io_wake(ml);
     ml_wg_notify(ml);
+    /* The coord task's reconnect backoff waits on its command queue */
+    ml_coord_cmd_t disc = ML_CMD_DISCONNECT;
+    ml_coord_queue_send(ml, ml->coord_cmd_queue, &disc, 0);
 
-    /* Wait for tasks to exit (they check ML_EVT_SHUTDOWN_REQUEST).
-     * Tasks call vTaskDelete(NULL) to self-delete, so we must NOT call
-     * vTaskDelete() on them again — that causes a crash in uxListRemove
-     * because the task's list node is already invalid. Just wait and
-     * NULL the handles. */
-    vTaskDelay(pdMS_TO_TICKS(3000));
+    /* Wait until every task has exited (each clears its bit last, then calls
+     * vTaskDelete(NULL), so we must not delete them). This was a fixed 3 s
+     * sleep: a task still inside a reconnect backoff (up to 16 s), the wait
+     * for DERP (15 s), a DERP region probe or a TLS handshake ran on into
+     * the queues and the instance tailtiny_destroy() had freed by then. */
+    uint64_t wait_start = ml_get_time_ms();
+    while (ml->tasks_alive && ml_get_time_ms() - wait_start < ML_STOP_TIMEOUT_MS) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    uint32_t left = ml->tasks_alive;
+    if (left) {
+        ESP_LOGE(TAG, "Stop: tasks still running after %d s (mask 0x%lx); the instance won't be freed",
+                 ML_STOP_TIMEOUT_MS / 1000, (unsigned long)left);
+        ml->stop_incomplete = true;
+    } else {
+        ESP_LOGI(TAG, "Stop: all tasks exited in %llu ms",
+                 (unsigned long long)(ml_get_time_ms() - wait_start));
+    }
 
     ml->net_io_task = NULL;
     ml->derp_tx_task = NULL;
@@ -609,6 +668,12 @@ void tailtiny_destroy(tailtiny_t *ml) {
     if (!ml) return;
 
     tailtiny_stop(ml);
+    if (ml->stop_incomplete) {
+        /* A task still uses the instance and its queues: leaking them beats
+         * the crash freeing them would cause. */
+        ESP_LOGE(TAG, "Destroy: a task is still running, leaking the instance");
+        return;
+    }
 
     /* Deinitialize peer NVS */
     ml_peer_nvs_deinit();
@@ -620,6 +685,8 @@ void tailtiny_destroy(tailtiny_t *ml) {
     }
 
     if (ml->derp_wake_fd >= 0) { close(ml->derp_wake_fd); ml->derp_wake_fd = -1; }
+    if (ml->coord_wake_fd >= 0) { close(ml->coord_wake_fd); ml->coord_wake_fd = -1; }
+    if (ml->net_io_wake_fd >= 0) { close(ml->net_io_wake_fd); ml->net_io_wake_fd = -1; }
 
     /* Delete queues */
     if (ml->derp_tx_queue) vQueueDelete(ml->derp_tx_queue);

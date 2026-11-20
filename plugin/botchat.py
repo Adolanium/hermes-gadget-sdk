@@ -27,8 +27,9 @@ from . import protocol
 BOT_CHAT_TITLE = "Bot Chat"
 RESUME_COMMAND = f"/resume --all {BOT_CHAT_TITLE}"
 REQUEST_TTL_S = 600  # a request for a device that never comes online is dropped after this
-VIRTUAL_HINT = ("On Hermes without the validate_native_profile_route hook (up to v0.23.1), also set "
-                "profile_mode: virtual, or messages to that profile fail with profile_mismatch.")
+HOOK_HINT = ("On Hermes v0.22.5 and later, switching to another profile also needs Hermes's "
+             "validate_native_profile_route hook (NousResearch/hermes-agent#147690), which isn't on Hermes "
+             "main or in a release yet; until then, messages to that profile fail with profile_mismatch.")
 
 
 class BotChatQueue:

@@ -369,8 +369,13 @@ static int poll_derp_read(tailtiny_t *ml) {
         return n;
     }
     if (n < 5) {
-        ESP_LOGW(TAG, "DERP partial header: got %d of 5 bytes", n);
-        return -1;
+        /* A header split across two TLS records is legal: wait for the rest
+         * (the payload below waits the same way). Treating it as an error
+         * dropped the relay connection, about 3 s of TLS handshake to redo. */
+        if (derp_tls_read_all(ml, header + n, 5 - n, 5000) < 0) {
+            ESP_LOGW(TAG, "DERP partial header: got %d of 5 bytes", n);
+            return -1;
+        }
     }
 
     uint8_t frame_type = header[0];
@@ -457,7 +462,7 @@ static void derp_wait_work(tailtiny_t *ml, uint32_t timeout_ms) {
     /* Poll as before where select() can't wait on both: an AT modem socket
      * isn't a lwIP descriptor, and without VFS select there is no eventfd. */
     if ((fd >= 0 && ml_at_socket_is_at_fd(fd)) || ml->derp_wake_fd < 0) {
-        vTaskDelay(fd >= 0 ? ML_DELAY_TICKS(1) : pdMS_TO_TICKS(timeout_ms));
+        vTaskDelay(fd >= 0 ? ML_DELAY_TICKS(1) : pdMS_TO_TICKS(100));
         return;
     }
     if ((fd >= 0 && (uxQueueMessagesWaiting(ml->derp_tx_queue) ||
@@ -603,6 +608,7 @@ void ml_derp_tx_task(void *arg) {
                     ml->derp_home_region = closest;
                     ml_save_preferred_derp(ml);
                     xEventGroupSetBits(ml->events, ML_EVT_DERP_REGION_CHANGED);
+                    ml_coord_wake(ml);  /* report it without waiting out the long-poll wait */
                 }
             }
             if (derp_wanted && !ml->derp.connected && ml_get_time_ms() >= derp_next_try_ms) {
@@ -683,15 +689,31 @@ void ml_derp_tx_task(void *arg) {
                     break;
                 }
             }
+            /* The relay sends a keepalive frame every 60 s. A connection
+             * that died without a FIN or RST (a NAT that forgot it, a router
+             * reboot) looked connected forever while we had nothing to send,
+             * and peers that reach us over DERP couldn't. */
+            if (ml->derp.connected &&
+                ml_get_time_ms() - ml->derp.last_recv_ms > ML_DERP_RX_TIMEOUT_MS) {
+                ESP_LOGW(TAG, "DERP: nothing received for %d s, reconnecting",
+                         ML_DERP_RX_TIMEOUT_MS / 1000);
+                ml->derp.connected = false;
+                xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
+            }
         }
 
         /* Sleep until the relay has data or TX/control work is queued. A
          * fixed delay here would hold outgoing relay packets back, and a
-         * one-tick yield keeps the chip from entering light sleep. */
-        derp_wait_work(ml, 100);
+         * one-tick yield keeps the chip from entering light sleep. Up to 1 s:
+         * nothing in this loop is due more often while connected (the
+         * heartbeat log is 5 s), and anything queued or received wakes it. */
+        derp_wait_work(ml, 1000);
     }
 
+    /* The live TLS session (tens of KB) and its socket leaked on every stop */
+    ml_derp_disconnect(ml);
     ESP_LOGI(TAG, "DERP I/O task exiting");
+    ml_task_exit(ml, ML_TASK_BIT_DERP);
     vTaskDelete(NULL);
 }
 

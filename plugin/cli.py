@@ -202,7 +202,7 @@ def _cmd_update(args) -> None:
 def _cmd_bot_chat(args) -> None:
     """Put a gadget in a profile's Bot Chat, where that profile can message the other Bots."""
     from . import status as live_status
-    from .botchat import BOT_CHAT_TITLE, REQUEST_TTL_S, VIRTUAL_HINT, BotChatQueue, bot_chat_row
+    from .botchat import BOT_CHAT_TITLE, REQUEST_TTL_S, HOOK_HINT, BotChatQueue, bot_chat_row
 
     store = _store()
     device_id = _match(store, args.device)
@@ -236,13 +236,11 @@ def _cmd_bot_chat(args) -> None:
             isinstance(offered, list) and profile in {str(p).strip() for p in offered})
         if not offers:
             sys.exit(f"{name} can only talk to {profile!r} when the gadget offers it: add it to "
-                     f"platforms.gadget.extra.profiles (or set profiles: all). {VIRTUAL_HINT}")
-    virtual = str(extra.get("profile_mode") or "").strip().lower() == "virtual" and profile != "default"
-    expected = f"{device_id}~{profile}" if virtual else device_id
+                     f"platforms.gadget.extra.profiles (or set profiles: all). {HOOK_HINT}")
     # Already there only when the Bot Chat is on the device's chat for that profile AND the device is on
     # that profile now (the gateway's live status): a device that moved on is switched back.
     live = live_status.read(store.path.parent)["devices"].get(device_id) or {}
-    if row.get("source") == "gadget" and row.get("chat_id") == expected and live.get("profile") == profile:
+    if row.get("source") == "gadget" and row.get("chat_id") == device_id and live.get("profile") == profile:
         print(f"{name} is already in {profile}'s {BOT_CHAT_TITLE}.")
         return
 

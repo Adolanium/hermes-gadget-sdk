@@ -1,6 +1,6 @@
 # TailTiny (vendored)
 
-`tailtiny/` and `wireguard_lwip/` are [TailTiny](https://github.com/Asimmimx/tailtiny) 3.1.0 at commit `d1ec2ae45e252e8dc737452be0f6afe1ac2e3edb`: `components/tailtiny/` there, with its `LICENSE` and `x25519-license.txt` from the repository root, and the `wireguard_lwip` it nests in `components/` moved up beside it so ESP-IDF finds both. This repository stores the files with LF line endings; upstream's are CRLF. Licenses: [TailTiny-MIT](../../../LICENSES/TailTiny-MIT.txt), [wireguard-lwip-BSD-3-Clause](../../../LICENSES/wireguard-lwip-BSD-3-Clause.txt), [STROBE-x25519-MIT](../../../LICENSES/STROBE-x25519-MIT.txt).
+`tailtiny/` and `wireguard_lwip/` are [TailTiny](https://github.com/Asimmimx/tailtiny) 3.2.0 at commit `f80f07798287ebdbc8681177bfc2a106d048ea70`: `components/tailtiny/` there, with its `LICENSE` and `x25519-license.txt` from the repository root, and the `wireguard_lwip` it nests in `components/` moved up beside it so ESP-IDF finds both. This repository stores the files with LF line endings; upstream's are CRLF. Licenses: [TailTiny-MIT](../../../LICENSES/TailTiny-MIT.txt), [wireguard-lwip-BSD-3-Clause](../../../LICENSES/wireguard-lwip-BSD-3-Clause.txt), [STROBE-x25519-MIT](../../../LICENSES/STROBE-x25519-MIT.txt).
 
 Each change below has its own patch in `tailtiny-patches/`, applied in order with `patch -p1 -d firmware/esp32/components`. To compare with upstream, `diff -r --strip-trailing-cr` a fresh copy, laid out as above, against these directories.
 
@@ -8,12 +8,20 @@ To update: copy the new upstream release the same way, then reapply the patches 
 
 ## From upstream since 3.1.0
 
-This firmware used to patch these in; they are in TailTiny 3.1.0, contributed from here ([#2](https://github.com/Asimmimx/tailtiny/pull/2), [#4](https://github.com/Asimmimx/tailtiny/pull/4), [#6](https://github.com/Asimmimx/tailtiny/pull/6) to [#12](https://github.com/Asimmimx/tailtiny/pull/12)):
+This firmware used to patch these in; they are in TailTiny since 3.1.0, contributed from here ([#2](https://github.com/Asimmimx/tailtiny/pull/2), [#4](https://github.com/Asimmimx/tailtiny/pull/4), [#6](https://github.com/Asimmimx/tailtiny/pull/6) to [#12](https://github.com/Asimmimx/tailtiny/pull/12)):
 
 - **ESP-IDF 6:** cJSON from the component registry, the UART and GPIO driver components, GCC 15's `nonstring` constants, Mbed TLS 4's PSA randomness for the relay's TLS, and the Noise channel's ChaCha20-Poly1305 from wireguard-lwip (`src/ml_noise_aead.h`). `firmware/tests/test_tailtiny_aead.cpp` still checks that wrapper against RFC 8439.
 - **The relay's certificate is verified** (`CONFIG_ML_DERP_VERIFY_CERT`, on by default): against the firmware's CA bundle and the relay's host name. `tests/test_firmware_source.py` checks that the vendored code requires it and that no board turns it off.
 - **One lock for WireGuard's state** (`wireguard-platform.h`, `src/wireguardif.c`): the timers and incoming packets on TailTiny's WireGuard task and the outgoing packets on lwIP's thread no longer share keypairs and counters without a lock. `tests/test_firmware_source.py` checks the rule.
 - **Light sleep while the tailnet is idle:** the DERP and WireGuard tasks wait for work instead of polling. TailTiny registers ESP-IDF's eventfd VFS in `tailtiny_init()`; this firmware doesn't register it itself.
+
+## New in 3.2.0
+
+- **`CONFIG_ML_TASK_DERP_CORE`** ([#16](https://github.com/Asimmimx/tailtiny/pull/16)) picks the core for the DERP relay task. The relay's TLS handshake takes about 3 s of CPU on an ESP32-S3 at priority 5, and on core 0 it held up this firmware's UI loop (`app_main`, core 0, priority 1): the screen froze for 2.6 to 2.9 s while the tailnet connected. The [tailnet build settings](../../../docs/hardware-validation.md#tailnet) set it to 1. Single-core chips ignore it.
+- **The rest of the idle work** ([#13](https://github.com/Asimmimx/tailtiny/pull/13), [#15](https://github.com/Asimmimx/tailtiny/pull/15)): the coord and net_io tasks wait for work too, so no TailTiny task wakes every 100 ms.
+- **A handshake after a reboot is answered** ([#14](https://github.com/Asimmimx/tailtiny/pull/14)): the WireGuard handshake timestamp is the wall clock (or the control server's time until the clock is set), so the Hermes host no longer drops a rebooted gadget's initiations as replays.
+- **A control update that changes nothing doesn't reset peers** ([#17](https://github.com/Asimmimx/tailtiny/pull/17)) or rewrite the NVS peer cache; that stalled the first second after connecting.
+- **From the maintainer:** WireGuard goes over DERP until DISCO confirms a direct path (peers behind carrier-grade NAT no longer get a one-way tunnel), peers the control server removes are removed, unanswered handshakes stop after 90 s, a silent session is re-handshaken after 15 s, the replay window is checked before the endpoint moves, a dead relay connection is noticed after 150 s, and `tailtiny_stop()` waits for its tasks. See TailTiny's [changelog](https://github.com/Asimmimx/tailtiny/blob/v3.2.0/CHANGELOG.md#v320-2026-11-11).
 
 ## Changes
 
