@@ -221,6 +221,27 @@ def test_volume_lowers_the_level_of_one_playback(tmp_path):
     assert full > 10000 and abs(quarter - full / 4) < 0.02 * full
 
 
+def test_ffmpeg_gets_the_search_path_and_locale_but_not_hermess_secrets(tmp_path, monkeypatch):
+    from hermes_gadget_plugin import audio
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-secret")
+    monkeypatch.setenv("LANG", "C.UTF-8")
+    seen = []
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(subprocess, "run", lambda args, **kw: seen.append(kw["env"]) or SimpleNamespace(
+        returncode=0, stdout=b"", stderr=b""))
+    monkeypatch.setattr(subprocess, "Popen", lambda args, **kw: seen.append(kw["env"]) or (_ for _ in ()).throw(
+        OSError("stop here")))
+    (tmp_path / "not-a-wav.mp3").write_bytes(b"ID3")
+    audio.decode_file(str(tmp_path / "not-a-wav.mp3"), 16000)
+    with pytest.raises(OSError, match="stop here"):
+        playback.FfmpegSource(16000, path=tmp_path / "tone.mp3")
+    assert len(seen) == 2
+    for env in seen:
+        assert env["PATH"] == os.environ["PATH"] and env["LANG"] == "C.UTF-8"
+        assert "OPENAI_API_KEY" not in env and set(env) <= {"PATH", "LANG", "LC_ALL", "LC_CTYPE", "SYSTEMROOT"}
+
+
 @requires_ffmpeg
 @pytest.mark.parametrize("name", ["tone.mp3", "tone.ogg", "tone.flac"])
 def test_compressed_files_are_decoded_through_ffmpeg_at_the_device_rate(tmp_path, name):

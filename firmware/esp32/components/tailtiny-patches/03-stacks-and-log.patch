@@ -1,8 +1,8 @@
 diff -ruN a/tailtiny/include/tailtiny_internal.h b/tailtiny/include/tailtiny_internal.h
---- a/tailtiny/include/tailtiny_internal.h	2026-11-08 09:32:26.725358160 +0000
-+++ b/tailtiny/include/tailtiny_internal.h	2026-11-08 09:32:26.731446844 +0000
-@@ -58,19 +58,21 @@
- #define ML_TASK_APP_CORE        1
+--- a/tailtiny/include/tailtiny_internal.h	2026-11-19 14:38:23.292948413 +0000
++++ b/tailtiny/include/tailtiny_internal.h	2026-11-19 14:38:33.207128204 +0000
+@@ -66,19 +66,21 @@
+ #define ML_TASK_DERP_CORE       CONFIG_ML_TASK_DERP_CORE
  #endif
  
 -#define ML_TASK_NET_IO_STACK    (8 * 1024)
@@ -15,7 +15,7 @@ diff -ruN a/tailtiny/include/tailtiny_internal.h b/tailtiny/include/tailtiny_int
 -#define ML_TASK_DERP_TX_STACK   (14 * 1024)
 +#define ML_TASK_DERP_TX_STACK   (8 * 1024)
  #define ML_TASK_DERP_TX_PRIO    5
- #define ML_TASK_DERP_TX_CORE    0
+ #define ML_TASK_DERP_TX_CORE    ML_TASK_DERP_CORE
  
 -#define ML_TASK_COORD_STACK     (12 * 1024)
 +#define ML_TASK_COORD_STACK     (9 * 1024)
@@ -28,9 +28,9 @@ diff -ruN a/tailtiny/include/tailtiny_internal.h b/tailtiny/include/tailtiny_int
  #define ML_TASK_WG_MGR_CORE     ML_TASK_APP_CORE
  
 diff -ruN a/tailtiny/src/ml_wg_mgr.c b/tailtiny/src/ml_wg_mgr.c
---- a/tailtiny/src/ml_wg_mgr.c	2026-11-08 09:32:00.898342294 +0000
-+++ b/tailtiny/src/ml_wg_mgr.c	2026-11-08 09:32:26.732643473 +0000
-@@ -1455,7 +1455,8 @@
+--- a/tailtiny/src/ml_wg_mgr.c	2026-11-19 14:38:11.917743884 +0000
++++ b/tailtiny/src/ml_wg_mgr.c	2026-11-19 14:38:33.183944813 +0000
+@@ -1669,7 +1669,8 @@
          if (dev && p->wg_peer_index < WIREGUARD_MAX_PEERS) {
              struct wireguard_peer *wp = &dev->peers[p->wg_peer_index];
              bool key_match = (memcmp(wp->public_key, p->public_key, 32) == 0);
