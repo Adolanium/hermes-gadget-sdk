@@ -109,9 +109,22 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
       break;
     case State::Choice:  // a tap picks an answer; a swipe down cancels and a swipe up shows more
     case State::ChoiceDrag:
+      // A list longer than the screen goes with the finger, also one that first went a little
+      // sideways, unless it is at its top and the finger goes down: that is still the swipe
+      // that cancels.
+      if (std::abs(dy) > cfg_.slop_px && std::abs(dy) > std::abs(dx) &&
+          !(dy > 0 && !app_.choice_page_back_possible()) && app_.choice_drag_start()) {
+        state_ = State::ChoiceScroll;
+        app_.choice_drag(dy);
+        break;
+      }
       if (swiped_down) {
-        state_ = State::Swipe;
-        press(Button::Cancel);
+        if (app_.choice_page_back()) {
+          state_ = State::Ignored;
+        } else {
+          state_ = State::Swipe;
+          press(Button::Cancel);
+        }
       } else if (-dy >= cfg_.swipe_px && std::abs(dx) < -dy) {
         state_ = State::Ignored;
         app_.choice_page_step();
@@ -119,6 +132,7 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
         state_ = State::ChoiceDrag;  // no longer a tap
       }
       break;
+    case State::ChoiceScroll: app_.choice_drag(dy); break;
     case State::List:  // still a tap until the finger leaves the slop
       if (std::abs(dx) > cfg_.slop_px || std::abs(dy) > cfg_.slop_px) {
         state_ = State::ListDrag;

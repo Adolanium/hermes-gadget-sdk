@@ -237,6 +237,19 @@ class App {
   // held_ms: how long the finger was down. The press guard counts from when it went down.
   void choice_tap(int x, int y, uint32_t held_ms = 0);
   bool choice_page_step();
+  // A swipe down on a list that was moved on shows the rows before; only on its first rows does
+  // it cancel.
+  bool choice_page_back();
+  bool choice_page_back_possible() const { return choice_first_ > 0; }
+  // A list longer than the screen follows a finger dragged up or down it: choice_drag_start()
+  // says whether it does and notes where the list stands, choice_drag(dy) moves it by the rows
+  // the finger has travelled since (dy in pixels, negative upwards).
+  bool choice_drag_start();
+  void choice_drag(int dy);
+  int choice_rows_shown() const { return ui_ ? ui_->choice_rows(model_) : 0; }
+  int choice_row_px() const { return ui_ ? ui_->choice_row_h(model_) : 0; }
+  // The row of the choice under a point, in panel coordinates (-1: none).
+  int choice_row_at(int x, int y) const { return ui_ ? ui_->choice_row_hit(model_, x, y) : -1; }
   // The roster a welcome may bring: the device keeps the first kMaxProfiles entries.
   static constexpr size_t kMaxProfiles = 32;
   // Profile thumbnails' side: the grid's largest icon, held to this range (docs/protocol.md#profile-thumbnails).
@@ -907,6 +920,7 @@ class App {
   uint32_t choice_since_ = 0;  // when it last came to the front: presses just after answer nothing
   bool choice_front_ = false;  // the Choice screen is what the model shows
   uint32_t choice_until_ = 0;  // 0 = until answered or withdrawn
+  int choice_drag_first_ = -1;  // the first row shown when the drag began; -1: no drag of this choice
 
   // transient messages
   std::string notice_;

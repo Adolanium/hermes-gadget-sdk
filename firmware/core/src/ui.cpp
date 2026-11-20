@@ -1255,8 +1255,15 @@ int Ui::choice_list_top(const UiModel& m) const {
   return layout_.top_h + layout_.header_h + s + (lines ? lines * Canvas::line_height(s) + 2 * s : 0);
 }
 
+int Ui::choice_row_h(const UiModel& m) const {
+  const int base = choice_row_h(), total = static_cast<int>(m.items.size());
+  if (!touch_px_ || total <= 0) return base;
+  const int room = info_.height - layout_.bottom_h - layout_.scale - choice_list_top(m);
+  return std::clamp(room / total, base, 2 * base);
+}
+
 int Ui::choice_rows(const UiModel& m) const {
-  return std::max(1, (info_.height - layout_.bottom_h - layout_.scale - choice_list_top(m)) / choice_row_h());
+  return std::max(1, (info_.height - layout_.bottom_h - layout_.scale - choice_list_top(m)) / choice_row_h(m));
 }
 
 int Ui::choice_row_hit(const UiModel& m, int x, int y) const {
@@ -1265,7 +1272,13 @@ int Ui::choice_row_hit(const UiModel& m, int x, int y) const {
   const int first = std::max(0, std::min(m.scroll, std::max(0, total - rows)));
   const int top = oy_ + choice_list_top(m);
   if (x < ox_ || x >= ox_ + info_.width || y < top) return -1;
-  const int row = (y - top) / choice_row_h();
+  const int row_h = choice_row_h(m);
+  int row = (y - top) / row_h;
+  // A thumb lands low: just under the last answer on a touchscreen still means that answer, as long
+  // as it is the list's last (not one with more below it) and the point is above the hint bar.
+  if (touch_px_ && row > 0 && first + row == total && row <= rows && y - oy_ < info_.height - layout_.bottom_h &&
+      (y - top) % row_h < row_h / 2)
+    --row;
   return row < rows && first + row < total ? first + row : -1;
 }
 
@@ -1273,7 +1286,7 @@ int Ui::choice_row_hit(const UiModel& m, int x, int y) const {
 // lines when it is too long for the header.
 void Ui::draw_choice(Canvas& c, const UiModel& m, int y0, int y1) {
   const int s = layout_.scale, w = info_.width, margin = 4 * s;
-  const int glyph_h = font::kGlyphHeight * s, row_h = choice_row_h();
+  const int glyph_h = font::kGlyphHeight * s, row_h = choice_row_h(m);
   const int total = static_cast<int>(m.items.size()), rows = choice_rows(m);
   int qy = y0 + s;
   for (const std::string& line : choice_question(m)) {
@@ -1290,6 +1303,15 @@ void Ui::draw_choice(Canvas& c, const UiModel& m, int y0, int y1) {
   for (int i = 0; i < rows && first + i < total; ++i, y += row_h) {
     const int idx = first + i;
     const bool sel = idx == m.item_sel;
+    if (touch_px_ && m.item_sel < 0) {  // a button for the thumb, its label as large as fits
+      const std::string& label = m.items[static_cast<size_t>(idx)];
+      const int inner = right - margin - 4 * s;
+      const int big = Canvas::text_width(label, s + 1) <= inner && Canvas::line_height(s + 1) < row_h - 2 * s ? s + 1 : s;
+      const std::string shown = fit(label, cols_for(inner, big));
+      c.fill_round_rect(margin, y + s, right - margin, row_h - 2 * s, 3 * s, kFaint);
+      c.text(margin + (right - margin - Canvas::text_width(shown, big)) / 2, y + (row_h - font::kGlyphHeight * big) / 2, shown, big, kText);
+      continue;
+    }
     const int ty = y + (row_h - glyph_h) / 2;
     if (sel) c.fill_round_rect(2 * s, y, right - 2 * s + margin / 2, row_h, 2 * s, kBar);
     else if (touch_px_ && i && idx - 1 != m.item_sel) c.fill_rect(margin, y, right - margin, 1, kFaint);  // rows are targets
