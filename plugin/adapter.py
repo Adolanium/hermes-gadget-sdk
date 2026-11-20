@@ -1847,18 +1847,19 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if session is None or not session.paired:
             return SendResult(success=False, error="gadget not connected")
         command = shown_command(prompt.command, session.display)
+        request_id = getattr(prompt, "request_id", None)  # Hermes before the approval-card path has none
         if command is None:
             question = _Prompt(id=uuid.uuid4().hex[:8], kind="approval", session_key=prompt.session_key,
                                title="Can't show this command", text=HOST_ONLY_TEXT, host_only=True,
-                               ttl_s=compat.approval_timeout_s(), request_id=prompt.request_id)
-            compat.approval_deny_only(prompt.session_key, prompt.request_id)  # Hermes refuses its YES too
+                               ttl_s=compat.approval_timeout_s(), request_id=request_id)
+            compat.approval_deny_only(prompt.session_key, request_id)  # Hermes refuses its YES too
         else:
             text = command
             if prompt.description:
                 text = f"{text}\n{textfmt.for_device(prompt.description, session.charset)}"
             question = _Prompt(id=uuid.uuid4().hex[:8], kind="approval", session_key=prompt.session_key,
                                title="Allow this command?", text=text, ttl_s=compat.approval_timeout_s(),
-                               request_id=prompt.request_id)
+                               request_id=request_id)
         return await self._ask(session, question)
 
     async def _ask(self, session: DeviceSession, prompt: _Prompt) -> SendResult:
