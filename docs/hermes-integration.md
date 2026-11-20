@@ -12,7 +12,7 @@ Hermes's gateway runs "platform adapters": Telegram, Slack and about twenty othe
 | `__init__.py` | `register(ctx)`: platform entry, agent tools, `hermes gadget` CLI |
 | `adapter.py` | `GadgetAdapter(BasePlatformAdapter)`: the Hermes-facing side |
 | `hub.py` | WebSocket server, auth, audio, images, actions (no Hermes imports) |
-| `tools.py` | `gadget_devices`, `gadget_display`, `gadget_ask`, `gadget_action`, `gadget_play`, `gadget_widget`, `gadget_interpret` |
+| `tools.py` | `gadget_devices`, `gadget_display`, `gadget_ask`, `gadget_action`, `gadget_speak`, `gadget_play`, `gadget_widget`, `gadget_interpret` |
 | `playback.py` | What `gadget_play` may open, decoding a chunk at a time, and the playback task (see [Playing audio](#playing-audio)) |
 | `interpret.py` | [Interpreter mode](#interpreter-mode): its state, the translation request and the device message (no Hermes imports) |
 | `store.py`, `status.py`, `protocol.py`, `audio.py`, `textfmt.py`, `imaging.py` | Support modules (no Hermes imports) |
@@ -282,7 +282,7 @@ Hermes asks before destructive commands (`/new`, `/undo`), costly model switches
 
 Hermes keeps the core tool schema narrow. Plugin tools are therefore deferred behind its tool-search bridge (`tool_search` / `tool_describe` / `tool_call`), and their names and descriptions appear in the bridge's manifest. A model invokes `gadget_action` through `tool_call`, and the end-to-end test exercises exactly that. The per-device context names the available actions so the model knows they exist.
 
-The seven tools:
+The eight tools:
 
 | Tool | What it does |
 |---|---|
@@ -290,6 +290,7 @@ The seven tools:
 | `gadget_display` | Shows a card: `title` and `text`, and optionally `items` (a list), `progress` (0 to 100) or `qr` (text to show as a QR code). A card sent again with the same `id` replaces the one on screen in place, which is how a progress bar moves |
 | `gadget_ask` | Shows `question` with 2 to 6 `options`, waits up to `seconds` (60 by default, 300 at most) and returns the option the user picked, as the agent wrote it, with its `index`; `cancelled: true` when the user cancelled; an error when nobody answered |
 | `gadget_action` | Runs an action the device declared |
+| `gadget_speak` | Says `text` out loud with Hermes's text-to-speech (see [Speaking from any chat](#speaking-from-any-chat)) |
 | `gadget_play` | Plays a sound file or an audio stream on the device's speaker, and stops it (see [Playing audio](#playing-audio)) |
 | `gadget_widget` | Sets, lists and clears home-screen widgets (see [Widgets from the agent](#widgets-from-the-agent)) |
 | `gadget_interpret` | Turns a gadget into an interpreter between two languages, and back (see [Interpreter mode](#interpreter-mode)) |
@@ -301,6 +302,12 @@ The agent learns when the user saw something else than it wrote. `gadget_ask` bl
 What a device cannot draw still reaches the user. A gadget without `caps.card` (older firmware, the Linux client) gets a list, a progress value and a code's text as a plain card, and the tool's result says so in `note`. A gadget without `caps.choice` gets the options as a numbered card; `gadget_ask` then fails with `shown_as_card: true` and tells the agent to ask for the answer by voice. See [structured cards](protocol.md#structured-cards) and [choices](protocol.md#choices).
 
 `gadget_ask` is separate from [confirmations](#confirmations). A dangerous command is still approved through Hermes's own yes/no question, with the rules above; an agent cannot stand in for that approval with a choice.
+
+### Speaking from any chat
+
+`gadget_speak` says `text` on a gadget's speaker from any session, for example "tell the kitchen dinner is ready" in a Telegram chat. Markdown is removed. The text goes through the same per-device queue as a message sent outside a turn (see [Scheduled delivery](#scheduled-delivery)): it is spoken after a turn in progress and after anything already playing, one message at a time, and never cuts anything off. The tool returns as soon as the text is queued, with `status` saying whether it starts now or waits, so the agent is not held up behind other speech. A cron job is not needed, and would wait for the scheduler's next tick.
+
+The tool refuses a device without a speaker, one waiting for pairing, and one where voice is off (`/voice off` in its chat, or `speak_replies: false`). Text-to-speech runs once the message's turn comes, so a text-to-speech failure, or a device that stays busy longer than the queue waits, is logged rather than returned. Unlike `gadget_play`, speech is not stopped when Hermes speaks or the gadget is used, and it does not show a `Playing` notice: it is a message, not a playback.
 
 ### Playing audio
 

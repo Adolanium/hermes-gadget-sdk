@@ -399,6 +399,59 @@ def test_agent_tools_drive_the_device(gadget, make_sim, monkeypatch):
     pool.shutdown()
 
 
+def test_gadget_speak_queues_speech_from_any_chat(gadget, make_sim, monkeypatch, tmp_path):
+    import concurrent.futures
+
+    from gateway import session_context
+    from hermes_gadget_plugin import tools
+
+    said = _fake_tts(monkeypatch, tmp_path)
+    sim = _paired_sim(gadget, make_sim, name="Kitchen")
+    mute = _paired_sim(gadget, make_sim, name="Panel", state="mute", board="sim-240x240-nospeaker")
+    device_id = sim.status()["device_id"]
+    # Called from another platform's chat, as "tell the kitchen ..." in Telegram would be.
+    monkeypatch.setattr(session_context, "get_session_env",
+                        lambda name, default="": {"HERMES_SESSION_PLATFORM": "telegram"}.get(name, default))
+    pool = concurrent.futures.ThreadPoolExecutor(1)  # tools run on agent worker threads
+
+    def call(args):
+        fut = pool.submit(tools.gadget_speak, args)
+        assert sim.wait_for(fut.done, timeout=15)
+        return json.loads(fut.result())
+
+    spoken = call({"device": "Kitchen", "text": "**Dinner** is ready."})
+    assert spoken["success"] and spoken["device"] == "Kitchen"
+    assert sim.wait_for(lambda: said == ["Dinner is ready."], timeout=10)
+    assert sim.wait_for(lambda: _types(sim, "audio.end"), timeout=10)
+
+    assert "no speaker" in call({"device": "Panel", "text": "Hi."})["error"]
+    assert "text is required" in call({"device": "Kitchen", "text": "  "})["error"]
+
+    # During a conversation on the device: queued at once, spoken after the turn, nothing cut off.
+    release = asyncio.Event()
+
+    async def still_working(event):
+        await release.wait()
+
+    gadget.reply = still_working
+    starts = len(_types(sim, "audio.start"))
+    sim.type_text("long task")
+    assert sim.wait_for(lambda: _types(sim, "turn.start"), timeout=5)
+    queued = call({"device": "Kitchen", "text": "The bins go out tonight."})
+    assert queued["success"] and queued["status"].startswith("queued")
+    sim.run_for(0.5)
+    assert len(_types(sim, "audio.start")) == starts  # the tool returned; nothing spoke over the turn
+    gadget.loop.call_soon_threadsafe(release.set)
+    assert sim.wait_for(lambda: "The bins go out tonight." in said, timeout=15)
+    kinds = [m["type"] for m in list(sim.received)]
+    assert kinds.index("turn.end") < len(kinds) - 1 - kinds[::-1].index("audio.start")
+    assert _types(sim, "audio.abort") == []
+
+    gadget.adapter._auto_tts_disabled_chats.add(device_id)  # "/voice off"
+    assert "voice is off" in call({"device": "Kitchen", "text": "Quiet."})["error"]
+    pool.shutdown()
+
+
 def test_images_are_converted_for_the_screen(gadget, make_sim, tmp_path):
     PIL = pytest.importorskip("PIL.Image")
     sim = _paired_sim(gadget, make_sim)

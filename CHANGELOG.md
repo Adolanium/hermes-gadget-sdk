@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Hermes plugin
+
+- **New `gadget_speak` tool: the agent can say something on a gadget from any chat.** Asked in another chat to tell someone something through a speaker, the agent had only `send_message` to `gadget:<device id>`, which models often turned into a cron job that waits for the scheduler's next tick. `gadget_speak` takes `text` and an optional `device`, and queues it on the same per-device speech queue as a message sent outside a turn, so it plays after a turn in progress and anything already playing, without cutting either off. It returns as soon as the text is queued. It refuses a device without a speaker, one waiting for pairing, and one where voice is off. [Speaking from any chat](docs/hermes-integration.md#speaking-from-any-chat). Part 2 of #304. Contributed by @NickJLange.
+
 ## 0.6.0
 
 Hermes Gadget 0.6.0 gives the agent more to do with a gadget. It can play a sound file or a radio stream on the speaker (`gadget_play`), show lists, progress bars and QR codes, ask a question with up to six answers on the screen (`gadget_ask`), set the face's expression, and fill the idle screen with widgets such as a disk's fill level or the room temperature. Interpreter mode turns a gadget into a translator that two people pass back and forth. Messages and cron jobs sent to a gadget outside a turn are spoken, and `hermes gadget bot-chat` lets a gadget talk to Hermes Bot Mode. Profile switching works on a stock Hermes with `profile_mode: virtual`, and a board's diagnostics report comes over the network, with the reason for a hang or a restart. The M5Stack CoreS3 gains its camera, as a `camera.capture` action and a camera mode with a live view. Five experimental board profiles arrive: the M5Stack StopWatch, the M5Stack Cardputer ADV, the Seeed Studio SenseCAP Watcher W1-A, the Waveshare ESP32-S3-Touch-LCD-1.47 and the LCDWIKI ES3C28P. The Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C boots on esp-hosted 2.12, and its speaker pops less when it turns on and off. Details by area follow.

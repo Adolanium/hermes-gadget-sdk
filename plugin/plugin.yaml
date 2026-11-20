@@ -19,6 +19,7 @@ provides_tools:
   - gadget_display
   - gadget_ask
   - gadget_action
+  - gadget_speak
   - gadget_play
   - gadget_widget
   - gadget_interpret
