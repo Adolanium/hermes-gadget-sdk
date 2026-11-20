@@ -6,8 +6,8 @@
  * No shared mutable state between tasks - each owns its data exclusively.
  *
  * Tasks:
- *   net_io   (Core 0, pri 6)  - Unified select() on all sockets
- *   derp_tx  (Core 0, pri 7)  - Sole DERP TLS writer
+ *   net_io   (Core 0, pri 7)  - Unified select() on all sockets
+ *   derp_tx  (Core 0, pri 5)  - Sole DERP TLS writer (CONFIG_ML_TASK_DERP_CORE)
  *   coord    (Core 1, pri 5)  - Control plane (Noise, HTTP/2, registration)
  *   wg_mgr   (Core 1, pri 7)  - WireGuard + DISCO + peer management
  *   app      (unpinned, pri 3) - User application (external, not ours)
@@ -58,6 +58,14 @@ extern "C" {
 #define ML_TASK_APP_CORE        1
 #endif
 
+/* The DERP task: core 0 unless CONFIG_ML_TASK_DERP_CORE says otherwise
+ * (Kconfig: keep the relay's TLS handshake off an app's core). */
+#if defined(CONFIG_FREERTOS_UNICORE) || !defined(CONFIG_ML_TASK_DERP_CORE)
+#define ML_TASK_DERP_CORE       0
+#else
+#define ML_TASK_DERP_CORE       CONFIG_ML_TASK_DERP_CORE
+#endif
+
 /* Hermes gadget patch: stacks trimmed to measured use plus margin (internal RAM is
  * short beside audio): net_io 2.9 KB, derp_tx 4.4 KB, coord 6.4 KB, wg_mgr 2.5 KB peak. */
 #define ML_TASK_NET_IO_STACK    (5 * 1024)
@@ -66,7 +74,7 @@ extern "C" {
 
 #define ML_TASK_DERP_TX_STACK   (8 * 1024)
 #define ML_TASK_DERP_TX_PRIO    5
-#define ML_TASK_DERP_TX_CORE    0
+#define ML_TASK_DERP_TX_CORE    ML_TASK_DERP_CORE
 
 #define ML_TASK_COORD_STACK     (9 * 1024)
 #define ML_TASK_COORD_PRIO      5
@@ -121,6 +129,8 @@ extern "C" {
 #define ML_DISCO_PING_INTERVAL_MS       5000
 #define ML_DISCO_HEARTBEAT_MS           3000
 #define ML_DISCO_TRUST_DURATION_MS      15000
+#define ML_DERP_RX_TIMEOUT_MS           150000  /* relay keepalive is every 60 s */
+#define ML_STOP_TIMEOUT_MS              20000   /* tailtiny_stop() waits this long for the tasks */
 #define ML_DISCO_PING_TIMEOUT_MS        5000
 #define ML_DISCO_UPGRADE_INTERVAL_MS    15000
 #define ML_DISCO_SESSION_ACTIVE_MS      45000
@@ -253,7 +263,10 @@ typedef struct {
         ML_PEER_ADD,
         ML_PEER_REMOVE,
         ML_PEER_UPDATE_ENDPOINT,
+        ML_PEER_SWEEP,      /* end of a full peer list: drop peers it didn't name */
     } action;
+    int64_t node_id;        /* tailcfg NodeID; 0 if unknown. Removals and patches name peers by it */
+    uint32_t sync_gen;      /* ADD from a full list, and its SWEEP: the list's number (0 otherwise) */
     uint32_t vpn_ip;
     uint8_t public_key[32];
     uint8_t disco_key[32];
@@ -308,6 +321,9 @@ typedef struct {
 
     /* On-demand handshake: tried once on first DISCO direct path discovery */
     bool tried_initial_handshake;
+
+    int64_t node_id;        /* tailcfg NodeID; 0 until a peer list names it (NVS cache) */
+    uint32_t sync_gen;      /* last full peer list that named this peer */
 } ml_peer_t;
 
 /* ============================================================================
@@ -401,9 +417,13 @@ struct tailtiny_s {
     TaskHandle_t coord_task;
     TaskHandle_t wg_mgr_task;
     int wg_notifiers;                  /* producers inside ml_wg_notify(), under ml_wg_task_lock */
+    volatile uint32_t tasks_alive;     /* ML_TASK_BIT_*: set by tailtiny_start(), cleared by ml_task_exit() */
+    bool stop_incomplete;              /* a task outlived tailtiny_stop(): destroy must not free */
 
     /* Queues */
     int derp_wake_fd;                  /* eventfd: wakes select for queued TX/control work */
+    int coord_wake_fd;                 /* eventfd: wakes the coord task's long-poll wait */
+    int net_io_wake_fd;                /* eventfd: wakes the net_io task's select() */
     QueueHandle_t derp_tx_queue;        /* -> derp_tx task */
     QueueHandle_t disco_rx_queue;       /* net_io -> wg_mgr */
     QueueHandle_t wg_rx_queue;          /* net_io -> wg_mgr */
@@ -580,6 +600,21 @@ static inline BaseType_t ml_derp_queue_item(tailtiny_t *ml, const void *item, bo
     return sent;
 }
 
+/* Wake the coord task's long-poll wait (STUN replies, commands, a DERP region
+ * change, stop) and the net_io task's select() (rebind, stop). Like
+ * ml_derp_wake(), an eventfd count stays set until the task reads it, so a
+ * wake sent just before the task starts waiting isn't lost. No-ops without an
+ * eventfd; those tasks then poll as before. */
+void ml_coord_wake(tailtiny_t *ml);
+void ml_net_io_wake(tailtiny_t *ml);
+
+static inline BaseType_t ml_coord_queue_send(tailtiny_t *ml, QueueHandle_t queue,
+                                            const void *item, TickType_t wait) {
+    BaseType_t sent = xQueueSend(queue, item, wait);
+    if (sent == pdTRUE) ml_coord_wake(ml);
+    return sent;
+}
+
 /* ml_net_io.c */
 void ml_net_io_task(void *arg);
 
@@ -645,6 +680,14 @@ void ml_peer_nvs_deinit(void);
 esp_err_t ml_peer_nvs_save(const ml_peer_t *peer);
 int ml_peer_nvs_load_all(ml_peer_t *peers, int max_peers);
 esp_err_t ml_peer_nvs_clear(void);
+esp_err_t ml_peer_nvs_remove(const uint8_t *public_key);
+
+/* tailtiny.c: a task's last touch of the instance, right before vTaskDelete(NULL) */
+#define ML_TASK_BIT_NET_IO  (1u << 0)
+#define ML_TASK_BIT_DERP    (1u << 1)
+#define ML_TASK_BIT_COORD   (1u << 2)
+#define ML_TASK_BIT_WG_MGR  (1u << 3)
+void ml_task_exit(tailtiny_t *ml, uint32_t bit);
 
 #ifdef CONFIG_ML_ZERO_COPY_WG
 /* ml_zerocopy.c */

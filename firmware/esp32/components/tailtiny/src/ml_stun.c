@@ -138,6 +138,9 @@ static esp_err_t ensure_stun_socket(tailtiny_t *ml) {
     };
     ml_bind(ml->stun_sock, (struct sockaddr *)&bind_addr, sizeof(bind_addr));
 
+    /* Created on the coord task: wake net_io so its select() includes it now,
+     * not when its 1 s wait ends. */
+    ml_net_io_wake(ml);
     return ESP_OK;
 }
 
@@ -485,6 +488,7 @@ static esp_err_t ensure_stun_socket6(tailtiny_t *ml) {
     };
     ml_bind(ml->stun_sock6, (struct sockaddr *)&bind_addr, sizeof(bind_addr));
 
+    ml_net_io_wake(ml);  /* see ensure_stun_socket() */
     return ESP_OK;
 }
 
