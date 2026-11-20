@@ -69,6 +69,7 @@
 #define REKEY_AFTER_TIME			(120)
 #define REJECT_AFTER_TIME			(180)
 #define REKEY_TIMEOUT				(5)
+#define REKEY_ATTEMPT_TIME			(90)	// wireguard-go RekeyAttemptTime: stop retrying a handshake after this
 #define KEEPALIVE_TIMEOUT			(10)
 
 // DERP relay output callback for peers without direct endpoints
@@ -180,6 +181,16 @@ struct wireguard_peer {
 
 	// We set this flag on RX/TX of packets if we think that we should initiate a new handshake
 	bool send_handshake;
+
+	// Set by the first initiation sent while there is no session; retries stop
+	// REKEY_ATTEMPT_TIME after it. Cleared once a session is up.
+	bool handshake_attempting;
+	uint32_t handshake_attempt_start;
+
+	// Data sent and nothing authenticated back since (wireguard-go's
+	// newHandshake timer): after KEEPALIVE_TIMEOUT + REKEY_TIMEOUT, a new handshake.
+	bool data_unanswered;
+	uint32_t data_unanswered_since;
 };
 
 struct wireguard_device {

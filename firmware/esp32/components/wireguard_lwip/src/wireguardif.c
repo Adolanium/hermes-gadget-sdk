@@ -127,6 +127,11 @@ static void update_peer_addr(struct wireguard_peer *peer, const ip_addr_t *addr,
 	peer->port = port;
 }
 
+// Something authenticated came from the peer: it is alive.
+static void note_authenticated_rx(struct wireguard_peer *peer) {
+	peer->data_unanswered = false;
+}
+
 static struct wireguard_peer *peer_lookup_by_allowed_ip(struct wireguard_device *device, const ip_addr_t *ipaddr) {
 	struct wireguard_peer *result = NULL;
 	struct wireguard_peer *fallback = NULL;
@@ -345,6 +350,13 @@ static err_t wireguardif_seal_locked(struct wireguard_peer *peer, struct pbuf *q
 				// Then encrypt
 				wireguard_encrypt_packet(dst, dst, padded_len, keypair);
 
+				// Data (not a keepalive) that the peer should answer within
+				// KEEPALIVE_TIMEOUT, at least with its own keepalive
+				if (q && q->tot_len > 0 && !peer->data_unanswered) {
+					peer->data_unanswered = true;
+					peer->data_unanswered_since = wireguard_sys_now();
+				}
+
 				// Sent by the caller, after the lock (wireguardif_send_sealed())
 				*out = pbuf;
 				endpoint_of(peer, ep);
@@ -367,7 +379,13 @@ static err_t wireguardif_seal_locked(struct wireguard_peer *peer, struct pbuf *q
 			result = ERR_CONN;
 		}
 	} else {
-		// No valid keys!
+		// No valid keys! As wireguard-go does for a packet with no session, ask
+		// the timers for a handshake (sent within one WireGuard task round). While
+		// one is already being retried, its REKEY_ATTEMPT_TIME window is kept.
+		if (!peer->handshake_attempting) {
+			peer->active = true;
+			peer->send_handshake = true;
+		}
 		result = ERR_CONN;
 	}
 	return result;
@@ -459,6 +477,7 @@ static void wireguardif_process_response_message(struct wireguard_device *device
 	peer = peer_lookup_by_handshake(device, response->receiver);
 	bool ok = peer && wireguard_process_handshake_response(device, peer, response);
 	if (ok) {
+		note_authenticated_rx(peer);
 		update_peer_addr(peer, addr, port);
 		wireguard_start_session(peer, true);
 		wg_idx = wireguard_peer_index(device, peer);
@@ -554,7 +573,13 @@ static void wireguardif_process_data_message_locked(struct wireguard_device *dev
 				bool decrypt_ok = wireguard_decrypt_packet(pbuf->payload, src, src_len, nonce, keypair);
 				WG_DEBUG("[WG_DECRYPT] result=%d, src_len=%u, nonce=%llu\n",
 				       decrypt_ok, (unsigned)src_len, (unsigned long long)nonce);
-				if (decrypt_ok) {
+				// The replay window comes first, for keepalives too. It came after
+				// the endpoint update below, so anyone who had captured one of the
+				// peer's packets could resend it from their own address and move
+				// our endpoint for that peer there.
+				bool fresh = decrypt_ok && wireguard_check_replay(keypair, nonce);
+				if (fresh) {
+					note_authenticated_rx(peer);
 
 					// 3. Since the packet has authenticated correctly, the source IP of the outer UDP/IP packet is used to update the endpoint for peer TrMv...WXX0.
 					// Update the peer location
@@ -578,8 +603,8 @@ static void wireguardif_process_data_message_locked(struct wireguard_device *dev
 					if (pbuf->tot_len > 0) {
 						//4a. Once the packet payload is decrypted, the interface has a plaintext packet. If this is not an IP packet, it is dropped.
 						iphdr = (struct ip_hdr *)pbuf->payload;
-						// Check for packet replay / dupes
-						if (wireguard_check_replay(keypair, nonce)) {
+						// Packet replay / dupes: checked above
+						{
 
 							// 4b. Otherwise, WireGuard checks to see if the source IP address of the plaintext inner-packet routes correspondingly in the cryptokey routing table
 							// Also check packet length!
@@ -645,8 +670,6 @@ static void wireguardif_process_data_message_locked(struct wireguard_device *dev
 								WG_DEBUG("[WG_RX_IP] DROPPED: header_len=%u > tot_len=%u\n",
 								       (unsigned)header_len, (unsigned)pbuf->tot_len);
 							}
-						} else {
-							// This is a duplicate packet / replayed / too far out of order
 						}
 					} else {
 						// This was a keep-alive packet
@@ -873,6 +896,7 @@ void wireguardif_network_rx(void *arg, struct udp_pcb *pcb, struct pbuf *p, cons
 				WG_LOCK(device);
 				peer = wireguard_process_initiation_message(device, msg_initiation);
 				if (peer) {
+					note_authenticated_rx(peer);
 					// Update the peer location
 					update_peer_addr(peer, addr, port);
 					reply = wireguardif_make_handshake_response_locked(device, peer);
@@ -982,6 +1006,10 @@ static err_t wireguard_start_handshake(struct netif *netif, struct wireguard_pee
 	if (pbuf) {
 		peer->send_handshake = false;
 		peer->last_initiation_tx = wireguard_sys_now();
+		if (!peer->handshake_attempting && !peer->curr_keypair.valid) {
+			peer->handshake_attempting = true;
+			peer->handshake_attempt_start = peer->last_initiation_tx;
+		}
 		memcpy(peer->handshake_mac1, msg.mac1, WIREGUARD_COOKIE_LEN);
 		peer->handshake_mac1_valid = true;
 		endpoint_of(peer, &ep);
@@ -1030,6 +1058,7 @@ err_t wireguardif_connect(struct netif *netif, u8_t peer_index) {
 			peer->port = peer->connect_port;
 			peer->send_handshake = true;
 			peer->last_initiation_tx = 0;
+			peer->handshake_attempting = false;	// a new path: a new retry window
 			result = ERR_OK;
 		} else {
 			result = ERR_ARG;
@@ -1115,6 +1144,19 @@ void wireguardif_shutdown(struct netif *netif) {
 	sys_untimeout(wireguardif_tmr, device);
 }
 
+void wireguardif_free_device(struct netif *netif) {
+	if (!netif || !netif->state) {
+		return;
+	}
+	struct wireguard_device *device = (struct wireguard_device *)netif->state;
+	netif->state = NULL;
+	void *lock = device->lock;
+	// Private key, session keys and handshake state
+	memset(device, 0, sizeof(*device));
+	wireguard_platform_lock_free(lock);
+	mem_free(device);
+}
+
 err_t wireguardif_update_endpoint(struct netif *netif, u8_t peer_index, const ip_addr_t *ip, u16_t port) {
 	struct wireguard_peer *peer;
 	struct wireguard_device *device = (struct wireguard_device *)netif->state;
@@ -1127,6 +1169,23 @@ err_t wireguardif_update_endpoint(struct netif *netif, u8_t peer_index, const ip
 	}
 	WG_UNLOCK(device);
 	return result;
+}
+
+bool wireguardif_clear_endpoint(struct netif *netif, u8_t peer_index) {
+	struct wireguard_peer *peer;
+	struct wireguard_device *device = (struct wireguard_device *)netif->state;
+	bool cleared = false;
+	WG_LOCK(device);
+	if (wireguardif_lookup_peer(netif, peer_index, &peer) == ERR_OK) {
+		cleared = !ip_addr_isany(&peer->ip) || peer->port != 0 ||
+		          !ip_addr_isany(&peer->connect_ip) || peer->connect_port != 0;
+		ip_addr_set_any(false, &peer->ip);
+		peer->port = 0;
+		ip_addr_set_any(false, &peer->connect_ip);
+		peer->connect_port = 0;
+	}
+	WG_UNLOCK(device);
+	return cleared;
 }
 
 
@@ -1206,6 +1265,21 @@ static bool should_send_initiation(struct wireguard_peer *peer) {
 			result = true;
 		}
 	}
+	// wireguard-go gives up after RekeyAttemptTime. Without this an offline
+	// peer, or one that has dropped us, got an initiation every 5 s forever
+	// (two X25519 operations each, and the chip never idle long enough to sleep).
+	// New outgoing traffic, wireguardif_connect() or a DISCO-found path starts
+	// a new window.
+	if (result && !peer->curr_keypair.valid && peer->handshake_attempting &&
+			wireguard_expired(peer->handshake_attempt_start, REKEY_ATTEMPT_TIME)) {
+		printf("[WG_PERIODIC] Handshake to key=%02x%02x%02x%02x unanswered for %d s, giving up until there is traffic\n",
+		       peer->public_key[0], peer->public_key[1], peer->public_key[2], peer->public_key[3],
+		       REKEY_ATTEMPT_TIME);
+		peer->active = false;
+		peer->send_handshake = false;
+		peer->handshake_attempting = false;
+		result = false;
+	}
 	return result;
 }
 
@@ -1264,6 +1338,21 @@ static void wireguardif_run_timers(struct wireguard_device *device) {
 			if (should_destroy_current_keypair(peer)) {
 				// Destroy current keypair
 				keypair_destroy(&peer->curr_keypair);
+			}
+			if (peer->curr_keypair.valid) {
+				peer->handshake_attempting = false;
+			}
+			// wireguard-go: data sent and nothing back for KEEPALIVE_TIMEOUT +
+			// REKEY_TIMEOUT means the session is dead (the peer restarted, or
+			// moved). Without this we kept sending on it until the rekey, up to
+			// two minutes later.
+			if (peer->data_unanswered &&
+					wireguard_expired(peer->data_unanswered_since, KEEPALIVE_TIMEOUT + REKEY_TIMEOUT)) {
+				peer->data_unanswered = false;
+				peer->send_handshake = true;
+				printf("[WG_PERIODIC] No reply from key=%02x%02x%02x%02x for %d s after sending, new handshake\n",
+				       peer->public_key[0], peer->public_key[1], peer->public_key[2], peer->public_key[3],
+				       KEEPALIVE_TIMEOUT + REKEY_TIMEOUT);
 			}
 			keepalive = should_send_keepalive(peer);
 			initiate = should_send_initiation(peer);
@@ -1516,6 +1605,7 @@ err_t wireguardif_connect_derp(struct netif *netif, u8_t peer_index) {
 		// Force immediate handshake - clear last_initiation_tx to bypass REKEY_TIMEOUT
 		// This is safe because DISCO has confirmed the path works
 		peer->last_initiation_tx = 0;
+		peer->handshake_attempting = false;	// a new path: a new retry window
 		result = ERR_OK;
 	}
 	WG_UNLOCK(device);

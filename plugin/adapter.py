@@ -20,6 +20,8 @@ config.yaml::
           port: 8765
           path: /gadget
           speak_replies: true    # auto-TTS for devices with a speaker
+          speech_queue_wait_s: 600            # how long a message waits for a busy device to be spoken
+          speech_overflow_target: telegram    # optional: where a message that couldn't be spoken goes
           auto_home: true        # first approved device becomes the gadget home channel
           unauthorized_dm_behavior: pair
           dashboard: true        # sessions and status tiles on devices that draw them
@@ -34,6 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import inspect
 import json
 import logging
@@ -76,7 +79,6 @@ logger = logging.getLogger(__name__)
 
 PLATFORM_NAME = "gadget"
 MAX_MESSAGE_LENGTH = 4000
-VIRTUAL_SEP = "~"             # <device>~<profile>: a device's chat with a non-default profile (profile_mode: virtual)
 PAIRING_TTL_S = 3600          # mirrors Hermes's pairing-code lifetime
 PAIRING_POLL_S = 2.0
 # A profile's changed face or avatar files are read for its thumbnail once they have held still this long.
@@ -97,8 +99,11 @@ _PAIRING_CMD = re.compile(r"(hermes\s+(?:-p\s+\S+\s+)?pairing\s+approve\s+\S+\s+
 _CRON_WRAP = re.compile(r"^Cronjob Response: .*?\n-{5,}\n\n(.*?)(?:\n\nTo stop or manage this job.*)?$", re.S)
 _TRUNCATED_NOTE = re.compile(r"\n\n\.\.\. \[truncated, full output saved to [^\]]*\]\s*$")
 # A message that arrives while the device is busy (a turn, or audio already playing) waits this long
-# for it to finish; after that it stays text only.
-SPEECH_QUEUE_WAIT_S = 120.0
+# by default (extra.speech_queue_wait_s); one still not spoken goes to extra.speech_overflow_target.
+SPEECH_QUEUE_WAIT_S = 600.0
+# The device whose turn the current task runs: what that task sends is the turn's reply, which Hermes
+# speaks itself. Set in on_processing_start; cron, send_message and other turns run in other tasks.
+_TURN_DEVICE: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("gadget_turn_device", default=None)
 _NOT_SPOKEN = "_gadget_not_spoken"  # metadata: this text is played or spoken another way (a caption, a question)
 # The gateway echoes speech-to-text results with this translated line: a microphone emoji and the
 # quoted transcript, quoted per language (Ukrainian uses «»). Patterns are built from the line itself.
@@ -266,6 +271,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         opus_bitrate = extra.get("opus_bitrate")
         self._opus_bitrate = 24000 if opus_bitrate in (None, "") else int(opus_bitrate)
         self._speak_replies = _flag(extra.get("speak_replies"), True)
+        self._speech_queue_wait = extra.get("speech_queue_wait_s")  # None: SPEECH_QUEUE_WAIT_S
+        self._speech_overflow_target = str(extra.get("speech_overflow_target") or "").strip() or None
         self._auto_home = _flag(extra.get("auto_home"), True)
         self._battery_log_on = _flag(extra.get("battery_log"), False)
         self._dashboard_on = _flag(extra.get("dashboard"), True)
@@ -276,12 +283,6 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._offer_all = isinstance(offered, str) and offered.strip().lower() == "all"
         self._offered: Optional[set] = None if offered is None or self._offer_all else {
             str(p).strip() for p in (offered if isinstance(offered, list) else []) if str(p).strip()}
-        # "virtual": a device talking to another profile becomes its own chat, ``<device>~<profile>``, that a
-        # ``gateway.profile_routes`` entry the plugin adds at run time sends to that profile. Hermes then
-        # admits it like any routed chat, so no core hook is needed, and each profile keeps its own sessions.
-        self._virtual_profiles = str(extra.get("profile_mode") or "").strip().lower() == "virtual"
-        self._virtual_routes: set = set()  # virtual chat ids that resolved to their profile's route
-        self._virtual_owned: dict = {}     # chat id -> the ProfileRoute this adapter added (and may remove)
         # The language `welcome` names for devices left on auto: Hermes's own unless set here.
         self._language = str(extra.get("language") or "auto").strip().lower() or "auto"
         # The language gadget recordings are transcribed in, whichever profile answers; None = its STT settings.
@@ -412,68 +413,11 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
 
     @staticmethod
     def _device_id(chat_id: str) -> str:
-        """The device behind a chat id: itself, or the device part of a virtual ``<device>~<profile>``."""
-        return str(chat_id).split(VIRTUAL_SEP, 1)[0]
+        """The device behind a chat id: a gadget's chat id is its device id."""
+        return str(chat_id)
 
     def _session(self, chat_id: str) -> Optional[DeviceSession]:
         return self._hub.get(self._device_id(chat_id)) if self._hub else None
-
-    def _virtual_chat(self, device_id: str, profile: str) -> Optional[str]:
-        """The virtual chat for a device's talk with a non-default profile, its route added if missing.
-        None when the gateway's route list cannot be reached: the caller falls back to the stamp."""
-        chat_id = f"{device_id}{VIRTUAL_SEP}{profile}"
-        config = getattr(getattr(self, "gateway_runner", None), "config", None)
-        routes = getattr(config, "profile_routes", None)
-        if routes is None:
-            return None
-        try:
-            from gateway.profile_routing import ProfileRoute
-        except ImportError:
-            return None
-        platform = self.platform.value
-
-        def effective():
-            # The route Hermes picks for this chat: the most specific enabled one that matches it.
-            for r in sorted(routes, key=lambda r: r.specificity, reverse=True):
-                if getattr(r, "enabled", True) and r.matches(platform, chat_id=chat_id, user_id=device_id):
-                    return r
-            return None
-
-        route = effective()
-        if route is None:
-            route = ProfileRoute(name=f"gadget-virtual-{chat_id}", platform=platform, profile=profile,
-                                 chat_id=chat_id)
-            routes.append(route)
-            routes.sort(key=lambda r: r.specificity, reverse=True)
-            self._virtual_owned[chat_id] = route
-            logger.info("[%s] routed virtual chat %s to profile %s", self.name, chat_id, profile)
-            route = effective()
-        if route is None or route.profile != profile:
-            # A route of the administrator's sends this chat elsewhere (or nothing matches it): don't
-            # take it over. The caller stamps the device's own chat instead, as without virtual mode.
-            self._virtual_routes.discard(chat_id)
-            return None
-        self._virtual_routes.add(chat_id)
-        return chat_id
-
-    def _prune_virtual_routes(self, served: set) -> None:
-        """Drop the routes this adapter added for profiles no longer served or offered (deleted, parked,
-        taken off ``profiles``). Devices on such a profile are sent back to the default one meanwhile."""
-        if not served:  # a roster Hermes could not give drops nothing
-            return
-        offered = served if self._offer_all else served & ((self._offered or set()) | {"default"})
-        # The adapter's own routes too, for chats an administrator's route has since taken over.
-        tracked = self._virtual_routes | set(self._virtual_owned)
-        stale = {c for c in tracked if c.split(VIRTUAL_SEP, 1)[1] not in offered}
-        if not stale:
-            return
-        routes = getattr(getattr(getattr(self, "gateway_runner", None), "config", None), "profile_routes", None)
-        owned = [self._virtual_owned.pop(c) for c in stale if c in self._virtual_owned]
-        if routes is not None and owned:
-            # Only the routes this adapter added: an administrator's route for the same chat stays.
-            routes[:] = [r for r in routes if not any(r is o for o in owned)]
-        self._virtual_routes -= stale
-        logger.info("[%s] dropped virtual routes for profiles no longer offered: %s", self.name, sorted(stale))
 
     # -- pairing --------------------------------------------------------------------
 
@@ -918,13 +862,6 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                 except Exception as exc:
                     logger.debug("[%s] pairing sync failed for %s: %s", self.name, session.device_id, exc)
             await self._push_rosters()
-            if self._virtual_routes or self._virtual_owned:
-                try:
-                    if served is None:
-                        served = {p["id"] for p in await asyncio.to_thread(self.profiles)}
-                    self._prune_virtual_routes(served)
-                except Exception as exc:
-                    logger.debug("[%s] virtual route cleanup failed: %s", self.name, exc)
 
     # -- dashboard ----------------------------------------------------------------------
 
@@ -1086,19 +1023,6 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         if self._busy(device_id):
             return
         event = self._event(session, "botchat", botchat.RESUME_COMMAND, message_type=MessageType.TEXT)
-        # The profile answers this chat only once it has approved the device itself; until then Hermes
-        # takes the resume for a stranger's message and replies with a pairing code. Where the gateway's
-        # check can tell (a routed or virtual chat), say so rather than send a resume that can't work.
-        approved = None
-        if event.source.chat_id != device_id:  # on the device's own chat the check answers for the default profile
-            try:
-                approved = self._is_sender_authorized(device_id, "dm", event.source.chat_id)
-            except Exception:
-                approved = None
-        if approved is False:
-            fail(f"{profile} hasn't approved this gadget yet: talk to {profile} once on the gadget, approve "
-                 f"the code it shows (hermes -p {profile} pairing list), then run the command again")
-            return
         if not queue.drop(device_id, request_id):
             return  # a newer request replaced this one while it was being served
         try:
@@ -1306,13 +1230,6 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             user_id=session.device_id, user_name=session.name)
 
     def _source(self, session: DeviceSession):
-        if (self._virtual_profiles and session.profile not in (None, "default")
-                and self._switches(session)):
-            chat_id = self._virtual_chat(session.device_id, session.profile)
-            if chat_id is not None:  # the route stamps source.profile; Hermes admits it as routed
-                return self.build_source(
-                    chat_id=chat_id, chat_name=f"{session.name} · {session.profile}", chat_type="dm",
-                    user_id=session.device_id, user_name=session.name)
         source = self._routed_source(session)
         if self._switches(session):
             source.profile = session.profile  # a multiplexed gateway runs the turn under this profile
@@ -1756,6 +1673,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     # -- turn lifecycle -------------------------------------------------------------
 
     async def on_processing_start(self, event: MessageEvent) -> None:
+        _TURN_DEVICE.set(self._device_id(event.source.chat_id))  # this task's sends are the turn's reply
         session = self._session(event.source.chat_id)
         if session is None or not session.paired:
             return
@@ -1828,52 +1746,88 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             await session.send_reply(text, turn=self._turns.get(session.device_id), interim=interim)
         # Hermes speaks only replies to voice turns, so a message pushed outside a turn (send_message,
         # cron delivery) would stay silent on a device that has no screen worth reading. Speak it.
-        # During a turn the text is the turn's own reply, which Hermes speaks itself when the turn was
-        # spoken. Cron output is never part of a turn, so it is queued to follow the turn.
+        # Only the task running this device's turn sends the turn's own reply, which Hermes speaks itself
+        # when the turn was spoken. Anything else that arrives during a turn (cron output, send_message
+        # from another chat) is queued to follow it.
         meta = metadata or {}
-        if ((self._turns.get(session.device_id) is None or meta.get("job_id")) and not meta.get("_interim_send")
+        if (_TURN_DEVICE.get() != session.device_id and not meta.get("_interim_send")
                 and not meta.get(_NOT_SPOKEN) and session.has_speaker and self._should_auto_tts_for_chat(chat_id)
                 and (spoken := spoken_message(content, meta))):
-            session.spawn(self.speak_queued(chat_id, spoken))
+            session.spawn(self.speak_queued(chat_id, spoken, shown=content))
         return SendResult(success=True, message_id=uuid.uuid4().hex[:12])
 
-    async def speak_queued(self, chat_id: str, text: str) -> SendResult:
+    def _speech_wait_s(self) -> float:
+        return float(self._speech_queue_wait or SPEECH_QUEUE_WAIT_S)
+
+    async def speak_queued(self, chat_id: str, text: str, *, shown: Optional[str] = None) -> SendResult:
         """Speak ``text`` after anything the device is already saying or doing, one message at a time.
 
         Waits for a turn in progress and for audio already playing, so a message never cuts off a
-        spoken reply or an earlier message. A message that has waited SPEECH_QUEUE_WAIT_S since it
-        was queued, behind other messages or a busy device, stays text only."""
+        spoken reply or an earlier message. A message not spoken within ``speech_queue_wait_s`` of
+        being queued, or whose speech failed, goes to ``speech_overflow_target`` as ``shown`` (the text
+        as sent); without a target it is logged. Turning voice off is not a failure."""
         device_id = self._device_id(chat_id)
         lock = self._speech_locks.setdefault(device_id, asyncio.Lock())
-        deadline = time.monotonic() + SPEECH_QUEUE_WAIT_S
+        deadline = time.monotonic() + self._speech_wait_s()
         try:
             await asyncio.wait_for(lock.acquire(), max(0.0, deadline - time.monotonic()))
         except asyncio.TimeoutError:
-            return self._not_spoken(device_id)
+            result = self._not_spoken(device_id)
+        else:
+            try:
+                if not await self._device_idle(chat_id, deadline):
+                    result = self._not_spoken(device_id)
+                elif not self._should_auto_tts_for_chat(chat_id):  # voice was turned off while it waited
+                    return SendResult(success=False, error="voice is off")
+                else:
+                    result = await self._speak(chat_id, text, wait=True, idle_by=deadline)
+            finally:
+                lock.release()
+        # Outside the lock: the next need not wait. Voice turned off while it waited, even one that then
+        # timed out behind a busy device, is the user's choice, not a lost message.
+        if not result.success and result.error != "voice is off" and chat_id not in self._auto_tts_disabled_chats:
+            await self._speech_overflow(chat_id, shown if shown is not None else text, result.error)
+        return result
+
+    async def _speech_overflow(self, chat_id: str, text: str, reason: Optional[str]) -> None:
+        """Send a message the device didn't speak to ``speech_overflow_target`` with Hermes's
+        send_message, so it still reaches someone; without a target, log it. The device showed it."""
+        session = self._session(chat_id)
+        name = session.name if session is not None else self._device_id(chat_id)
+        target = self._speech_overflow_target
+        if not target:
+            logger.warning("[%s] not spoken on %s (%s); set speech_overflow_target to forward these: %s",
+                           self.name, name, reason, text[:200])
+            return
         try:
-            if not await self._device_idle(chat_id, deadline):
-                return self._not_spoken(device_id)
-            if not self._should_auto_tts_for_chat(chat_id):  # voice was turned off while it waited
-                return SendResult(success=False, error="voice is off")
-            return await self._speak(chat_id, text, wait=True, idle_by=deadline)
-        finally:
-            lock.release()
+            from tools.send_message_tool import send_message_tool
+
+            raw = await asyncio.to_thread(send_message_tool, {
+                "action": "send", "target": target, "message": f"Not spoken on {name} ({reason}):\n\n{text}"})
+            result = json.loads(raw) if raw else {}
+        except Exception as exc:  # the tool itself failed: still say what was lost
+            result = {"error": str(exc)}
+        if result.get("success"):
+            logger.info("[%s] not spoken on %s (%s); sent to %s", self.name, name, reason, target)
+        else:
+            logger.warning("[%s] not spoken on %s (%s), and sending it to %s failed (%s): %s",
+                           self.name, name, reason, target, result.get("error"), text[:200])
 
     async def _device_idle(self, chat_id: str, deadline: float) -> bool:
         """Wait until the device is in no turn and plays nothing; False once ``deadline`` passes.
         Returns without yielding when it is idle already, so the caller can start audio at once."""
         device_id = self._device_id(chat_id)
         while True:
+            if time.monotonic() >= deadline:  # before idle: a device free only after the deadline is too late
+                return False
             session = self._session(chat_id)
             if session is None or (device_id not in self._turns and not session.audio_playing):
                 return True
-            if time.monotonic() >= deadline:
-                return False
             await asyncio.sleep(0.2)
 
     def _not_spoken(self, device_id: str) -> SendResult:
         logger.warning("[%s] %s stayed busy for %d s; a message was shown but not spoken",
-                       self.name, device_id, int(SPEECH_QUEUE_WAIT_S))
+                       self.name, device_id, int(self._speech_wait_s()))
         return SendResult(success=False, error="the device stayed busy")
 
     def supports_draft_streaming(self, chat_type=None, metadata=None, chat_id=None) -> bool:
@@ -2110,6 +2064,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             # Synthesis and decoding took time: a turn or its reply may have started meanwhile.
             if not await self._device_idle(chat_id, idle_by):
                 return self._not_spoken(session.device_id)
+            if self._session(chat_id) is not session or not session.paired:  # replaced or revoked meanwhile
+                return SendResult(success=False, error="gadget not connected")
             if not self._should_auto_tts_for_chat(chat_id):
                 return SendResult(success=False, error="voice is off")
         # Last, with no await before the audio starts: decoding and the wait above took time.

@@ -118,6 +118,27 @@ menu "TailTiny Configuration"
             Turn it off only for a self-hosted DERP server with a certificate
             the bundle doesn't know. Needs MBEDTLS_CERTIFICATE_BUNDLE.
 
+    config ML_TASK_DERP_CORE
+        int "Core for the DERP task"
+        range 0 1
+        default 0
+        depends on !FREERTOS_UNICORE
+        help
+            The core TailTiny's DERP relay task is pinned to (priority 5).
+            The coord and WireGuard tasks run on core 1, net_io on core 0.
+
+            The DERP task does the relay's TLS handshake, which took about
+            3 s of CPU on an ESP32-S3. A task below priority 5 on the same
+            core doesn't run meanwhile: in one product whose UI loop ran on
+            core 0 at priority 1, the screen froze for 2.6 to 2.9 s at every
+            DERP connect, and with this set to 1 the longest stall was 257 ms.
+            That moves the contention to core 1 rather than removing it:
+            lower-priority tasks there wait instead, and the handshake shares
+            the core with coord (time-sliced at the same priority) and the
+            WireGuard task (higher, so it isn't held up).
+
+            Single-core targets always use core 0.
+
     menu "Cellular Modem"
 
         config ML_ENABLE_CELLULAR

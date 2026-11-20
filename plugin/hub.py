@@ -1060,8 +1060,15 @@ class DeviceSession:
         if self._ota_inbox is not None:
             self._ota_inbox.put_nowait(
                 protocol.message("ota.error", code="disconnected", message=f"{self.name} disconnected"))
-        if self._audio_out and self._audio_out._task:
-            self._audio_out._task.cancel()
+        out = self._audio_out
+        if out is not None and out.playing:
+            # Still being sent, or sent and still in the device's buffer: the device won't play the rest.
+            # A pump cancelled before it starts never reaches its finally either, so whoever waits on
+            # this stream (a device's speech queue) would wait forever without done.
+            out.failed = True
+            out.done.set()
+        if out is not None and out._task:
+            out._task.cancel()
         self.end_playback("the device disconnected")  # its source (a download, ffmpeg) ends with the connection
 
     # -- description ----------------------------------------------------------------
