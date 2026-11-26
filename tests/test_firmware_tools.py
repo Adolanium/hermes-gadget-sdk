@@ -264,6 +264,21 @@ def test_esp32p4_image_has_its_bootloader_at_0x2000(project, tmp_path, monkeypat
     assert f"{hashlib.sha256(image).hexdigest()}  hermes-gadget-p4-0.2.0.bin" in sums
 
 
+def test_esp32s31_image_has_its_bootloader_at_0x2000(project, tmp_path, monkeypatch):
+    """The ESP32-S31's ROM also loads the bootloader from 0x2000 (ESP_ROM_BOOTLOADER_OFFSET_FLASH)."""
+    monkeypatch.setattr(package_release, "IDF_BOARDS", {"s31": "a test"})
+    out_dir = project("s31", flash="16MB", target="esp32s31", idf=True, meta={"title": "S31 board"})
+    dist = tmp_path / "dist"
+    assert _package(project, "--board", "s31", "--out", str(dist)) == 0
+
+    image = (dist / "hermes-gadget-s31-0.2.0.bin").read_bytes()
+    bootloader = (out_dir / "bootloader.bin").read_bytes()
+    assert image[:0x2000] == b"\xff" * 0x2000
+    assert image[0x2000:0x2000 + len(bootloader)] == bootloader
+    builds = json.loads((dist / "manifest.json").read_text(encoding="utf-8"))["builds"]
+    assert [(b["board"], b["chip"]) for b in builds] == [("s31", "ESP32-S31")]
+
+
 def _idf_build(path: Path, chip: str = "esp32p4", bootloader: str = "0x2000") -> Path:
     """An idf.py build directory: the files and the flasher_args.json that names them."""
     from fakes.fake_firmware import fake_image
