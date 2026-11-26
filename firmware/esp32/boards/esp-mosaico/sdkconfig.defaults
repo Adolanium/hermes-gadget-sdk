@@ -1,0 +1,30 @@
+# Espressif ESP-Mosaico, CoreBoard V1.2: ESP32-S31NRV16 (16 MB in-package PSRAM),
+# 16 MB flash, square 480x480 CO5300 AMOLED, CST9220 touch, one ES8311 for the
+# microphone and the speaker. Built with idf.py on ESP-IDF 6.1.1 or later
+# (PlatformIO has no ESP32-S31 platform). Pins: docs/hardware.md#esp-mosaico
+CONFIG_IDF_TARGET="esp32s31"
+# CONFIG_ESPTOOLPY_FLASHSIZE_4MB is not set
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_200M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+# The USB-C port is the S31's USB 2.0 OTG, which carries no console without a USB
+# stack in the firmware. The console stays on UART0: the RX and TX pads on the
+# back of the BaseBoard.
+CONFIG_HG_BOARD_ESP_MOSAICO=y
+# The RISC-V image leaves under 10% of partitions.csv's 1.9 MB slots free (9% on
+# ESP-IDF 6.1.1). No Mosaico has been flashed with that table, so it starts on one
+# with 4 MB slots.
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-16mb.csv"
+
+# TCP windows for links with a long round trip (a phone hotspot): 5,760 B capped
+# a connection near 33 KB/s at 175 ms, below 24 kHz audio's 48 KB/s.
+# Wi-Fi and lwIP buffers in PSRAM first, internal RAM when the module has none.
+# docs/porting.md#network-buffers
+CONFIG_LWIP_TCP_WND_DEFAULT=32768
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y

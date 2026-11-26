@@ -30,9 +30,10 @@ if(IDF_TARGET STREQUAL "esp32s3")
         list(APPEND HG_CORES3_CAMERA_REQUIRES esp32-camera)
     endif()
 endif()
-# The RGB panel driver (ST7701 over an I/O expander) only builds for the chips
-# with an LCD_CAM RGB scanout: port_rgb.cpp is compiled out on every other
-# target, and esp_lcd_st7701 does not publish builds for them either.
+# The RGB panel driver (ST7701 over an I/O expander) is pulled in for the chips
+# whose boards have an RGB panel. port_rgb.cpp builds only where it is
+# (HG_RGB_PANEL below): the ESP32-S31 has an RGB scanout too, but no ESP32-S31 board
+# here has an RGB panel, so its build leaves the driver out.
 if(IDF_TARGET STREQUAL "esp32s3" OR IDF_TARGET STREQUAL "esp32p4")
     list(APPEND HG_RGB_REQUIRES esp_lcd_st7701 esp_lcd_panel_io_additions)
 endif()
@@ -121,3 +122,6 @@ idf_component_register(
 # can turn them on without a rebuild. A line below its tag's level is skipped at run
 # time. Only this component: ESP-IDF's and the managed components' debug lines stay out.
 target_compile_definitions(${COMPONENT_LIB} PRIVATE LOG_LOCAL_LEVEL=ESP_LOG_DEBUG)
+if(HG_RGB_REQUIRES)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE HG_RGB_PANEL=1)
+endif()

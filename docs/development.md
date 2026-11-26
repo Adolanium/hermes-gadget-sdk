@@ -36,7 +36,7 @@ A pull request runs only the CI jobs its files can affect. The **Changed areas**
 - A change under `firmware/` runs the host core tests and builds the boards the diff can affect. `firmware/esp32/tools/ci_boards.py` picks them:
   - a file under `boards/<board>/` selects that board;
   - a changed line inside `#if CONFIG_HG_BOARD_...`, or a line in `Kconfig.projbuild` or an environment in `platformio.ini` that names a board, selects the boards named;
-  - any other change to `firmware/core/`, `firmware/drivers/` or `firmware/esp32/main/` is shared code. It selects five boards: `esp32s3-breadboard`, `esp32s3-touch-amoled-175`, `esp32s3-lcd-154`, `esp32-2432s028-cyd` and `crowpanel-p4-101`;
+  - any other change to `firmware/core/`, `firmware/drivers/` or `firmware/esp32/main/` is shared code. It selects six boards: `esp32s3-breadboard`, `esp32s3-touch-amoled-175`, `esp32s3-lcd-154`, `esp32-2432s028-cyd`, `crowpanel-p4-101` and `esp-mosaico`;
   - a change to the build itself (`sdkconfig.defaults`, the partition table, `components/`, `tools/`, `idf_component.yml`) selects every board.
 - The `full-ci` label on a pull request builds every board. Add it, then re-run the **Pick firmware boards** job.
 - Any change outside `site/` runs the Python tests, because they build the simulator from `firmware/` and check the commands in the docs.

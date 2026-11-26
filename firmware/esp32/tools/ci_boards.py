@@ -32,9 +32,9 @@ from package_release import PROJECT_DIR, environments  # noqa: E402
 REPO = PROJECT_DIR.parent.parent
 FIRMWARE = "firmware/esp32/"
 # Built when shared code changes: the three boards branch protection once named, the only classic
-# ESP32, and one ESP32-P4.
+# ESP32, one ESP32-P4 and the only ESP32-S31.
 SHARED = ("esp32s3-breadboard", "esp32s3-touch-amoled-175", "esp32s3-lcd-154", "esp32-2432s028-cyd",
-          "crowpanel-p4-101")
+          "crowpanel-p4-101", "esp-mosaico")
 # A change here can break any board in a way no subset shows.
 ALL_PATHS = re.compile(r"^(\.github/workflows/ci\.yml|firmware/esp32/(tools/|components/|sdkconfig\.defaults$|"
                        r"partitions[^/]*\.csv$|CMakeLists\.txt$|main/idf_component\.yml$|dependencies\.lock$))")

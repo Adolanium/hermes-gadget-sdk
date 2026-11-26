@@ -53,6 +53,12 @@ Hardware ports remain experimental until the [verification table](hardware-valid
 | [Waveshare ESP32-P4-WIFI6-Touch-LCD-7B](hardware.md#waveshare-esp32-p4-wifi6-touch-lcd-7b) | BOOT is configured as TALK; GT911 touch is configured but not yet validated | ES7210 microphone ADC and ES8311 speaker codec; optional OV5647 still capture is experimentally verified |
 | [Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C](hardware.md#waveshare-esp32-p4-wifi6-touch-lcd-34c) | Hold the touch screen to talk; BOOT is TALK. Touch and audio aren't verified on the board yet | ES7210 microphones and ES8311 speaker; USB power, no battery. Source build only; the C6 needs its own firmware first |
 
+## ESP32-S31 boards
+
+| Board | Controls | Audio |
+|---|---|---|
+| [Espressif ESP-Mosaico V1.2](hardware.md#esp-mosaico) | Hold the screen or the Function key to talk; swipe down to cancel | One ES8311 for the onboard microphone and speaker. Source build only (ESP-IDF 6.1.1); the USB-C port carries no console, so the console is on the back UART pads. Battery not read. Experimental: not run on a board yet |
+
 Check the exact model and connections in [Hardware and wiring](hardware.md), then follow [Set up a board](setup-board.md). The browser installer lists profiles included in the latest published release. Newly merged profiles may need a [source build](development.md) until the next release.
 
 Voice needs [speech recognition and text-to-speech configured in Hermes](connect-hermes.md#4-enable-speech). Boards without onboard audio can display replies and accept text through the USB console.

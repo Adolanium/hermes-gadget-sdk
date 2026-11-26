@@ -239,6 +239,11 @@ bool AmoledDisplay::begin(const AmoledConfig& cfg) {
     init_len = sizeof(kInit480) / sizeof(kInit480[0]);
   }
   for (size_t i = 0; i < init_len; ++i) {
+    if (init[i].cmd == 0x36 && cfg.madctl >= 0 && cfg.madctl <= 0xFF) {
+      const uint8_t madctl = static_cast<uint8_t>(cfg.madctl);
+      command(0x36, &madctl, 1);
+      continue;  // MADCTL carries no delay in any table
+    }
     command(init[i].cmd, init[i].data, init[i].len);
     if (init[i].delay_ms) vTaskDelay(pdMS_TO_TICKS(init[i].delay_ms));
   }

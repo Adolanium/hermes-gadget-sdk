@@ -1,0 +1,6 @@
+{
+  "title": "Espressif ESP-Mosaico V1.2",
+  "summary": "ESP32-S31 board with a 2.16\" 480x480 AMOLED touch screen, a microphone and a speaker. Experimental.",
+  "docs": "docs/hardware.md#esp-mosaico",
+  "ready_made": true
+}

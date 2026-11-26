@@ -92,6 +92,9 @@ menu "Hermes Gadget"
             bool "Waveshare ESP32-S3-Touch-AMOLED-2.06 (watch, 410x502 AMOLED, FT3168 touch)"
         config HG_BOARD_AMOLED_216
             bool "Waveshare ESP32-S3-Touch-AMOLED-2.16 (480x480 AMOLED, CST9220 touch, ES8311 + ES7210)"
+        config HG_BOARD_ESP_MOSAICO
+            bool "Espressif ESP-Mosaico V1.2 (experimental, ESP32-S31, 480x480 AMOLED, CST9220 touch, ES8311)"
+            depends on IDF_TARGET_ESP32S31
         config HG_BOARD_BOX3
             bool "Espressif ESP32-S3-BOX-3 (LCD, touch, ES8311 + ES7210)"
         config HG_BOARD_ESP32S3_BOX

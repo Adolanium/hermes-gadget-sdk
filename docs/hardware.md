@@ -1259,7 +1259,7 @@ Panel timings (15 MHz PCLK, 8/4/43 and 8/4/12 porches, `pclk_active_neg`) and th
 
 ## Elecrow CrowPanel Advanced 10.1-inch ESP32-P4
 
-Use board profile `crowpanel-p4-101` for the Elecrow CrowPanel Advanced 10.1-inch ESP32-P4, V1.1. Elecrow identifies this panel as 1024×600; the profile is for that resolution and is based on the V1.1 documentation and schematic. The profile is experimental and builds with ESP-IDF 6.1.0 via `idf.py` and the dedicated CI job; this project has no ESP-IDF PlatformIO environment for P4. The PlatformIO Arduino framework listing is a different build path. The optional camera is not implemented.
+Use board profile `crowpanel-p4-101` for the Elecrow CrowPanel Advanced 10.1-inch ESP32-P4, V1.1. Elecrow identifies this panel as 1024×600; the profile is for that resolution and is based on the V1.1 documentation and schematic. The profile is experimental and builds with ESP-IDF 6.1.1 via `idf.py` and the dedicated CI job; this project has no ESP-IDF PlatformIO environment for P4. The PlatformIO Arduino framework listing is a different build path. The optional camera is not implemented.
 
 | Part | Interface and profile wiring |
 |---|---|
@@ -1276,7 +1276,7 @@ GPIO 45 and 46 are on the P4 VDD_IO_5 domain. Firmware acquires internal LDO4 at
 
 **Battery limitations.** The STC8 voltage and percentage are uncalibrated estimates. The adapter exposes only the existing Gadget `PowerStatus` fields: `battery_mv`, `battery_percent`, and `charging`; a reported STC8 error leaves `charging` unknown. These readings do not quantify current or calibrated state of charge, and `external_power` remains unknown. Validate charging with a meter rather than inferring current from percentage or an LED.
 
-**Build with ESP-IDF 6.1.0** (the P4 Wi-Fi and EK79007 dependencies are pinned in `main/idf_component.yml`):
+**Build with ESP-IDF 6.1.1** (the P4 Wi-Fi and EK79007 dependencies are pinned in `main/idf_component.yml`):
 
 ```bash
 cd firmware/esp32
@@ -1385,7 +1385,7 @@ Board option `ws-p4-touch-lcd-7b`, for Waveshare's ESP32-P4-WIFI6-Touch-LCD-7B (
 
 On camera-equipped 7B units, the firmware exposes `camera.capture`. It captures an OV5647 still, reduces it to 640×512 RGB565 for the existing generic action result, and returns `format`, `width`, `height`, and `image_b64` in the existing action result; see [Device actions](protocol.md#device-actions). The plugin saves it as a timestamped PNG under `~/.hermes/gadgetpix/` and returns the file's path, not the image. This reuses the current action/result message types; no new protocol messages are added. SKU 32510 is the standard version without the bundled camera; an OV5647 module is required. The camera connector and SCCB wiring follow Waveshare's [camera preview example](https://github.com/waveshareteam/ESP32-P4-WIFI6-Touch-LCD-7B/tree/9fcd49a8c927a00f5583c22d568b3448addbe51c/examples/arduino/examples/06_Camera_Preview) at commit `9fcd49a8c927a00f5583c22d568b3448addbe51c`; no vendor source code is copied. Two device captures were completed on the attached camera module. In the integrated development test, the plugin saved the latest result as a valid 640×512 PNG; its image content and quality were not visually reviewed, and broader physical validation remains incomplete. See [hardware validation](hardware-validation.md#waveshare-p4-7b-camera-and-online-smoke-test).
 
-Build with ESP-IDF 6.1.0 (the project's P4 CI toolchain) and the board defaults:
+Build with ESP-IDF 6.1.1 (the toolchain of CI's `idf.py` job) and the board defaults:
 
 ```bash
 cd firmware/esp32
@@ -1400,6 +1400,53 @@ idf.py -B build/ws-p4-touch-lcd-7b \
 ```
 
 This is an experimental profile. Touch input/coordinates, actual microphone capture, audible speaker output, Wi-Fi loss/recovery, OTA and the full physical checklist remain unverified.
+
+## ESP-Mosaico
+
+Board option `esp-mosaico`, for Espressif's [ESP-Mosaico](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s31/esp-mosaico/user_guide.html) with the **V1.2** CoreBoard (check the silkscreen on the mainboard): an ESP32-S31NRV16 (dual-core RISC-V, 16 MB in-package PSRAM) with 16 MB flash, a square 2.16" 480×480 AMOLED, one analog microphone and a speaker. Nothing needs wiring. V1.0 boards are not supported by this profile: they swap the display's reset and clock pins, switch the codec's supply from GPIO 56 and put the board's I2C bus on GPIO 0/1.
+
+| Part | Chip | Connection |
+|---|---|---|
+| Board supply | VCC_PW high-side switch | GPIO 60, on when low; switched on with a 50 ms PWM soft start, as Espressif's BSP does, then 10 ms to settle. It feeds the panel, the touch controller and the expansion modules |
+| Display | CO5300, QSPI | CS 50, SCLK 42, D0–D3 36/51/35/9, reset 44; full 480×480 window, no column offset, no rotation (MADCTL 0x00); TE on 43 is unused |
+| Touch | CST9220 | I2C 0x5A, read with the CST9217 report; INT 6; no reset line; no swap or mirror |
+| Speaker and microphone | ES8311 | I2C 0x19; I2S MCLK 54, BCLK 37, WS 49, DOUT 52 (to the codec), DIN 40 (from the codec); NS4150B amplifier enable 45, active high; microphone gain 36 dB |
+| I2C bus | | SDA 56, SCL 3, 400 kHz |
+| Function key | | GPIO 7, active low: TALK |
+| POWER key | SAM8108 | Hardware power switch only; the firmware does not read it |
+| Not used | BMI270 IMU (0x69), BMM150 magnetometers (0x11, 0x12), BQ27220 fuel gauge (0x55), vibration motor (GPIO 8), SPI NAND, expansion modules (second I2C bus on GPIO 0/1), POWER_SWITCH (GPIO 57) | |
+
+The battery percentage, charging state and software power-off are not implemented: the BQ27220 fuel gauge has no driver here yet. The POWER key turns the board on and off in hardware.
+
+**Controls.** Hold the screen or the Function key to talk, tap to answer "yes", swipe down to cancel.
+
+**USB.** The USB-C port is the ESP32-S31's USB 2.0 high-speed OTG port. Stock ESP32-S31 silicon flashes through it only in ROM download mode, and this firmware has no USB stack, so the port shows no serial console and no log once the firmware runs. The serial console is on UART0, the RX and TX pads on the back of the BaseBoard (3.3 V levels). USB Serial/JTAG is on the left expansion connector. Set up Wi-Fi from a phone through the board's setup network ([Wi-Fi setup](setup-board.md#set-up-wi-fi-with-your-phone)); later updates arrive over the air.
+
+**Build and flash it** with ESP-IDF 6.1.1 or later, the first release with the ESP32-S31 as a supported target. PlatformIO has no ESP32-S31 platform. To enter download mode, hold BOOT while the board is off, then press POWER (or plug in USB):
+
+```bash
+cd firmware/esp32
+idf.py -B build/esp-mosaico \
+    -D SDKCONFIG=build/esp-mosaico/sdkconfig \
+    -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/esp-mosaico/sdkconfig.defaults" \
+    set-target esp32s31 build
+idf.py -B build/esp-mosaico -p <PORT> flash
+```
+
+Then power-cycle the board with POWER. The board uses `partitions-16mb.csv`, with 4 MB app slots instead of 1.9 MB: on this RISC-V chip the image left only 9% of a 1.9 MB slot free. Settings, otadata and the core dump keep the usual offsets. Releases don't include this board yet, so the browser installer doesn't list it. CI builds the profile on every change that can affect it.
+
+This port is **experimental**: it has not been run on a board. It stays experimental until a full [physical verification report](hardware-validation.md) is recorded.
+
+### First flash: what to check
+
+1. **Boot log** (UART0): `CO5300 480x480 ready`, `codecs: speaker ready, microphones ready (es8311 analog)`, and `touch ready`. No line says `soft start of the GPIO 60 rail failed`. In the `diag` report, `i2c` should include `0x19` (ES8311), `0x55` (BQ27220), `0x5a` (CST9220) and `0x69` (BMI270).
+2. **Screen:** the mascot is upright and not mirrored, and text is white on dark slate bars. If the picture is turned or mirrored, report which way: the BSP's orientation (MADCTL 0x00) is used, not the Waveshare 2.16's.
+3. **Touch:** holding the screen shows the listening waves, a tap lands where the finger is, and a swipe *down* cancels.
+4. **Microphone:** say something. The waves move with your voice and the transcript is right. Report whether the level is too low or clips.
+5. **Speaker:** replies are clear and loud enough (`set volume 80`), with no hiss between replies.
+6. **Function key:** holding it records like holding the screen.
+
+The pins, the supply sequence and the CO5300 start-up table (the same as this project's 480×480 table, without its MADCTL 0xA0) come from Espressif's [esp-mosaico-bsp](https://github.com/esp-mosaico/esp-mosaico-bsp/tree/d1eef04db4c96f027891cdb05aa6c1c5f2cbc5e8/components/esp-mosaico-bsp) at commit `d1eef04` and the [esp-brookesia V1.2 board files](https://github.com/espressif/esp-brookesia/tree/ff6e05fcc9362bbf1d608108b5a0779087396650/hal/brookesia_hal_boards/boards/espressif/esp_mosaico_v1_2) at commit `ff6e05f`, checked against the [V1.2 user guide](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s31/esp-mosaico/user_guide.html). Only hardware facts are used; no Espressif source is copied.
 
 ## Build and flash
 

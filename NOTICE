@@ -98,6 +98,19 @@ https://github.com/waveshareteam/Waveshare-ESP32-components/tree/63ac675334db625
 released by Waveshare under the Apache License 2.0. A copy of that license is in
 LICENSES/Apache-2.0.txt.
 
+The ESP-Mosaico V1.2 pin map, supply sequence (GPIO 60 soft start and settle
+time), codec address and touch orientation in firmware/esp32/main/board.cpp
+follow Espressif's ESP-Mosaico board support package at commit
+d1eef04db4c96f027891cdb05aa6c1c5f2cbc5e8,
+https://github.com/esp-mosaico/esp-mosaico-bsp/tree/d1eef04db4c96f027891cdb05aa6c1c5f2cbc5e8/components/esp-mosaico-bsp,
+and the esp-brookesia esp_mosaico_v1_2 board files at commit
+ff6e05fcc9362bbf1d608108b5a0779087396650,
+https://github.com/espressif/esp-brookesia/tree/ff6e05fcc9362bbf1d608108b5a0779087396650/hal/brookesia_hal_boards/boards/espressif/esp_mosaico_v1_2,
+both released by Espressif Systems (Shanghai) CO LTD under the Apache License
+2.0. A copy of that license is in LICENSES/Apache-2.0.txt. Only these hardware
+facts are used; no Espressif source is copied. Its CO5300 start-up table matches
+kInit480 apart from the MADCTL value.
+
 The JD9365 start-up commands for the 800x800 round panel (kJd9365InitCmds in
 firmware/esp32/main/port_dsi.cpp) follow Waveshare's board support package for
 the ESP32-P4-WIFI6-Touch-LCD-XC, version 2.0.0 (its

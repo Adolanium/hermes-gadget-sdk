@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "driver/gpio.h"
+#include "driver/ledc.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -239,6 +240,51 @@ void add_camera_action(hg::App& app, i2c_master_bus_handle_t sccb_bus) {
 }
 #endif
 
+// A rail's soft start (PowerRail::ramp_ms): an 8-bit PWM at 100 kHz, well above the
+// switch's gate RC, fades from off to on, then the pin goes back to a plain GPIO output
+// held on. Timer 3 and channel 7 are not used by any display backlight. False when the
+// LEDC driver refuses; the pin is then still a GPIO, held off.
+bool ramp_rail_on(gpio_num_t pin, bool on_level, uint16_t ms) {
+  constexpr ledc_mode_t kMode = LEDC_LOW_SPEED_MODE;
+  constexpr ledc_timer_t kTimer = LEDC_TIMER_3;
+  constexpr ledc_channel_t kChannel = LEDC_CHANNEL_7;
+  constexpr uint32_t kFull = (1u << 8) - 1;
+  const uint32_t off_duty = on_level ? 0 : kFull;
+  const uint32_t on_duty = on_level ? kFull : 0;
+  ledc_timer_config_t timer = {};
+  timer.speed_mode = kMode;
+  timer.duty_resolution = LEDC_TIMER_8_BIT;
+  timer.timer_num = kTimer;
+  timer.freq_hz = 100000;
+  timer.clk_cfg = LEDC_AUTO_CLK;
+  ledc_channel_config_t channel = {};
+  channel.gpio_num = pin;
+  channel.speed_mode = kMode;
+  channel.channel = kChannel;
+  channel.timer_sel = kTimer;
+  channel.duty = off_duty;
+  const bool configured = ledc_timer_config(&timer) == ESP_OK && ledc_channel_config(&channel) == ESP_OK;
+  bool ok = false;
+  if (configured) {
+    // Another driver may already own the fade service; only remove it if it was installed here.
+    const esp_err_t installed = ledc_fade_func_install(0);
+    ok = (installed == ESP_OK || installed == ESP_ERR_INVALID_STATE) &&
+         ledc_set_fade_with_time(kMode, kChannel, on_duty, ms) == ESP_OK &&
+         ledc_fade_start(kMode, kChannel, LEDC_FADE_WAIT_DONE) == ESP_OK;
+    if (installed == ESP_OK) ledc_fade_func_uninstall();
+  }
+  // On after a ramp, off after a refusal.
+  const int level = (ok ? on_level : !on_level) ? 1 : 0;
+  if (configured) ledc_stop(kMode, kChannel, static_cast<uint32_t>(level));
+  // Level first, then the GPIO matrix output, so the switch never sees the opposite level.
+  gpio_set_level(pin, level);
+  gpio_config_t out = {};
+  out.pin_bit_mask = 1ULL << pin;
+  out.mode = GPIO_MODE_OUTPUT;
+  gpio_config(&out);
+  return ok;
+}
+
 // Supplies switched straight from a GPIO go on before anything talks to the
 // parts behind them.
 void power_rails_on(const hgp::BoardConfig& b) {
@@ -247,6 +293,17 @@ void power_rails_on(const hgp::BoardConfig& b) {
     if (rail.gpio < 0) continue;
     const auto pin = static_cast<gpio_num_t>(rail.gpio);
     gpio_reset_pin(pin);
+    if (rail.ramp_ms) {
+      // The reset pin floats with its pull-up, which holds an active-low rail off.
+      gpio_set_level(pin, rail.on_level ? 0 : 1);
+      if (!ramp_rail_on(pin, rail.on_level, rail.ramp_ms)) {
+        // A rail left off would keep the panel and codec dark; switching it hard is the lesser risk.
+        ESP_LOGW(TAG, "soft start of the GPIO %d rail failed; switching it on directly", rail.gpio);
+        gpio_set_level(pin, rail.on_level ? 1 : 0);
+      }
+      any = true;
+      continue;
+    }
     gpio_set_direction(pin, GPIO_MODE_OUTPUT);
     gpio_set_level(pin, rail.on_level ? 1 : 0);
     any = true;
