@@ -1433,7 +1433,7 @@ idf.py -B build/esp-mosaico \
 idf.py -B build/esp-mosaico -p <PORT> flash
 ```
 
-Then power-cycle the board with POWER. Releases don't include this board yet, so the browser installer doesn't list it. CI builds the profile on every change that can affect it.
+Then power-cycle the board with POWER. The board uses `partitions-16mb.csv`, with 4 MB app slots instead of 1.9 MB: on this RISC-V chip the image left only 9% of a 1.9 MB slot free. Settings, otadata and the core dump keep the usual offsets. Releases don't include this board yet, so the browser installer doesn't list it. CI builds the profile on every change that can affect it.
 
 This port is **experimental**: it has not been run on a board. It stays experimental until a full [physical verification report](hardware-validation.md) is recorded.
 

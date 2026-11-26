@@ -261,7 +261,6 @@ bool ramp_rail_on(gpio_num_t pin, bool on_level, uint16_t ms) {
   channel.gpio_num = pin;
   channel.speed_mode = kMode;
   channel.channel = kChannel;
-  channel.intr_type = LEDC_INTR_DISABLE;
   channel.timer_sel = kTimer;
   channel.duty = off_duty;
   const bool configured = ledc_timer_config(&timer) == ESP_OK && ledc_channel_config(&channel) == ESP_OK;

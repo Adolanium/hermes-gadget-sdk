@@ -15,6 +15,10 @@ CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 # stack in the firmware. The console stays on UART0: the RX and TX pads on the
 # back of the BaseBoard.
 CONFIG_HG_BOARD_ESP_MOSAICO=y
+# The RISC-V image leaves under 10% of partitions.csv's 1.9 MB slots free (9% on
+# ESP-IDF 6.1.1). No Mosaico has been flashed with that table, so it starts on one
+# with 4 MB slots.
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-16mb.csv"
 
 # TCP windows for links with a long round trip (a phone hotspot): 5,760 B capped
 # a connection near 33 KB/s at 175 ms, below 24 kHz audio's 48 KB/s.
