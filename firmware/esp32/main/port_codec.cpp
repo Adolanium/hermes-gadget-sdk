@@ -102,9 +102,10 @@ bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus)
   audio_codec_i2c_cfg_t dac_i2c = {};
   dac_i2c.port = I2C_NUM_0;
   // Address macros are the 8-bit form. The I2C driver shifts them to 7-bit.
-  dac_i2c.addr = cfg.speaker == SpeakerCodec::Aw88298 ? AW88298_CODEC_DEFAULT_ADDR
-               : cfg.speaker == SpeakerCodec::Es8388 ? ES8388_CODEC_DEFAULT_ADDR
-                                                     : ES8311_CODEC_DEFAULT_ADDR;
+  dac_i2c.addr = cfg.dac_addr                         ? static_cast<uint8_t>(cfg.dac_addr << 1)
+               : cfg.speaker == SpeakerCodec::Aw88298 ? AW88298_CODEC_DEFAULT_ADDR
+               : cfg.speaker == SpeakerCodec::Es8388  ? ES8388_CODEC_DEFAULT_ADDR
+                                                      : ES8311_CODEC_DEFAULT_ADDR;
   dac_i2c.bus_handle = bus;
   es8311_codec_cfg_t dac = {};
   dac.ctrl_if = audio_codec_new_i2c_ctrl(&dac_i2c);

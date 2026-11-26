@@ -158,6 +158,9 @@ struct AmoledConfig {
   bool round = false;
   uint8_t corner_inset = 0;  // extra top-bar padding for rounded corners (hg::DisplayInfo)
   AmoledPanel panel = AmoledPanel::Co5300_466;
+  // Replaces the table's MADCTL (0x36) value when 0-255: the same glass mounted another
+  // way round on another board. -1 keeps the table's value.
+  int madctl = -1;
 };
 
 struct I2cBusConfig {
@@ -189,6 +192,9 @@ struct CodecAudioConfig {
   bool speaker_pa = false;    // CodecSpeaker drives `pa`, not esp_codec_dev (see CodecAudio::begin)
   bool dac_fade_ramp = false; // ES8311 speaker only: its DAC ramps volume on mute/unmute (reg 0x37)
   bool dac_mclk = true;       // false: the ES8311 derives its clock from BCLK
+  // The speaker codec's 7-bit I2C address when its address pin moves it off the driver's
+  // default (an ES8311 at 0x19 instead of 0x18). 0 keeps the default.
+  uint8_t dac_addr = 0;
   uint8_t es7210_mics = 0x03;  // ES7210_SEL_MIC1 | ES7210_SEL_MIC2
   // ES7243E 7-bit I2C address when MicCodec::Es7243e (CodecAudio::begin shifts it to the
   // 8-bit form esp_codec_dev takes). An older ES7243 at 0x13 is used instead when it answers
@@ -298,6 +304,10 @@ struct ExpanderLevelConfig {
 struct PowerRail {
   int gpio = -1;          // -1 = unused
   bool on_level = true;   // the level that turns the rail on
+  // Soft start: sweep the pin's PWM duty from off to on over this many ms, so a
+  // high-side switch whose gate follows the average opens gradually and the inrush
+  // current stays bounded. 0 switches the pin straight on.
+  uint16_t ramp_ms = 0;
 };
 
 struct ButtonConfig {
