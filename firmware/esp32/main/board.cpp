@@ -24,6 +24,8 @@ namespace {
 #define HG_BOARD_NAME "esp32s3-touch-amoled-2.06"
 #elif CONFIG_HG_BOARD_AMOLED_216
 #define HG_BOARD_NAME "esp32s3-touch-amoled-2.16"
+#elif CONFIG_HG_BOARD_ESP_MOSAICO
+#define HG_BOARD_NAME "esp-mosaico"
 #elif CONFIG_HG_BOARD_AIPI_LITE
 #define HG_BOARD_NAME "aipi-lite"
 #elif CONFIG_HG_BOARD_SPOTPEAR_MUMA
@@ -436,6 +438,62 @@ BoardConfig make() {
   b.axp_power_key = true;
   b.buttons = {0, -1, -1, -1};  // BOOT is TALK
   b.talk_label = "BOOT";
+  b.cancel_label = "Swipe down";
+  return b;
+}
+#elif CONFIG_HG_BOARD_ESP_MOSAICO
+// Espressif ESP-Mosaico, CoreBoard V1.2 only (V1.0 swaps the LCD reset and clock
+// pins, keeps the codec on a switched supply and puts the I2C bus on GPIO 0/1).
+// ESP32-S31 (16 MB in-package PSRAM), 16 MB flash, square 480x480 CO5300 AMOLED
+// over QSPI, CST9220 touch, one ES8311 at 0x19 for the analog microphone and the
+// NS4150B speaker amplifier. VCC_PW (GPIO 60, active low) switches the 3.3 V rail
+// behind the panel, the touch controller and the expansion modules; the codec has
+// its own LDO. The POWER key reaches only the SAM8108 power switch.
+// Pins: Espressif esp-mosaico-bsp at commit d1eef04 (include/bsp/esp_mosaico.h and
+// onboard/*.c) and the esp-brookesia esp_mosaico_v1_2 board files at commit ff6e05f.
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  // The BSP sweeps VCC_PW over 50 ms so the high-side switch opens slowly, and
+  // waits 10 ms before it talks to the codec.
+  b.power_rails[0] = {60, false, 50};
+  b.power_rails_settle_ms = 10;
+  b.amoled.enabled = true;
+  b.amoled.width = 480;
+  b.amoled.height = 480;  // square glass
+  b.amoled.cs = 50;
+  b.amoled.sclk = 42;
+  b.amoled.d0 = 36;
+  b.amoled.d1 = 51;
+  b.amoled.d2 = 35;
+  b.amoled.d3 = 9;
+  b.amoled.rst = 44;
+  b.amoled.gap_x = 0;
+  b.amoled.gap_y = 0;
+  b.amoled.panel = AmoledPanel::Co5300_480;  // the BSP's vendor table matches it
+  b.amoled.madctl = 0x00;  // the BSP keeps the panel unrotated, where the Waveshare 2.16 turns it
+  b.i2c = {56, 3, 400000};
+  b.codec.enabled = true;
+  b.codec.mclk = 54;
+  b.codec.bclk = 37;
+  b.codec.ws = 49;
+  b.codec.dout = 52;  // chip to codec (the BSP's SDOUT)
+  b.codec.din = 40;   // codec to chip (the BSP's DSIN)
+  b.codec.pa = 45;
+  b.codec.speaker_pa = true;  // the amplifier draws power only while sound plays
+  b.codec.dac_addr = 0x19;
+  b.codec.mic = MicCodec::Es8311;  // the same ES8311 is the microphone
+  b.codec.mic_gain_db = 36.0f;     // esp-brookesia's recorder gain for this microphone; not measured here
+  b.touch.enabled = true;
+  b.touch.ppi = 314;  // estimate (see TouchConfig::ppi)
+  b.touch.controller = TouchController::Cst9217;  // the CST9220 sends the same report
+  b.touch.addr = 0x5A;
+  b.touch.rst = -1;      // no reset line
+  b.touch.int_gpio = 6;
+  b.touch.width = 480;
+  b.touch.height = 480;  // the BSP reads touch with no swap or mirror
+  b.buttons = {7, -1, -1, -1};  // the Function (AI) key is TALK
+  b.talk_label = "Function";
   b.cancel_label = "Swipe down";
   return b;
 }
